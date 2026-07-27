@@ -121,3 +121,41 @@ live tasks.
 public later is one setting whenever Lance decides the project should be visible; going public
 was not assumed. This also unlocks the Cloudflare Pages auto-deploy-on-push pattern when the
 site exists.
+
+---
+
+## 2026-07-27 — Plan 1 execution session (Tasks 1-4 of 10)
+
+Subagent-driven execution of the slice-1 plan. Lance chose a **feature branch in place**
+(`slice1-foundation-ingestion`) over a full worktree or committing to main.
+
+**Completed, each with an independent review pass:**
+1. **Task 1 - scaffold.** ESM Node project, node:test, env template. Notable: the plan's
+   `node --test tests/` fails on Node 24/Windows (MODULE_NOT_FOUND on the dir arg). The
+   implementer subagent first shipped an index.js shim; the controller challenged it with a
+   flawed verification (ran the suite with the shim still present), the implementer re-tested
+   with the file actually absent and proved the failure was real; final fix = bare `node --test`
+   default discovery (no shim, no silent-skip trap). Both lessons added to PLAYBOOK_DELTA §7.
+2. **Task 2 - typed errors + shared rate limiter.** skip≠empty enforced: all fetch failures
+   throw SourceFetchError/RateLimitedError.
+3. **Task 3 - DB layer.** additivePatch (never overwrites set fields) + provenance run
+   open/close + insertIfAbsent. 7 tests green.
+4. **Task 4 - schema migration SQL.** 12 tables + RLS + seed, byte-verified against the plan by
+   the reviewer, Postgres-syntax sanity-checked. NOT applied anywhere yet - that's Lance's
+   draft-then-apply gate.
+
+**Review findings deferred as minors** (tracked in the git-ignored SDD ledger at
+`.superpowers/sdd/2026-07-27-slice1-foundation-ingestion/progress.md` for the final
+whole-branch review): engines.node floor vs supabase-js's node>=22; untyped JSON-parse
+errors in http.js; no direct fetchWithLimit tests; and one **product decision for Lance**:
+`summaries.editor_notes` would be publicly readable on published rows under current RLS.
+
+**Paused BLOCKED at Task 5:** no `.env` exists. Lance to supply Congress.gov + OpenStates API
+keys (Tasks 5-9) and create the Supabase project + apply migrations (Task 10). Branch pushed.
+
+### [Lance]
+> update all documentation, commit and push. I need to restart
+
+**[Claude]** This entry, TODO NOW-section rewrite (exact resume state + Lance's three unblock
+steps), and PLAYBOOK_DELTA §7 (VisibleGov's first two own-delta lessons) - committed and pushed
+on the feature branch.

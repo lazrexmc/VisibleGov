@@ -7,12 +7,20 @@
 ## NOW
 
 - [x] ~~Lance reviews the MVP design draft~~ (approved as working draft 2026-07-27)
-- [ ] **Execute Plan 1: foundation + ingestion (Onder slice)** —
-  `docs/superpowers/plans/2026-07-27-slice1-foundation-ingestion.md`. Lance's setup steps
-  before the blocked tasks: (a) free API keys — Congress.gov (api.congress.gov/sign-up) and
-  OpenStates (open.pluralpolicy.com) — into `.env`; (b) create Supabase project + apply the
-  Task 4 migration; then Task 10 runs live. Plans 2 (summarization + review queue) and
-  3 (public site + admin) follow.
+- [ ] **Execute Plan 1: foundation + ingestion (Onder slice)** — IN PROGRESS, paused
+  2026-07-27. Tasks 1-4 of 10 done + review-approved on branch `slice1-foundation-ingestion`
+  (pushed): scaffold, typed errors + rate limiter, DB layer, schema migration SQL.
+  **BLOCKED on Lance, in order:**
+  - [ ] (a) Congress.gov API key (free: api.congress.gov/sign-up) → `.env` — unblocks Tasks 5-6
+  - [ ] (b) OpenStates API key (free: open.pluralpolicy.com) → `.env` — unblocks Tasks 7-9
+  - [ ] (c) Create Supabase project + run both files in `supabase/migrations/` in its SQL
+        editor, then SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY → `.env` — unblocks Task 10
+  Copy `.env.example` → `.env` and fill in. **Resume note for a fresh session:** execution
+  state lives in `.superpowers/sdd/2026-07-27-slice1-foundation-ingestion/progress.md`
+  (git-ignored, local) — resume subagent-driven execution of the plan at Task 5; deferred
+  minor findings are listed there for the final review.
+- [ ] Decision for Lance before Plan 2: published summaries' `editor_notes` column would be
+  publicly readable under current RLS — keep internal (column-split or clear-on-publish)?
 
 ## 🛠 BUILD QUEUE
 

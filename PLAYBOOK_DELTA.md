@@ -160,5 +160,16 @@ it is. Revisit this section before shipping any summarization or scoring logic.
 
 ---
 
-*VisibleGov's own delta - what THIS project teaches the next one - starts accumulating in a new
-section once real building begins. Nothing below this line yet.*
+## 7. VisibleGov's own delta (accumulating as of 2026-07-27)
+
+1. **`node --test <dir>` breaks on Node 24 / Windows.** Passing a directory arg to the test
+   runner (`node --test tests/`) dies with MODULE_NOT_FOUND — Node treats the dir as a module
+   entry. Bare `node --test` (default `*.test.js` discovery, excludes node_modules) works and
+   also avoids the manual-registration trap of an index.js test shim (a forgotten future test
+   file would silently never run). Cost two fix commits + a controller/implementer dispute to
+   settle.
+2. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
+   that removing a shim was safe by running the suite — with the shim still present. The
+   implementer re-tested with the file actually absent, pushed back with evidence, and was
+   right. An adversarial check only counts if it tests the world in the state being claimed
+   (league's §6 lesson, now proven in-house).
