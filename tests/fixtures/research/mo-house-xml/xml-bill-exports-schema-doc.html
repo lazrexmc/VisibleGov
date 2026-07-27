@@ -1,0 +1,222 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>Missouri House of Representatives: XML Bill Export Instructions</title>
+    <style>
+        body {
+            background: white;
+            font-family: Arial, Helvetica, Sans-Serif;
+            font-size: 10pt;
+            width: 900px;
+        }
+
+        h3 {
+            font-size: 15pt;
+        }
+		
+		h4 {
+			padding-left: 18px;
+		}
+
+        div {
+            margin-top: 15px;
+        }
+
+        ul {
+            margin-left: -10px;
+            margin-top: 1px;
+        }
+
+        .subsection {
+            border: 1px solid gray;
+        }
+
+        .nelement {
+            font-style: italic;
+            font-weight: bold;
+        }
+    </style>
+	<script language="javascript" type="text/javascript" src="SessionSet.js"></script>
+</head>
+<body onload="SetLinks();">
+    <h3>Missouri House of Representatives: XML Bill Export Instructions</h3>
+    <div>
+        Due to increased load from "scraping" technology used to gather data from our servers, the Missouri House of Representatives has begun generating several
+        XML files which should allow more efficient download of information while minimizing load on our servers.
+    </div>
+    <div>
+        <ul>
+            <li>These bill files will be updated on an hourly schedule, then uploaded to the server. The job is scheduled so that scripts run on the hour should pick up the latest version.</li>
+            <li id="show4" style="display: none;">In the <a id="spec2BillList" rel="noopener" target="_blank">Bill List XML File</a>, the date and time of last update is given. To reduce your own bandwidth usage, you may wish to script to only pull documents updated since your last data retrieval.</li>
+			<li id="show1" style="display: none;">In the <a id="specBillList" rel="noopener" target="_blank">Bill List XML File</a>, the date and time of last update is given. To reduce your own bandwidth usage, you may wish to script to only pull documents updated since your last data retrieval.</li>
+			<li>In the <a id="billList" rel="noopener" target="_blank">Bill List XML File</a>, the date and time of last update is given. To reduce your own bandwidth usage, you may wish to script to only pull documents updated since your last data retrieval.</li>
+            <li>Do not automate scripts to pull down information more often than once every half hour. This will not benefit you, and will cause unecessary load.</li>
+            <li>Scripts which cause undue load, either by repeated "scraping" of web pages, or excessive polling of the XML Exports may be temporarily blocked at the discretion of House Information Systems.</li>
+            <li>This data is made available for public use, however, we do not support technology external to the Missouri House of Representatives.</li>
+        </ul>
+    </div>
+    <div class="subsection">
+        <h4>XML Format:</h4>
+        <ul>
+            <li><span class="nelement">BillInformation</span> - The top level element.</li>
+            <ul>
+				<li><span class="nelement">BillNumber</span> - occurs once per document and includes the bill identifier within the session (eg. HJR28, HB1150).</li>
+				<li><span class="nelement">CurrentBillString</span> - occurs once per document. Identifies current version infomation within the session (eg. SCS HB 11, HCS HB 345).</li>
+				<li><span class="nelement">PastSessionAppropriationBill</span> - This will only show up on Appropriation Bills rolled over from past sessions for Administrative purposes.</li>
+				<li><span class="nelement">SubstitutedBy</span> - Identifies whether bill has been combined with another bill via a substitute.</li>
+				<ul>
+					<li><span class="nelement">ParentBillString</span> - The bill identifier for the Parent Bill within the sesison (eg. HJR28, HB1150).</li>
+					<li><span class="nelement">ParentBillLink</span> - Link on the House website to the Parent Bill.</li>
+				</ul>
+				<li>
+					<span class="nelement">Title</span> - occurs once per document and includes the current bill titles.
+					<ul>
+						<li><span class="nelement">ShortTitle</span> - The title given to the bill.</li>
+						<li><span class="nelement">LongTitle</span> - A short description of the bill.</li>
+					</ul>
+				</li>
+				<li><span class="nelement">ProposedEffectiveDate</span> - The proposed date in which the bill goes into effect. Is officially the effective date once the bill is sent to the Secretary of the State.</li>
+				<li><span class="nelement">CurrentLRNumber</span> - The unique identifier for the bills most current text version.</li>
+				<li><span class="nelement">GovernorLastAction</span> - Details about the Governor's Last Action on a Bill
+					<ul>
+						<li><span class="nelement">GovernorAction</span> - The Action, preceded by the date, that the Governor took on the bill.</li>
+						<li><span class="nelement">GovernorsVetoLetter</span> - The URL to the House copy of the Governor's Veto Letter.</li>
+					</ul>
+				</li>
+				<li><span class="nelement">LastAction</span> - The Last Action for the Bill.</li>
+				<li><span class="nelement">NextHouseHearing</span> - The Next upcoming hearing for the bill (eg. Children and Families - Date: 02/20/2024 Time: 8:00AM Location: House Hearing Room 6). If there isn't a hearing upcoming "Hearing not scheduled" will be displayed.</li>
+				<li><span class="nelement">Calendar</span> - The Bills current Calendar (eg. HOUSE BILLS FOR SECOND READING). If it isn't currently on a Calendar "Bill currently not on a House calendar" will be displayed.</li>
+				<li>
+					<span class="nelement">Action</span> - Details an action taken on a legislation.
+					<ul>
+						<li><span class="nelement">Link</span> - Links to the summary information for the legislation.</li>
+						<li><span class="nelement">Description</span> - The description of the action.</li>
+						<li><span class="nelement">Guid</span> - a unique identifier for the action. (Not related to "globally unique identifier".)</li>
+						<li><span class="nelement">ActivitySequence</span> - The sequence in which the bill activities are ordered</li>
+						<li><span class="nelement">PubDate</span> - Date on which the action was logged.</li>
+						<li><span class="nelement">Comments</span> - Additional notes regarding action (where applicable)</li>
+						<li><span class="nelement">RollCall</span> - Individual Roll Call information (where applicable)</li>
+						<ul>
+							<li><span class="nelement">TotalYes</span> - Total "yes" votes</li>
+							<li><span class="nelement">TotalNo</span> - Total "no" votes</li>
+							<li><span class="nelement">TotalPresent</span> - Total "present" votes</li>
+						</ul>
+						<li><span class="nelement">HouseJournalStartPage</span> - Page of House Journal where this action begins being recorded (where applicable)</li>
+						<li><span class="nelement">HouseJournalEndPage</span> - Page of House Journal where this action finishes being recorded (where applicable)</li>
+						<li><span class="nelement">SenateJournalStartPage</span> - Page of Senate Journal where this action begins being recorded (where applicable)</li>
+						<li><span class="nelement">SenateJournalEndPage</span> - Page of Senate Journal where this action finishes being recorded (where applicable)</li>
+						<li><span class="nelement">JournalLink</span> - Link to House Journal OR Senate Journal list page (where applicable)</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">Amendment</span> - Details an amendment to the legislation.
+					<ul>
+						<li><span class="nelement">AmendmentText</span> - Link to PDF of the amendment text.</li>
+						<li><span class="nelement">LRNumber</span> - unique identifier for the Amendment.</li>
+						<li><span class="nelement">Status</span> - Status code of the amendment. (G: Distributed, O: Offered, W: Withdrawn, etc.)</li>
+						<li><span class="nelement">StatusDescription</span> - Description associated with Status Code.</li>
+						<li><span class="nelement">AmendmentDescription</span> - The description of the amendment (eg. HA 1, HA 1 to HA 1, etc.).</li>
+						<li><span class="nelement">Sponsor</span> - The sponsor of the amendment</li>
+						<li><span class="nelement">Map</span> - Map infomation for redistricting</li>
+						<ul>
+							<li><span class="nelement">MapLink</span> - Link to Map for Amendment</li>
+						</ul>
+						<li><span class="nelement">RollCalls</span> - List of Roll Calls (where applicable)</li>
+						<ul>
+							<li><span class="nelement">RollCall</span> - Individual Roll Call information (where applicable)</li>
+							<ul>
+								<li><span class="nelement">RollCallPDF</span> - Roll Call vote detail PDF link</li>
+								<li><span class="nelement">SessionDay</span> - Sequential number of the given day in session on which the roll call was taken</li>
+								<li><span class="nelement">RollCallNumber</span> - Sequential number of the roll call within a Session Day</li>
+								<li><span class="nelement">TotalYes</span> - Total "yes" votes</li>
+								<li><span class="nelement">TotalNo</span> - Total "no" votes</li>
+								<li><span class="nelement">TotalPresent</span> - Total "present" votes</li>
+							</ul>
+						</ul>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">Sponsor</span> - Sponsor/Co-Sponsor of the legislation.
+					<ul>
+						<li><span class="nelement">SponsorType</span> - Type of Sponsor (Sponsor/Co-Sponsor).</li>
+						<li><span class="nelement">FullName</span> - Name of the Member sponsoring the legislation.</li>
+						<li><span class="nelement">District</span> - District of the Member sponsoring the legislation.</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">BillText</span> - Text of the bill. One will appear for each version of the bill text.
+					<ul>
+						<li><span class="nelement">BillTextLink</span> - PDF of the text of a given version of the bill.</li>
+						<li><span class="nelement">LRNumber</span> - unique identifier for the Bill Text.</li>
+						<li><span class="nelement">DocumentName</span> - Name of a given version of the bill.</li>
+						<li><span class="nelement">WebName</span> - Shorthand name of a given version of the bill which is used on the House Website.</li>
+						<li><span class="nelement">VersionTypeCode</span> - Code for a given version of the bill.</li>
+						<li><span class="nelement">Map</span> - Map infomation for redistricting</li>
+						<ul>
+							<li><span class="nelement">MapLink</span> - Link to Map for Bill Version</li>
+						</ul>
+						<li><span class="nelement">RollCalls</span> - List of Roll Calls (where applicable)</li>
+						<ul>
+							<li><span class="nelement">RollCall</span> - Individual Roll Call information (where applicable)</li>
+							<ul>
+								<li><span class="nelement">RollCallPDF</span> - Roll Call vote detail PDF link</li>
+								<li><span class="nelement">SessionDay</span> - Sequential number of the given day in session on which the roll call was taken</li>
+								<li><span class="nelement">RollCallNumber</span> - Sequential number of the roll call within a Session Day</li>
+								<li><span class="nelement">TotalYes</span> - Total "yes" votes</li>
+								<li><span class="nelement">TotalNo</span> - Total "no" votes</li>
+								<li><span class="nelement">TotalPresent</span> - Total "present" votes</li>
+							</ul>
+						</ul>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">SummarySheet</span> - Summary of the statues affected by the bill.
+					<ul>
+						<li><span class="nelement">SummarySheetLink</span> - PDF of the Summary Sheet.</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">BillSummary</span> - Summary of the bill. One will appear for each version of the bill.
+					<ul>
+						<li><span class="nelement">SummaryTextLink</span> - PDF of the summary of a given version of the bill.</li>
+						<li><span class="nelement">LRNumber</span> - unique identifier for the Bill Summary.</li>
+						<li><span class="nelement">DocumentName</span> - Name a given version of the bill.</li>
+						<li><span class="nelement">VersionTypeCode</span> - Code for a given version of the bill.</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">FiscalNotes</span> - Fiscal Notes information.
+					<ul>
+						<li><span class="nelement">FiscalNoteLink</span> - Link to Fiscal Notes hosted by the Missouri General Assembly (not managed by the Missouri House of Representatives).</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">Hearings</span> - Hearings held on the bill. One will appear for each hearing that has occurred or is planned for the bill.
+					<ul>
+						<li><span class="nelement">CommName</span> - Name of the Committee.</li>
+						<li><span class="nelement">NoticeDate</span> - Date of the Hearing per the hearing notice.</li>
+						<li><span class="nelement">NoticeTime</span> - Time of the Hearing per the hearing notice.</li>
+						<li><span class="nelement">Location</span> - Location of the Hearing per the hearing notice.</li>
+						<li><span class="nelement">Comments</span> - Additional details regarding the Hearing.</li>
+						<li><span class="nelement">AltTime</span> - Text descriptor of Hearing time (eg. Upon Morning Adjournment).</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">Witness</span> - Witness forms (where applicable)
+					<ul>
+						<li><span class="nelement">WitnessFormsLink</span> - Link to PDF of witness forms.</li>
+						<li><span class="nelement">WitnessFormsLinkDescription</span> - Additional descriptor text to identify between multiple witness forms (not on most bills).</li>
+					</ul>
+				</li>
+				<li>
+					<span class="nelement">SubjectIndex</span> - Each Subject Index for the bill.
+					<ul>
+						<li><span class="nelement">SubjectID</span> - Unique Subject ID.</li>
+						<li><span class="nelement">SubjectName</span> - A Subject Index Description for the bill.</li>
+					</ul>
+				</li>
+			</ul>
+        </ul>
+    </div>
+</body>
+</html>

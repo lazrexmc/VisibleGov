@@ -1,0 +1,76 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>Missouri House of Representatives: XML Bill List Instructions</title>
+    <style>
+        body {
+            background: white;
+            font-family: Arial, Helvetica, Sans-Serif;
+            font-size: 10pt;
+            width: 900px;
+        }
+
+        h3 {
+            font-size: 15pt;
+        }
+		
+		h4 {
+			padding-left: 18px;
+		}
+
+        div {
+            margin-top: 15px;
+        }
+
+        ul {
+            margin-left: -10px;
+            margin-top: 1px;
+        }
+
+        .subsection {
+            border: 1px solid gray;
+        }
+
+        .nelement {
+            font-style: italic;
+            font-weight: bold;
+        }
+    </style>
+	<script language="javascript" type="text/javascript" src="SessionSet.js"></script>
+</head>
+<body onload="SetLinks();">
+    <h3>Missouri House of Representatives: XML Bill List Instructions</h3>
+    <div>
+        Due to increased load from "scraping" technology used to gather data from our servers, the Missouri House of Representatives has begun generating several
+        XML files which should allow more efficient download of information while minimizing load on our servers.
+    </div>
+    <div>
+        <ul>
+		<li id="show4" style="display: none;">The <a id="spec2BillList" rel="noopener" target="_blank">Bill List XML File</a> will provide you with the url to each individual bill XML file for your use.</li>
+            <li id="show5" style="display: none;">The file will be updated on an hourly schedule, then uploaded to the server. The job is scheduled so that scripts run on the hour should pick up the latest version.</li>
+            <li id="show6" style="display: none;">On the <a id="spec2BillList2" rel="noopener" target="_blank">Bill List XML File</a>, the date and time of last update is given. To reduce your own bandwidth usage, you may wish to script to only pull documents updated since your last data retrieval.</li>
+			<li id="show1" style="display: none;">The <a id="specBillList" rel="noopener" target="_blank">Bill List XML File</a> will provide you with the url to each individual bill XML file for your use.</li>
+            <li id="show2" style="display: none;">The file will be updated on an hourly schedule, then uploaded to the server. The job is scheduled so that scripts run on the hour should pick up the latest version.</li>
+            <li id="show3" style="display: none;">On the <a id="specBillList2" rel="noopener" target="_blank">Bill List XML File</a>, the date and time of last update is given. To reduce your own bandwidth usage, you may wish to script to only pull documents updated since your last data retrieval.</li>
+            <li>The <a id="billList" rel="noopener" target="_blank">Bill List XML File</a> will provide you with the url to each individual bill XML file for your use.</li>
+            <li>The file will be updated on an hourly schedule, then uploaded to the server. The job is scheduled so that scripts run on the hour should pick up the latest version.</li>
+            <li>On the <a id="billList2" rel="noopener" target="_blank">Bill List XML File</a>, the date and time of last update is given. To reduce your own bandwidth usage, you may wish to script to only pull documents updated since your last data retrieval.</li>
+            <li>Do not automate scripts to pull down information more often than once every half hour. This will not benefit you, and will cause unecessary load.</li>
+            <li>Scripts which cause undue load, either by repeated "scraping" of web pages, or excessive polling of the XML Exports may be temporarily blocked at the discretion of House Information Systems.</li>
+            <li>This data is made available for public use, however, we do not support technology external to the Missouri House of Representatives.</li>
+        </ul>
+    </div>
+    <div class="subsection">
+        <h4>XML Format:</h4>
+        <ul>
+            <li><span class="nelement">BillXML</span> - The top level element for each bill.</li>
+            <li><span class="nelement">BillType</span> - Includes the bill type identifier within the session (eg. HJR, HB).</li>
+            <li><span class="nelement">BillNumber</span> - Includes the bill number identifier within the session (eg. 28, 1150).</li>
+			<li><span class="nelement">SessionYear</span> - The year that bill was heard in Session (eg. 2023, 2022).</li>
+			<li><span class="nelement">SessionCode</span> - The code for the Session in which the bill was heard (eg. R, S1).</li>
+            <li><span class="nelement">BillXMLLink</span> - The link to the bills XML file.</li>
+            <li><span class="nelement">LastTimeRun</span> - The last time the bills XML was updated in the following format (eg. 06-20-2023 10:46:24.440).</li>
+        </ul>
+    </div>
+</body>
+</html>

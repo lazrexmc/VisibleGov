@@ -41,10 +41,21 @@
 8. Identity merge: link federal+MO legislator rows (Onder currently = 2 rows — one keyed by
    `bioguide_id`, one by `openstates_id` — confirmed live 2026-07-27; expected until this is
    built, not a bug).
-9. MO official-journal scraper for individual roll-call votes (OpenStates has none) — confirmed
-   across 4 sessions/305 sampled vote events (2022/2021/2019/2017: exactly 1 event with voter
-   data). The events' own source links point at house.mo.gov/senate.mo.gov — scrape the primary
-   record, which §4.1 prefers anyway.
+9. MO individual roll-call votes (OpenStates has none) — confirmed across 4 sessions/305 sampled
+   vote events (2022/2021/2019/2017: exactly 1 event with voter data). **Investigated 2026-07-27
+   (Task 9, full findings in `docs/research/2026-07-27-mo-data-sources.md`).** Narrower than
+   "scrape the journal": house.mo.gov runs its own no-auth, live, hourly XML export
+   (`documents.house.mo.gov/xml/...`) that gives clean per-bill action history, but its `RollCall`
+   element is aggregate tallies only — individual votes live one hop away in a linked
+   `RollCallPDF`, confirmed real and text-layer (not scanned — extracts cleanly, no OCR needed) via
+   a live fetch. Build a `mo-house-xml` adapter against that XML + PDF pair (see the research doc's
+   proposed adapter shape) — no signup, no ToU ambiguity ("made available for public use"). Separately,
+   LegiScan's `getRollCall` operation is confirmed (via its own official client source, not a live
+   MO payload — no key was registered) to return individual `people_id`/`vote_id` votes in general;
+   whether MO's data is actually populated is the one open question a real key would settle in one
+   call, and could replace the PDF-parsing step if so. Bill full text is PDF-only at the MO primary
+   source either way (confirmed) — either path needs a new PDF-text-extraction dependency before
+   `summarizeBill()` can run on MO text, which isn't built yet.
 10. Plan-2 first commits (from final whole-branch review, 2026-07-27): (a) fail-loud chamber
     parsing in both adapters (kill the silent 'house'/'senate' fallback guesses); (b) wire an
     enrichment pass so placeholder rows (null bills, id-as-name legislators) can be filled —

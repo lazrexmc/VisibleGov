@@ -1,0 +1,193 @@
+2022-01-14 12:00  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.4.1
+	* LegiScan.php: fix loadBill() to correctly populate bill struct for
+	the *_size/*_hash values
+
+2021-12-31 13:37  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.4.0
+	* LegiScan.php: Add getMonitorList(), setMonitor() for new API hooks
+	interacting with GAITS tracking list, add processMonitorList() to keep
+	local data in parity with the GAITS monitoring list, add middleware
+	signal in processBill() for session changes with exposed prefile,
+	sine_die and prior flags, add support for "referrals" for historical
+	list of committees a bill has been referred to over its lifetime, add
+	prefer_pdf support to getBillText(), getAmendment() and getSupplement()
+	hooks, add local_fragment for document tables to store the pathname of
+	the document under the local filesystem doc_dir folder for easier
+	fetching, add *_size/*_hash value for text, amendment and supplements,
+	search functions now use getSearch & getSearchRaw since
+	search/searchRaw is deprecated, add support for stance (watch, support,
+	oppose) in monitor() 
+	* config.dist.php: Add prefer_pdf variable to prefer the PDF version
+	of a document when multiple formats exist for a single getBillText,
+	getAmendment, or getSupplement object; if a PDF version does not exist
+	an alternate format such as HTML will be returned instead; fix typo
+	massage_date -> massage_dates for Postgres/MSSQL
+	* legiscan-cli.php: Add --monitorlist for new hooks along with --monitor
+	--ignore, add --sync to synchronize monitor list changes with GAITS
+	tracking, add --stance for monitor list, add tables to --reset-db
+	* upgrade.php: Script that will update existing database installation
+	between releases by running `php upgrade.php`
+	* Schema: Add local_fragment *_size/*_hash for amendment, supplement and
+	text tables, add ls_bill_referral for referral chains, add ls_variable
+	table, add session_tag to ls_session along with prefile, sine_die, and
+	prior flags, expand the ls_mime_type list, add '0' for ls_progress
+	completeness, add stance to ls_monitor along with ls_stance lookup, add
+	views for useful joins: lsv_bill, lsv_bill_amendment, lsv_bill_calendar,
+	lsv_bill_history, lsv_bill_referral, lsv_bill_sast, lsv_bill_sponsor,
+	lsv_bill_subject, lsv_bill_supplement, lsv_bill_text, lsv_bill_vote,
+	lsv_bill_vote_detail; changed indexing on ls_bill_sast, ls_bill_subject,
+	and ls_bill_vote_detail, add sast_bill_number to ls_bill_sast
+
+2020-11-13 15:21  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.3.2
+	* LegiScan.php: Fix deprecated curly brace string offset since PHP 7.4
+	finally complains about it
+	* Schema: Correct a typo in the the ls_session table definition
+
+2020-08-27 15:15  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.3.1
+	* LegiScan.php: Add knowwho_pid to processPerson() and processBill(), keep
+	the import_hash/import_date properly updated when using importDataset(),
+	explicitly handle sqlsrv with massage_dates, processed flag in ls_signal
+	supports values >= 1, enforce local cache lifetimes in apiRequest() to
+	match API Operations Frequency guidelines for Pull
+	* legiscan-cli.php: Add --reset-db option to truncate and reset database
+	to clean install state
+	* Schema: Add knowwho_pid to ls_people as third party identifier
+
+2020-01-20 03:14  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.3.0
+	* LegiScan.php: Add getMasterListRaw(), getSearchRaw(),
+	getSessionPeople(), getSponsoredList() to LegiScan_Pull for new
+	API hooks
+	* legiscan-cli.php: Use the new getMasterListRaw and getSearchRaw
+	* legiscand.php: Use the new getMasterListRaw and getSearchRaw
+	* General: Documentation updates and clarifications
+
+2019-01-01 14:20  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.2.0
+	* config.dist.php: Add massage_dates and years[] variables
+	* legiscan-bulk.php: Rewrite to utilize getDatasetList and getDataset for
+	updates
+	* legiscand.php: Fix a bug in search based synchronizing that would cause
+	the import to fail
+	* legiscan-ui.php: Add the Pull request URL along with the raw JSON
+	payload response
+	* LegiScan.php: Add getDatasetList() and getDataset() to LegiScan_Pull,
+	add LegiScan_Bulk to process ZIP datasets, middleware_signal on all object
+	types, correct an edge case in apiRequest() that could save an ERROR
+	response in cache, align default cache time to current standard one hour,
+	expose getURL() and getRawResponse()
+	* legiscan.service: Add LEGISCAN_PATH to PATH
+	* common.php: Add yes_no_prompt() and tidy up some help text
+	* Schema: Add import_date and import_hash to ls_session for dataset
+	tracking
+
+2018-03-27 15:52  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.8
+	* Schema: Create Postgres triggers to mimic ON UPDATE CURRENT_TIMESTAMP
+	for 'updated' columns
+
+2018-01-09 01:02  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.7
+	* LegiScan.php: Add missing constraint for SAST cleanup on bill updates
+
+2017-12-26 09:46  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.6
+	* LegiScan.php: Refactor sponsor code in the update branch of
+	processBill()
+	* config.php: Distribute config.php as config.dist.php to not overwrite
+	live configuation file
+	* General: Documentation updated for copying dist config on initial setup
+
+2017-12-18 11:09  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.5
+	* Schema: Update ls_bill_sponsor primary key from (bill_id, sponsor_order)
+	to (bill_id, people_id)
+	* General: Documentation updates to Document cache file structure
+
+2017-12-15 18:01  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.4
+	* legiscan-bulk.php: Skip hash.md5 from public datasets
+
+2017-09-10 00:12  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.3
+	* legiscan.php: Moved to legiscan-ui.php to prevent Windows filesystem
+	name conflict
+	* General: Documentation updates for new legiscan-ui.php
+
+2017-09-09 15:04  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.2
+	* Schema: Update ls_bill_history.history_action to TEXT for obscenely
+	long history steps
+
+2017-08-31 12:58  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.1
+	* LegiScan.php: Add skip_cache parameter to checkExists to by-pass
+	any caching mechanism, corrected typo in processBill for chamber in
+	history step updates of existing bills in processBill, skip executing
+	an empty statement in monitor()/ignore()
+	* General: Corrected copypasta for MySQL database setup loading schema
+
+2017-04-10 15:36  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.1.0
+
+2017-04-09 08:27  LegiScan API Team <api@legiscan.com>
+
+	* LegiScan.php: Middleware signaling will preserve the original
+	timestamp if there are multiple updates between processing sweeps
+
+2017-04-08 17:52  LegiScan API Team <api@legiscan.com>
+
+	* legiscand.php: Add "monitored" update_type support
+	* config.php: Add interval setting for legiscand.php, add vim modeline
+	* LegiScan.php: Add monitor/ignore support functions to LegiScan_Process
+	* legiscan-cli.php: Add (un)monitor/(un)ignore handlers
+	* common.php: Add command line help for (un)monitor/(un)ignore
+
+2017-04-07 14:15  LegiScan API Team <api@legiscan.com>
+
+	* General: Documentation updates and flattened source doc structure
+	to increase online readability
+
+2017-04-04 06:25  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.0.0
+
+2017-04-04 06:20  LegiScan API Team <api@legiscan.com>
+
+	* LegiScan.php: Reformat SQL statements for line wrapping
+
+2017-03-29 21:20  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.0.0-rc2
+
+2017-03-29 19:54  LegiScan API Team <api@legiscan.com>
+
+	* LegiScan.php: Correct static reference Notice under PHP7 in
+	LegiScan_Cache_Memory when memcache server not in use
+
+2017-03-28 20:33  LegiScan API Team <api@legiscan.com>
+
+	* legiscan.php: Remove api_key pull from getConfig to prevent
+	information leak when public/unprotected
+
+2017-03-27 16:00  LegiScan API Team <api@legiscan.com>
+
+	* RELEASE 1.0.0-rc1
