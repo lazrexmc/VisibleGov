@@ -6,13 +6,23 @@
 
 ## NOW
 
-- [ ] **Brainstorm/scoping pass before any code.** Needs: which legislative bodies first (federal
-  only? a specific state? both?), what the actual data sources are (Congress.gov API, OpenStates,
-  state legislature sites - each has different access/rate-limit/format realities), what MVP scope
-  actually looks like (one chamber, one session, a handful of bills, proven end-to-end, before
-  scaling breadth), and what's actually missing from existing tools (GovTrack, OpenStates,
-  ProPublica's Represent, BillTrack50) that makes this worth building instead of just using one of
-  those - see PLAYBOOK_DELTA §5.5.
+- [ ] **Lance reviews the MVP design draft** —
+  `docs/superpowers/specs/2026-07-27-visiblegov-mvp-design.md` (marked WORKING DRAFT; overall
+  shape agreed 2026-07-27, details expected to evolve). After approval → implementation plan.
+
+## 🛠 BUILD QUEUE
+
+1. **First vertical slice: Bob Onder end-to-end** (Lance's call, 2026-07-27). US House MO-3
+   (since 2025) + prior MO General Assembly career = one legislator exercising BOTH adapters.
+   Verify his actual career dates/districts against official records first — don't trust memory.
+   Slice = ingest his votes from both sources → summarize the triggered bills → review queue →
+   published legislator page.
+2. Schema migration draft (canonical tables + RLS) — draft-then-apply, Lance runs it.
+3. Congress.gov adapter (bills, actions, calendars, roll-call XML).
+4. OpenStates/MO adapter (+ spot-check votes against official journals before trusting).
+5. Summarization CLI (versioned prompt, hash-tied to bill text version, review queue).
+6. Public site: directory, legislator page, bill page, address lookup (Census Geocoder).
+7. Staff `/admin` review queue.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
@@ -23,9 +33,5 @@
 
 Multi-faceted per Lance: (1) plain-language bill/law breakdowns, (2) purpose/intent surfaced
 clearly, (3) voting-record tracking tied to individual legislators, (4) accountability - making the
-above easy enough that regular people actually use it. Not yet decomposed into a real scope - see
-NOW above.
-
-## 🛠 BUILD QUEUE
-
-(empty - nothing scoped yet, that's the NOW item)
+above easy enough that regular people actually use it. Decomposed 2026-07-27 into the MVP design
+draft — see NOW.

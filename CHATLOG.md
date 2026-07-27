@@ -50,3 +50,50 @@ compile-don't-extrapolate; NOW = a real brainstorm/scoping pass before any code,
 
 git-initialized the repo and made the first commit. Nothing pushed to a remote - no remote
 configured yet, that's Lance's call whenever he wants one.
+
+---
+
+## 2026-07-27 — Brainstorm/scoping session (the TODO "NOW" item)
+
+### [Lance]
+> proceed
+
+**[Claude]** Ran the brainstorm via structured questions. Decisions, with Lance's answers:
+
+1. **The gap vs existing tools** (GovTrack/OpenStates/BillTrack50) - Lance selected three:
+   *bills are unreadable*, *no plain accountability view*, *nobody actually uses them*.
+   Explicitly NOT selected: coverage level. Product bet = readability + one-tap accountability +
+   built for regular people.
+2. **Jurisdiction** - offered US-Congress-first (recommended), Missouri-first, or both.
+   Lance chose **both from day one**, aware of the two-pipeline risk. Mitigation: one canonical
+   jurisdiction-agnostic schema + per-source adapters.
+3. **Front door:**
+   > "combonation of who represents me and a legislator directory. They can look at anyone but
+   > alos enter an address to see who is there reps"
+4. **Trust model** - Lance chose: **he approves every summary** before publish (review queue;
+   nothing auto-publishes). Second-model adversarial pre-screen deferred until volume demands.
+5. **Bill scope:**
+   > "I like the idea of bills with votes but we also need to see items that are in the works
+   > that are upcoming that may come to vote soon"
+   → mechanical trigger: recorded floor vote OR reported out of committee OR on a floor calendar.
+   Everything else gets bare listings with official links.
+6. **Architecture** - chose **Approach A**: Supabase + Cloudflare Pages + Node ingestion/
+   summarization CLI (manual first, GitHub Actions cron later), static pre-render on publish.
+   Over B (Cloudflare-native Workers cron) and C (framework SSR).
+7. On the design draft, Lance's framing correction:
+   > "I'd say this is a good start for an overall rough draft/overview, but there are many more
+   > details inside that we'll get to eventually so don't say this is 'the exact right model so
+   > far' it's a work in progress still"
+   → spec explicitly marked WORKING DRAFT throughout.
+
+### [Lance] (mid-task, while spec was being written)
+> The first person we are going to check out is Bob Onder's political career
+
+**[Claude]** Captured (not chased, per capture-don't-chase): Onder becomes the **first vertical
+slice** - he spans both jurisdictions (MO General Assembly → US House MO-3 since 2025), so one
+legislator page exercises both adapters end-to-end. Added to spec + TODO build queue; career
+dates flagged for verification against official records during the build.
+
+Spec written to `docs/superpowers/specs/2026-07-27-visiblegov-mvp-design.md`, self-reviewed
+(fixed a trigger-rule inconsistency between two sections), committed. Awaiting Lance's review of
+the spec file before writing the implementation plan.
