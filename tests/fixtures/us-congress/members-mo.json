@@ -1,0 +1,1161 @@
+{
+    "members": [
+        {
+            "bioguideId": "O000177",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67744f970b34857ecc909161_200.jpg"
+            },
+            "district": 3,
+            "name": "Onder, Robert F.",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:28Z",
+            "url": "https://api.congress.gov/v3/member/O000177?format=json"
+        },
+        {
+            "bioguideId": "B001316",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/b001316_200.jpg"
+            },
+            "district": 7,
+            "name": "Burlison, Eric",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2023
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:27Z",
+            "url": "https://api.congress.gov/v3/member/B001316?format=json"
+        },
+        {
+            "bioguideId": "A000379",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/a000379_200.jpg"
+            },
+            "district": 4,
+            "name": "Alford, Mark",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2023
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:27Z",
+            "url": "https://api.congress.gov/v3/member/A000379?format=json"
+        },
+        {
+            "bioguideId": "S001195",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/s001195_200.jpg"
+            },
+            "district": 8,
+            "name": "Smith, Jason",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2013
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:23Z",
+            "url": "https://api.congress.gov/v3/member/S001195?format=json"
+        },
+        {
+            "bioguideId": "W000812",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/695fc654ddd5f76cbbad2f67_200.jpg"
+            },
+            "district": 2,
+            "name": "Wagner, Ann",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2013
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:22Z",
+            "url": "https://api.congress.gov/v3/member/W000812?format=json"
+        },
+        {
+            "bioguideId": "C001061",
+            "depiction": {
+                "attribution": "Congressional Pictorial Directory",
+                "imageUrl": "https://www.congress.gov/img/member/116_rp_mo_5_cleaver_emanuel_200.jpg"
+            },
+            "district": 5,
+            "name": "Cleaver, Emanuel",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2005
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:21Z",
+            "url": "https://api.congress.gov/v3/member/C001061?format=json"
+        },
+        {
+            "bioguideId": "G000546",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/g000546_200.jpg"
+            },
+            "district": 6,
+            "name": "Graves, Sam",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2001
+                    }
+                ]
+            },
+            "updateDate": "2026-07-27T07:40:21Z",
+            "url": "https://api.congress.gov/v3/member/G000546?format=json"
+        },
+        {
+            "bioguideId": "B001324",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/677422240b34857ecc90904a_200.jpg"
+            },
+            "district": 1,
+            "name": "Bell, Wesley",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-07T07:35:21Z",
+            "url": "https://api.congress.gov/v3/member/B001324?format=json"
+        },
+        {
+            "bioguideId": "S001227",
+            "depiction": {
+                "attribution": "Official U.S. Senate Photo",
+                "imageUrl": "https://www.congress.gov/img/member/b66a0806e77f63e862391b15a0b1f753_200.jpg"
+            },
+            "name": "Schmitt, Eric",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "startYear": 2023
+                    }
+                ]
+            },
+            "updateDate": "2026-03-08T10:32:35Z",
+            "url": "https://api.congress.gov/v3/member/S001227?format=json"
+        },
+        {
+            "bioguideId": "H001089",
+            "depiction": {
+                "imageUrl": "https://www.congress.gov/img/member/h001089_200.jpg"
+            },
+            "name": "Hawley, Josh",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "startYear": 2019
+                    }
+                ]
+            },
+            "updateDate": "2026-03-08T10:31:24Z",
+            "url": "https://api.congress.gov/v3/member/H001089?format=json"
+        },
+        {
+            "bioguideId": "H000947",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/https://bioguide.congress.gov/photo/7aafc66b389f89e3c48c102bbef620ec.jpg"
+            },
+            "district": 6,
+            "name": "Hull, William",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1973,
+                        "startYear": 1955
+                    }
+                ]
+            },
+            "updateDate": "2026-01-13T12:28:45Z",
+            "url": "https://api.congress.gov/v3/member/H000947?format=json"
+        },
+        {
+            "bioguideId": "H000049",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/https://bioguide.congress.gov/photo/e1e879b0dca8f9d6d82648dc35eb2efb.jpg"
+            },
+            "district": 7,
+            "name": "Hall, Durward",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1973,
+                        "startYear": 1961
+                    }
+                ]
+            },
+            "updateDate": "2026-01-13T12:28:45Z",
+            "url": "https://api.congress.gov/v3/member/H000049?format=json"
+        },
+        {
+            "bioguideId": "C000488",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/c000488_200.jpg"
+            },
+            "district": 1,
+            "name": "Clay, William (Bill)",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2001,
+                        "startYear": 1969
+                    }
+                ]
+            },
+            "updateDate": "2025-07-18T12:34:17Z",
+            "url": "https://api.congress.gov/v3/member/C000488?format=json"
+        },
+        {
+            "bioguideId": "B000611",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/b000611_200.jpg"
+            },
+            "name": "Bond, Christopher S.",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 2011,
+                        "startYear": 1987
+                    }
+                ]
+            },
+            "updateDate": "2025-05-14T12:56:30Z",
+            "url": "https://api.congress.gov/v3/member/B000611?format=json"
+        },
+        {
+            "bioguideId": "L000569",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/l000569_200.jpg"
+            },
+            "district": 3,
+            "name": "Luetkemeyer, Blaine",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2025,
+                        "startYear": 2009
+                    }
+                ]
+            },
+            "updateDate": "2025-01-06T13:03:57Z",
+            "url": "https://api.congress.gov/v3/member/L000569?format=json"
+        },
+        {
+            "bioguideId": "B001224",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/b001224_200.jpg"
+            },
+            "district": 1,
+            "name": "Bush, Cori",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2025,
+                        "startYear": 2021
+                    }
+                ]
+            },
+            "updateDate": "2025-01-06T12:43:44Z",
+            "url": "https://api.congress.gov/v3/member/B001224?format=json"
+        },
+        {
+            "bioguideId": "C001043",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/c001043_200.jpg"
+            },
+            "name": "Carnahan, Jean",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 2002,
+                        "startYear": 2001
+                    }
+                ]
+            },
+            "updateDate": "2024-02-01T16:26:03Z",
+            "url": "https://api.congress.gov/v3/member/C001043?format=json"
+        },
+        {
+            "bioguideId": "L000576",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/l000576_200.jpg"
+            },
+            "district": 7,
+            "name": "Long, Billy",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2023,
+                        "startYear": 2011
+                    }
+                ]
+            },
+            "updateDate": "2023-01-26T16:10:43Z",
+            "url": "https://api.congress.gov/v3/member/L000576?format=json"
+        },
+        {
+            "bioguideId": "H001053",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/h001053_200.jpg"
+            },
+            "district": 4,
+            "name": "Hartzler, Vicky",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2023,
+                        "startYear": 2011
+                    }
+                ]
+            },
+            "updateDate": "2023-01-26T16:10:43Z",
+            "url": "https://api.congress.gov/v3/member/H001053?format=json"
+        },
+        {
+            "bioguideId": "B000575",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/b000575_200.jpg"
+            },
+            "name": "Blunt, Roy",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2011,
+                        "startYear": 1997
+                    },
+                    {
+                        "chamber": "Senate",
+                        "endYear": 2023,
+                        "startYear": 2011
+                    }
+                ]
+            },
+            "updateDate": "2023-01-26T16:10:43Z",
+            "url": "https://api.congress.gov/v3/member/B000575?format=json"
+        },
+        {
+            "bioguideId": "M001170",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/m001170_200.jpg"
+            },
+            "name": "McCaskill, Claire",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 2019,
+                        "startYear": 2007
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/M001170?format=json"
+        },
+        {
+            "bioguideId": "R000041",
+            "district": 4,
+            "name": "Randall, William J.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1977,
+                        "startYear": 1959
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/R000041?format=json"
+        },
+        {
+            "bioguideId": "H000948",
+            "depiction": {
+                "attribution": "Image, Congressional Pictorial Directory, 109th.",
+                "imageUrl": "https://www.congress.gov/img/member/h000948_200.jpg"
+            },
+            "district": 9,
+            "name": "Hulshof, Kenny C.",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2009,
+                        "startYear": 1997
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/H000948?format=json"
+        },
+        {
+            "bioguideId": "E000172",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/e000172_200.jpg"
+            },
+            "district": 8,
+            "name": "Emerson, Jo Ann",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2013,
+                        "startYear": 1997
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/E000172?format=json"
+        },
+        {
+            "bioguideId": "A000356",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/a000356_200.jpg"
+            },
+            "name": "Ashcroft, John",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 2001,
+                        "startYear": 1995
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/A000356?format=json"
+        },
+        {
+            "bioguideId": "Y000051",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/y000051_200.jpg"
+            },
+            "district": 2,
+            "name": "Young, Robert A.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1987,
+                        "startYear": 1977
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/Y000051?format=json"
+        },
+        {
+            "bioguideId": "W000326",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/w000326_200.jpg"
+            },
+            "district": 5,
+            "name": "Wheat, Alan",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1995,
+                        "startYear": 1983
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/W000326?format=json"
+        },
+        {
+            "bioguideId": "V000112",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives, Gift of the U.S. Association of Former Members of Congress",
+                "imageUrl": "https://www.congress.gov/img/member/v000112_200.jpg"
+            },
+            "district": 9,
+            "name": "Volkmer, Harold L.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1997,
+                        "startYear": 1977
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/V000112?format=json"
+        },
+        {
+            "bioguideId": "T000075",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/t000075_200.jpg"
+            },
+            "district": 7,
+            "name": "Taylor, G.",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1989,
+                        "startYear": 1973
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/T000075?format=json"
+        },
+        {
+            "bioguideId": "T000024",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives <a href=\"http://history.house.gov/Collection/Detail/29040?ret=True\">About this object</a>",
+                "imageUrl": "https://www.congress.gov/img/member/t000024_200.jpg"
+            },
+            "name": "Talent, Jim",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2001,
+                        "startYear": 1993
+                    },
+                    {
+                        "chamber": "Senate",
+                        "endYear": 2007,
+                        "startYear": 2002
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/T000024?format=json"
+        },
+        {
+            "bioguideId": "S001134",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/s001134_200.jpg"
+            },
+            "district": 2,
+            "name": "Symington, James W.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1977,
+                        "startYear": 1969
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/S001134?format=json"
+        },
+        {
+            "bioguideId": "S001057",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives <a href=\"http://history.house.gov/Collection/Detail/29084?ret=True\">About this object</a>",
+                "imageUrl": "https://www.congress.gov/img/member/s001057_200.jpg"
+            },
+            "district": 3,
+            "name": "Sullivan, Leonor K. (Mrs. John B.)",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1977,
+                        "startYear": 1953
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/S001057?format=json"
+        },
+        {
+            "bioguideId": "S000465",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives <a href=\"http://history.house.gov/Collection/Detail/43102?ret=True\">About this object</a>",
+                "imageUrl": "https://www.congress.gov/img/member/s000465_200.jpg"
+            },
+            "district": 4,
+            "name": "Skelton, Ike",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2011,
+                        "startYear": 1977
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/S000465?format=json"
+        },
+        {
+            "bioguideId": "B000605",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives, Gift of Nona Bolling <a href=\"http://history.house.gov/Collection/Detail/29283?ret=True\">About this object</a>",
+                "imageUrl": "https://www.congress.gov/img/member/b000605_200.jpg"
+            },
+            "district": 5,
+            "name": "Bolling, Richard",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1983,
+                        "startYear": 1949
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/B000605?format=json"
+        },
+        {
+            "bioguideId": "M000316",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/m000316_200.jpg"
+            },
+            "district": 5,
+            "name": "McCarthy, Karen",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2005,
+                        "startYear": 1995
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/M000316?format=json"
+        },
+        {
+            "bioguideId": "S001136",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/s001136_200.jpg"
+            },
+            "name": "Symington, Stuart",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 1977,
+                        "startYear": 1953
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/S001136?format=json"
+        },
+        {
+            "bioguideId": "E000004",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/e000004_200.jpg"
+            },
+            "name": "Eagleton, Thomas F.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 1987,
+                        "startYear": 1967
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/E000004?format=json"
+        },
+        {
+            "bioguideId": "D000030",
+            "depiction": {
+                "attribution": "<a href=\"http://www.senate.gov/artandhistory/history/common/generic/Photo_Collection_of_the_Senate_Historical_Office.htm\">Courtesy U.S. Senate Historical Office</a>",
+                "imageUrl": "https://www.congress.gov/img/member/d000030_200.jpg"
+            },
+            "name": "Danforth, John C.",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "Senate",
+                        "endYear": 1995,
+                        "startYear": 1977
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/D000030?format=json"
+        },
+        {
+            "bioguideId": "C001060",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/c001060_200.jpg"
+            },
+            "district": 3,
+            "name": "Carnahan, Russ",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2013,
+                        "startYear": 2005
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/C001060?format=json"
+        },
+        {
+            "bioguideId": "A000358",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/a000358_200.jpg"
+            },
+            "district": 2,
+            "name": "Akin, W. Todd",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2013,
+                        "startYear": 2001
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/A000358?format=json"
+        },
+        {
+            "bioguideId": "C001049",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/c001049_200.jpg"
+            },
+            "district": 1,
+            "name": "Clay, Wm. Lacy",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2021,
+                        "startYear": 2001
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/C001049?format=json"
+        },
+        {
+            "bioguideId": "C000618",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives, Gift of the U.S. Association of Former Members of Congress",
+                "imageUrl": "https://www.congress.gov/img/member/c000618_200.jpg"
+            },
+            "district": 6,
+            "name": "Coleman, E. Thomas",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1993,
+                        "startYear": 1977
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/C000618?format=json"
+        },
+        {
+            "bioguideId": "B001113",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/b001113_200.jpg"
+            },
+            "district": 10,
+            "name": "Burlison, Bill D.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1981,
+                        "startYear": 1969
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/B001113?format=json"
+        },
+        {
+            "bioguideId": "B001036",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/b001036_200.jpg"
+            },
+            "district": 2,
+            "name": "Buechner, Jack",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1991,
+                        "startYear": 1987
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/B001036?format=json"
+        },
+        {
+            "bioguideId": "B000047",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/b000047_200.jpg"
+            },
+            "district": 8,
+            "name": "Bailey, Wendell",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1983,
+                        "startYear": 1981
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/B000047?format=json"
+        },
+        {
+            "bioguideId": "E000174",
+            "depiction": {
+                "attribution": "Image, Congressional Pictorial Directory, 104th.",
+                "imageUrl": "https://www.congress.gov/img/member/e000174_200.jpg"
+            },
+            "district": 8,
+            "name": "Emerson, Bill",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1997,
+                        "startYear": 1981
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/E000174?format=json"
+        },
+        {
+            "bioguideId": "D000046",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/d000046_200.jpg"
+            },
+            "district": 6,
+            "name": "Danner, Pat",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2001,
+                        "startYear": 1993
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/D000046?format=json"
+        },
+        {
+            "bioguideId": "L000360",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/l000360_200.jpg"
+            },
+            "district": 6,
+            "name": "Litton, Jerry",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1977,
+                        "startYear": 1973
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/L000360?format=json"
+        },
+        {
+            "bioguideId": "I000001",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/i000001_200.jpg"
+            },
+            "district": 8,
+            "name": "Ichord, Richard H.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1981,
+                        "startYear": 1961
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/I000001?format=json"
+        },
+        {
+            "bioguideId": "H000965",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/h000965_200.jpg"
+            },
+            "district": 9,
+            "name": "Hungate, William L.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1977,
+                        "startYear": 1963
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/H000965?format=json"
+        },
+        {
+            "bioguideId": "H000788",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/h000788_200.jpg"
+            },
+            "district": 2,
+            "name": "Horn, Joan Kelly",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1993,
+                        "startYear": 1991
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/H000788?format=json"
+        },
+        {
+            "bioguideId": "H000151",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives, Gift of the U.S. Association of Former Members of Congress",
+                "imageUrl": "https://www.congress.gov/img/member/h000151_200.jpg"
+            },
+            "district": 7,
+            "name": "Hancock, Mel",
+            "partyName": "Republican",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1997,
+                        "startYear": 1989
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/H000151?format=json"
+        },
+        {
+            "bioguideId": "G000132",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/g000132_200.jpg"
+            },
+            "district": 3,
+            "name": "Gephardt, Richard A.",
+            "partyName": "Democratic",
+            "state": "Missouri",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2005,
+                        "startYear": 1977
+                    }
+                ]
+            },
+            "updateDate": "2022-12-16T21:56:51Z",
+            "url": "https://api.congress.gov/v3/member/G000132?format=json"
+        }
+    ],
+    "pagination": {
+        "count": 53
+    },
+    "request": {
+        "contentType": "application/json",
+        "format": "json"
+    }
+}

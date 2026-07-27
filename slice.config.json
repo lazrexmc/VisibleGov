@@ -1,0 +1,11 @@
+{
+  "onder": {
+    "bioguide_id": "O000177",
+    "us_house_district": 3,
+    "party": "Republican",
+    "openstates_id": null,
+    "mo_senate_district": null
+  },
+  "fixture_roll_number": 362,
+  "fixture_bill": { "congress": 119, "type_slug": "hr", "number": "498" }
+}
