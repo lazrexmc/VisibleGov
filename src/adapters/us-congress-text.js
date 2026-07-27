@@ -26,13 +26,16 @@ export function stripHtml(htm) {
   return htm
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#\d+;/g, ' ')
     // GPO's bulk-text render embeds its own <DOC>/</DOC> document-boundary marker as literal
-    // text, HTML-escaped (&lt;DOC&gt;) in the source so it survives the tag strip above. Decoding
-    // entities exposes it as a bracketed token again, so run one more defensive tag-shaped strip
-    // after decoding. Deviation from the task brief's reference stripHtml, found via the real
-    // captured fixture (not present in synthetic test HTML).
-    .replace(/<[^>]+>/g, ' ')
+    // text, HTML-escaped (&lt;DOC&gt;) in the source, so it survives the tag-strip pass above.
+    // Strip that literal token narrowly, BEFORE general entity decoding. Do NOT run an
+    // unrestricted `.replace(/<[^>]+>/g, ' ')` pass after decoding: real bill text can contain
+    // decoded '<'/'>' comparison operators (e.g. "the amount is < 100"), and an unrestricted
+    // bracket-strip there would treat everything between two such operators as a tag and
+    // silently swallow it — confirmed regression: 'the amount is &lt; 100 and separately the
+    // other value is &gt; 50' collapsed to 'the amount is 50'.
+    .replace(/&lt;\/?DOC&gt;/gi, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#\d+;/g, ' ')
     .replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
 }
 
