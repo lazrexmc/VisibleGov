@@ -41,7 +41,16 @@
    `bioguide_id`, one by `openstates_id` — confirmed live 2026-07-27; expected until this is
    built, not a bug).
 9. MO official-journal scraper for individual roll-call votes (OpenStates has none) — confirmed
-   twice (Task 7 fixture, Task 10 live run: 0 vote_casts across 95 MO vote events).
+   across 4 sessions/305 sampled vote events (2022/2021/2019/2017: exactly 1 event with voter
+   data). The events' own source links point at house.mo.gov/senate.mo.gov — scrape the primary
+   record, which §4.1 prefers anyway.
+10. Plan-2 first commits (from final whole-branch review, 2026-07-27): (a) fail-loud chamber
+    parsing in both adapters (kill the silent 'house'/'senate' fallback guesses); (b) wire an
+    enrichment pass so placeholder rows (null bills, id-as-name legislators) can be filled —
+    additivePatch exists but nothing calls it; (c) resolve the editor_notes RLS decision (NOW)
+    before anything writes summaries; (d) consider a freshness view narrowing ingestion_runs
+    anon exposure to source/status/finished_at; (e) generalize or remove the Onder-specific
+    MO-term config fallback before MO ingestion widens.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 

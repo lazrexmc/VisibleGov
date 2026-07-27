@@ -233,3 +233,28 @@ Updated `TODO.md`: NOW section marks Plan 1 complete with the live-run summary; 
 marks items 1 (ingestion half), 2, 3, 4 done and adds items 8 (identity merge) and 9 (MO
 journal scraper). `PLAYBOOK_DELTA.md` untouched this session - no new time-cost lesson beyond
 what Tasks 1-9 already recorded there.
+
+---
+
+## 2026-07-27 — Final whole-branch review + fix wave (slice 1 closed)
+
+Final review (most capable model, full 13-commit branch diff + live-DB spot checks): verdict
+**"Ready to merge - with fixes."** Every live claim re-verified against the production DB
+independently. Neutrality check: clean.
+
+**The one Critical it caught:** the Congress.gov API key rode in request URLs; a failed fetch
+embeds the URL in the typed error message, which the CLI persists into `ingestion_runs.detail` -
+a table our own RLS makes publicly readable. Only zero-failure runs had kept the DB clean. Fixed
+at both ends (key moved to X-Api-Key header; redactUrl() strips key params from all error
+messages/fields, with tests) plus two more: engines.node now truthfully >=22, and README/CLAUDE
+status paragraphs updated from "nothing built yet" to slice-1 reality. Scoped re-review traced
+the full leak path closed: **ALL CLEAR**, 23/23 tests, pushed (de4f7ae).
+
+Deferred findings triaged by the final review (all OK TO DEFER) are queued as TODO build-queue
+item 10; MO journal-scraper evidence strengthened to 4 sessions/305 events sampled (item 9).
+
+Lance's mid-session question - "why 2022, and is the missing Onder MO data our fault?" -
+answered with evidence: 2022 was his last full MO Senate session (payload-verified via his
+sponsorships); the missing individual votes are an upstream OpenStates gap affecting all MO
+legislators (raw pre-code payloads empty; same pipeline gets 433/433 federal casts; 4-session
+probe). Not our bug - and the journal scraper grounds MO votes in the primary record anyway.

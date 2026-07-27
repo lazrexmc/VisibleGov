@@ -20,7 +20,7 @@ See `PLAYBOOK_DELTA.md` §2.
 
 - `CLAUDE.md` - working rules for this project, pointers to sibling projects for deeper reference.
 - `PLAYBOOK_DELTA.md` - lessons inherited from prior projects, read before building anything.
-- `TODO.md` - backlog, currently just the raw idea capture and the next step.
+- `TODO.md` - backlog: current state, build queue, and raw idea inbox.
 - `CHATLOG.md` - decision trail, kept from day one.
 - `supabase/migrations/` - canonical schema + RLS migrations.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` - specs and plans for each build slice.
