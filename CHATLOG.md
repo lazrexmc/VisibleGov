@@ -97,3 +97,13 @@ dates flagged for verification against official records during the build.
 Spec written to `docs/superpowers/specs/2026-07-27-visiblegov-mvp-design.md`, self-reviewed
 (fixed a trigger-rule inconsistency between two sections), committed. Awaiting Lance's review of
 the spec file before writing the implementation plan.
+
+### [Lance]
+> We need to create a git repo for this project
+
+**[Claude]** Local repo already existed; what was missing was the remote. Renamed `master` →
+`main` (flagged earlier as free-before-a-remote-exists), created **private** GitHub repo
+`https://github.com/lazrexmc/VisibleGov` via `gh`, pushed. Private by default - flipping it
+public later is one setting whenever Lance decides the project should be visible; going public
+was not assumed. This also unlocks the Cloudflare Pages auto-deploy-on-push pattern when the
+site exists.
