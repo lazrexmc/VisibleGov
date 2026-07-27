@@ -35,11 +35,15 @@ export function parseMemberList(json) {
   return (json.members ?? []).map((m) => {
     const items = m.terms?.item ?? [];
     const latest = items[items.length - 1] ?? {};
+    let chamber;
+    if (/senate/i.test(latest.chamber ?? '')) chamber = 'senate';
+    else if (/house/i.test(latest.chamber ?? '')) chamber = 'house';
+    else throw new Error(`unknown chamber for member ${m.bioguideId}`);
     return {
       bioguide_id: m.bioguideId,
       full_name: m.name,
       party: m.partyName ?? null,
-      chamber: /senate/i.test(latest.chamber ?? '') ? 'senate' : 'house',
+      chamber,
       district: m.district != null ? String(m.district) : null,
     };
   });

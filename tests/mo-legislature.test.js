@@ -52,3 +52,8 @@ test('parseBillsWithVotes yields canonical bills and enum-safe casts', () => {
   const billsWithVotes = items.filter((i) => i.votes.length > 0);
   assert.ok(billsWithVotes.length > 0, 'at least one bill has a non-empty votes array');
 });
+
+test('parseBillsWithVotes throws on a vote with no chamber classification', () => {
+  const bad = { results: [{ identifier: 'SB 1', title: 't', openstates_url: 'https://x', votes: [{ id: 'v1', motion_text: 'm', start_date: '2022-01-01', result: 'pass', organization: {}, votes: [], counts: [] }], from_organization: {} }] };
+  assert.throws(() => parseBillsWithVotes(bad), /unknown chamber/);
+});

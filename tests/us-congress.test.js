@@ -47,6 +47,11 @@ test('parseHouseRollCall yields a full-chamber cast list including Onder', () =>
   assert.ok(casts.some((c) => c.bioguide_id === cfg.onder.bioguide_id));
 });
 
+test('parseMemberList throws on a member with no chamber signal', () => {
+  const bad = { members: [{ bioguideId: 'X000000', name: 'Test', partyName: 'I', terms: { item: [] } }] };
+  assert.throws(() => parseMemberList(bad), /unknown chamber/);
+});
+
 test('parseBillDetail extracts canonical bill fields', () => {
   const bill = parseBillDetail(billJson);
   assert.match(bill.identifier, /^(HR|S|HRES|SRES|HJRES|SJRES|HCONRES|SCONRES) \d+$/);

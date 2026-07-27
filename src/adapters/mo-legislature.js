@@ -60,25 +60,29 @@ export function parseBillsWithVotes(json) {
       status: null, // lifecycle stage mapping is a later-slice concern
       canonical_url: b.openstates_url ?? '',
     },
-    votes: (b.votes ?? []).map((v) => ({
-      vote: {
-        source_key: `mo-${v.id}`,
-        // Real OpenStates v3 payload: each vote event carries its own
-        // `organization.classification` ('upper'|'lower') directly — verified present on
-        // all 95 vote events in tests/fixtures/mo-legislature/bills-with-votes.json.
-        // Fall back to the bill's from_organization if a future payload ever omits it.
-        chamber: mapChamber(v.organization?.classification) ?? mapChamber(b.from_organization?.classification) ?? 'senate',
-        vote_date: v.start_date || null,
-        question: v.motion_text ?? '',
-        result: v.result ?? '',
-        source_url: b.openstates_url ?? '',
-      },
-      casts: (v.votes ?? []).map((pv) => ({
-        openstates_id: pv.voter?.id ?? null,
-        voter_name: pv.voter_name ?? pv.voter?.name ?? '',
-        position: mapOpenstatesOption(pv.option),
-      })),
-    })),
+    votes: (b.votes ?? []).map((v) => {
+      // Real OpenStates v3 payload: each vote event carries its own
+      // `organization.classification` ('upper'|'lower') directly — verified present on
+      // all 95 vote events in tests/fixtures/mo-legislature/bills-with-votes.json.
+      // Fall back to the bill's from_organization if a future payload ever omits it.
+      const chamber = mapChamber(v.organization?.classification) ?? mapChamber(b.from_organization?.classification);
+      if (!chamber) throw new Error(`unknown chamber on vote ${v.id}`);
+      return {
+        vote: {
+          source_key: `mo-${v.id}`,
+          chamber,
+          vote_date: v.start_date || null,
+          question: v.motion_text ?? '',
+          result: v.result ?? '',
+          source_url: b.openstates_url ?? '',
+        },
+        casts: (v.votes ?? []).map((pv) => ({
+          openstates_id: pv.voter?.id ?? null,
+          voter_name: pv.voter_name ?? pv.voter?.name ?? '',
+          position: mapOpenstatesOption(pv.option),
+        })),
+      };
+    }),
   }));
 }
 
