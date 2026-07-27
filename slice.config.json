@@ -8,5 +8,6 @@
   },
   "fixture_roll_number": 362,
   "fixture_bill": { "congress": 119, "type_slug": "hr", "number": "498" },
+  "fixture_text": { "type_slug": "hr", "number": "498", "version_type": "Engrossed in House" },
   "mo_sessions": ["2022", "2022S1"]
 }
