@@ -53,6 +53,14 @@
     anon exposure to source/status/finished_at; (e) generalize or remove the Onder-specific
     MO-term config fallback before MO ingestion widens.
 
+11. **On-demand ingestion (launch architecture, Lance 2026-07-27):** capture the verified Onder
+    end-to-end process as an executable runbook; when a user looks up a legislator with a
+    thin/missing record, the system enqueues that process (automated identity verification
+    against source APIs → vote ingestion → summary triggers) instead of pre-filling everyone.
+    UX: "record queued — filling now" (live fills take minutes under rate limits). Depends on:
+    identity merge (8), generalized MO-term handling (10e), automating the Task-5/7 manual
+    identity-verification steps. Design in Plan 3/4.
+
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
 > "I'd like to expose all the politicians by breaking down the bills and laws they propose into

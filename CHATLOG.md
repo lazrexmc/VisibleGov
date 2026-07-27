@@ -276,3 +276,37 @@ words: (1) editor_notes resolved - internal-only, never publicly readable (fixes
 finding as part of Plan 2's first migration); (2) "votes missed" is now a spec'd legislator-page
 feature - bills sponsored / votes cast / votes missed as bare counts, identical treatment for
 every legislator (the data already exists in vote_casts positions).
+
+### [Lance] (mid-task, during Plan 2 scoping)
+> Now that we are working on Onder's end to end line we will be able to do this with any
+> representative if we capture this current process and ensure it is 100% accurate. This will
+> allow us to launch the system without having to fill every single constituents information
+> beforehand and the system can fill it for us as the politician is looked up for on the
+> website/app by users.
+
+**[Claude]** Captured as the launch architecture: **on-demand ingestion**. The Onder slice
+becomes the verified runbook; a user lookup of a thin/missing legislator enqueues that same
+process (identity verification against source APIs → vote ingestion → summary triggers) as a
+background job with "record queued - filling now" UX (live fills take minutes under source
+rate limits). Prerequisites queued: identity merge (item 8), generalize the Onder-specific
+config fallback (item 10e), and an automated per-legislator identity-verification step
+replacing the manual Task-5/7 capture. Targeted for Plan 3/4 design, not Plan 2. Also this
+session: Lance chose Claude Opus 5 for the summarizer (~$0.11/bill) and a minimal local web
+page for the review queue; MO bill-text path = federal-first while hunting a machine-readable
+MO source (LegiScan API is the lead candidate - may also fix the MO individual-votes gap).
+
+### [Lance] (mid-task)
+> The process is two fold here, we want to be able to read the bills, but we also want to
+> quickly be able to see how our representation voted on it
+
+**[Claude]** Confirmed the two halves are structurally welded: the summarization trigger only
+fires on bills WITH recorded votes, so every published summary already has its vote data linked.
+Plan-2 delta from this: the review page gains a vote strip (roll-call question/result/tally
+above the draft) so review happens in the same summary+votes frame the public site will show.
+Plan 3's bill page pairs them for users. Plan 2 written and committed:
+`docs/superpowers/plans/2026-07-27-slice2-summarization-review.md` - 9 tasks (fail-loud chamber
+fix, migration 0003 incl. status-constraint update + staff-only notes + freshness view, bill-text
+fetcher, Opus-5 JSON-constrained summarizer with oversize/refusal typed errors, summarize CLI
+with staleness, local review server (127.0.0.1, gated transitions), E2E with Lance's live review,
+golden-set drift check, MO source investigation with LegiScan as lead). New Lance gates:
+ANTHROPIC_API_KEY into .env, and migration 0003 apply.
