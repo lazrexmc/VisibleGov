@@ -310,3 +310,14 @@ fetcher, Opus-5 JSON-constrained summarizer with oversize/refusal typed errors, 
 with staleness, local review server (127.0.0.1, gated transitions), E2E with Lance's live review,
 golden-set drift check, MO source investigation with LegiScan as lead). New Lance gates:
 ANTHROPIC_API_KEY into .env, and migration 0003 apply.
+
+### [Lance] (mid-task)
+> API calls using Claude should be approved by me so they do not get excess in this build
+
+**[Claude]** Adopted as standing build policy, effective immediately: **no live Claude API call
+runs without Lance's explicit go-ahead**, and every request for approval states the expected
+call count and dollar estimate up front. The first live summarize run (3 Opus calls, ~$0.33)
+had already failed harmlessly on "credit balance too low" (no spend occurred, texts were
+fetched and stored, re-run skips straight to the model calls) - it will not be retried until
+Lance both adds credits AND approves the run. Also recommended the mechanical version of this
+policy: set a monthly spend limit in console.anthropic.com -> Billing -> Limits.
