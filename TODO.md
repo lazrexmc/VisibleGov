@@ -6,9 +6,13 @@
 
 ## NOW
 
-- [ ] **Lance reviews the MVP design draft** —
-  `docs/superpowers/specs/2026-07-27-visiblegov-mvp-design.md` (marked WORKING DRAFT; overall
-  shape agreed 2026-07-27, details expected to evolve). After approval → implementation plan.
+- [x] ~~Lance reviews the MVP design draft~~ (approved as working draft 2026-07-27)
+- [ ] **Execute Plan 1: foundation + ingestion (Onder slice)** —
+  `docs/superpowers/plans/2026-07-27-slice1-foundation-ingestion.md`. Lance's setup steps
+  before the blocked tasks: (a) free API keys — Congress.gov (api.congress.gov/sign-up) and
+  OpenStates (open.pluralpolicy.com) — into `.env`; (b) create Supabase project + apply the
+  Task 4 migration; then Task 10 runs live. Plans 2 (summarization + review queue) and
+  3 (public site + admin) follow.
 
 ## 🛠 BUILD QUEUE
 

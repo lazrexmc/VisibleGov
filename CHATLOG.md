@@ -99,6 +99,20 @@ Spec written to `docs/superpowers/specs/2026-07-27-visiblegov-mvp-design.md`, se
 the spec file before writing the implementation plan.
 
 ### [Lance]
+> That looks like a fair starting point, I'm sure there will be many changes in the future.
+> Proceed forward.
+
+**[Claude]** Spec approved as working draft. Scope check split the MVP into three plans
+(1: foundation + ingestion, 2: summarization + review queue, 3: public site + admin). Wrote
+Plan 1 to `docs/superpowers/plans/2026-07-27-slice1-foundation-ingestion.md`: 10 TDD tasks -
+scaffold, typed errors + rate limiter (skip≠empty), additive-merge DB layer, full schema
+migration with RLS (draft-then-apply, Lance runs it), fixture capture with Onder identity
+verification against the real APIs (no memory-derived facts allowed to survive), both adapters,
+dry-run-capable ingest CLI, live end-to-end verification. Blockers flagged for Lance: free
+Congress.gov + OpenStates API keys, and Supabase project creation + migration apply before the
+live tasks.
+
+### [Lance]
 > We need to create a git repo for this project
 
 **[Claude]** Local repo already existed; what was missing was the remote. Renamed `master` →
