@@ -8,7 +8,8 @@
   "scripts": {
     "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js",
-    "summarize": "node --env-file=.env src/cli/summarize.js"
+    "summarize": "node --env-file=.env src/cli/summarize.js",
+    "review": "node --env-file=.env src/review/server.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

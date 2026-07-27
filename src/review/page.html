@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VisibleGov — Summary Review</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #f7f7f5; color: #1a1a1a; }
+  header { padding: 0.75rem 1rem; background: #1a1a1a; color: #fff; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+  header select { font-size: 0.9rem; padding: 0.25rem; min-width: 20rem; }
+  #status-msg { font-size: 0.85rem; color: #ffd76a; }
+  main.panes { display: flex; gap: 1px; background: #ccc; height: calc(100vh - 3rem); }
+  .pane { background: #fff; padding: 1rem; overflow-y: auto; flex: 1 1 50%; }
+  .pane h2 { margin-top: 0; font-size: 1.05rem; }
+  pre#bill-text { white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; line-height: 1.4; }
+  .vote-strip { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  #draft-rendered { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; background: #fafafa; }
+  #draft-rendered ul { margin: 0.25rem 0; padding-left: 1.25rem; }
+  #draft-rendered p { margin: 0.5rem 0; }
+  label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
+  textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; padding: 0.5rem; }
+  .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+  .actions button { padding: 0.4rem 0.9rem; font-size: 0.9rem; cursor: pointer; border-radius: 4px; border: 1px solid #999; background: #fff; }
+  #btn-approve { border-color: #2e7d32; color: #2e7d32; }
+  #btn-reject { border-color: #c62828; color: #c62828; }
+  #btn-publish { border-color: #1565c0; color: #1565c0; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VisibleGov — Summary Review</h1>
+  <select id="queue"><option>Loading…</option></select>
+  <span id="status-msg"></span>
+</header>
+
+<main class="panes">
+  <section class="pane pane-text">
+    <h2 id="bill-heading">Select an item from the queue</h2>
+    <pre id="bill-text"></pre>
+  </section>
+  <section class="pane pane-draft">
+    <div id="vote-strip" class="vote-strip">No vote on file.</div>
+    <div id="draft-rendered"></div>
+    <label for="draft-edit">Edit draft (Markdown)</label>
+    <textarea id="draft-edit" rows="12"></textarea>
+    <label for="note">Note (required for Reject)</label>
+    <textarea id="note" rows="3"></textarea>
+    <div class="actions">
+      <button id="btn-save-edit" type="button">Save Edit</button>
+      <button id="btn-approve" type="button">Approve</button>
+      <button id="btn-reject" type="button">Reject</button>
+      <button id="btn-publish" type="button">Publish</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  let currentId = null;
+
+  // Minimal markdown renderer: bold + bullets + paragraphs only (the body_md we generate uses
+  // nothing else). Escapes HTML first so bold markers can't be used to inject tags.
+  function renderMarkdown(md) {
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const bold = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    const lines = (md || '').split('\n');
+    const html = [];
+    let list = [];
+    const flushList = () => { if (list.length) { html.push('<ul>' + list.join('') + '</ul>'); list = []; } };
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { flushList(); continue; }
+      const m = line.match(/^[-*]\s+(.*)$/);
+      if (m) { list.push('<li>' + bold(m[1]) + '</li>'); continue; }
+      flushList();
+      html.push('<p>' + bold(line) + '</p>');
+    }
+    flushList();
+    return html.join('\n');
+  }
+
+  function setStatus(msg) {
+    document.getElementById('status-msg').textContent = msg;
+  }
+
+  async function loadQueue() {
+    const select = document.getElementById('queue');
+    let items = [];
+    try {
+      const res = await fetch('/api/queue');
+      if (!res.ok) throw new Error('queue fetch failed');
+      items = await res.json();
+    } catch {
+      select.textContent = '';
+      select.appendChild(new Option('Error loading queue', ''));
+      return;
+    }
+    select.textContent = '';
+    if (items.length === 0) {
+      select.appendChild(new Option('Queue is empty', ''));
+      return;
+    }
+    for (const it of items) {
+      const label = '[' + it.status + '] ' + (it.bill ? it.bill.identifier : '?') + ' — ' + (it.bill && it.bill.title ? it.bill.title : '');
+      select.appendChild(new Option(label, it.id));
+    }
+    if (!currentId || !items.some((it) => it.id === currentId)) currentId = items[0].id;
+    select.value = currentId;
+    await loadItem(currentId);
+  }
+
+  async function loadItem(id) {
+    try {
+      const res = await fetch('/api/item/' + encodeURIComponent(id));
+      if (!res.ok) throw new Error('item fetch failed');
+      const data = await res.json();
+
+      document.getElementById('bill-heading').textContent = data.bill
+        ? data.bill.identifier + ' — ' + (data.bill.title || '')
+        : 'Unknown bill';
+      document.getElementById('bill-text').textContent = data.text || '(no bill text on file)';
+      document.getElementById('draft-rendered').innerHTML = renderMarkdown(data.summary.body_md || '');
+      document.getElementById('draft-edit').value = data.summary.body_md || '';
+      document.getElementById('note').value = '';
+
+      const vs = document.getElementById('vote-strip');
+      vs.textContent = data.vote
+        ? (data.vote.question || 'Vote') + ' — ' + (data.vote.result || '?') + ' — Yea ' + data.vote.yeas + ', Nay ' + data.vote.nays
+        : 'No vote on file.';
+    } catch {
+      setStatus('Error loading item.');
+    }
+  }
+
+  async function postDecision(action) {
+    if (!currentId) return;
+    const payload = { summary_id: currentId, action, note: document.getElementById('note').value };
+    if (action === 'edit') payload.body_md = document.getElementById('draft-edit').value;
+    try {
+      const res = await fetch('/api/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus('Error: ' + (body.error || res.status)); return; }
+      setStatus('Saved: ' + body.status);
+      await loadQueue();
+    } catch {
+      setStatus('Network error.');
+    }
+  }
+
+  document.getElementById('queue').addEventListener('change', (e) => {
+    currentId = e.target.value;
+    if (currentId) loadItem(currentId);
+  });
+  document.getElementById('btn-save-edit').addEventListener('click', () => postDecision('edit'));
+  document.getElementById('btn-approve').addEventListener('click', () => postDecision('approve'));
+  document.getElementById('btn-reject').addEventListener('click', () => postDecision('reject'));
+  document.getElementById('btn-publish').addEventListener('click', () => postDecision('publish'));
+
+  loadQueue();
+</script>
+</body>
+</html>
