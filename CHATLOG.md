@@ -258,3 +258,21 @@ answered with evidence: 2022 was his last full MO Senate session (payload-verifi
 sponsorships); the missing individual votes are an upstream OpenStates gap affecting all MO
 legislators (raw pre-code payloads empty; same pipeline gets 433/433 federal casts; 4-session
 probe). Not our bug - and the journal scraper grounds MO votes in the primary record anyway.
+
+---
+
+## 2026-07-27 — Summaries scope decision (post-merge)
+
+### [Lance]
+> There should be no editorial summaries here, people put their emotions into their summaries,
+> we are only looking for facts. Bills proposed, votes made, votes missed, etc.
+
+**[Claude]** Clarified which of two products this means; Lance chose **factual plain-language**:
+the layman's translation stays (it was gap #1 - "bills are unreadable"), held to a hard
+facts-only rule now written into the spec: every bullet traceable to a bill section, no
+intent-guessing beyond the bill's own stated-purpose text, no impact characterization beyond the
+text, review queue rejects anything reading as opinion/emphasis/emotion. Two additions from his
+words: (1) editor_notes resolved - internal-only, never publicly readable (fixes the Task-4 RLS
+finding as part of Plan 2's first migration); (2) "votes missed" is now a spec'd legislator-page
+feature - bills sponsored / votes cast / votes missed as bare counts, identical treatment for
+every legislator (the data already exists in vote_casts positions).

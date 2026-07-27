@@ -47,7 +47,10 @@ for speed, link previews, and search indexing — reach is part of the product t
 - **Directory** — all legislators in all four chambers (US House, US Senate, MO House, MO Senate);
   filter by chamber/party/district; search by name.
 - **Legislator page** — party, district, photo, contact; voting record as one row per roll-call
-  vote: bill one-liner, their vote (Yea/Nay/Present/Absent), outcome.
+  vote: bill one-liner, their vote (Yea/Nay/Present/Absent), outcome. Also the factual activity
+  record (Lance, 2026-07-27: "Bills proposed, votes made, votes missed"): bills sponsored, votes
+  cast, and votes missed (absent/not-voting counts per session) — attendance stated as bare
+  counts, identically for every legislator, never editorialized.
 - **Bill page** — plain-language summary ("what it does" bullets + stated purpose), lifecycle
   stage (introduced → committee → calendar → voted → law), full vote breakdown (party split +
   every member's vote), prominent link to the official bill text and record. Footer on every
@@ -99,6 +102,13 @@ run id.
   API with a fixed, versioned prompt: plain-language "what it does" bullets; stated purpose from
   the bill's own language; no adjectives about merit; no party framing; classify "amends existing
   law" vs "new program" vs "appropriation."
+- **Facts-only rule (Lance, 2026-07-27: "There should be no editorial summaries here, people put
+  their emotions into their summaries, we are only looking for facts"):** every summary bullet
+  must be traceable to a specific section of the bill text; no intent-guessing beyond the bill's
+  own stated-purpose language; no characterization of impact beyond what the text says; the
+  review queue rejects anything that reads as opinion, emphasis, or emotion. Editor notes
+  (rejection reasons, edit rationale) are internal-only — never publicly readable (fixes the
+  Task-4 RLS finding: exclude `editor_notes` from the public policy or move it to a staff table).
 - Output lands as a `draft` row. Nothing publishes without approval in the queue.
 - If the bill text gains a new version after drafting, the summary is flagged stale (hash
   mismatch) and re-queued.
