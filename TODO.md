@@ -7,34 +7,41 @@
 ## NOW
 
 - [x] ~~Lance reviews the MVP design draft~~ (approved as working draft 2026-07-27)
-- [ ] **Execute Plan 1: foundation + ingestion (Onder slice)** — IN PROGRESS, paused
-  2026-07-27. Tasks 1-4 of 10 done + review-approved on branch `slice1-foundation-ingestion`
-  (pushed): scaffold, typed errors + rate limiter, DB layer, schema migration SQL.
-  **BLOCKED on Lance, in order:**
-  - [ ] (a) Congress.gov API key (free: api.congress.gov/sign-up) → `.env` — unblocks Tasks 5-6
-  - [ ] (b) OpenStates API key (free: open.pluralpolicy.com) → `.env` — unblocks Tasks 7-9
-  - [ ] (c) Create Supabase project + run both files in `supabase/migrations/` in its SQL
-        editor, then SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY → `.env` — unblocks Task 10
-  Copy `.env.example` → `.env` and fill in. **Resume note for a fresh session:** execution
-  state lives in `.superpowers/sdd/2026-07-27-slice1-foundation-ingestion/progress.md`
-  (git-ignored, local) — resume subagent-driven execution of the plan at Task 5; deferred
-  minor findings are listed there for the final review.
+- [x] ~~Execute Plan 1: foundation + ingestion (Onder slice)~~ — **COMPLETE 2026-07-27.** All
+  10 tasks done + review-approved on branch `slice1-foundation-ingestion` (pushed): scaffold,
+  typed errors + rate limiter, additive-merge DB layer, schema migration SQL (Lance applied),
+  Congress.gov adapter, OpenStates/MO adapter, dry-run-capable ingest CLI, live end-to-end
+  ingest + verification. Live run: `us-congress` rolls 358-362/2025 (5 votes, 2165 casts, 0
+  failures) + `mo-legislature` session 2022 page 1 (95 votes, 20 bills, 0 casts — confirmed
+  OpenStates gap, 0 failures); both `status: "succeeded"`. Onder verified end-to-end in the
+  live DB via Supabase REST: federal row (bioguide_id `O000177`) with 5 vote_casts (one per
+  ingested roll), separate MO row (openstates_id) with 1 synthesized senate/district-2 term;
+  re-ran the MO ingest to confirm idempotency (no duplicate terms or votes). Full detail in
+  CHATLOG. Next: Plan 2 (summarization + review queue).
 - [ ] Decision for Lance before Plan 2: published summaries' `editor_notes` column would be
   publicly readable under current RLS — keep internal (column-split or clear-on-publish)?
 
 ## 🛠 BUILD QUEUE
 
-1. **First vertical slice: Bob Onder end-to-end** (Lance's call, 2026-07-27). US House MO-3
-   (since 2025) + prior MO General Assembly career = one legislator exercising BOTH adapters.
-   Verify his actual career dates/districts against official records first — don't trust memory.
-   Slice = ingest his votes from both sources → summarize the triggered bills → review queue →
-   published legislator page.
-2. Schema migration draft (canonical tables + RLS) — draft-then-apply, Lance runs it.
-3. Congress.gov adapter (bills, actions, calendars, roll-call XML).
-4. OpenStates/MO adapter (+ spot-check votes against official journals before trusting).
+1. [x] ~~First vertical slice: Bob Onder end-to-end — ingestion half~~ **DONE 2026-07-27.**
+   Ingested live from both jurisdictions and verified end-to-end (see TODO NOW + CHATLOG). The
+   remaining half of this slice (summarize the triggered bills → review queue → published
+   legislator page) is items 5-7 below, deferred to Plans 2-3.
+2. [x] ~~Schema migration draft (canonical tables + RLS)~~ **DONE** — applied by Lance,
+   confirmed live via Supabase REST probe (jurisdictions + sessions seed present).
+3. [x] ~~Congress.gov adapter (bills, actions, calendars, roll-call XML)~~ **DONE** —
+   live-verified (Tasks 6 and 10).
+4. [x] ~~OpenStates/MO adapter~~ **DONE** — live-verified (Tasks 8 and 10). Known gap:
+   OpenStates MO vote events carry no per-voter casts (confirmed 0/95 twice, in fixture and
+   live) — see item 9.
 5. Summarization CLI (versioned prompt, hash-tied to bill text version, review queue).
 6. Public site: directory, legislator page, bill page, address lookup (Census Geocoder).
 7. Staff `/admin` review queue.
+8. Identity merge: link federal+MO legislator rows (Onder currently = 2 rows — one keyed by
+   `bioguide_id`, one by `openstates_id` — confirmed live 2026-07-27; expected until this is
+   built, not a bug).
+9. MO official-journal scraper for individual roll-call votes (OpenStates has none) — confirmed
+   twice (Task 7 fixture, Task 10 live run: 0 vote_casts across 95 MO vote events).
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 

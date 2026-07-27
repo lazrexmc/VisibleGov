@@ -159,3 +159,77 @@ keys (Tasks 5-9) and create the Supabase project + apply migrations (Task 10). B
 **[Claude]** This entry, TODO NOW-section rewrite (exact resume state + Lance's three unblock
 steps), and PLAYBOOK_DELTA §7 (VisibleGov's first two own-delta lessons) - committed and pushed
 on the feature branch.
+
+---
+
+## 2026-07-27 — Plan 1 execution session (Tasks 5-10: live keys applied, both adapters, live ingest)
+
+Lance supplied `.env` (Congress.gov key, OpenStates key, Supabase project URL + service role
+key) and applied both migration files in `supabase/migrations/` via the Supabase SQL editor,
+unblocking the rest of Plan 1. Tasks 5-9 (fixture capture + Onder identity verification against
+the real APIs, Congress.gov adapter, OpenStates/MO adapter, dry-run-capable ingest CLI) ran
+subagent-driven with an independent review pass each; full detail is in
+`.superpowers/sdd/2026-07-27-slice1-foundation-ingestion/progress.md` and the per-task reports
+in that folder. Carried-forward finding from Task 7, **verified twice** (fixture, then live in
+this session): OpenStates' MO 2022-session vote events have zero per-voter casts - a real
+upstream data gap, not a bug anywhere in this pipeline.
+
+### Task 10 - live ingest + end-to-end verification
+
+Controller rulings adjusted the written plan: federal rolls **358-362/2025** instead of
+120-124 (this range includes the fixture-verified roll 362; 2025 Clerk rolls top out at 362),
+and Step 3 verification done **directly via Supabase REST** (service role key from `.env`,
+headers `apikey` + `Authorization: Bearer`) instead of handed to Lance as SQL to run manually.
+
+**Live run 1 - `us-congress`, rolls 358-362, year 2025:**
+```json
+{
+  "mode": "live", "run_id": "75e71b16-07db-4b52-9c7a-912d6716d9f5", "status": "succeeded",
+  "counts": { "legislators": 53, "bills": 3, "votes": 5, "casts": 2165, "failures": 0 },
+  "failures": []
+}
+```
+
+**Live run 2 - `mo-legislature`, session 2022, page 1:**
+```json
+{
+  "mode": "live", "run_id": "ffe4a890-f6b8-4c68-923b-bca87383c73e", "status": "succeeded",
+  "counts": { "legislators": 1, "bills": 20, "votes": 95, "casts": 0, "failures": 0 },
+  "failures": []
+}
+```
+MO casts: 0, confirmed (again, now live) as the real OpenStates gap - not a pipeline defect.
+stderr logged `note: derived:slice.config` - Onder's MO record has no `current_role`/
+`other_roles` upstream (retired member), so his senate/district-2 term is synthesized from
+`slice.config.json`'s verified value, exactly as designed in Task 9.
+
+**Verification via Supabase REST (a-e), all passed:**
+- **(a)** `legislators?bioguide_id=eq.O000177` -> 1 row, `full_name: "Onder, Robert F."`.
+- **(b)** `legislators?openstates_id=eq.ocd-person/e29b57a2-c2e7-4b5a-b299-bb734104f0d7` -> 1
+  row, `full_name: "Bob Onder"` - confirmed a **separate row** from (a). This is the expected,
+  known state (identity merge is queued, item 8 below), not a defect.
+- **(c)** `vote_casts` joined to (a)'s legislator id -> 5 casts, one per ingested roll: 358
+  yea, 359 nay, 360 yea, 361 nay, 362 yea.
+- **(d)** `votes?jurisdiction_id=eq.mo-legislature` -> 95 rows; `vote_casts` inner-joined to
+  those same votes -> 0 rows. Confirms the OpenStates gap end-to-end in the live database, not
+  just in adapter-layer parsing.
+- **(e)** `terms` for the MO legislator row -> exactly 1 row: `chamber: "senate"`,
+  `district: "2"`, `start_date: null` (the synthesized term).
+
+**Idempotency check (controller-required, closes a reviewer concern from Task 9's report):**
+re-ran the MO ingest a second time (same session/page). `terms` for the MO legislator id is
+still exactly 1 row, **same row id** as before the re-run - the null-`start_date`
+select-then-insert path in `upsertTerm`/`findExistingTerm` does not duplicate on re-run, as
+designed. `votes` for `mo-legislature` is still exactly 95 rows, no duplicates.
+
+**Honest state going into Plan 2:** Onder is 2 `legislators` rows (federal + MO, unmerged by
+design - see item 8 below). Federal roll-call accountability data is real and complete for the
+5 ingested rolls (2165 individual casts). MO per-legislator voting record is **not** yet
+populated for any legislator, Onder included - `vote_casts` for MO is 0 across all 95 vote
+events ingested so far, a genuine upstream OpenStates gap, until either OpenStates fixes it or
+a MO official-journal scraper is built (added to BUILD QUEUE, item 9).
+
+Updated `TODO.md`: NOW section marks Plan 1 complete with the live-run summary; BUILD QUEUE
+marks items 1 (ingestion half), 2, 3, 4 done and adds items 8 (identity merge) and 9 (MO
+journal scraper). `PLAYBOOK_DELTA.md` untouched this session - no new time-cost lesson beyond
+what Tasks 1-9 already recorded there.
