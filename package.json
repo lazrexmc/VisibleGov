@@ -1,0 +1,14 @@
+{
+  "name": "visiblegov",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.6" },
+  "scripts": {
+    "test": "node --test tests/",
+    "ingest": "node --env-file=.env src/cli/ingest.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "fast-xml-parser": "^4.4.0"
+  }
+}

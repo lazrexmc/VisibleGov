@@ -5,3 +5,4 @@ PrivateData/
 .DS_Store
 Thumbs.db
 .superpowers/
+node_modules/
