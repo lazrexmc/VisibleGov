@@ -18,8 +18,9 @@
   ingested roll), separate MO row (openstates_id) with 1 synthesized senate/district-2 term;
   re-ran the MO ingest to confirm idempotency (no duplicate terms or votes). Full detail in
   CHATLOG. Next: Plan 2 (summarization + review queue).
-- [ ] Decision for Lance before Plan 2: published summaries' `editor_notes` column would be
-  publicly readable under current RLS — keep internal (column-split or clear-on-publish)?
+- [x] ~~Decision: editor_notes public readability~~ **RESOLVED 2026-07-27** — internal-only,
+  never publicly readable (Lance's facts-only directive; fix ships in Plan 2's first migration).
+- [ ] **Next: Plan 2 — summarization + review queue**, under the spec's new facts-only rule.
 
 ## 🛠 BUILD QUEUE
 
