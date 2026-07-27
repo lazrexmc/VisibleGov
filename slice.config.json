@@ -3,9 +3,10 @@
     "bioguide_id": "O000177",
     "us_house_district": 3,
     "party": "Republican",
-    "openstates_id": null,
-    "mo_senate_district": null
+    "openstates_id": "ocd-person/e29b57a2-c2e7-4b5a-b299-bb734104f0d7",
+    "mo_senate_district": 2
   },
   "fixture_roll_number": 362,
-  "fixture_bill": { "congress": 119, "type_slug": "hr", "number": "498" }
+  "fixture_bill": { "congress": 119, "type_slug": "hr", "number": "498" },
+  "mo_sessions": ["2022", "2022S1"]
 }
