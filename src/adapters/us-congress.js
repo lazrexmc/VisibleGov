@@ -103,12 +103,16 @@ export function fetchHouseRollCall(rollNumber, year, limiter = clerkLimiter) {
   return fetchWithLimit(url, { source: SOURCE, limiter, as: 'text' });
 }
 
+function apiKeyHeaders() {
+  return { 'X-Api-Key': process.env.CONGRESS_API_KEY };
+}
+
 export function fetchBillDetail(congress, typeSlug, number, limiter = congressLimiter) {
-  const url = `https://api.congress.gov/v3/bill/${congress}/${typeSlug}/${number}?api_key=${process.env.CONGRESS_API_KEY}`;
-  return fetchWithLimit(url, { source: SOURCE, limiter, as: 'json' });
+  const url = `https://api.congress.gov/v3/bill/${congress}/${typeSlug}/${number}`;
+  return fetchWithLimit(url, { source: SOURCE, limiter, headers: apiKeyHeaders(), as: 'json' });
 }
 
 export function fetchMemberList(stateCode, limiter = congressLimiter) {
-  const url = `https://api.congress.gov/v3/member/${stateCode}?api_key=${process.env.CONGRESS_API_KEY}&limit=250`;
-  return fetchWithLimit(url, { source: SOURCE, limiter, as: 'json' });
+  const url = `https://api.congress.gov/v3/member/${stateCode}?limit=250`;
+  return fetchWithLimit(url, { source: SOURCE, limiter, headers: apiKeyHeaders(), as: 'json' });
 }

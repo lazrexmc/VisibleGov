@@ -11,9 +11,9 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
-**Status: pre-brainstorm.** Nothing has been built yet. This repo currently holds only the seeded
-lessons doc, this file, and a starter TODO. The next real step is a proper brainstorm/scoping pass
-(data sources, MVP scope, stack choice) before any code - see TODO.md.
+**Status: slice 1 complete** (see TODO.md NOW for current state). The repo now holds the
+ingestion CLI (`src/`), schema migrations (`supabase/migrations/`), and fixture-backed tests
+(`tests/`).
 
 ## The one non-negotiable
 

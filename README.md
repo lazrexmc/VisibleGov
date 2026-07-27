@@ -5,9 +5,10 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status: concept stage.** Just scaffolded (2026-07-27) with lessons carried forward from prior
-projects - see `PLAYBOOK_DELTA.md`. Nothing built yet. Next step is a proper brainstorm/scoping
-pass (data sources, MVP scope, stack) before any code - see `TODO.md`.
+**Status: concept validated, slice 1 built and live-verified (2026-07-27).** Slice 1 (foundation
++ dual-jurisdiction ingestion) is complete on branch `slice1-foundation-ingestion`: one legislator
+(Bob Onder) ingested end-to-end from both Congress.gov and OpenStates into Supabase. Summarization
+and the public site are next (Plans 2-3) - see `TODO.md` and `CHATLOG.md`.
 
 ## The one non-negotiable
 
@@ -21,3 +22,5 @@ See `PLAYBOOK_DELTA.md` §2.
 - `PLAYBOOK_DELTA.md` - lessons inherited from prior projects, read before building anything.
 - `TODO.md` - backlog, currently just the raw idea capture and the next step.
 - `CHATLOG.md` - decision trail, kept from day one.
+- `supabase/migrations/` - canonical schema + RLS migrations.
+- `docs/superpowers/specs/`, `docs/superpowers/plans/` - specs and plans for each build slice.

@@ -2,7 +2,7 @@
   "name": "visiblegov",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20.6" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js"
