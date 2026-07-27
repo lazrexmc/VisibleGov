@@ -4,7 +4,7 @@
   "type": "module",
   "engines": { "node": ">=20.6" },
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js"
   },
   "dependencies": {
