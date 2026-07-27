@@ -2,12 +2,15 @@
   "name": "visiblegov",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@supabase/supabase-js": "^2.45.0",
     "fast-xml-parser": "^4.4.0"
   }
