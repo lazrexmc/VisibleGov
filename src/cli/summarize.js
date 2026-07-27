@@ -9,6 +9,10 @@ import {
 
 const JURISDICTION = 'us-congress';
 const FAILURE_TYPES = [SourceFetchError, OversizeTextError, SummaryRefusedError, SummaryTruncatedError];
+// A summary in any of these statuses, at the current text hash, is "already summarized" — skip
+// it. 'approved' means an editor signed off but hasn't published yet; it must not be
+// re-summarized (would duplicate a paid API call and insert a redundant draft row).
+const ALREADY_SUMMARIZED_STATUSES = new Set(['draft', 'approved', 'published']);
 
 export function parseArgs(argv) {
   const out = { dryRun: false, bill: null };
@@ -60,11 +64,11 @@ export function planWork(bills, texts, summaries) {
       needSummary.push(bill); // ...and regenerate
       continue;
     }
-    if (summary.status !== 'draft' && summary.status !== 'published') {
+    if (!ALREADY_SUMMARIZED_STATUSES.has(summary.status)) {
       // e.g. 'rejected' at the current hash — not "already summarized", needs a fresh draft
       needSummary.push(bill);
     }
-    // else: draft/published summary already matches the current text — nothing to do
+    // else: draft/approved/published summary already matches the current text — nothing to do
   }
 
   return { needText, needSummary, stale };
@@ -123,13 +127,28 @@ async function loadCurrentState(client, bills) {
   return { currentTexts, textRowByBill, summaries: summaryRows ?? [] };
 }
 
+// pickTextUrl throws a plain Error ('no fetchable text format...') when a bill's text versions
+// have no fetchable format — that is a per-bill data-shape problem, not a code bug, so it must
+// be recorded in failures[] like any other source problem (skip != empty), never abort the
+// whole batch. Wrap it as a typed SourceFetchError so the isTypedFailure() gate at the call
+// site catches it; pass any already-typed error straight through.
+export function wrapTextFormatError(err) {
+  if (err instanceof SourceFetchError) return err;
+  return new SourceFetchError(err.message, { source: 'us-congress' });
+}
+
 // Fetches + stores text for a bill with none yet. Honors "don't refetch a version_type already
 // stored" by checking bill_texts before making the (network) body fetch.
 async function ensureText(client, runId, bill) {
   const slug = billTypeSlug(bill.identifier);
   const number = bill.identifier.split(' ')[1];
   const versionsJson = await fetchBillTextVersions(bill.congress, slug, number);
-  const picked = pickTextUrl(parseTextVersions(versionsJson));
+  let picked;
+  try {
+    picked = pickTextUrl(parseTextVersions(versionsJson));
+  } catch (err) {
+    throw wrapTextFormatError(err);
+  }
 
   const { data: existing, error: existingErr } = await client.from('bill_texts')
     .select('bill_id,version,content,content_hash')
