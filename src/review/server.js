@@ -76,6 +76,30 @@ export function pickBillText(texts, targetHash) {
   ), null);
 }
 
+// CSRF guard for POST /api/decision. A cross-origin <form enctype="text/plain"> is a no-preflight
+// "simple request" — the browser will happily send it to 127.0.0.1:8991 from any open tab, with
+// no CORS check, because we never answer OPTIONS. Two independent conditions close that off:
+//   1. Content-Type must start with 'application/json'. A plain HTML form cannot set this content
+//      type (only 'application/x-www-form-urlencoded', 'multipart/form-data', or 'text/plain' are
+//      formenctype-legal) without triggering a CORS preflight — which this server never answers,
+//      so a real cross-origin JSON POST cannot arrive at all. This alone kills the form vector.
+//   2. Origin, when the browser sends one, must be exactly this server's own origin
+//      (belt-and-suspenders — catches any client that does manage to set a JSON content type).
+//      Non-browser callers (curl, this project's own tests) often send no Origin header at all;
+//      that is allowed, since there is no browser-enforced same-origin policy to bypass there.
+export function isAllowedDecisionRequest(headers) {
+  const h = {};
+  for (const [key, value] of Object.entries(headers || {})) h[key.toLowerCase()] = value;
+
+  const contentType = String(h['content-type'] ?? '').toLowerCase();
+  if (!contentType.startsWith('application/json')) return false;
+
+  const origin = h['origin'];
+  if (origin !== undefined && origin !== `http://${HOST}:${PORT}`) return false;
+
+  return true;
+}
+
 export class BodyTooLargeError extends Error {
   constructor() {
     super('request body exceeds limit');
@@ -279,7 +303,11 @@ export async function requestListener(req, res) {
   const itemMatch = pathname.match(/^\/api\/item\/([^/]+)$/);
   if (req.method === 'GET' && itemMatch) { await handleItem(client, res, decodeURIComponent(itemMatch[1])); return; }
 
-  if (req.method === 'POST' && pathname === '/api/decision') { await handleDecision(client, req, res); return; }
+  if (req.method === 'POST' && pathname === '/api/decision') {
+    if (!isAllowedDecisionRequest(req.headers)) { sendJson(res, 403, { error: 'forbidden' }); return; }
+    await handleDecision(client, req, res);
+    return;
+  }
 
   sendJson(res, 404, { error: 'not found' });
 }

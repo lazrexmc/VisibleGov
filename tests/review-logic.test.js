@@ -4,8 +4,11 @@ import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import {
   nextStatus, mapNoteAction, validateDecisionInput, countVoteCasts, pickLatestVote,
-  pickBillText, readBody, BodyTooLargeError, requestListener,
+  pickBillText, readBody, BodyTooLargeError, requestListener, isAllowedDecisionRequest,
+  HOST, PORT,
 } from '../src/review/server.js';
+
+const OWN_ORIGIN = `http://${HOST}:${PORT}`;
 
 test('nextStatus: draft + approve -> approved', () => {
   assert.equal(nextStatus('draft', 'approve'), 'approved');
@@ -155,6 +158,33 @@ test('readBody rejects with BodyTooLargeError once the size cap is exceeded', as
   await assert.rejects(() => readBody(req, 1000), BodyTooLargeError);
 });
 
+// ---- isAllowedDecisionRequest (CSRF guard on POST /api/decision) ----
+
+test('isAllowedDecisionRequest: application/json + no Origin -> allowed', () => {
+  assert.equal(isAllowedDecisionRequest({ 'content-type': 'application/json' }), true);
+});
+
+test('isAllowedDecisionRequest: application/json + own Origin -> allowed', () => {
+  assert.equal(isAllowedDecisionRequest({ 'content-type': 'application/json', origin: OWN_ORIGIN }), true);
+});
+
+test('isAllowedDecisionRequest: text/plain (form CSRF vector) -> denied regardless of Origin', () => {
+  assert.equal(isAllowedDecisionRequest({ 'content-type': 'text/plain' }), false);
+  assert.equal(isAllowedDecisionRequest({ 'content-type': 'text/plain', origin: OWN_ORIGIN }), false);
+});
+
+test('isAllowedDecisionRequest: application/json + foreign Origin -> denied', () => {
+  assert.equal(isAllowedDecisionRequest({ 'content-type': 'application/json', origin: 'https://evil.example' }), false);
+});
+
+test('isAllowedDecisionRequest: missing Content-Type -> denied', () => {
+  assert.equal(isAllowedDecisionRequest({}), false);
+});
+
+test('isAllowedDecisionRequest: Content-Type with charset suffix still matches (startsWith)', () => {
+  assert.equal(isAllowedDecisionRequest({ 'content-type': 'application/json; charset=utf-8' }), true);
+});
+
 // ---- requestListener HTTP-level behavior (no live DB required) ----
 
 function withServer(fn) {
@@ -200,6 +230,41 @@ test('POST /api/decision rejects an over-1MB body with 413', () => withServer(as
     body: JSON.stringify({ summary_id: 'x', action: 'edit', body_md: big }),
   });
   assert.equal(res.status, 413);
+}));
+
+// ---- CSRF guard, exercised over real HTTP (the form-CSRF vector is specifically about the
+// actual Content-Type/Origin headers an HTTP request arrives with) ----
+
+test('POST /api/decision with Content-Type text/plain (the <form enctype=text/plain> CSRF vector) -> 403', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ summary_id: 'x', action: 'approve' }),
+  });
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { error: 'forbidden' });
+}));
+
+test('POST /api/decision with a foreign Origin -> 403', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+    body: JSON.stringify({ summary_id: 'x', action: 'approve' }),
+  });
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { error: 'forbidden' });
+}));
+
+test('POST /api/decision with application/json and no Origin passes the CSRF guard (not 403)', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary_id: 'x', action: 'approve' }),
+  });
+  // No live DB client in this test process, so this falls through to a 500 (or a 400 if
+  // validation trips first) — the point of this test is only that the CSRF guard itself did not
+  // block it.
+  assert.notEqual(res.status, 403);
 }));
 
 test('unknown route returns 404', () => withServer(async (base) => {
