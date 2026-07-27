@@ -1,0 +1,114 @@
+import { XMLParser } from 'fast-xml-parser';
+import { fetchWithLimit } from '../lib/http.js';
+import { createLimiter } from '../lib/rate-limiter.js';
+
+export const SOURCE = 'us-congress';
+// Congress.gov allows 1000 req/hr => 1 per 3.6s; Clerk XML is separate but be polite anyway.
+export const congressLimiter = createLimiter({ minIntervalMs: 3600 });
+export const clerkLimiter = createLimiter({ minIntervalMs: 1000 });
+
+const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+
+export function normalizeBillIdentifier(legisNum) {
+  const s = String(legisNum).trim().toUpperCase();
+  const m = s.match(/^([A-Z .]+?)\s+(\d+)$/);
+  if (!m) return s;
+  return `${m[1].replace(/[ .]/g, '')} ${m[2]}`;
+}
+
+export function billTypeSlug(identifier) {
+  return identifier.split(' ')[0].toLowerCase();
+}
+
+const POSITION_MAP = new Map([
+  ['yea', 'yea'], ['aye', 'yea'],
+  ['nay', 'nay'], ['no', 'nay'],
+  ['present', 'present'],
+  ['not voting', 'not_voting'],
+]);
+
+export function mapHousePosition(raw) {
+  return POSITION_MAP.get(String(raw).trim().toLowerCase()) ?? 'other';
+}
+
+export function parseMemberList(json) {
+  return (json.members ?? []).map((m) => {
+    const items = m.terms?.item ?? [];
+    const latest = items[items.length - 1] ?? {};
+    return {
+      bioguide_id: m.bioguideId,
+      full_name: m.name,
+      party: m.partyName ?? null,
+      chamber: /senate/i.test(latest.chamber ?? '') ? 'senate' : 'house',
+      district: m.district != null ? String(m.district) : null,
+    };
+  });
+}
+
+function parseClerkDate(s) {
+  // e.g. "10-Apr-2025"
+  const months = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
+  const m = String(s).match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${months[m[2]]}-${m[1].padStart(2, '0')}`;
+}
+
+export function parseHouseRollCall(xmlString, { year }) {
+  const doc = xml.parse(xmlString);
+  const root = doc['rollcall-vote'];
+  const meta = root['vote-metadata'];
+  const roll = Number(meta['rollcall-num']);
+  const legisNum = meta['legis-num'] ? normalizeBillIdentifier(meta['legis-num']) : null;
+  let recorded = root['vote-data']['recorded-vote'] ?? [];
+  if (!Array.isArray(recorded)) recorded = [recorded];
+  return {
+    vote: {
+      source_key: `us-house-${meta.congress}-${year}-${roll}`,
+      chamber: 'house',
+      vote_date: parseClerkDate(meta['action-date']),
+      question: String(meta['vote-question'] ?? ''),
+      result: String(meta['vote-result'] ?? ''),
+      bill_identifier: legisNum,
+      source_url: `https://clerk.house.gov/evs/${year}/roll${String(roll).padStart(3, '0')}.xml`,
+    },
+    casts: recorded.map((rv) => ({
+      bioguide_id: rv.legislator['@_name-id'],
+      position: mapHousePosition(rv.vote),
+    })),
+  };
+}
+
+export function parseBillDetail(json) {
+  const b = json.bill;
+  const identifier = normalizeBillIdentifier(`${b.type} ${b.number}`);
+  return {
+    identifier,
+    title: b.title ?? '',
+    status: b.latestAction?.text ?? null,
+    canonical_url: `https://www.congress.gov/bill/${b.congress}th-congress/${slugToPath(b.type)}/${b.number}`,
+  };
+}
+
+function slugToPath(type) {
+  const paths = {
+    HR: 'house-bill', S: 'senate-bill', HRES: 'house-resolution', SRES: 'senate-resolution',
+    HJRES: 'house-joint-resolution', SJRES: 'senate-joint-resolution',
+    HCONRES: 'house-concurrent-resolution', SCONRES: 'senate-concurrent-resolution',
+  };
+  return paths[String(type).toUpperCase()] ?? 'bill';
+}
+
+export function fetchHouseRollCall(rollNumber, year, limiter = clerkLimiter) {
+  const url = `https://clerk.house.gov/evs/${year}/roll${String(rollNumber).padStart(3, '0')}.xml`;
+  return fetchWithLimit(url, { source: SOURCE, limiter, as: 'text' });
+}
+
+export function fetchBillDetail(congress, typeSlug, number, limiter = congressLimiter) {
+  const url = `https://api.congress.gov/v3/bill/${congress}/${typeSlug}/${number}?api_key=${process.env.CONGRESS_API_KEY}`;
+  return fetchWithLimit(url, { source: SOURCE, limiter, as: 'json' });
+}
+
+export function fetchMemberList(stateCode, limiter = congressLimiter) {
+  const url = `https://api.congress.gov/v3/member/${stateCode}?api_key=${process.env.CONGRESS_API_KEY}&limit=250`;
+  return fetchWithLimit(url, { source: SOURCE, limiter, as: 'json' });
+}
