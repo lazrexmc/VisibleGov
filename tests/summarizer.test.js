@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SUMMARY_SCHEMA, SYSTEM_PROMPT, buildUserMessage, renderMarkdown, MAX_TEXT_CHARS, PROMPT_VERSION, MODEL } from '../src/lib/summarizer.js';
+import { SUMMARY_SCHEMA, SYSTEM_PROMPT, buildUserMessage, renderMarkdown, MAX_TEXT_CHARS, MAX_OUTPUT_TOKENS, PROMPT_VERSION, MODEL, SummaryTruncatedError } from '../src/lib/summarizer.js';
 
 test('schema requires section citations on every bullet', () => {
   const item = SUMMARY_SCHEMA.properties.what_it_does.items;
@@ -30,4 +30,11 @@ test('constants pinned', () => {
   assert.equal(MODEL, 'claude-opus-5');
   assert.equal(PROMPT_VERSION, 'v1');
   assert.ok(MAX_TEXT_CHARS >= 100000);
+  assert.ok(MAX_OUTPUT_TOKENS >= 16000);
+});
+
+test('SummaryTruncatedError is exported and instanceof Error', () => {
+  const err = new SummaryTruncatedError('summary for HR 498 hit max_tokens');
+  assert.ok(err instanceof Error);
+  assert.equal(err.name, 'SummaryTruncatedError');
 });
