@@ -307,3 +307,15 @@ All four fixtures were grepped for anything key-shaped (`api_key`, `token`, `sec
 etc.) before being committed - the only hits were false positives on the word "Secretary" (HHS
 Secretary, printed throughout the actual statute text). No credentials of any kind are involved;
 the site is fully public and unauthenticated.
+
+## LegiScan API probe (2026-07-28, 4 queries, key registered by Lance)
+
+`legiscan/mo-sessions.json` (getSessionList state=MO: 31 sessions, 2010-2026),
+`legiscan/mo-2018-masterlist.json` (getMasterList session 1530: 2,347 bills),
+`legiscan/mo-2018-SB894.json` (getBill 1050440), `legiscan/mo-2018-rollcall-747209.json`
+(getRollCall: House 3rd read on SB 894, yea=121/nay=19/total=161, **161 individual
+{people_id, vote_id, vote_text} entries — MO individual votes CONFIRMED populated**).
+Data © LegiScan, CC BY 4.0, key= param redacted by convention. Note: SB 894's LegiScan record
+carries only the House roll call — the Senate's vote on the combined substitute vehicle
+('SS for SCS for SBs 894 & 921', in our Day 37 journal fixture) presumably lives under a
+different bill record; substitute-vehicle attribution mapping is a real adapter-design task.
