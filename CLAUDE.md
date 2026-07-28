@@ -41,3 +41,12 @@ editorializing in a summary. Check every design decision against this before it 
 
 Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) live in
 `~/.claude/CLAUDE.md` and apply here too. This file only holds what's specific to VisibleGov.
+
+**Standing policies (Lance, 2026-07-27, non-negotiable):**
+- **No live Claude/LLM API call runs without Lance's explicit per-run approval**, with call
+  count + dollar estimate stated up front. Mechanical enforcement exists where possible (e.g.
+  the golden-check `GOLDEN_CHECK_APPROVED` gate) - extend that pattern to new model-calling
+  tools.
+- **Trust model v2:** summaries are opus-5-authored → sonnet-5 adversarially verified
+  (mechanically completeness-gated - never trust the verifier's self-reported overall) →
+  Lance adjudicates/publishes. Facts-only rule per the spec; nothing editorial, ever.
