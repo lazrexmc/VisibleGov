@@ -104,11 +104,12 @@ query-param endpoints below), which are themselves plain HTTP GETs fetchable dir
   2018 — the day SB 894's "S Third Read and Passed" action, cited as journal page S592, actually
   happened). **Confirmed text-layer PDF, not scanned** — extracted cleanly via the Read tool with
   no OCR. Page 587 lists the day's full Present/Absent senator roll (Onder present, 31 senators,
-  1 vacancy). Pages 588-596 contain **at least 10 separate named roll-call votes** in that single
+  1 vacancy). Pages 588-597 contain **exactly 13 separate named roll-call votes** in that single
   day's journal, each formatted as `YEAS—Senators` / `NAYS—Senators` / `Absent—Senators` /
   `Absent with leave—Senators` / `Vacancies—N`, with a trailing count after the last name in each
-  list (e.g. `Wieland—28`). Bob Onder's name appears by name in every YEAS list on this page range
-  (he was Chairman of the Committee on General Laws that session). This is the real, individual,
-  named MO Senate roll-call primary source — one document per **day**, not per **vote** (unlike
+  list (e.g. `Wieland—28`). Names are printed as bare surnames (same granularity as the House's
+  roll-call PDFs, not full names). Bob Onder's surname appears in every YEAS list on this page
+  range (he was Chairman of the Committee on General Laws that session). This is the real,
+  individual, named MO Senate roll-call primary source — one document per **day**, not per **vote** (unlike
   the House's one-PDF-per-roll-call `RollCallPDF`), with several to a few dozen votes embedded in
   each day's file depending on floor activity that day.

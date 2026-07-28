@@ -108,24 +108,28 @@ list — confirmed text-layer, VERIFIED-BY-PAYLOAD.** Structurally different fro
   ```
   On motion of Senator <X>, <bill> was read the 3rd time and passed by the following vote:
   YEAS—Senators
-  <full-name-1> <full-name-2> ... <full-name-N>—<count>
+  <surname-1> <surname-2> ... <surname-N>—<count>
   NAYS—Senators
-  <full-name-1> ...—<count>
-  Absent—Senators[—None | <names>—<count>]
+  <surname-1> ...—<count>
+  Absent—Senators[—None | <surnames>—<count>]
   Absent with leave—Senators
-  <names>
+  <surnames>
   Vacancies—<N>
   ```
   This single 155KB, 24-page PDF (one calendar day) contains **13 separate individual roll-call
   votes** (SCS for SBs 632&675, SS for SB 882, SS for SCS for SB 600, SB 793, SS for SB 881, SS
   for SCS for SBs 894&921 [the Onder-era target bill], SS for SCS for SB 592, SS for SCS for SBs
-  627&925, SB 683, SB 768, SB 631, SCS for SBs 946&947, SB 819). **Names are printed in full** (not abbreviated surnames like the House), grouped by vote position rather
-  than one line per legislator — the parsing shape is genuinely different from the House's
-  per-member-per-line `SURNAME [DISTRICT] <CODE>` format: here it's `<CATEGORY HEADER>` followed
-  by a flat run of full names, terminated by the next category header, with a trailing
-  `—<count>` after the last name that gives a cheap, mechanically-checkable tally (directly
-  reusable as the same style of reconcile-or-throw gate `mo-rollcall-pdf.js` already uses for the
-  House, just against a different grouping shape).
+  627&925, SB 683, SB 768, SB 631, SCS for SBs 946&947, SB 819). **Corrected on re-check against
+  the fixture (2026-07-28 review): names are printed as BARE SURNAMES only** (e.g. `Brown
+  Chappelle-Nadal Cierpiot Crawford Cunningham Curls Dixon ... Onder ... Wieland—31`) — **the
+  same granularity as the House's roll-call PDFs**, not full first+last names as an earlier draft
+  of this doc incorrectly claimed. Grouped by vote position rather than one line per legislator —
+  the parsing shape is still genuinely different from the House's per-member-per-line `SURNAME
+  [DISTRICT] <CODE>` format: here it's `<CATEGORY HEADER>` followed by a flat run of surnames,
+  terminated by the next category header, with a trailing `—<count>` after the last name that
+  gives a cheap, mechanically-checkable tally (directly reusable as the same style of
+  reconcile-or-throw gate `mo-rollcall-pdf.js` already uses for the House, just against a
+  different grouping shape).
 - Practical implication for an adapter: **one fetch (one day's journal) yields many votes**,
   which is actually *more* data-dense than the House's one-PDF-per-vote model — but finding *all*
   the vote blocks inside a variable-length day (could be a handful of pages on a quiet day, dozens
@@ -136,7 +140,7 @@ list — confirmed text-layer, VERIFIED-BY-PAYLOAD.** Structurally different fro
 ## Q3: Does coverage extend back to 2015-2023 (Bob Onder's MO Senate era)?
 
 **Yes — VERIFIED-BY-PAYLOAD for 2018 specifically (squarely inside Onder's term), and
-DOCUMENTED by the Senate's own instructions for the full 2015-2023 span.**
+DOCUMENTED-UNVERIFIED by the Senate's own instructions for the full 2015-2023 span.**
 
 - VERIFIED-BY-PAYLOAD: `sb894-2018-onder-era-actions-fragment.html` — the exact same
   `handler=Actions` mechanism, `year=2018` (not 2026), works identically: same field shapes, same
@@ -149,7 +153,7 @@ DOCUMENTED by the Senate's own instructions for the full 2015-2023 span.**
   him chairing the Committee on General Laws that session per the journal text itself). This
   directly answers the task's "fetch one Onder-era sample if reachable" instruction — reachable,
   fetched, and it names Onder in a real recorded vote.
-- DOCUMENTED (the Senate's own page, quoted verbatim, `find-voting-records.html`): *"From the
+- DOCUMENTED-UNVERIFIED (the Senate's own page, quoted verbatim, `find-voting-records.html`): *"From the
   dropdown, click on the desired year; bills before 2015 you will click the '2015 and earlier'
   option."* This is the Senate telling its own users, in its own instructions, that **individual
   per-year bill archives exist starting at 2015** — the exact first year of Onder's Senate term
@@ -228,11 +232,14 @@ House adapter's parsing code, only its *architecture and integrity discipline*.
   Senate's version of the House's `Total Yes:`/`Total No:` line, and should gate storage the same
   way.
 - `resolveMoRep`'s fail-loud, no-guessing identity-resolution pattern (0 or >1 match → null,
-  recorded unresolved, never guessed) — directly applicable to matching a Senate journal's full
-  name against a Senate roster, likely *simpler* than the House case since 34 senators makes
-  surname collisions rare (none observed in the one real day fetched) and full names (not bare
-  surnames) are printed, removing the House's district-suffix-disambiguation need entirely for the
-  common case.
+  recorded unresolved, never guessed) — directly applicable to matching a Senate journal's name
+  against a Senate roster. **Correction (2026-07-28 review): the journal prints bare surnames,
+  the same granularity as the House's roll-call PDFs** — not full names as an earlier draft of
+  this doc claimed — so resolution is surname-based exactly like `resolveMoRep`, not a simpler
+  full-name lookup. The one real difference is volume: Missouri's Senate is 34 seats vs. the
+  House's 163, so surname collisions (and the House's district-suffix-disambiguation need) are
+  correspondingly rarer in practice — none were observed in the one real day fetched — but the
+  matching logic itself is the same shape, not simpler in kind.
 
 **What's genuinely new work (real, not cosmetic):**
 1. **Bill/action discovery is HTML-fragment scraping, not XML parsing.** No schema doc exists to
@@ -289,8 +296,9 @@ src/adapters/mo-senate-journal-pdf.js
     // scan for "...following vote:" anchors; each block terminated by the next category header
     // or the next motion anchor; reconcile-or-throw against each category's trailing "—N" count,
     // same non-negotiable as mo-rollcall-pdf.js's parseMoRollCall
-  resolveSenator(fullName, roster) -> legislator_id | null   // fail-loud, same convention as
-    // resolveMoRep — likely simpler (full names, 34-seat chamber, no observed collisions)
+  resolveSenator(surname, roster) -> legislator_id | null   // fail-loud, same convention as
+    // resolveMoRep — surname-based, same as the House; 34-seat chamber makes collisions rarer
+    // in practice (none observed) but the matching logic itself is not simpler in kind
 ```
 
 ### What Lance needs to do
