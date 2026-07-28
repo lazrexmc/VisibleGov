@@ -4,9 +4,11 @@ import {
   getAnthropicClient, MAX_TEXT_CHARS,
   OversizeTextError, SummaryRefusedError, SummaryTruncatedError,
 } from '../lib/summarizer.js';
-import { verifyBill, VERIFIER_MODEL, VERIFY_PROMPT_VERSION } from '../lib/verifier.js';
+import {
+  verifyBill, VERIFIER_MODEL, VERIFY_PROMPT_VERSION, assessVerdicts, VerificationIncompleteError,
+} from '../lib/verifier.js';
 
-const FAILURE_TYPES = [OversizeTextError, SummaryRefusedError, SummaryTruncatedError];
+const FAILURE_TYPES = [OversizeTextError, SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError];
 // Same target set as summarize.js's staleness handling: a draft is the normal unreviewed state,
 // stale means the text moved out from under an existing draft — both need a fresh verification.
 // approved/published/rejected summaries are out of scope for this pass.
@@ -48,6 +50,28 @@ export function parseBullets(bodyMd) {
   return bullets;
 }
 
+// Raw '- ' line count, independent of parseBullets' stricter well-formedness requirement (must
+// also end in ')' with a recoverable ' (' split point). A bullet edited to drop its trailing
+// '(section)' still matches this but not parseBullets — that gap is exactly what checkBulletCoverage
+// below catches (pre-merge finding 2).
+function countRawBulletLines(bodyMd) {
+  return String(bodyMd || '').split('\n').filter((raw) => /^- /.test(raw.trim())).length;
+}
+
+// A body_md bullet edited to lose its trailing '(section)' silently vanishes from parseBullets'
+// output — and therefore from verification — while still rendering publicly on the review page.
+// Comparing parseBullets' count against a raw '- ' line count catches that drop before the
+// (now-incomplete) bullet set is even sent to the verifier model. Pure, throws.
+export function checkBulletCoverage(identifier, bodyMd, bullets) {
+  const raw = countRawBulletLines(bodyMd);
+  if (bullets.length !== raw) {
+    throw new VerificationIncompleteError(
+      `summary for ${identifier}: body_md has ${raw} raw '- ' bullet line(s) but only ${bullets.length} parsed as citable — an edited/uncited bullet is invisible to verification`,
+      { identifier, raw, parsed: bullets.length },
+    );
+  }
+}
+
 // isMissingRelationError itself now lives in ../lib/db.js (shared with the review server — see
 // that module for why). In --dry-run mode a missing table is tolerated (controller ruling #3);
 // in live mode it is deliberately NOT caught anywhere — it's a gate.
@@ -85,18 +109,33 @@ async function loadAlreadyVerifiedIds(client, summaryIds, dryRun) {
 }
 
 async function verifyOne(client, summary, anthropic) {
+  const identifier = summary.bills ? summary.bills.identifier : summary.bill_id;
   const bullets = parseBullets(summary.body_md);
+  // Fail fast, before any DB text lookup or model call, if an edited bullet already lost its
+  // citation and vanished from what parseBullets recognized (finding 2).
+  checkBulletCoverage(identifier, summary.body_md, bullets);
+
   const { data: texts, error: tErr } = await client
     .from('bill_texts').select('content,content_hash,retrieved_at').eq('bill_id', summary.bill_id);
   if (tErr) throw new Error(`bill_texts lookup failed: ${tErr.message}`);
   const textRow = pickBillText(texts ?? [], summary.bill_text_hash);
   if (!textRow) throw new Error(`no bill text on file for bill ${summary.bill_id}`);
 
-  const identifier = summary.bills ? summary.bills.identifier : summary.bill_id;
   const { json } = await verifyBill(anthropic, { identifier, bullets, text: textRow.content });
 
+  // Mechanical completeness gate (finding 1): overall is DERIVED here, never trusted from the
+  // model's own json.overall. An incomplete/inconsistent verdict set stores nothing — it's
+  // recorded as a typed failure instead, leaving the summary honestly 'unverified'.
+  const { complete, overall } = assessVerdicts(json.verdicts, bullets.length);
+  if (!complete) {
+    throw new VerificationIncompleteError(
+      `summary for ${identifier} (id ${summary.id}): verifier returned an incomplete or inconsistent verdict set for ${bullets.length} bullet(s)`,
+      { identifier, summaryId: summary.id, bulletCount: bullets.length },
+    );
+  }
+
   const { error: insErr } = await client.from(VERIFICATIONS_TABLE).insert({
-    summary_id: summary.id, verdicts: json.verdicts, overall: json.overall,
+    summary_id: summary.id, verdicts: json.verdicts, overall,
     model: VERIFIER_MODEL, prompt_version: VERIFY_PROMPT_VERSION,
   });
   if (insErr) throw new Error(`${VERIFICATIONS_TABLE} insert failed for summary ${summary.id}: ${insErr.message}`);

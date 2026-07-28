@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VERIFIER_MODEL, VERIFY_PROMPT_VERSION, VERIFY_SCHEMA, VERIFY_SYSTEM_PROMPT,
-  buildVerifyMessage, verifyBill,
+  buildVerifyMessage, verifyBill, assessVerdicts, VerificationIncompleteError,
 } from '../src/lib/verifier.js';
 import { MODEL, MAX_TEXT_CHARS, OversizeTextError, renderMarkdown } from '../src/lib/summarizer.js';
-import { parseArgs, parseBullets } from '../src/cli/verify.js';
+import { parseArgs, parseBullets, checkBulletCoverage } from '../src/cli/verify.js';
 
 // ---- constants (controller ruling #4: sonnet stays sonnet, deliberately not opus) ----
 
@@ -115,6 +115,114 @@ test('parseBullets ignores non-bullet lines (heading, purpose paragraph, blank l
 test('parseBullets on empty/absent body_md returns an empty array', () => {
   assert.deepEqual(parseBullets(''), []);
   assert.deepEqual(parseBullets(null), []);
+});
+
+// ---- checkBulletCoverage: catches a bullet that lost its trailing '(section)' on edit and so
+// vanished from parseBullets' output while still rendering publicly (pre-merge finding 2) ----
+
+test('checkBulletCoverage throws VerificationIncompleteError when body_md has an uncited "- " line invisible to parseBullets', () => {
+  const bodyMd = '**What it does:**\n- Prohibits X payments (Sec. 2)\n- Establishes a new grant program, edited to drop its citation';
+  const bullets = parseBullets(bodyMd);
+  assert.equal(bullets.length, 1); // the uncited line doesn't end in ')', so parseBullets silently drops it
+  assert.throws(
+    () => checkBulletCoverage('HR 1', bodyMd, bullets),
+    VerificationIncompleteError,
+  );
+});
+
+test('checkBulletCoverage error message names the summary identifier and both counts', () => {
+  const bodyMd = '- Point one (Sec. 2)\n- Point two, uncited';
+  const bullets = parseBullets(bodyMd);
+  try {
+    checkBulletCoverage('HR 498', bodyMd, bullets);
+    assert.fail('expected checkBulletCoverage to throw');
+  } catch (err) {
+    assert.ok(err instanceof VerificationIncompleteError);
+    assert.match(err.message, /HR 498/);
+    assert.match(err.message, /1/); // parsed count
+    assert.match(err.message, /2/); // raw count
+  }
+});
+
+test('checkBulletCoverage does not throw when every raw "- " line parses cleanly', () => {
+  const bodyMd = '- Point one (Sec. 2)\n- Point two (Sec. 3)';
+  const bullets = parseBullets(bodyMd);
+  assert.doesNotThrow(() => checkBulletCoverage('HR 1', bodyMd, bullets));
+});
+
+test('checkBulletCoverage does not throw on empty body_md (0 raw === 0 parsed)', () => {
+  assert.doesNotThrow(() => checkBulletCoverage('HR 1', '', []));
+});
+
+// ---- assessVerdicts: the mechanical completeness gate (pre-merge finding 1) — derives overall
+// itself rather than trusting the model's own 'overall' field, which this function's signature
+// doesn't even accept. ----
+
+test('assessVerdicts: complete + all supported -> clean', () => {
+  const verdicts = [
+    { bullet_index: 0, supported: true },
+    { bullet_index: 1, supported: true },
+  ];
+  assert.deepEqual(assessVerdicts(verdicts, 2), { complete: true, overall: 'clean' });
+});
+
+test('assessVerdicts: complete + one unsupported -> flagged, even if every verdict claimed clean elsewhere', () => {
+  const verdicts = [
+    { bullet_index: 0, supported: true },
+    { bullet_index: 1, supported: false },
+  ];
+  assert.deepEqual(assessVerdicts(verdicts, 2), { complete: true, overall: 'flagged' });
+});
+
+test('assessVerdicts: missing verdict -> incomplete', () => {
+  const verdicts = [{ bullet_index: 0, supported: true }];
+  const result = assessVerdicts(verdicts, 2);
+  assert.equal(result.complete, false);
+});
+
+test('assessVerdicts: duplicate bullet_index -> incomplete', () => {
+  const verdicts = [
+    { bullet_index: 0, supported: true },
+    { bullet_index: 0, supported: true },
+  ];
+  const result = assessVerdicts(verdicts, 2);
+  assert.equal(result.complete, false);
+});
+
+test('assessVerdicts: out-of-range bullet_index -> incomplete', () => {
+  const verdicts = [
+    { bullet_index: 0, supported: true },
+    { bullet_index: 5, supported: true },
+  ];
+  const result = assessVerdicts(verdicts, 2);
+  assert.equal(result.complete, false);
+});
+
+test('assessVerdicts: negative bullet_index -> incomplete', () => {
+  const verdicts = [
+    { bullet_index: -1, supported: true },
+    { bullet_index: 0, supported: true },
+  ];
+  const result = assessVerdicts(verdicts, 2);
+  assert.equal(result.complete, false);
+});
+
+test('assessVerdicts: zero bullets, zero verdicts -> complete/clean (vacuous case)', () => {
+  assert.deepEqual(assessVerdicts([], 0), { complete: true, overall: 'clean' });
+});
+
+test('assessVerdicts: non-array verdicts -> incomplete rather than throwing', () => {
+  const result = assessVerdicts(undefined, 2);
+  assert.equal(result.complete, false);
+});
+
+// ---- VerificationIncompleteError shape ----
+
+test('VerificationIncompleteError carries a name and passes meta through', () => {
+  const err = new VerificationIncompleteError('bad state', { summaryId: 's1' });
+  assert.equal(err.name, 'VerificationIncompleteError');
+  assert.equal(err.summaryId, 's1');
+  assert.ok(err instanceof Error);
 });
 
 // ---- CLI arg parsing ----

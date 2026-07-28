@@ -49,6 +49,43 @@ export const VERIFY_SYSTEM_PROMPT = [
   '- overall is "clean" only if every single verdict is supported; if even one bullet fails, overall is "flagged".',
 ].join('\n');
 
+// Thrown when the verifier's json.verdicts cannot be mechanically trusted as complete/consistent
+// (assessVerdicts below), or — from verify.js's checkBulletCoverage — when a body_md bullet lost
+// its citation on edit and silently vanished from what got sent to the verifier at all
+// (pre-merge findings 1 & 2). Deliberately a typed error, not a thrown-away log line: verify.js
+// adds it to its typed-failure set so the batch continues and the summary is recorded in
+// failures[], staying 'unverified' in the queue — the honest state, never a fabricated 'clean'.
+export class VerificationIncompleteError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'VerificationIncompleteError';
+    Object.assign(this, meta);
+  }
+}
+
+// Mechanical completeness gate (pre-merge finding 1): the model's own json.overall is NEVER
+// trusted directly — this function doesn't even accept it as input. Given the verdicts array and
+// the number of bullets actually sent for verification, it independently re-derives whether the
+// verdict set is complete (exactly one verdict per bullet_index in [0, bulletCount), no dupes, no
+// gaps, no out-of-range indices) and, only if complete, what overall should be (every verdict
+// supported -> 'clean', otherwise 'flagged'). Pure — never throws; callers decide what an
+// incomplete result means for them (verify.js's verifyOne throws VerificationIncompleteError).
+export function assessVerdicts(verdicts, bulletCount) {
+  if (!Array.isArray(verdicts) || verdicts.length !== bulletCount) return { complete: false };
+  const seen = new Set();
+  for (const v of verdicts) {
+    const idx = v && v.bullet_index;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= bulletCount) return { complete: false };
+    if (seen.has(idx)) return { complete: false };
+    seen.add(idx);
+  }
+  // verdicts.length === bulletCount and every bullet_index is a distinct integer in
+  // [0, bulletCount) => the set of indices is exactly {0..bulletCount-1}; no separate coverage
+  // check needed.
+  const overall = verdicts.every((v) => v.supported === true) ? 'clean' : 'flagged';
+  return { complete: true, overall };
+}
+
 export function buildVerifyMessage(identifier, bulletsJson, text) {
   return `Bill ${identifier}\n\n<bullets_to_verify>\n${bulletsJson}\n</bullets_to_verify>\n\n<bill_text>\n${text}\n</bill_text>\n\nAttempt to refute each bullet against ONLY its cited section. Return one verdict per bullet, in bullet_index order, per your schema.`;
 }
