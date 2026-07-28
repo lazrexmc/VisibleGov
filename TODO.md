@@ -46,6 +46,17 @@
 
 ## 🛠 BUILD QUEUE
 
+0. **NEXT PLAN — LegiScan bulk adapter (unblocked 2026-07-28: Lance registered a key; probe
+   CONFIRMED MO individual votes populated — 161 {people_id, vote_id, vote_text} entries on a
+   real 2018 roll call; 31 MO sessions 2010-2026 available as weekly dataset ZIPs, ~tens of
+   queries for the whole backfill).** Supersedes the 30-min-cadence grind as the PRIMARY MO
+   ingestion path for both chambers; the mo-house/mo-senate primary-source parsers become the
+   reconciliation/audit layer (LegiScan casts must reconcile against official printed tallies
+   before storage). Binding operating terms: `docs/research/2026-07-28-legiscan-terms.md`
+   (dataset_hash gating is suspension-level mandatory). Known design task: substitute-vehicle
+   attribution (SB 894's Senate vote lives under the combined 'SBs 894 & 921' record, not
+   SB 894's own). Start AFTER the mo-senate-adapter branch merges.
+
 1. [x] ~~First vertical slice: Bob Onder end-to-end — ingestion half~~ **DONE 2026-07-27.**
    Ingested live from both jurisdictions and verified end-to-end (see TODO NOW + CHATLOG). The
    remaining half of this slice (summarize the triggered bills → review queue → published
