@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { additivePatch, isMissingRelationError } from '../src/lib/db.js';
+import { additivePatch, isMissingRelationError, isMissingColumnError } from '../src/lib/db.js';
 
 test('additivePatch never overwrites a set field, even when values differ', () => {
   const patch = additivePatch({ title: 'Original', status: null }, { title: 'Different', status: 'passed' });
@@ -42,4 +42,36 @@ test('isMissingRelationError does not false-positive on a different missing tabl
 
 test('isMissingRelationError is false for a null/absent error', () => {
   assert.equal(isMissingRelationError(null, 'summary_verifications'), false);
+});
+
+// ---- isMissingColumnError (Task 4: mo-house-xml member persistence gates on migration 0005 —
+// legislators.mo_house_id — via this same skip≠empty tolerance pattern) ----
+
+test('isMissingColumnError recognizes PostgREST\'s "column not found in schema cache" shape (PGRST204)', () => {
+  const err = { code: 'PGRST204', message: "Could not find the 'mo_house_id' column of 'legislators' in the schema cache" };
+  assert.equal(isMissingColumnError(err, 'mo_house_id'), true);
+});
+
+test('isMissingColumnError recognizes a raw Postgres undefined_column error (42703)', () => {
+  const err = { code: '42703', message: 'column "mo_house_id" of relation "legislators" does not exist' };
+  assert.equal(isMissingColumnError(err, 'mo_house_id'), true);
+});
+
+test('isMissingColumnError matches on message text alone when .code was stripped (insertIfAbsent wraps errors into a plain Error, discarding .code)', () => {
+  const err = new Error("insertIfAbsent(legislators) failed: Could not find the 'mo_house_id' column of 'legislators' in the schema cache");
+  assert.equal(isMissingColumnError(err, 'mo_house_id'), true);
+});
+
+test('isMissingColumnError does not false-positive on an unrelated error', () => {
+  const err = { code: 'ECONNRESET', message: 'network error' };
+  assert.equal(isMissingColumnError(err, 'mo_house_id'), false);
+});
+
+test('isMissingColumnError does not false-positive on a different missing column', () => {
+  const err = { code: '42703', message: 'column "openstates_id" of relation "legislators" does not exist' };
+  assert.equal(isMissingColumnError(err, 'mo_house_id'), false);
+});
+
+test('isMissingColumnError is false for a null/absent error', () => {
+  assert.equal(isMissingColumnError(null, 'mo_house_id'), false);
 });

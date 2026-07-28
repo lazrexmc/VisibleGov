@@ -1,0 +1,11 @@
+-- Draft (Lance applies — draft-then-apply). Adds the MO House identity key so the mo-house-xml
+-- adapter's roster ingestion (src/adapters/mo-house-xml.js parseMoRepresentative ->
+-- mo_house_id = district number as text) can persist legislators, mirroring the existing
+-- per-source identity-key pattern (bioguide_id for us-congress, openstates_id for
+-- mo-legislature).
+--
+-- Until this is applied, src/cli/ingest-mo-house.js detects the resulting PostgREST
+-- "column not found" error (PGRST204) via isMissingColumnError (src/lib/db.js) and skips
+-- member persistence with an honest note in run detail. bills/actions/votes persistence is
+-- unaffected — those tables need no new columns.
+alter table legislators add column mo_house_id text unique;

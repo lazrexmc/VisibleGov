@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js",
+    "ingest-mo-house": "node --env-file=.env src/cli/ingest-mo-house.js",
     "summarize": "node --env-file=.env src/cli/summarize.js",
     "verify": "node --env-file=.env src/cli/verify.js",
     "golden": "node --env-file=.env src/cli/golden.js",

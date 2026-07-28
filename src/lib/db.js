@@ -58,3 +58,21 @@ export function isMissingRelationError(error, table) {
   if (code === '42P01' || code === 'PGRST205') return mentionsTable;
   return mentionsTable && (msg.includes('does not exist') || msg.includes('could not find the table'));
 }
+
+// Same shape as isMissingRelationError but for a missing COLUMN (e.g. legislators.mo_house_id
+// before migration 0005 is applied — draft-then-apply, Lance's call when to run it). Matched
+// on `.message` text alone, NOT `.code` — insertIfAbsent (above) wraps the real Supabase error
+// into a plain `Error(...)` and only preserves `.message`, discarding `.code`, so a caller that
+// went through insertIfAbsent (the normal path) never sees a `.code` at all. Checking the raw
+// `.code` too is a harmless bonus for any caller working with an unwrapped Supabase error
+// directly. PostgREST reports this as PGRST204 ("Could not find the '<col>' column of '<table>'
+// in the schema cache"); raw Postgres reports 42703 undefined_column ('column "<col>" of
+// relation "<table>" does not exist').
+export function isMissingColumnError(error, column) {
+  if (!error) return false;
+  const code = error.code;
+  const msg = String(error.message || '').toLowerCase();
+  const mentionsColumn = msg.includes(column.toLowerCase());
+  if (code === 'PGRST204' || code === '42703') return mentionsColumn;
+  return mentionsColumn && (msg.includes('does not exist') || msg.includes('could not find'));
+}
