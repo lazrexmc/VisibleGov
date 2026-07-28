@@ -168,7 +168,20 @@ it is. Revisit this section before shipping any summarization or scoring logic.
    also avoids the manual-registration trap of an index.js test shim (a forgotten future test
    file would silently never run). Cost two fix commits + a controller/implementer dispute to
    settle.
-2. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
+2. **Never let the audited model grade its own completeness.** Slice 2's verifier (sonnet
+   refuting opus) returned an `overall` verdict — and we initially stored it as-is. The final
+   review caught it: a verifier returning 3 verdicts for 5 bullets + "clean" would pass silently.
+   Rule: derive the verdict mechanically from the verdicts themselves (count match, index
+   coverage, all-supported), never from the model's self-report. The model being audited on X
+   doesn't get to assert X.
+3. **HTML-strip traps in government text.** GPO bill HTML carries a literal `&lt;DOC&gt;` marker;
+   a "helpful" second tag-strip pass AFTER entity decoding silently swallowed everything between
+   two decoded angle brackets (e.g. `< 100 ... > 50`). Strip the specific known marker before
+   decoding; never run an unrestricted bracket-strip on decoded text.
+4. **Supabase edge blocks secret keys on browser-like user agents.** PowerShell's
+   Invoke-RestMethod gets 403 "Forbidden use of secret API key in browser" — use curl/node for
+   service-role REST checks.
+5. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
    that removing a shim was safe by running the suite — with the shim still present. The
    implementer re-tested with the file actually absent, pushed back with evidence, and was
    right. An adversarial check only counts if it tests the world in the state being claimed

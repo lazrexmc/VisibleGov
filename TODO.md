@@ -20,7 +20,19 @@
   CHATLOG. Next: Plan 2 (summarization + review queue).
 - [x] ~~Decision: editor_notes public readability~~ **RESOLVED 2026-07-27** — internal-only,
   never publicly readable (Lance's facts-only directive; fix ships in Plan 2's first migration).
-- [ ] **Next: Plan 2 — summarization + review queue**, under the spec's new facts-only rule.
+- [x] ~~Plan 2 — summarization + review queue~~ **COMPLETE + MERGED 2026-07-28.** Full pipeline
+  live: 3 federal bills summarized by opus-5 (facts-only, section-cited), adversarially verified
+  by sonnet-5 (22/22 bullets, 0 flags, mechanically completeness-gated), Lance-approved and
+  **published** via the local review page (full audit trail); goldens committed; anon-key RLS
+  probes prove the public sees exactly the published rows. 149/149 tests. Trust model v2 +
+  per-run API approval policy both operative.
+- [ ] **Next: Plan 3 — the public site, profile-first** (Lance: "the politician profile is the
+  product"). Onder's page = who he is + votes cast/missed with plain-language bill one-liners +
+  sponsored bills + MO history; bill pages as click-through support; directory + address lookup;
+  static pre-render on publish; freshness footer (filter view to ingestion sources). Pre-work
+  carried from slice-2 final review: id-based markStale, "current published summary per bill"
+  convention, published-goes-stale UX treatment, run_id on summary_verifications (next
+  migration), sponsored-bills ingestion.
 
 ## 🛠 BUILD QUEUE
 
