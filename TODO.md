@@ -84,6 +84,14 @@
     identity merge (8), generalized MO-term handling (10e), automating the Task-5/7 manual
     identity-verification steps. Design in Plan 3/4.
 
+12. **US Senate roll-call adapter (unlocks Hawley + every senator).** Senate votes live at
+    senate.gov in their own XML format (different from House Clerk EVS) — one new adapter, then
+    the whole existing pipeline (canonical tables, summarize triggers, verification, profiles)
+    works for senators unchanged. Hawley (H001089) is already in our legislators table via the
+    MO delegation ingest. Note: his MO-era record (Attorney General) is executive, not
+    legislative — Senate-only profile, honestly labeled. Captured 2026-07-28 from Lance's ask;
+    decide fold-into-Plan-3 vs fast-follow during the Plan 3 spec.
+
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
 > "I'd like to expose all the politicians by breaking down the bills and laws they propose into
