@@ -84,6 +84,8 @@
     identity merge (8), generalized MO-term handling (10e), automating the Task-5/7 manual
     identity-verification steps. Design in Plan 3/4.
 
+14. **Referenced-context glossary (Lance, 2026-07-28, morning design): summaries cite acts/agencies/programs readers do not know** - add a labeled background/context content class so layman-readers get what referenced items ARE, without polluting facts-only bullets. Open design questions: grounding source (model knowledge + adversarial verify vs fetched statute text), schema shape, verifier rules, visual separation. Touches trust model - design WITH Lance, then prompt v2 + re-run needs his spend approval.
+
 13. **Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion** - daily delta runs (new House rolls via ceiling probe, new Senate votes via menu diff, MO XML on its half-hour ToU), plus a summary-candidate report Lance approves as batches. Design after Plan 3a lands.
 
 12. **US Senate roll-call adapter (unlocks Hawley + every senator).** Senate votes live at

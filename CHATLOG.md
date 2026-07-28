@@ -417,3 +417,23 @@ incremental machinery (PLAYBOOK §3.4 startup-vs-poll discipline) - scheduled de
 (new House rolls, new Senate votes, MO cadence-respecting refresh), new-summary-candidate
 detection surfaced as batches for Lance's per-run approval. Ingestion cron is free; only the
 summarize/verify steps ever cost money and stay approval-gated.
+
+### [Lance] (final messages before bed, 2026-07-28)
+> I've noticed that the golden jsons reference other bills, departments or offices that aren't
+> exactly clearly defined in the text when we read it, it's as if readers should know every
+> single previous bill, we need a way to relay the important information from those referenced
+> items to the reader so that the context is available to the reader otherwise we aren't fully
+> getting to "layman's terms"
+
+> continue that backfill, I'm really going to bed now
+
+**[Claude]** Captured as the next summarizer evolution (prompt v2 + schema + spec change - a
+MORNING design conversation, not an overnight one, because it touches the trust model): readers
+need referenced-item context (what the Social Security Act sec. 1903 IS, what an agency does),
+but that context is NOT in the bill text, so the facts-only rule as written forbids it. Design
+space sketched for morning: (a) a separate, visually-distinct "background" content class,
+clearly labeled as context-not-bill-text; (b) grounding options for it (model knowledge with
+adversarial verification vs fetching referenced statute text from govinfo/US Code sources);
+(c) verifier treatment for background claims. Overnight execution continues per the standing
+directive: Senate wiring done (171/171), Senate backfill next once the House backfill exits,
+then MO XML + PDFs.
