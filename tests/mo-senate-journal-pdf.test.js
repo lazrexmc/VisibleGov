@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   JournalParseError, extractJournalText, extractBillRefs, parseJournalVotes, resolveMoSenator,
+  stripPageChrome,
 } from '../src/adapters/mo-senate-journal-pdf.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-senate';
@@ -10,7 +11,10 @@ const FIXTURES = 'tests/fixtures/research/mo-senate';
 // Loaded once and reused - extractJournalText is the only async step. Both real fixtures per
 // task-4-brief.md: Day 37 (2018, Onder era, 13 votes, incl. hyphenated Chappelle-Nadal) and Day 39
 // (2026, 11 YEAS blocks = 10 passages + 1 emergency-clause adoption, incl. district-suffix
-// collisions Brown (16)/Brown (26) and Gregory (15)/Gregory (21)).
+// collisions Brown (16)/Brown (26) and Gregory (15)/Gregory (21)). CODE REVIEW FIX ROUND 1
+// (finding 2): the emergency-clause block has no bill reference in its own motion text, so under
+// the new zero-bill-refs-fails-loud gate it now lands in `failures`, not `votes` - Day 39 is
+// therefore 10 votes + 1 failure, not 11 votes + 0 failures (see the dedicated test below).
 const day37Buffer = readFileSync(`${FIXTURES}/2018-day37-journal-onder-era.pdf`);
 const day37Text = await extractJournalText(day37Buffer);
 const day37 = parseJournalVotes(day37Text);
@@ -40,6 +44,55 @@ test('extractJournalText: page chrome (bare page numbers, "Journal of the Senate
   // between 'Riddle Rizzo' and 'Romine Rowden' unless stripped first. Prove it's gone.
   assert.ok(!day37Text.includes('Thirty-Seventh Day—Thursday, March 8, 2018 591'));
   assert.ok(!/^\d+$/m.test(day37Text.split('\n').find((l) => l.trim() === '587') ?? ''));
+});
+
+// ---- stripPageChrome: context-anchored chrome stripping (code review fix round 1, finding 1) ----
+//
+// The bug this guards against: PAGE_NUMBER_ONLY_RE matches ANY bare digits-only line - including
+// one that could be a category's own printed count, isolated onto its own reconstructed row by a
+// page break (the exact same failure class already fixed for name-list text in Day 37 block 4,
+// applied to a COUNT digit instead of a surname). If that digit were stripped, extractCategory's
+// lazy terminator would overshoot searching for the next em-dash+digit, silently reconciling
+// against the WRONG count - the one failure mode this pipeline must never produce. The fix strips a
+// bare digits-only line ONLY when it is adjacent (nearest non-blank neighbor, either side) to a
+// known chrome header line - never blindly.
+
+test('stripPageChrome: a real chrome shape (page-footer number immediately adjacent to the next page\'s "Journal of the Senate" header, exactly as it appears in the Day 37 fixture) is still stripped', () => {
+  const realChromeShape = 'Kehoe Sater—2\nVacancies—1\nThe Lieutenant Governor was present.\n587\n\n588Journal of the Senate\nRESOLUTIONS\n';
+  const cleaned = stripPageChrome(realChromeShape);
+  assert.ok(!cleaned.includes('587'), 'the adjacent page-footer number must still be stripped');
+  assert.ok(!cleaned.includes('Journal of the Senate'));
+  assert.ok(cleaned.includes('Kehoe Sater—2') && cleaned.includes('RESOLUTIONS'), 'real content around the chrome must survive');
+});
+
+test('stripPageChrome: a real chrome shape using the day-header form (page number immediately adjacent to a "<Ordinal> Day<dash><Weekday>..." header, as in the Day 39 fixture) is still stripped', () => {
+  const realChromeShape = 'was adopted.\n772\n\n773 Thirty-Ninth Day - Wednesday, March 25, 2026\nSenator Bean offered Senate Resolution No. 829.\n';
+  const cleaned = stripPageChrome(realChromeShape);
+  assert.ok(!cleaned.includes('772'), 'the adjacent page-footer number must still be stripped');
+  assert.ok(!cleaned.includes('Thirty-Ninth Day'));
+});
+
+test('stripPageChrome: an isolated digits-only line with NO adjacent chrome header is preserved, even though it has the exact same bare-digit shape as real chrome - never stripped by shape alone', () => {
+  // Hypothetical (never observed in either real fixture): a category's own printed count lands
+  // alone on its own reconstructed row, with ordinary vote content - not a chrome header - on
+  // both sides.
+  const isolatedCountDigit = 'YEAS—Senators\nAlpha Beta Gamma Delta Epsilon Zeta—\n6\nNAYS—Senators—None\n';
+  const cleaned = stripPageChrome(isolatedCountDigit);
+  assert.ok(cleaned.includes('\n6\n'), 'an isolated real count digit with no adjacent chrome header must survive stripping');
+});
+
+test('parseJournalVotes: a category whose printed count digit is isolated onto its own line (simulating a page break landing between the em-dash and the digit) still reconciles correctly end to end, because stripPageChrome leaves it in place', () => {
+  const text = 'On motion of Senator Test, SB 300 was read the 3rd time and passed by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta Gamma Delta Epsilon Zeta—\n6\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  assert.equal(failures.length, 0);
+  assert.equal(votes.length, 1);
+  assert.equal(votes[0].tallies.yeas, 6);
+  assert.equal(votes[0].yeas.length, 6);
 });
 
 // ---- parseJournalVotes (Day 37, real fixture): 13 blocks, research-verified count ----
@@ -124,12 +177,13 @@ test('parseJournalVotes (Day 37, real fixture): single-bill motions with no subs
 
 // ---- parseJournalVotes (Day 39, real fixture): format stability across sessions ----
 
-test('parseJournalVotes (Day 39, real fixture): all 11 YEAS blocks parse (10 third-reading passages + 1 emergency-clause adoption), zero failures - CONTROLLER RULING 1 ground truth', () => {
-  assert.equal(day39.votes.length, 11);
-  assert.equal(day39.failures.length, 0);
+test('parseJournalVotes (Day 39, real fixture): CONTROLLER RULING 1 ground truth is 11 YEAS blocks total (10 third-reading passages + 1 emergency-clause adoption) - but code review fix round 1 (finding 2) routes the bill-less emergency-clause block to `failures`, so votes.length is 10, not 11', () => {
+  assert.equal(day39.votes.length, 10);
+  assert.equal(day39.failures.length, 1);
+  assert.equal(day39.votes.length + day39.failures.length, 11, 'the 11-block ground truth still accounts for every parsed block, split across votes/failures');
 });
 
-test('parseJournalVotes (Day 39, real fixture): every block reconciles', () => {
+test('parseJournalVotes (Day 39, real fixture): every returned vote reconciles', () => {
   for (const v of day39.votes) {
     assert.equal(v.yeas.length, v.tallies.yeas, `block ${v.ordinal} yeas`);
     assert.equal(v.nays.length, v.tallies.nays, `block ${v.ordinal} nays`);
@@ -137,12 +191,14 @@ test('parseJournalVotes (Day 39, real fixture): every block reconciles', () => {
   }
 });
 
-test('parseJournalVotes (Day 39, real fixture): the emergency-clause adoption block has NO bill reference (motion text names no bill at all) but still reconciles', () => {
-  const block = day39.votes.find((v) => /emergency clause/i.test(v.motion));
-  assert.ok(block, 'expected an emergency-clause block');
-  assert.equal(block.motion, 'The emergency clause was adopted by the following vote:');
-  assert.deepEqual(block.bill_refs, []);
-  assert.equal(block.tallies.yeas, 33);
+test('parseJournalVotes (Day 39, real fixture): CODE REVIEW FIX ROUND 1 (finding 2) - the emergency-clause adoption block has NO bill reference in its own motion text, so it is diverted into `failures` (typed, reviewable) instead of being silently stored as an unattributed vote', () => {
+  const failure = day39.failures.find((f) => f.ordinal === 9);
+  assert.ok(failure, 'expected the emergency-clause block (ordinal 9) to be a failure');
+  assert.ok(failure instanceof JournalParseError);
+  assert.equal(failure.category, 'bill_refs');
+  assert.equal(failure.reason, 'no bill reference found in motion - needs human review');
+  assert.equal(failure.motion, 'The emergency clause was adopted by the following vote:');
+  assert.ok(!day39.votes.some((v) => /emergency clause/i.test(v.motion)), 'the emergency-clause block must not appear in votes at all');
 });
 
 test('parseJournalVotes (Day 39, real fixture): a 3-bill combined vehicle with an Oxford comma ("SBs 907, 1154, and 1272")', () => {
@@ -212,6 +268,45 @@ test('parseJournalVotes: the anchor phrase tolerates an internal line-wrap (CONT
   assert.equal(failures.length, 0);
   assert.equal(votes.length, 1);
   assert.equal(votes[0].motion, 'On motion of Senator Test, SB 100 was read the 3rd time and passed by the following vote:');
+});
+
+// ---- code review fix round 1, finding 2: extractMotionSentence's period-boundary heuristic +
+// the zero-bill-refs-fails-loud gate ----
+
+test('parseJournalVotes: a motion sentence with an internal period BEFORE the bill reference (simulating an abbreviated title extractMotionSentence has no defense against) still yields the CORRECT bill_refs - truncation only drops the sentence prefix, never the reference itself, because the reference sits after the false boundary', () => {
+  // "Sen." here plays the role of a hypothetical dotted abbreviation - never observed in either
+  // real fixture (both spell "Senator" in full in every motion, and bill-description prose uses
+  // "RSMo," with a comma, never a period) but exercised here as the documented edge case.
+  const text = 'Was taken up. On motion of Sen. Test, SB 400 was read the 3rd time and passed by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  assert.equal(failures.length, 0);
+  assert.equal(votes.length, 1);
+  // The internal period DOES truncate `motion` (it starts after "Sen." instead of "On motion of
+  // Sen.") - proving the boundary heuristic is imperfect, exactly as finding 2 describes - but
+  // bill_refs is still correct because "SB 400" appears after the false boundary, not before it.
+  assert.equal(votes[0].motion, 'Test, SB 400 was read the 3rd time and passed by the following vote:');
+  assert.deepEqual(votes[0].bill_refs, ['SB 400']);
+});
+
+test('parseJournalVotes: a genuinely bill-less motion (no bill token anywhere in the sentence) is diverted to `failures` with the human-review reason, never silently stored as an unattributed vote - the load-bearing half of finding 2\'s fix', () => {
+  const text = 'The President declared the bill passed. The Senate observed a moment of silence, and by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  assert.equal(votes.length, 0);
+  assert.equal(failures.length, 1);
+  assert.ok(failures[0] instanceof JournalParseError);
+  assert.equal(failures[0].category, 'bill_refs');
+  assert.equal(failures[0].reason, 'no bill reference found in motion - needs human review');
+  assert.match(failures[0].message, /no bill reference found in motion/);
 });
 
 test('parseJournalVotes: a "—None" printed for every non-YEAS category parses as empty arrays / zero counts, never throws', () => {

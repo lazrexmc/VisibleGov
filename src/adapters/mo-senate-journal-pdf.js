@@ -72,17 +72,64 @@ function reconstructPageText(items) {
 // parseJournalVotes never has to reason about page boundaries at all.
 const PAGE_NUMBER_ONLY_RE = /^\d+$/;
 const JOURNAL_HEADER_RE = /Journal of the Senate/i;
-const DAY_HEADER_RE = /\b[A-Za-z-]+\s+Day[—-]\s*[A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s*\d{4}\b/i;
+// BUG FOUND WHILE ADDING THE FIX-ROUND-1 FINDING-1 TESTS: the 2026 fixture's day-header style puts
+// a SPACE before the hyphen ('Thirty-Ninth Day - Wednesday, March 25, 2026'), unlike the 2018
+// fixture's em-dash-tight style ('THIRTY-SEVENTH DAY—THURSDAY, MARCH 8, 2018'). The original
+// pattern required the dash immediately after 'Day' with no space, so it silently failed to match
+// the 2026 style at all - never caught earlier because no vote block in either real fixture
+// happens to page-break next to a 2026-style header. Caught only once a synthetic test exercised
+// that exact shape directly. Fixed with 'Day\s*[—-]' (optional whitespace before the dash).
+const DAY_HEADER_RE = /\b[A-Za-z-]+\s+Day\s*[—-]\s*[A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s*\d{4}\b/i;
 
-function stripPageChrome(text) {
-  return text
-    .split('\n')
-    .filter((line) => {
+// INVARIANT (code review fix round 1, finding 1): chrome stripping must be PROVABLY UNABLE to
+// match vote content. JOURNAL_HEADER_RE and DAY_HEADER_RE are safe unconditionally - their literal
+// text ('Journal of the Senate', the '<Ordinal> Day<dash><Weekday>, <Month> <D>, <Year>' shape)
+// never appears in a category name-list or tally. PAGE_NUMBER_ONLY_RE is NOT safe unconditionally:
+// a bare digits-only line is exactly the shape a category's own printed count would take if a page
+// break ever isolated it onto its own reconstructed row (the same failure class already fixed for
+// name lists in Day 37 block 4 - not observed for a COUNT digit in either real fixture, but the
+// risk is structurally identical and undetectable by the reconcile gate if it silently overshoot to
+// a LATER em-dash+digit instead). So a bare digits-only line is stripped ONLY when its nearest
+// non-blank neighbor (checked on BOTH sides, skipping blank page-join lines) is itself a
+// JOURNAL_HEADER_RE or DAY_HEADER_RE match - i.e. only when it is provably page-footer/header
+// chrome, never a lone digit sitting between ordinary content. Verified empirically: the only two
+// bare-digit-only lines across both real fixtures ('587' in Day 37, '772' in Day 39) each have
+// exactly this adjacency (a 'Journal of the Senate' / day-header line as their next non-blank
+// neighbor) - see task-4-report.md "Fix round 1" for the exact context dump. An isolated digit
+// found WITHOUT that adjacency is left in place; if it truly is unrecognized chrome, the reconcile
+// gate below will fail loud on it (a wrong parsed count) rather than this function silently
+// deciding it was safe to discard.
+function nearestNonBlankIndex(lines, start, step) {
+  let i = start + step;
+  while (i >= 0 && i < lines.length) {
+    if (lines[i].trim() !== '') return i;
+    i += step;
+  }
+  return -1;
+}
+
+function isKnownChromeHeaderLine(line) {
+  const trimmed = line.trim();
+  return JOURNAL_HEADER_RE.test(trimmed) || DAY_HEADER_RE.test(trimmed);
+}
+
+// Exported (beyond Task 4's original interface list, same "strictly additive, low-risk export"
+// justification as extractBillRefs) so its adjacency behavior is directly unit-testable without
+// needing a real PDF to synthesize the page-boundary shapes under test.
+export function stripPageChrome(text) {
+  const lines = text.split('\n');
+  return lines
+    .filter((line, i) => {
       const trimmed = line.trim();
       if (trimmed === '') return true; // blank lines are page/paragraph separators, not chrome
-      if (PAGE_NUMBER_ONLY_RE.test(trimmed)) return false;
-      if (JOURNAL_HEADER_RE.test(trimmed)) return false;
-      if (DAY_HEADER_RE.test(trimmed)) return false;
+      if (isKnownChromeHeaderLine(line)) return false;
+      if (PAGE_NUMBER_ONLY_RE.test(trimmed)) {
+        const prevIdx = nearestNonBlankIndex(lines, i, -1);
+        const nextIdx = nearestNonBlankIndex(lines, i, 1);
+        const prevIsChrome = prevIdx !== -1 && isKnownChromeHeaderLine(lines[prevIdx]);
+        const nextIsChrome = nextIdx !== -1 && isKnownChromeHeaderLine(lines[nextIdx]);
+        return !(prevIsChrome || nextIsChrome);
+      }
       return true;
     })
     .join('\n');
@@ -120,9 +167,23 @@ const ANCHOR_RE = /by\s+the\s+following\s+vote\s*:/gi;
 // The sentence immediately preceding a vote's anchor is always the motion sentence (verified
 // against every block in both real fixtures: 'Was taken up[ by Senator X].' or '...bill passed.'
 // always immediately precedes 'On motion of Senator X, ...' or 'The emergency clause was...').
-// Sentence boundary = the nearest '.' before the anchor; internal periods (bill-description prose
-// earlier in the same paragraph, e.g. 'RSMo.') are never closer to the anchor than that boundary
-// because the motion sentence is always the FIRST thing after the previous sentence's period.
+// Sentence boundary = the nearest '.' before the anchor.
+//
+// CODE REVIEW FIX ROUND 1 (finding 2): this boundary has no gate against an internal period
+// WITHIN the true motion sentence (e.g. an abbreviated title before a name) truncating `motion` to
+// start later than it should. Checked empirically for a real risk pattern first: bill-description
+// prose in both real fixtures spells out 'RSMo,' with a COMMA, never a period ('RSMo.') - an
+// earlier draft of this comment claimed otherwise and was wrong; corrected here. No real dotted
+// token was found immediately preceding any of the 24 real motion sentences (13 + 11 across both
+// fixtures), so there is nothing concrete to special-case defensively without guessing at a
+// pattern that doesn't exist in evidence. The actual protection is downstream, not here: a
+// truncated/mis-bounded motion is only dangerous if it produces WRONG bill_refs, and the
+// zero-bill-refs gate in parseVoteBlock below converts "no bill reference extracted" (whether from
+// truncation or a genuinely bill-less sentence) into a typed failure for human review rather than
+// a silently-stored vote - see that gate's comment for why this, not a speculative regex here, is
+// the load-bearing fix. (Tested: a synthetic internal period BEFORE a bill reference still yields
+// the correct bill_refs, because truncation only drops the SENTENCE PREFIX - see
+// tests/mo-senate-journal-pdf.test.js.)
 function extractMotionSentence(text, anchorStart, anchorEnd) {
   const periodIdx = text.lastIndexOf('.', anchorStart - 1);
   const start = periodIdx === -1 ? 0 : periodIdx + 1;
@@ -167,6 +228,16 @@ export function extractBillRefs(motion) {
 // includes '-' so a hyphenated surname stays one token; it never collides with the trailing
 // em-dash+count terminator because that terminator requires a DIGIT immediately after the dash,
 // which never follows a hyphen inside a surname.
+//
+// KNOWN GAP (carried forward from mo-rollcall-pdf.js's CAST_RE comment, minor code-review note):
+// a genuine two-WORD surname printed with a plain space (no hyphen) - e.g. that file's real
+// FOUNTAIN HENDERS / WALSH MOORE - would tokenize here as two separate single-word names, same as
+// the House parser's documented gap. Not observed in either MO Senate fixture (every Senate
+// surname in both Day 37 and Day 39 is one word, optionally hyphenated or district-suffixed), but
+// not mechanically distinguishable from "two consecutive ordinary surnames" without a name
+// dictionary this codebase deliberately doesn't have - if a future Senate journal prints one, it
+// would silently miscount that category by one extra token and fail the reconcile gate loudly
+// (never silently succeed), consistent with this file's fail-loud posture elsewhere.
 const NAME_TOKEN_RE = /([A-Za-z][A-Za-z'-]*)(?:\s*\((\d+)\))?/g;
 
 function extractNameTokens(raw) {
@@ -249,7 +320,36 @@ function extractVacancies(blockText, cursor, ordinal) {
   return m[1] === 'None' ? 0 : Number(m[1]);
 }
 
+// CODE REVIEW FIX ROUND 1 (finding 2, load-bearing): bill_refs is what ties a parsed vote to the
+// actual bill - it must never be silently wrong or silently absent, because nothing downstream can
+// recover the correct bill from a vote_casts row alone. A block whose motion mechanically yields
+// ZERO bill references (whether from a genuinely bill-less motion sentence, like Day 39's real
+// emergency-clause-adoption block, or from any future extractMotionSentence boundary mistake that
+// truncates past the reference) is therefore diverted into `failures` - a typed, reviewable
+// failure - rather than ever landing in `votes` as an unattributed vote. This is a deliberate
+// product trade-off, not an accident: the ONE real bill-less block across both fixtures (Day 39's
+// emergency-clause adoption, procedurally tied to the immediately preceding SB 1421 passage but
+// not itself naming a bill) now surfaces as a failure for a human to attribute, instead of being
+// silently stored with no bill_refs at all. If genuinely bill-less procedural roll calls turn out
+// to be common, that failure pattern is the signal to revisit this rule - not a reason to guess.
+function requireBillRefs(motion, ordinal) {
+  const bill_refs = extractBillRefs(motion);
+  if (bill_refs.length === 0) {
+    throw new JournalParseError(
+      `block ${ordinal}: no bill reference found in motion - needs human review`,
+      {
+        ordinal,
+        category: 'bill_refs',
+        reason: 'no bill reference found in motion - needs human review',
+        motion,
+      },
+    );
+  }
+  return bill_refs;
+}
+
 function parseVoteBlock(blockText, ordinal, motion) {
+  const bill_refs = requireBillRefs(motion, ordinal);
   const yeas = requireCategory(blockText, 0, 'yeas', ordinal);
   const nays = requireCategory(blockText, yeas.matchEnd, 'nays', ordinal);
   const absent = requireCategory(blockText, nays.matchEnd, 'absent', ordinal);
@@ -258,7 +358,7 @@ function parseVoteBlock(blockText, ordinal, motion) {
   return {
     ordinal,
     motion,
-    bill_refs: extractBillRefs(motion),
+    bill_refs,
     yeas: yeas.names,
     nays: nays.names,
     absent: absent.names,
