@@ -700,6 +700,42 @@ test('GET /api/glossary/queue returns items with term/kind/citation/needs_mappin
   }, client);
 });
 
+// ---- trust model v3 mechanism 2 (auto-publish-glossary CLI): 'published' rows must stay
+// queryable through /api/glossary/queue — the review page needs them for its published-count and
+// sample-for-audit view, even though clean drafts now leave the review page entirely on their own ----
+
+test('GET /api/glossary/queue queries glossary_terms with status in (draft, stale, approved, published)', () => {
+  const calls = [];
+  const client = fakeClient(
+    { glossary_terms: { data: [], error: null } },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    await fetch(`${base}/api/glossary/queue`);
+    const statusFilter = calls.find((c) => c.table === 'glossary_terms' && c.method === 'in' && c.args[0] === 'status');
+    assert.ok(statusFilter, 'expected a glossary_terms .in("status", [...]) call');
+    assert.deepEqual(statusFilter.args[1].slice().sort(), ['approved', 'draft', 'published', 'stale']);
+  }, client);
+});
+
+test('GET /api/glossary/queue includes a published-status row (not just draft/stale/approved)', () => {
+  const client = fakeClient({
+    glossary_terms: {
+      data: [{ id: 't1', term: 'X', kind: 'statute', citation: 'y', needs_mapping: false, gloss_md: 'g', status: 'published', created_at: '2026-01-01T00:00:00Z' }],
+      error: null,
+    },
+    glossary_verifications: { data: [], error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const pub = body.items.find((it) => it.id === 't1');
+    assert.ok(pub, 'published row must appear in the glossary queue response');
+    assert.equal(pub.status, 'published');
+  }, client);
+});
+
 test('GET /api/glossary/queue degrades verified:"unverified" (not 500) when glossary_verifications is missing', () => {
   const client = fakeClient({
     glossary_terms: {

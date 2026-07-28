@@ -28,6 +28,15 @@ const TRANSITIONS = {
 // publishing" — all three belong in the working queue.
 const QUEUE_STATUSES = ['draft', 'stale', 'approved'];
 
+// Trust model v3 mechanism 2 (auto-publish-glossary CLI, src/cli/auto-publish-glossary.js): clean,
+// verified glossary drafts now move all the way to 'published' with zero human touch, so the
+// glossary review page's job shifted from "review everything actionable" to "surface what the
+// pipeline could NOT auto-handle, plus reachable context" — flagged items (the real queue),
+// needs_mapping/no-gloss stubs, and a published count + sample pool for Lance's spot-audit role.
+// 'published' has to be queryable here for that last part; summaries have no equivalent auto-path
+// (yet — see the v3 design doc's open decision 4), so QUEUE_STATUSES above stays untouched.
+const GLOSSARY_QUEUE_STATUSES = ['draft', 'stale', 'approved', 'published'];
+
 export function nextStatus(current, action) {
   const next = TRANSITIONS[current] && TRANSITIONS[current][action];
   if (!next) throw new Error('illegal transition');
@@ -433,7 +442,7 @@ async function handleGlossaryQueue(client, res) {
     const { data, error } = await client
       .from('glossary_terms')
       .select('id,term,kind,citation,needs_mapping,gloss_md,status,created_at')
-      .in('status', QUEUE_STATUSES)
+      .in('status', GLOSSARY_QUEUE_STATUSES)
       .order('created_at', { ascending: true });
     if (error) {
       if (isMissingRelationError(error, 'glossary_terms')) {
