@@ -92,6 +92,42 @@ async function loadAllTerms(client, dryRun) {
   return { terms: data ?? [], tableMissing: false };
 }
 
+// persistGloss: the two dependent writes for a completed gloss, and ONLY those two writes —
+// deliberately factored out of glossOne so this write ORDER (and its effect on retry eligibility)
+// is unit-testable with a fake `client` alone, no model/network faking required.
+//
+// Fix round 2 (Important review finding): glossary_verifications is written FIRST, glossary_terms
+// SECOND — the reverse of this task's original order. Mirrors extract-terms.js's self-healing
+// pattern, where retry eligibility (planExtraction) is keyed off the LAST of its two writes
+// (summary_terms), not the first. planGlossing (below) keys `alreadyGlossed` off
+// glossary_terms.gloss_md alone; under the ORIGINAL order (glossary_terms updated before
+// glossary_verifications inserted), a transient failure on the second write would leave gloss_md
+// already committed with NO backing glossary_verifications row — planGlossing would then route
+// that term to alreadyGlossed forever, a permanently ungrounded gloss that no future run would
+// ever retry (cuts against trust-model v2's audit trail). With verifications written first,
+// gloss_md can only ever become non-null once its verification row already exists — so a term
+// stays retry-eligible (gloss_md still null) for as long as EITHER write hasn't succeeded, the
+// same shape extract-terms.js already has. See tests/gloss-cli.test.js for the failure-then-retry
+// proof.
+export async function persistGloss(client, runId, term, { glossMd, supportedByQuote, sourceUrl, sourceHash, verdicts, overall }) {
+  const { error: verErr } = await client.from(GLOSSARY_VERIFICATIONS_TABLE).insert({
+    term_id: term.id, verdicts, overall,
+    model: GLOSS_VERIFIER_MODEL, prompt_version: GLOSS_VERIFY_PROMPT_VERSION,
+  });
+  if (verErr) throw new Error(`${GLOSSARY_VERIFICATIONS_TABLE} insert failed for term ${term.id}: ${verErr.message}`);
+
+  // supported_by_quote (fix round 2, promoted Minor review finding): the author model's claimed
+  // supporting quote from the source excerpt, persisted alongside gloss_md for display at review
+  // time — previously part of GLOSS_SCHEMA's required output but never written anywhere (dead
+  // output). Deliberately NOT added to migration 0007's published-completeness CHECK: it always
+  // co-arrives with gloss_md in this same update, so a separate gate on it would be redundant.
+  const { error: updErr } = await client.from(GLOSSARY_TERMS_TABLE).update({
+    gloss_md: glossMd, supported_by_quote: supportedByQuote, source_url: sourceUrl, source_hash: sourceHash,
+    model: MODEL, prompt_version: PROMPT_VERSION, run_id: runId,
+  }).eq('id', term.id);
+  if (updErr) throw new Error(`${GLOSSARY_TERMS_TABLE} update failed for term ${term.id}: ${updErr.message}`);
+}
+
 async function glossOne(client, runId, term, anthropic) {
   const { url, excerptText, hash } = await fetchGlossSource(term.citation);
   const { json: glossJson } = await authorGloss(anthropic, { term: term.term, excerptText });
@@ -110,17 +146,10 @@ async function glossOne(client, runId, term, anthropic) {
     );
   }
 
-  const { error: updErr } = await client.from(GLOSSARY_TERMS_TABLE).update({
-    gloss_md: glossJson.gloss_md, source_url: url, source_hash: hash,
-    model: MODEL, prompt_version: PROMPT_VERSION, run_id: runId,
-  }).eq('id', term.id);
-  if (updErr) throw new Error(`${GLOSSARY_TERMS_TABLE} update failed for term ${term.id}: ${updErr.message}`);
-
-  const { error: verErr } = await client.from(GLOSSARY_VERIFICATIONS_TABLE).insert({
-    term_id: term.id, verdicts: verifyJson.verdicts, overall,
-    model: GLOSS_VERIFIER_MODEL, prompt_version: GLOSS_VERIFY_PROMPT_VERSION,
+  await persistGloss(client, runId, term, {
+    glossMd: glossJson.gloss_md, supportedByQuote: glossJson.supported_by_quote,
+    sourceUrl: url, sourceHash: hash, verdicts: verifyJson.verdicts, overall,
   });
-  if (verErr) throw new Error(`${GLOSSARY_VERIFICATIONS_TABLE} insert failed for term ${term.id}: ${verErr.message}`);
 
   return { overall };
 }

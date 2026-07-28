@@ -21,6 +21,14 @@ create table glossary_terms (
   kind           text not null check (kind in ('statute','act','agency','program','public_law')),
   citation       text,                       -- normalized cite, e.g. '42 U.S.C. 1396b'
   gloss_md       text,                       -- the 1-2 sentence plain-language explanation
+  -- Fix round 2 (Task 5 review, promoted Minor finding): the author model's claimed supporting
+  -- quote from the source excerpt (GLOSS_SCHEMA.supported_by_quote in glosser.js) — displayed
+  -- alongside gloss_md at review time so a human adjudicator can check the quote against the
+  -- gloss without re-opening the source. Nullable like gloss_md itself (co-arrives with it, same
+  -- Task-4-stub-then-Task-5-fills-in lifecycle) and deliberately NOT part of the
+  -- glossary_terms_published_complete check below — it always co-arrives with gloss_md in the
+  -- same write, so a separate gate on it would be redundant.
+  supported_by_quote text,
   -- Nullable, NOT "not null": Task 4 inserts a bare STUB row here the moment a bill references a
   -- term (term/kind/citation only, status='draft') — it has no source to cite yet. Task 5's gloss
   -- stage is what fetches the term's primary text and fills these in (alongside gloss_md). A
