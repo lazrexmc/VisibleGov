@@ -23,10 +23,10 @@ export { normalizeTermText, upsertKeyFor, normalizeCitation };
 // able to version independently.
 export const EXTRACT_MODEL = 'claude-sonnet-5';
 export const EXTRACT_PROMPT_VERSION = 'v1';
-// Matches summarizer.js's MAX_OUTPUT_TOKENS: the original 4000 "tiny output" assumption did not
-// survive contact with reference-dense bills — 4 of the first 25 live extractions (HCONRES 113,
-// HR 6955, HR 9770, HR 8595) hit the cap on sonnet-5's thinking + a long referenced_terms list.
-export const EXTRACT_MAX_OUTPUT_TOKENS = 16000;
+// The original 4000 "tiny output" assumption did not survive contact with reference-dense bills:
+// 4 of the first 25 live extractions truncated at 4k, and HR 8595 truncated again at 16k. 32k
+// matches verifier.js's cap and, like it, requires the streaming call path below.
+export const EXTRACT_MAX_OUTPUT_TOKENS = 32000;
 export const EXTRACT_COST_PER_SUMMARY_USD = 0.03; // per the plan's own estimate (~25 x ~$0.03 ~= $0.75)
 
 // Mirrors SUMMARY_SCHEMA's referenced_terms shape by REFERENCE (controller ruling 1: "JSON-schema
@@ -66,13 +66,17 @@ export async function extractTerms(client, { identifier, title, text }) {
   if (text.length > MAX_TEXT_CHARS) {
     throw new OversizeTextError(`bill text ${text.length} chars exceeds ${MAX_TEXT_CHARS}; will not truncate silently`, { identifier, length: text.length });
   }
-  const response = await client.messages.create({
+  // Streaming + finalMessage, not create(): at 32k max_tokens a non-streaming request can outlive
+  // the HTTP timeout on reference-dense bills (verifier.js hit exactly this at its 32k cap and
+  // established the pattern; HR 8595 forced the same escalation here after truncating at 16k).
+  const stream = client.messages.stream({
     model: EXTRACT_MODEL,
     max_tokens: EXTRACT_MAX_OUTPUT_TOKENS,
     system: EXTRACT_SYSTEM_PROMPT,
     output_config: { format: { type: 'json_schema', schema: EXTRACTION_SCHEMA } },
     messages: [{ role: 'user', content: buildExtractUserMessage(identifier, title, text) }],
   });
+  const response = await stream.finalMessage();
   if (response.stop_reason === 'refusal') {
     throw new SummaryRefusedError(`model declined to extract terms for ${identifier}`, { identifier });
   }
