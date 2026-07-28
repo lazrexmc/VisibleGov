@@ -45,6 +45,10 @@ export function parseMemberList(json) {
       party: m.partyName ?? null,
       chamber,
       district: m.district != null ? String(m.district) : null,
+      // Full state name as congress.gov returns it (e.g. 'Missouri'), not an abbreviation.
+      // Unused by the House delegation path; added for us-senate.js's ensureSenateMembers
+      // (Task 2), which needs it to match against Senate roll-call XML's 2-letter state codes.
+      state: m.state ?? null,
     };
   });
 }
@@ -118,5 +122,13 @@ export function fetchBillDetail(congress, typeSlug, number, limiter = congressLi
 
 export function fetchMemberList(stateCode, limiter = congressLimiter) {
   const url = `https://api.congress.gov/v3/member/${stateCode}?limit=250`;
+  return fetchWithLimit(url, { source: SOURCE, limiter, headers: apiKeyHeaders(), as: 'json' });
+}
+
+// Full-chamber paging (unfiltered by state) — used by us-senate.js's ensureSenateMembers
+// (Task 2) to build the whole current-Senate roster. Caller loops offset by 250 until a page
+// comes back shorter than the requested limit.
+export function fetchMemberPage(offset, limit = 250, limiter = congressLimiter) {
+  const url = `https://api.congress.gov/v3/member?limit=${limit}&offset=${offset}`;
   return fetchWithLimit(url, { source: SOURCE, limiter, headers: apiKeyHeaders(), as: 'json' });
 }
