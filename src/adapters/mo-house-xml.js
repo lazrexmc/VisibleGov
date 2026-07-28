@@ -133,13 +133,19 @@ function extractActionRollcalls(actions) {
     }));
 }
 
-// BillText > RollCalls > RollCall (schema doc: nested under a bill-text version) is the ONLY
-// place RollCallPDF/SessionDay/RollCallNumber live — but this element has no date or motion of
-// its own. The two roll-call representations are joined below by exact tally match.
-function extractPdfRollcalls(billTexts) {
+// BillText > RollCalls > RollCall AND Amendment > RollCalls > RollCall (schema doc,
+// xml-bill-exports-schema-doc.html lines ~111-137 for Amendment and ~158-169 for BillText —
+// both document the IDENTICAL child shape: RollCallPDF/SessionDay/RollCallNumber/TotalYes/
+// TotalNo/TotalPresent) are the ONLY places RollCallPDF/SessionDay/RollCallNumber live — but
+// neither element has a date or motion of its own. No real captured research fixture contains
+// an Amendment-level RollCall (only BillText-level, on HB1800); that path is covered by a
+// schema-derived synthetic fixture in tests/mo-house-xml.test.js, not a live capture. The two
+// roll-call representations (this pool + the Action-level aggregate) are joined below by exact
+// tally match.
+function extractPdfRollcallsFrom(nodes) {
   const out = [];
-  for (const bt of billTexts) {
-    for (const rc of asArray(bt.RollCalls?.RollCall)) {
+  for (const node of nodes) {
+    for (const rc of asArray(node.RollCalls?.RollCall)) {
       out.push({
         yes: Number(rc.TotalYes ?? 0),
         no: Number(rc.TotalNo ?? 0),
@@ -182,6 +188,7 @@ export function parseMoBillXml(xmlString) {
   const billNumber = trimmedString(info.BillNumber);
   const actions = asArray(info.Action);
   const billTexts = asArray(info.BillText);
+  const amendments = asArray(info.Amendment);
   const sponsors = asArray(info.Sponsor);
   const sponsor = sponsors.find((s) => s.SponsorType === 'Sponsor') ?? sponsors[0] ?? null;
   // Every Action.Link for a given bill points to the same house.mo.gov bill page (verified
@@ -189,7 +196,13 @@ export function parseMoBillXml(xmlString) {
   // canonical URL rather than trying to pick a "best" action.
   const canonicalUrl = actions[0]?.Link ? trimmedString(actions[0].Link) : null;
 
-  const rollcalls = joinRollcalls(extractActionRollcalls(actions), extractPdfRollcalls(billTexts));
+  // The pdf-rollcall pool draws from BOTH BillText and Amendment elements — ordinal numbering
+  // (buildMoVoteRows) is driven entirely by actionRollcalls' own document order (ActivitySequence
+  // ascending), which is unaffected by which pool a PDF match came from, so "the ordinal
+  // continues across both locations in document order" falls out naturally from the join
+  // direction (action-level is primary; BillText/Amendment only enrich it with a PDF link).
+  const pdfRollcalls = [...extractPdfRollcallsFrom(billTexts), ...extractPdfRollcallsFrom(amendments)];
+  const rollcalls = joinRollcalls(extractActionRollcalls(actions), pdfRollcalls);
 
   return {
     bill: {

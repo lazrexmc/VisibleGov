@@ -6,7 +6,7 @@ import {
   normalizeMoBillIdentifier, parseMoBillList, parseMoMemberList, parseMoRepresentative,
   parseMoBillXml, joinRollcalls, buildMoVoteRows,
 } from '../src/adapters/mo-house-xml.js';
-import { parseMoHouseArgs } from '../src/cli/ingest-mo-house.js';
+import { parseMoHouseArgs, remainingCooldownMs, formatCooldownWait, selectTargets } from '../src/cli/ingest-mo-house.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
 const billListXml = readFileSync(`${FIXTURES}/bill-list-sample-truncated.xml`, 'utf8');
@@ -133,6 +133,50 @@ test('parseMoBillXml (HB2): a bill with no roll calls and a single non-array Act
   assert.equal(rollcalls.length, 0);
 });
 
+// SCHEMA-DERIVED SYNTHETIC FIXTURE — NOT a real capture. Built directly from
+// xml-bill-exports-schema-doc.html's documented Amendment > RollCalls > RollCall shape
+// (lines ~111-137), which the schema doc describes as identical in shape to BillText's
+// RollCalls > RollCall (already verified against the real HB1800 fixture: RollCallPDF,
+// SessionDay, RollCallNumber, TotalYes, TotalNo, TotalPresent). No real captured research
+// fixture contains an Amendment-level RollCall — this exists purely to cover the documented
+// (but unobserved-in-the-wild) code path added for the durable-cooldown/amendment-rollcall fix.
+const syntheticAmendmentRollCallXml = '<ROOT><BillInformation>'
+  + '<BillNumber>HB9999</BillNumber>'
+  + '<Title><ShortTitle>SYNTHETIC</ShortTitle><LongTitle>Synthetic bill for schema-derived Amendment RollCall coverage</LongTitle></Title>'
+  + '<LastAction>synthetic</LastAction>'
+  + '<Action><Link>https://house.mo.gov/bill.aspx?bill=HB9999&amp;year=2026&amp;code=R</Link>'
+  + '<Description>Adopted Amendment (H)</Description><Guid>1</Guid><ActivitySequence>100</ActivitySequence>'
+  + '<PubDate>2026-04-01</PubDate>'
+  + '<RollCall><TotalYes>90</TotalYes><TotalNo>50</TotalNo><TotalPresent>1</TotalPresent></RollCall></Action>'
+  + '<Amendment><AmendmentText>https://documents.house.mo.gov/billtracking/bills261/amendpdf/9999H01.01H.pdf</AmendmentText>'
+  + '<LRNumber>9999H01.01H</LRNumber><Status>A</Status><StatusDescription>Adopted</StatusDescription>'
+  + '<AmendmentDescription>HA 1</AmendmentDescription><Sponsor>Synthetic Sponsor</Sponsor>'
+  + '<RollCalls><RollCall><RollCallPDF>https://documents.house.mo.gov/billtracking/bills261/rollcalls/099.001.pdf</RollCallPDF>'
+  + '<SessionDay>99</SessionDay><RollCallNumber>1</RollCallNumber>'
+  + '<TotalYes>90</TotalYes><TotalNo>50</TotalNo><TotalPresent>1</TotalPresent></RollCall></RollCalls></Amendment>'
+  + '<Sponsor><SponsorType>Sponsor</SponsorType><FullName>Synthetic Sponsor</FullName><District>1</District></Sponsor>'
+  + '</BillInformation></ROOT>';
+
+test('parseMoBillXml matches an Amendment-level RollCalls > RollCall (schema-derived synthetic — no real capture has one)', () => {
+  const { rollcalls } = parseMoBillXml(syntheticAmendmentRollCallXml);
+  assert.equal(rollcalls.length, 1);
+  assert.equal(rollcalls[0].yes, 90);
+  assert.equal(rollcalls[0].no, 50);
+  assert.equal(rollcalls[0].present, 1);
+  assert.equal(rollcalls[0].pdf_url, 'https://documents.house.mo.gov/billtracking/bills261/rollcalls/099.001.pdf');
+  assert.equal(rollcalls[0].session_day, '99');
+  assert.equal(rollcalls[0].roll_call_number, '1');
+});
+
+test('buildMoVoteRows on the synthetic Amendment-rollcall bill yields a votes row carrying the amendment PDF as source_url', () => {
+  const parsed = parseMoBillXml(syntheticAmendmentRollCallXml);
+  const rows = buildMoVoteRows(parsed.bill.identifier, parsed.rollcalls);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source_key, 'mo-house-xml-HB9999-1');
+  assert.equal(rows[0].result, '90-50');
+  assert.equal(rows[0].source_url, 'https://documents.house.mo.gov/billtracking/bills261/rollcalls/099.001.pdf');
+});
+
 // ---- joinRollcalls (pure tally-matching helper) ----
 
 test('joinRollcalls attaches pdf_url only to the action-rollcall whose tallies match exactly', () => {
@@ -200,4 +244,55 @@ test('parseMoHouseArgs: --limit, --session, --bill, --bill-xml-file, --dry-run',
 
 test('parseMoHouseArgs rejects unknown flags', () => {
   assert.throws(() => parseMoHouseArgs(['--nope', '1']), /unknown flag/);
+});
+
+test('parseMoHouseArgs normalizes --bill (case/space-insensitive) through normalizeMoBillIdentifier', () => {
+  assert.equal(parseMoHouseArgs(['--bill', 'hb1800']).billIdentifier, 'HB 1800');
+  assert.equal(parseMoHouseArgs(['--bill', 'Hb1800']).billIdentifier, 'HB 1800');
+  assert.equal(parseMoHouseArgs(['--bill', 'HB 1800']).billIdentifier, 'HB 1800');
+  assert.equal(parseMoHouseArgs(['--bill', ' hb1800 ']).billIdentifier, 'HB 1800');
+});
+
+// ---- selectTargets (integration check: a lowercase/unspaced --bill still matches a
+// normalized bill-list entry, end to end) ----
+
+test('selectTargets matches --bill against the fetched list after normalization', () => {
+  const entries = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }, { identifier: 'HB 1800', bill_xml_url: 'https://x/HB1800.xml' }];
+  const args = parseMoHouseArgs(['--bill', 'hb1800']);
+  const targets = selectTargets(entries, args);
+  assert.deepEqual(targets, [{ identifier: 'HB 1800', bill_xml_url: 'https://x/HB1800.xml' }]);
+});
+
+// ---- durable cross-process ToU cooldown (pure helpers; the DB-querying wrapper
+// enforceDurableCooldown is exercised live, same convention as ingest.js's other
+// DB-touching collect/persist functions) ----
+
+test('remainingCooldownMs: 0 when there is no prior run', () => {
+  assert.equal(remainingCooldownMs(null, 30 * 60 * 1000), 0);
+  assert.equal(remainingCooldownMs(undefined, 30 * 60 * 1000), 0);
+});
+
+test('remainingCooldownMs: full interval when the prior run just started', () => {
+  const now = Date.parse('2026-07-28T05:00:00Z');
+  const lastStart = '2026-07-28T05:00:00Z';
+  assert.equal(remainingCooldownMs(lastStart, 30 * 60 * 1000, now), 30 * 60 * 1000);
+});
+
+test('remainingCooldownMs: partial wait when partway through the interval', () => {
+  const now = Date.parse('2026-07-28T05:04:00Z'); // 4 minutes after lastStart
+  const lastStart = '2026-07-28T05:00:00Z';
+  assert.equal(remainingCooldownMs(lastStart, 30 * 60 * 1000, now), 26 * 60 * 1000);
+});
+
+test('remainingCooldownMs: 0 once the interval has fully elapsed (never negative)', () => {
+  const now = Date.parse('2026-07-28T06:00:00Z'); // 60 minutes after lastStart
+  const lastStart = '2026-07-28T05:00:00Z';
+  assert.equal(remainingCooldownMs(lastStart, 30 * 60 * 1000, now), 0);
+});
+
+test('formatCooldownWait formats whole minutes and seconds, rounding up to the next second', () => {
+  assert.equal(formatCooldownWait(26 * 60 * 1000), '26m 0s');
+  assert.equal(formatCooldownWait(90 * 1000), '1m 30s');
+  assert.equal(formatCooldownWait(500), '0m 1s');
+  assert.equal(formatCooldownWait(0), '0m 0s');
 });

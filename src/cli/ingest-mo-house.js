@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import {
-  getClient, openRun, closeRun, insertIfAbsent, additivePatch, isMissingColumnError,
+  getClient, openRun, closeRun, insertIfAbsent, additivePatch, isMissingColumnError, isMissingRelationError,
 } from '../lib/db.js';
 import { SourceFetchError } from '../lib/errors.js';
 import * as mo from '../adapters/mo-house-xml.js';
@@ -11,7 +11,6 @@ import * as mo from '../adapters/mo-house-xml.js';
 // limiters) and a fetch-list-then-loop-per-item shape that doesn't fit ingest.js's existing
 // one-collect-call-per-source pattern without complicating it for every other source.
 
-const ROSTER_MEMBER_LIST_FIXTURE = 'tests/fixtures/research/mo-house-xml/member-list-sample-truncated.xml';
 const ROSTER_REPRESENTATIVE_FIXTURE = 'tests/fixtures/research/mo-house-xml/representative-107.xml';
 
 export function parseMoHouseArgs(argv) {
@@ -25,7 +24,10 @@ export function parseMoHouseArgs(argv) {
     const val = argv[i + 1];
     if (key === '--session') out.session = val;
     else if (key === '--limit') out.limit = Number(val);
-    else if (key === '--bill') out.billIdentifier = val;
+    // Normalized (case/space-insensitive) so '--bill hb1800', '--bill HB1800', and
+    // '--bill "HB 1800"' all resolve identically — matches entries[].identifier, which is
+    // always produced via the same normalizeMoBillIdentifier call (parseMoBillList).
+    else if (key === '--bill') out.billIdentifier = mo.normalizeMoBillIdentifier(val);
     else if (key === '--bill-xml-file') out.billXmlFile = val;
     else throw new Error(`unknown flag: ${key}`);
     i += 2;
@@ -59,6 +61,61 @@ export function selectTargets(entries, args) {
   // honest default for a first pass. A future overnight pass could prioritize bills not yet
   // enriched, once some detail has been fetched.
   return entries.slice(0, args.limit).map((e) => ({ identifier: e.identifier, bill_xml_url: e.bill_xml_url }));
+}
+
+// ---- durable, cross-process ToU cooldown ----
+//
+// moHouseLimiter (src/adapters/mo-house-xml.js) is an IN-MEMORY limiter: it only sequences
+// fetches within a single process's lifetime. Bug found in review: a real double-fetch
+// (~4 minutes apart) occurred when a second process (the controller's overnight driver) started
+// shortly after this process had already exited — the new process's limiter had zero memory of
+// the first process's fetch, so it fetched immediately, violating house.mo.gov's <=1 req/30min
+// ToU. ingestion_runs is the durable, cross-process-visible record of "was a fetch recently
+// made (or attempted)" — these two pure helpers plus enforceDurableCooldown below close that gap.
+
+// Pure + testable without a DB: given the most recent run's started_at (ISO string) and the
+// required minimum interval, how much longer must we wait (0 if the cooldown has elapsed, or if
+// there is no prior run at all).
+export function remainingCooldownMs(lastStartedAtIso, minIntervalMs, now = Date.now()) {
+  if (!lastStartedAtIso) return 0;
+  const elapsed = now - new Date(lastStartedAtIso).getTime();
+  return Math.max(0, minIntervalMs - elapsed);
+}
+
+export function formatCooldownWait(ms) {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}m ${secs}s`;
+}
+
+// Queries the most recent source='mo-house-xml' ingestion_runs row REGARDLESS of status —
+// an in-flight 'running' row (another process mid-fetch right now) must count too, not just a
+// closed 'succeeded'/'failed' one, or two processes starting within the same instant could both
+// pass the check. Waits out any remaining cooldown before returning; never aborts, never skips
+// the check silently (a lookup failure is a hard error, not a swallowed skip).
+//
+// KNOWN RESIDUAL GAP (documented honestly, not fixed here — see task-4-report.md): two processes
+// launched at the EXACT same instant could both query before either has inserted its own run
+// row, and both pass. This closes the SEQUENTIAL gap the review found (processes minutes apart
+// with no shared in-memory state) but is not a full distributed lock. Acceptable for a
+// single-operator overnight driver; would need real locking (e.g. a Postgres advisory lock) for
+// truly concurrent launches, which is out of scope for this fix.
+export async function enforceDurableCooldown(client, minIntervalMs = mo.MO_HOUSE_MIN_INTERVAL_MS) {
+  const { data, error } = await client
+    .from('ingestion_runs')
+    .select('started_at')
+    .eq('source', 'mo-house-xml')
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`mo-house cooldown lookup failed: ${error.message}`);
+  if (!data) return; // no prior run recorded for this source at all — nothing to wait for
+  const remaining = remainingCooldownMs(data.started_at, minIntervalMs);
+  if (remaining > 0) {
+    console.error(`[${new Date().toISOString()}] ToU cooldown: waiting ${formatCooldownWait(remaining)} (last fetch ${data.started_at})`);
+    await new Promise((r) => setTimeout(r, remaining));
+  }
 }
 
 // ---- persistence ----
@@ -127,10 +184,11 @@ async function persistBillDetail(client, runId, sessionRow, parsed) {
 }
 
 // Roster ingestion this task is FIXTURE-SOURCED, not live: the live budget for this task is
-// AT MOST ONE live fetch (the bill-list XML) per task-4-brief.md — a live MemberList.XML +
-// per-district RepresentativeXML fetch is a future overnight-loop pass, not this run. Exercises
-// the real mo_house_id migration-0005 gate against whatever the live DB schema actually is
-// right now (skip != empty: a missing column is reported honestly, never silently swallowed).
+// AT MOST ONE live fetch (the bill-list XML) per the controller dispatch — a live
+// MemberList.XML + per-district RepresentativeXML fetch is a future overnight-loop pass, not
+// this run. Exercises the real mo_house_id migration-0005 gate against whatever the live DB
+// schema actually is right now (skip != empty: a missing column is reported honestly, never
+// silently swallowed).
 async function persistRoster(client, runId) {
   const repXml = readFileSync(ROSTER_REPRESENTATIVE_FIXTURE, 'utf8');
   const roster = [mo.parseMoRepresentative(repXml)];
@@ -152,28 +210,96 @@ async function persistRoster(client, runId) {
   }
 }
 
+// --dry-run makes ZERO live fetches (fix: previously it still made the live bill-list fetch).
+// Reports from DB state only: how many bill stub rows already exist for this session, and how
+// many still need per-bill enrichment (title IS NULL is exactly the stub-vs-enriched signal
+// persistBillStubs/persistBillDetail already produce — no separate tracking needed).
+export async function dryRunReport(client, session) {
+  const { data: sessionRow, error: sessErr } = await client.from('sessions')
+    .select('id,identifier,name')
+    .eq('jurisdiction_id', 'mo-legislature').eq('identifier', session).maybeSingle();
+  if (sessErr) {
+    if (isMissingRelationError(sessErr, 'sessions')) {
+      return { counts: null, note: 'sessions table not found (migration not yet applied) — no DB state to report; zero live fetches made' };
+    }
+    throw new Error(`dry-run session lookup failed: ${sessErr.message}`);
+  }
+  if (!sessionRow) {
+    return {
+      counts: { bills_total: 0, bills_needing_enrichment: 0 },
+      note: `no sessions row yet for identifier=${session} (no live run has happened yet); counts come from the DB, not a live list — zero live fetches made`,
+    };
+  }
+  const { count: total, error: totalErr } = await client.from('bills')
+    .select('id', { count: 'exact', head: true }).eq('session_id', sessionRow.id);
+  if (totalErr) throw new Error(`dry-run bills count failed: ${totalErr.message}`);
+  const { count: needingEnrichment, error: needErr } = await client.from('bills')
+    .select('id', { count: 'exact', head: true }).eq('session_id', sessionRow.id).is('title', null);
+  if (needErr) throw new Error(`dry-run bills-needing-enrichment count failed: ${needErr.message}`);
+  return {
+    counts: { bills_total: total ?? 0, bills_needing_enrichment: needingEnrichment ?? 0 },
+    note: 'counts computed from DB state only — zero live fetches made this invocation, per --dry-run',
+  };
+}
+
 // ---- main ----
 
 async function main() {
   const args = parseMoHouseArgs(process.argv.slice(2));
+  // Fetched even under --dry-run's early-return branch is now GONE (fix): the client is needed
+  // either way (dry-run reads DB state; live reads+writes), but no live fetch happens before we
+  // know which branch we're in.
+  const client = getClient();
 
-  // The one mandatory live request this task's brief specifies: "(1) the current-session
-  // bill-list XML (one request — it is a bulk export listing all bills)". Made unconditionally
-  // (even under --dry-run) so --dry-run still reports real, honest counts instead of an empty
-  // stub — mirrors src/cli/ingest.js's us-senate --dry-run precedent of still doing real reads.
-  const listXml = await mo.fetchMoBillList(args.session);
-  console.error(`[${new Date().toISOString()}] fetched bill-list XML (session ${args.session})`);
-  const entries = mo.parseMoBillList(listXml);
-  const targets = selectTargets(entries, args);
-
-  const client = args.dryRun ? null : getClient();
-  if (!client) {
-    console.log(JSON.stringify({ mode: 'dry-run', source: 'mo-house-xml', counts: { bills_listed: entries.length, targets: targets.length } }, null, 2));
+  if (args.dryRun) {
+    if (!client) {
+      console.log(JSON.stringify({
+        mode: 'dry-run', source: 'mo-house-xml', counts: null,
+        note: 'no DB client configured (SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY unset) — cannot report DB state; zero live fetches made',
+      }, null, 2));
+      return;
+    }
+    const report = await dryRunReport(client, args.session);
+    console.log(JSON.stringify({ mode: 'dry-run', source: 'mo-house-xml', ...report }, null, 2));
     return;
   }
 
+  if (!client) {
+    console.log(JSON.stringify({ mode: 'blocked', reason: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set' }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
+  // Cross-process durable cooldown check happens BEFORE we even open our own run row — see
+  // enforceDurableCooldown's own comment block for why (an in-flight row must be visible).
+  await enforceDurableCooldown(client);
+
+  // openRun is now called BEFORE the bill-list fetch (previously it was called AFTER — the bug
+  // the review caught: a run row that only appears once a fetch already happened is invisible
+  // to another process's cooldown check for as long as the fetch takes). Its started_at
+  // (schema default now() at INSERT time) is therefore a close proxy for "when this process's
+  // first house.mo.gov request happened" — safe because: (1) it's durable and
+  // cross-process-visible, unlike moHouseLimiter's in-memory state; (2) if anything fails between
+  // this insert and the actual fetch, the cooldown still counts it — conservative, better to
+  // over-wait than risk violating the ToU; (3) it reflects FETCH time, not run-CLOSE time —
+  // using finished_at instead would be wrong, since a run that loops over several per-bill
+  // fetches can stay open far longer than any single fetch, which would make a next run's
+  // cooldown check under-wait if it referenced finished_at.
+  //
+  // KNOWN RESIDUAL GAP: within a single process making MULTIPLE live fetches (--limit > 1, no
+  // --bill-xml-file), only the FIRST fetch's timing is captured by started_at — a third process
+  // starting mid-loop would see a stale started_at and could under-wait relative to that
+  // process's most recent (not first) fetch. In practice this driver has so far only ever made
+  // one live document fetch per invocation (see task-4-report.md); running it as short-lived,
+  // --limit 1 invocations spaced externally (e.g. a scheduler re-launching the process every
+  // ~30 min) sidesteps the gap entirely and is the recommended operational pattern.
   const runId = await openRun(client, 'mo-house-xml');
   try {
+    const listXml = await mo.fetchMoBillList(args.session);
+    console.error(`[${new Date().toISOString()}] fetched bill-list XML (session ${args.session})`);
+    const entries = mo.parseMoBillList(listXml);
+    const targets = selectTargets(entries, args);
+
     const sessionRow = await ensureSessionRow(client, runId, args.session);
     await persistBillStubs(client, runId, sessionRow, entries);
     const roster = await persistRoster(client, runId);
