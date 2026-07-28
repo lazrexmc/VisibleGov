@@ -26,6 +26,16 @@
   **published** via the local review page (full audit trail); goldens committed; anon-key RLS
   probes prove the public sees exactly the published rows. 149/149 tests. Trust model v2 +
   per-run API approval policy both operative.
+- [x] ~~Glossary implementation (item 14)~~ **CODE-COMPLETE + REVIEW-CLEAN 2026-07-28** on
+  branch `glossary-implementation` (12 commits, 424/424 tests, final whole-branch review clean
+  after 2 fix rounds; zero LLM spend). Live E2E gated on Lance, in order: apply amended 0007 →
+  top up credits → golden drift check ($0.35, pre-approved) → extraction backfill (~$0.75) →
+  gloss batch (count+cost stated at gate) → adjudicate glossary terms in the review page →
+  anon probes → merge decision. Full trail: CHATLOG 2026-07-28 afternoon +
+  `.superpowers/sdd/2026-07-28-glossary-implementation/progress.md`.
+- [ ] **Deprioritized (Lance, 2026-07-28): the 22 summary drafts** (17 clean, 5 flagged) were
+  pipeline-proving test artifacts — important later when publishing that batch matters, not a
+  central focus now. No dependency: glossary extraction reads summaries in any status.
 - [ ] **Next: Plan 3 — the public site, profile-first** (Lance: "the politician profile is the
   product"). Onder's page = who he is + votes cast/missed with plain-language bill one-liners +
   sponsored bills + MO history; bill pages as click-through support; directory + address lookup;
@@ -84,7 +94,12 @@
     identity merge (8), generalized MO-term handling (10e), automating the Task-5/7 manual
     identity-verification steps. Design in Plan 3/4.
 
-14. **Referenced-context glossary (Lance, 2026-07-28, morning design): summaries cite acts/agencies/programs readers do not know** - add a labeled background/context content class so layman-readers get what referenced items ARE, without polluting facts-only bullets. Open design questions: grounding source (model knowledge + adversarial verify vs fetched statute text), schema shape, verifier rules, visual separation. Touches trust model - design WITH Lance, then prompt v2 + re-run needs his spend approval.
+14. [x] ~~Referenced-context glossary~~ **DESIGNED + BUILT 2026-07-28** (see NOW). Remaining
+    product decisions parked for Lance: (a) re-gloss path for a rejected-with-gloss term
+    (currently: edit the text directly; summaries re-draft on reject, glossary does not);
+    (b) subsection-cited terms under the 100k cap gloss from the whole section (as-designed);
+    (c) "(e.g. X)" mid-sentence over-splits into an extra verifier fragment (accepted
+    residual — noisy-but-honest beats silent merge; prompt discourages dotted abbreviations).
 
 13. **Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion** - daily delta runs (new House rolls via ceiling probe, new Senate votes via menu diff, MO XML on its half-hour ToU), plus a summary-candidate report Lance approves as batches. Design after Plan 3a lands.
 

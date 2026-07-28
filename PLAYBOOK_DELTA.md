@@ -194,3 +194,20 @@ it is. Revisit this section before shipping any summarization or scoring logic.
    implementer re-tested with the file actually absent, pushed back with evidence, and was
    right. An adversarial check only counts if it tests the world in the state being claimed
    (league's §6 lesson, now proven in-house).
+9. **Additive pipeline stages must never fail the primary product.** Wiring glossary-term
+   persistence into the summarize CLI initially guarded only the "table missing" case; ANY
+   other glossary-side error crashed the whole batch — and closeRun('failed') overwrote the
+   run detail, erasing the honest record of every bill already processed. Rule: a secondary
+   write rides in a catch-all that records a structured warning; the primary row always lands;
+   a later backfill self-heals the secondary (key its retry eligibility off the SECOND write's
+   existence, not the first's).
+10. **Sentence-splitting legal text: bias ambiguity toward over-split, never silent merge.**
+    Dotted citations ("42 U.S.C.") both break naive splitters and, once "protected", can
+    swallow a real sentence boundary — which silently under-verifies (one verdict covering two
+    claims). Protect every dot EXCEPT the abbreviation's last; accept documented over-split
+    noise. In a verification pipeline, noisy-but-honest always beats quiet-but-wrong.
+11. **Control characters don't survive tool-write escaping.** Writing a \x01 placeholder as a
+    source-level escape produced a literal NUL byte in the file — grep/git then treated the
+    source as binary. Generate control-char sentinels at runtime (String.fromCharCode), byte-
+    check the file after, and sanitize the sentinel out of INPUT before using it (a
+    pre-existing occurrence otherwise round-trips into corruption).

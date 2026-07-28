@@ -532,3 +532,53 @@ findings). Queue now: 22 drafts, all verified — 17 clean, 5 flagged. Glossary:
 all four design decisions — A+C hybrid approved; uscode.house.gov + govinfo.gov approved;
 label "Background — from the referenced law's official text"; federal-first. Design doc marked
 APPROVED; implementation plan next.
+
+---
+
+## 2026-07-28 (afternoon) — glossary implementation: code-complete, review-clean
+
+Executed the approved glossary plan via SDD on branch `glossary-implementation` (12 commits,
+922bd34..7ea596d, 424/424 tests). All six code tasks done + final whole-branch review (fable)
+clean after two fix rounds. Zero LLM spend (credits exhausted anyway; every model CLI stops at
+its GLOSS_RUN_APPROVED gate with cost printed first).
+
+What shipped:
+1. **Migration 0007** (draft — Lance applies): glossary_terms / summary_terms /
+   glossary_verifications / glossary_notes, RLS (anon reads published only), published-
+   completeness CHECK (a bare or empty-string gloss can never publish), supported_by_quote
+   column, needs_mapping for unparseable citations, as-cited citation granularity.
+2. **US Code adapter**: parseCitation (incl. subsection capture), official-text fetch from
+   uscode.house.gov, fixture-first against the real 169,882-char 42 U.S.C. 1396b; oversize
+   sections slice at the cited subsection via OLRC anchors — or typed-skip honestly.
+3. **Summarizer prompt v2**: additive referenced_terms extraction; goldens unchanged by design
+   (drift check still gated on credits). summarize.js now PERSISTS extracted terms at draft
+   time (final review caught it discarding paid output); glossary persistence can never fail a
+   summary draft — any glossary-side error becomes an honest recorded warning (backfill
+   self-heals).
+4. **extract-terms backfill CLI** (for pre-v2 summaries) + **glosser/gloss verifier**
+   (opus-5 authors from the fetched excerpt alone; sonnet-5 refutes; completeness derived
+   mechanically; verification row written BEFORE gloss so partial failures self-heal;
+   rejected terms never re-enter the billable queue).
+5. **Review-page glossary tab**: verification strips, needs_mapping list, CSRF-guarded
+   draft→approved→published transitions, honest "0007 not applied" state pre-migration
+   (live-smoked; summary queue untouched).
+
+Notable controller rulings (full trail in .superpowers/sdd ledger): citation granularity is
+AS-CITED (1396b(i) ≠ 1396b — reader-relevant, dedup only splits on real difference);
+sentence-splitter ambiguity biases to over-split (noisy but honest) never silent merge;
+glossary rejection means "not a real term" (skip forever) unlike summary rejection (re-draft).
+
+### [Lance] (2026-07-28)
+> The 22 summary drafts are a bit moot right now, they were part of the testing and will be
+> important later but shouldn't be a central focus to move forward unless your feedback
+> suggests different
+
+**[Claude]** Agreed, no dependency: extraction reads summaries in any status, so the glossary
+seed run works on the drafts as-is; gloss adjudication is its own small queue of unique terms.
+Drafts demoted to "later, when publishing that batch matters."
+
+**Awaiting Lance (in order):** apply amended 0007 → top up credits → golden drift check
+($0.35, pre-approved) → extraction backfill (~$0.75) → gloss batch (count+cost stated at the
+gate) → adjudicate glossary terms → merge decision on `glossary-implementation`. Product
+decisions parked: re-gloss path for a rejected-with-gloss term; "(e.g. X)" over-split noise
+accepted-residual; giant-bill policy; Plan 3 mockups.
