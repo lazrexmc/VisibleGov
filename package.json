@@ -11,6 +11,7 @@
     "ingest-mo-house": "node --env-file=.env src/cli/ingest-mo-house.js",
     "summarize": "node --env-file=.env src/cli/summarize.js",
     "verify": "node --env-file=.env src/cli/verify.js",
+    "extract-terms": "node --env-file=.env src/cli/extract-terms.js",
     "golden": "node --env-file=.env src/cli/golden.js",
     "review": "node --env-file=.env src/review/server.js"
   },
