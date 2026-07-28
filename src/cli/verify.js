@@ -1,4 +1,4 @@
-import { getClient, openRun, closeRun } from '../lib/db.js';
+import { getClient, openRun, closeRun, isMissingRelationError } from '../lib/db.js';
 import { pickBillText } from '../review/server.js';
 import {
   getAnthropicClient, MAX_TEXT_CHARS,
@@ -48,22 +48,9 @@ export function parseBullets(bodyMd) {
   return bullets;
 }
 
-// Detects "relation does not exist", whether reported as a raw Postgres error (undefined_table,
-// 42P01) or PostgREST's own "not in schema cache" shape (seen when a table was never created —
-// e.g. before migration 0004 is applied). Callers decide what to do with it; this is pure
-// detection only. In --dry-run mode a missing table is tolerated (controller ruling #3); in live
-// mode it is deliberately NOT caught anywhere — it's a gate.
-export function isMissingRelationError(error, table) {
-  if (!error) return false;
-  const code = error.code;
-  const msg = String(error.message || '').toLowerCase();
-  const mentionsTable = msg.includes(table.toLowerCase());
-  // The Postgres/PostgREST error codes for "relation doesn't exist" are the same regardless of
-  // WHICH relation — the table name only shows up in the message — so even a code match must
-  // still be confirmed against the message to avoid matching a different missing table.
-  if (code === '42P01' || code === 'PGRST205') return mentionsTable;
-  return mentionsTable && (msg.includes('does not exist') || msg.includes('could not find the table'));
-}
+// isMissingRelationError itself now lives in ../lib/db.js (shared with the review server — see
+// that module for why). In --dry-run mode a missing table is tolerated (controller ruling #3);
+// in live mode it is deliberately NOT caught anywhere — it's a gate.
 
 function isTypedFailure(err) {
   return FAILURE_TYPES.some((T) => err instanceof T);

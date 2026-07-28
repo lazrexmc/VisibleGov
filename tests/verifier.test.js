@@ -5,7 +5,7 @@ import {
   buildVerifyMessage, verifyBill,
 } from '../src/lib/verifier.js';
 import { MODEL, MAX_TEXT_CHARS, OversizeTextError, renderMarkdown } from '../src/lib/summarizer.js';
-import { parseArgs, parseBullets, isMissingRelationError } from '../src/cli/verify.js';
+import { parseArgs, parseBullets } from '../src/cli/verify.js';
 
 // ---- constants (controller ruling #4: sonnet stays sonnet, deliberately not opus) ----
 
@@ -128,28 +128,5 @@ test('parseArgs rejects unknown flags', () => {
   assert.throws(() => parseArgs(['--bogus']), /unknown flag/);
 });
 
-// ---- isMissingRelationError (controller ruling #3: never crash dry-run on 0004 not applied yet) ----
-
-test('isMissingRelationError recognizes a raw Postgres undefined_table error (42P01)', () => {
-  const err = { code: '42P01', message: 'relation "public.summary_verifications" does not exist' };
-  assert.equal(isMissingRelationError(err, 'summary_verifications'), true);
-});
-
-test('isMissingRelationError recognizes PostgREST\'s "not in schema cache" shape (PGRST205)', () => {
-  const err = { code: 'PGRST205', message: "Could not find the table 'public.summary_verifications' in the schema cache" };
-  assert.equal(isMissingRelationError(err, 'summary_verifications'), true);
-});
-
-test('isMissingRelationError does not false-positive on an unrelated error', () => {
-  const err = { code: 'ECONNRESET', message: 'network error' };
-  assert.equal(isMissingRelationError(err, 'summary_verifications'), false);
-});
-
-test('isMissingRelationError does not false-positive on a different missing table', () => {
-  const err = { code: '42P01', message: 'relation "public.some_other_table" does not exist' };
-  assert.equal(isMissingRelationError(err, 'summary_verifications'), false);
-});
-
-test('isMissingRelationError is false for a null/absent error', () => {
-  assert.equal(isMissingRelationError(null, 'summary_verifications'), false);
-});
+// isMissingRelationError itself now lives in src/lib/db.js (shared with the review server) —
+// see tests/db.test.js for its unit tests. verify.js just imports and uses it.

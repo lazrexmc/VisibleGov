@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import {
   nextStatus, mapNoteAction, validateDecisionInput, countVoteCasts, pickLatestVote,
   pickBillText, readBody, BodyTooLargeError, requestListener, isAllowedDecisionRequest,
-  verificationBadge, latestVerificationBySummary,
+  verificationBadge, latestVerificationBySummary, resolveVerificationRows,
   HOST, PORT,
 } from '../src/review/server.js';
 
@@ -180,6 +180,37 @@ test('latestVerificationBySummary on empty/absent input returns an empty map', (
   assert.equal(latestVerificationBySummary(undefined).size, 0);
 });
 
+// ---- resolveVerificationRows (fix: review server must not 500 the whole page when migration
+// 0004/summary_verifications hasn't been applied yet — the pure fallback decision) ----
+
+const MISSING_RELATION_ERROR = {
+  code: 'PGRST205',
+  message: "Could not find the table 'public.summary_verifications' in the schema cache",
+};
+
+test('resolveVerificationRows returns the rows on success', () => {
+  const rows = resolveVerificationRows({ data: [{ summary_id: 's1' }], error: null });
+  assert.deepEqual(rows, [{ summary_id: 's1' }]);
+});
+
+test('resolveVerificationRows treats null data on success as an empty array', () => {
+  assert.deepEqual(resolveVerificationRows({ data: null, error: null }), []);
+});
+
+test('resolveVerificationRows degrades to [] (not a throw) on a missing-relation error — 0004 not applied yet', () => {
+  assert.deepEqual(resolveVerificationRows({ data: null, error: MISSING_RELATION_ERROR }), []);
+});
+
+test('resolveVerificationRows rethrows any OTHER error — no blanket swallowing', () => {
+  const err = { code: '08006', message: 'connection failure' };
+  assert.throws(() => resolveVerificationRows({ data: null, error: err }), (thrown) => thrown === err);
+});
+
+test('resolveVerificationRows rethrows an error naming a DIFFERENT missing table — no blanket swallowing', () => {
+  const err = { code: '42P01', message: 'relation "public.some_other_table" does not exist' };
+  assert.throws(() => resolveVerificationRows({ data: null, error: err }), (thrown) => thrown === err);
+});
+
 // ---- readBody / 1MB cap ----
 
 test('readBody resolves with the concatenated buffer under the limit', async () => {
@@ -223,10 +254,10 @@ test('isAllowedDecisionRequest: Content-Type with charset suffix still matches (
 
 // ---- requestListener HTTP-level behavior (no live DB required) ----
 
-function withServer(fn) {
+function withServer(fn, clientOverride) {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
-      requestListener(req, res).catch(reject);
+      requestListener(req, res, clientOverride).catch(reject);
     });
     server.listen(0, '127.0.0.1', async () => {
       const { port } = server.address();
@@ -241,6 +272,71 @@ function withServer(fn) {
     });
   });
 }
+
+// ---- fake Supabase-shaped client (test-only) ----
+// Every postgrest-js query builder method returns the same chainable, thenable object regardless
+// of call order — mirrors real Supabase's builder shape closely enough to drive handleQueue/
+// handleItem through a real HTTP round trip without a live DB.
+function fakeQuery(result) {
+  const builder = {
+    select: () => builder,
+    in: () => builder,
+    eq: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    maybeSingle: () => builder,
+    then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
+  };
+  return builder;
+}
+
+function fakeClient(resultsByTable) {
+  return { from: (table) => fakeQuery(resultsByTable[table] ?? { data: null, error: null }) };
+}
+
+// ---- fix: review server must degrade, not 500, when summary_verifications is missing (0004 not
+// applied yet) — regression coverage for exactly this bug ----
+
+test('GET /api/queue returns verified:"unverified" (200, not 500) when summary_verifications is missing', () => {
+  const client = fakeClient({
+    summaries: {
+      data: [{ id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z', bills: { identifier: 'HR 1', title: 'A Bill' } }],
+      error: null,
+    },
+    summary_verifications: { data: null, error: MISSING_RELATION_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/queue`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), [{
+      id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z',
+      bill: { identifier: 'HR 1', title: 'A Bill' }, verified: 'unverified',
+    }]);
+  }, client);
+});
+
+test('GET /api/item/:id returns verification:null (200, not 500) when summary_verifications is missing', () => {
+  const client = fakeClient({
+    summaries: {
+      data: {
+        id: 'sum1', bill_id: 'b1', status: 'draft', body_md: '- x (Sec 1)', model: 'claude-opus-5',
+        prompt_version: 'v1', bill_text_hash: 'h1', created_at: '2026-01-01T00:00:00Z', published_at: null,
+      },
+      error: null,
+    },
+    bills: { data: { identifier: 'HR 1', title: 'A Bill', canonical_url: 'https://example.test/hr1' }, error: null },
+    bill_texts: { data: [], error: null },
+    votes: { data: [], error: null },
+    summary_verifications: { data: null, error: MISSING_RELATION_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/item/sum1`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.verification, null);
+    assert.equal(body.summary.id, 'sum1');
+  }, client);
+});
 
 test('GET / serves page.html as text/html with the nosniff header', () => withServer(async (base) => {
   const res = await fetch(`${base}/`);

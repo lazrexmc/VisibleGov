@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { getClient } from '../lib/db.js';
+import { getClient, isMissingRelationError } from '../lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PAGE_HTML = readFileSync(path.join(__dirname, 'page.html'));
@@ -98,6 +98,19 @@ export function latestVerificationBySummary(rows) {
     if (!existing || (r.created_at ?? '') > (existing.created_at ?? '')) map.set(r.summary_id, r);
   }
   return map;
+}
+
+// Migration 0004 (summary_verifications) may not be applied yet when this server runs — a query
+// against that table then fails with a "relation does not exist" error, and treating that like
+// any other DB error would 500 the whole queue/item, a regression of the pre-Task-10 working
+// page. Degrade gracefully ONLY for that specific failure (empty rows = "nobody verified yet");
+// any OTHER error still throws, so real DB problems are never silently swallowed.
+export function resolveVerificationRows({ data, error }, table = 'summary_verifications') {
+  if (error) {
+    if (isMissingRelationError(error, table)) return [];
+    throw error;
+  }
+  return data ?? [];
 }
 
 // CSRF guard for POST /api/decision. A cross-origin <form enctype="text/plain"> is a no-preflight
@@ -205,10 +218,9 @@ async function handleQueue(client, res) {
     const ids = (data ?? []).map((row) => row.id);
     let latestVerification = new Map();
     if (ids.length > 0) {
-      const { data: verRows, error: vErr } = await client
+      const verResult = await client
         .from('summary_verifications').select('summary_id,overall,verdicts,created_at').in('summary_id', ids);
-      if (vErr) throw vErr;
-      latestVerification = latestVerificationBySummary(verRows ?? []);
+      latestVerification = latestVerificationBySummary(resolveVerificationRows(verResult));
     }
 
     sendJson(res, 200, (data ?? []).map((row) => ({
@@ -256,14 +268,14 @@ async function handleItem(client, res, id) {
       vote = { question: latestVote.question, result: latestVote.result, yeas, nays };
     }
 
-    const { data: verRows, error: verErr } = await client
+    const verResult = await client
       .from('summary_verifications')
       .select('overall,verdicts,model,created_at')
       .eq('summary_id', id)
       .order('created_at', { ascending: false })
       .limit(1);
-    if (verErr) throw verErr;
-    const verification = (verRows && verRows[0]) ? verRows[0] : null;
+    const verRows = resolveVerificationRows(verResult);
+    const verification = verRows[0] ?? null;
 
     sendJson(res, 200, {
       summary: {
@@ -337,8 +349,10 @@ async function handleDecision(client, req, res) {
 
 // ---- Router ----
 
-export async function requestListener(req, res) {
-  const client = getClient();
+// clientOverride is test-only dependency injection (a fake Supabase-shaped client) — production
+// callers always invoke this with 2 args, so getClient() (real env-based client) is unaffected.
+export async function requestListener(req, res, clientOverride) {
+  const client = clientOverride ?? getClient();
   const { pathname } = new URL(req.url, `http://${req.headers.host ?? `${HOST}:${PORT}`}`);
 
   if (req.method === 'GET' && pathname === '/') { sendHtml(res); return; }
