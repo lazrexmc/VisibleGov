@@ -84,6 +84,8 @@
     identity merge (8), generalized MO-term handling (10e), automating the Task-5/7 manual
     identity-verification steps. Design in Plan 3/4.
 
+13. **Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion** - daily delta runs (new House rolls via ceiling probe, new Senate votes via menu diff, MO XML on its half-hour ToU), plus a summary-candidate report Lance approves as batches. Design after Plan 3a lands.
+
 12. **US Senate roll-call adapter (unlocks Hawley + every senator).** Senate votes live at
     senate.gov in their own XML format (different from House Clerk EVS) — one new adapter, then
     the whole existing pipeline (canonical tables, summarize triggers, verification, profiles)

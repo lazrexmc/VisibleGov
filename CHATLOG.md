@@ -405,3 +405,15 @@ Overnight sequence: (1) finish+verify House backfill; (2) build US Senate roll-c
 via full SDD (fixture-first from senate.gov XML, free) + backfill both 119th sessions -
 unlocks Hawley + Schmitt; (3) mo-house-xml adapter XML side only, honoring the half-hour ToU
 cadence; MO Senate = investigation only. Everything through the normal review gates.
+
+### [Lance] (mid-task, during overnight P3a execution)
+> I'm not entirely overly concerned about the front end web page and UI yet, I am laser focused
+> on the back end information being correct, available, and up to date so that when the front
+> end is finalized, the information displayed is what we want users to see.
+
+**[Claude]** Priorities confirmed/reordered: Plan 3 (site/UI) stays parked; data correctness,
+availability, and FRESHNESS are the mainline. "Up to date" adds a queued item: steady-state
+incremental machinery (PLAYBOOK §3.4 startup-vs-poll discipline) - scheduled delta ingestion
+(new House rolls, new Senate votes, MO cadence-respecting refresh), new-summary-candidate
+detection surfaced as batches for Lance's per-run approval. Ingestion cron is free; only the
+summarize/verify steps ever cost money and stay approval-gated.
