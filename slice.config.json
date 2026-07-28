@@ -9,5 +9,11 @@
   "fixture_roll_number": 362,
   "fixture_bill": { "congress": 119, "type_slug": "hr", "number": "498" },
   "fixture_text": { "type_slug": "hr", "number": "498", "version_type": "Engrossed in House" },
-  "mo_sessions": ["2022", "2022S1"]
+  "mo_sessions": ["2022", "2022S1"],
+  "us_senate": {
+    "fixture_congress": 119,
+    "fixture_session": 1,
+    "fixture_vote_number": 618,
+    "fixture_bill": "H.R. 5371"
+  }
 }
