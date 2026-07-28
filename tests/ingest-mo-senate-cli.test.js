@@ -470,11 +470,22 @@ test('ensureSessionRow: inserts the exact row shape (task-5-brief.md step 2) and
 // non-unique index — multiple eras' occupants of the same district can each get their own row).
 // `missingColumn: true` simulates 0008 itself not being applied at all (PGRST204) — orthogonal to
 // the unique-index question, same as before this fix round.
-function makeFakeLegislatorsDb({ uniqueMoSenateId = false, missingColumn = false } = {}) {
-  const rows = [];
+// seedRows: pre-populate legislators (e.g. an already-persisted prior-era row) before the fake is
+// ever queried — used by the FIX ROUND 2 replay tests below to set up "Bob Onder (2018) already
+// persisted" without going through ensureRosterIdentities first. vote_casts is a second in-memory
+// table (upsert-only, no dedup needed for these tests) so the same fake can serve
+// replayJournalArtifacts's insertIfAbsent(..., 'vote_casts', ...) calls too.
+function makeFakeLegislatorsDb({
+  uniqueMoSenateId = false, missingColumn = false, seedRows = [],
+} = {}) {
+  const rows = [...seedRows];
+  const voteCasts = [];
   let counter = 0;
   const client = {
     from(table) {
+      if (table === 'vote_casts') {
+        return { upsert: async (castRows) => { voteCasts.push(...castRows); return { error: null }; } };
+      }
       assert.equal(table, 'legislators');
       return {
         select: () => ({
@@ -509,7 +520,9 @@ function makeFakeLegislatorsDb({ uniqueMoSenateId = false, missingColumn = false
       };
     },
   };
-  return { client, rows };
+  return {
+    client, rows, voteCasts,
+  };
 }
 
 test('ensureRosterIdentities: normal case — inserts a new (full_name, mo_senate_id) row, found:0 inserted:1, gated:false', async () => {
@@ -829,22 +842,26 @@ test('processJournalDay: roster-gated branch — writes a per-day gate artifact 
   });
 });
 
-// ---- gated-artifact replay ----
+// ---- gated-artifact replay (FIX ROUND 2, CRITICAL — replay must never resolve blind across
+// eras) ----
 
-function fakeReplayLegislatorsClient(rows) {
-  return {
-    from(table) {
-      if (table !== 'legislators') throw new Error(`unexpected table ${table}`);
-      return { select: () => ({ not: async () => ({ data: rows, error: null }) }) };
-    },
-  };
+function writeGateArtifact(dir, pdfBasename, year, votes) {
+  writeFileSync(join(dir, `${pdfBasename}.journal-day.json`), JSON.stringify({
+    year,
+    pdf_basename: pdfBasename,
+    journal_url: `https://x/${pdfBasename}.pdf`,
+    journal_date: '2018-03-08',
+    votes,
+    extracted_run_id: 'run-0',
+  }, null, 2));
 }
 
 test('replayJournalArtifacts: an empty/missing directory is a clean no-op', async () => {
   await withScratchDirAsync(async (dir) => {
-    const result = await replayJournalArtifacts(fakeReplayLegislatorsClient([]), 'run-1', `${dir}/does-not-exist`);
+    const { client } = makeFakeLegislatorsDb();
+    const result = await replayJournalArtifacts(client, 'run-1', { dir: `${dir}/does-not-exist` });
     assert.deepEqual(result, {
-      attempted: 0, replayed: 0, stillGated: false, unresolved: 0, unresolvedSample: [],
+      attempted: 0, replayed: 0, unresolved: 0, unresolvedSample: [], deferred: [],
     });
   });
 });
@@ -853,62 +870,147 @@ test('replayJournalArtifacts: ignores .done.json and .failed.json markers sittin
   await withScratchDirAsync(async (dir) => {
     writeDoneMarker('RDay1', {}, dir);
     writeDayFailureArtifact('RDay2', 'https://x', [Object.assign(new Error('boom'), { ordinal: 1, category: 'yeas' })], dir);
-    const result = await replayJournalArtifacts(fakeReplayLegislatorsClient([]), 'run-1', dir);
+    const { client } = makeFakeLegislatorsDb();
+    const result = await replayJournalArtifacts(client, 'run-1', { dir });
     assert.deepEqual(result, {
-      attempted: 0, replayed: 0, stillGated: false, unresolved: 0, unresolvedSample: [],
+      attempted: 0, replayed: 0, unresolved: 0, unresolvedSample: [], deferred: [],
     });
     assert.ok(existsSync(join(dir, 'RDay1.done.json')));
     assert.ok(existsSync(join(dir, 'RDay2.failed.json')));
   });
 });
 
-test('replayJournalArtifacts: a fully-resolvable gate artifact replays and is deleted', async () => {
+test('replayJournalArtifacts: an artifact with no year field is deferred with an honest note, never guessed at', async () => {
   await withScratchDirAsync(async (dir) => {
-    const insertedCasts = [];
-    const client = {
-      from(table) {
-        if (table === 'legislators') return { select: () => ({ not: async () => ({ data: [{ id: 'leg-onder', surname: 'Onder', mo_senate_id: '2' }], error: null }) }) };
-        if (table === 'vote_casts') return { upsert: async (rows) => { insertedCasts.push(...rows); return { error: null }; } };
-        throw new Error(`unexpected table ${table}`);
-      },
-    };
     writeFileSync(join(dir, 'RDay1.journal-day.json'), JSON.stringify({
-      pdf_basename: 'RDay1',
-      journal_url: 'https://x/RDay1.pdf',
-      journal_date: '2018-03-08',
-      votes: [{ vote_id: 'vote-1', source_key: 'mo-senate-web-2018-RDay1-vote1', casts: [{ surname: 'Onder', district: null, position: 'yea' }] }],
-      extracted_run_id: 'run-0',
-    }));
-    const result = await replayJournalArtifacts(client, 'run-2', dir);
+      pdf_basename: 'RDay1', votes: [{ vote_id: 'v1', source_key: 'k1', casts: [{ surname: 'Onder', district: null, position: 'yea' }] }],
+    })); // deliberately no `year`
+    const { client, voteCasts } = makeFakeLegislatorsDb();
+    const result = await replayJournalArtifacts(client, 'run-1', { dir });
     assert.equal(result.attempted, 1);
-    assert.equal(result.replayed, 1);
-    assert.equal(result.unresolved, 0);
-    assert.equal(insertedCasts.length, 1);
-    assert.equal(existsSync(join(dir, 'RDay1.journal-day.json')), false);
+    assert.equal(result.replayed, 0);
+    assert.equal(voteCasts.length, 0);
+    assert.equal(result.deferred.length, 1);
+    assert.match(result.deferred[0].note, /no year field/);
+    assert.ok(existsSync(join(dir, 'RDay1.journal-day.json')), 'left completely untouched');
   });
 });
 
-test('replayJournalArtifacts: a partially-resolvable artifact is rewritten with only the unresolved casts, kept on disk', async () => {
+// ---- CRITICAL — the reviewer's exact trace: 2018 Bob Onder already persisted, a 2026 Jane Onder
+// artifact queued (gated pre-0009). The bug: the OLD replay resolved this against a global,
+// era-blind roster, found only Bob (Jane had no row), and silently attributed Jane's vote to Bob
+// while deleting the evidence. The fix: an artifact only ever resolves against its OWN year.
+
+test('replayJournalArtifacts: CRITICAL repro — 2026 artifact stays QUEUED (deferred, honest note) when no 2026 mapping is obtainable; Bob\'s 2018 row is never touched, zero casts written', async () => {
   await withScratchDirAsync(async (dir) => {
-    const client = {
-      from(table) {
-        if (table === 'legislators') return { select: () => ({ not: async () => ({ data: [{ id: 'leg-onder', surname: 'Onder', mo_senate_id: '2' }], error: null }) }) };
-        if (table === 'vote_casts') return { upsert: async () => ({ error: null }) };
-        throw new Error(`unexpected table ${table}`);
-      },
-    };
-    writeFileSync(join(dir, 'RDay1.journal-day.json'), JSON.stringify({
-      pdf_basename: 'RDay1',
-      journal_url: 'https://x/RDay1.pdf',
-      journal_date: '2018-03-08',
-      votes: [{
-        vote_id: 'vote-1',
-        source_key: 'mo-senate-web-2018-RDay1-vote1',
-        casts: [{ surname: 'Onder', district: null, position: 'yea' }, { surname: 'Nobody', district: null, position: 'nay' }],
-      }],
-      extracted_run_id: 'run-0',
-    }));
-    const result = await replayJournalArtifacts(client, 'run-2', dir);
+    await withScratchDirAsync(async (rosterDir) => {
+      const { client, rows, voteCasts } = makeFakeLegislatorsDb({
+        seedRows: [{
+          id: 'leg-bob', full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', run_id: 'seed',
+        }],
+      });
+      // Jane's vote, queued under year 2026 — no roster cache exists for 2026 (no live fetch, no
+      // prior ensure this invocation for that year) and currentYear is NOT 2026, so no mapping is
+      // obtainable without a live fetch — must defer, never resolve blind.
+      writeGateArtifact(dir, '2026-day1', 2026, [{
+        vote_id: 'vote-jane-1', source_key: 'mo-senate-web-2026-2026-day1-vote1', casts: [{ surname: 'Onder', district: null, position: 'yea' }],
+      }]);
+
+      const result = await replayJournalArtifacts(client, 'run-1', {
+        dir, rosterDir, currentYear: 2018, currentYearIdentities: null,
+      });
+
+      assert.equal(result.attempted, 1);
+      assert.equal(result.replayed, 0, 'must not silently resolve Jane\'s vote against Bob\'s row');
+      assert.equal(voteCasts.length, 0, 'zero casts written — never guessed');
+      assert.equal(result.deferred.length, 1);
+      assert.equal(result.deferred[0].year, 2026);
+      assert.equal(result.deferred[0].note, 'replay deferred: year 2026 roster unavailable this invocation');
+      assert.ok(existsSync(join(dir, '2026-day1.journal-day.json')), 'the artifact — the only evidence of Jane\'s pending vote — is NOT deleted');
+      assert.equal(rows.length, 1, 'no new row created; Bob\'s original row is the only one');
+      assert.equal(rows[0].full_name, 'Bob Onder');
+    });
+  });
+});
+
+test('replayJournalArtifacts: CRITICAL repro — once the 2026 roster mapping IS obtainable (warm cache, post-0009), Jane\'s vote resolves to JANE, never Bob; artifact deleted', async () => {
+  await withScratchDirAsync(async (dir) => {
+    await withScratchDirAsync(async (rosterDir) => {
+      const { client, rows, voteCasts } = makeFakeLegislatorsDb({
+        seedRows: [{
+          id: 'leg-bob', full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', run_id: 'seed',
+        }],
+      });
+      writeGateArtifact(dir, '2026-day1', 2026, [{
+        vote_id: 'vote-jane-1', source_key: 'mo-senate-web-2026-2026-day1-vote1', casts: [{ surname: 'Onder', district: null, position: 'yea' }],
+      }]);
+      // A warm 2026 roster cache (as ensureRosterForRun would have written on a prior invocation
+      // for year 2026, post-0009) — replay rebuilds that year's mapping from it via
+      // ensureRosterIdentities, a pure DB op, no live fetch.
+      writeFileSync(join(rosterDir, '2026.json'), JSON.stringify({
+        fetched_at: new Date().toISOString(),
+        members: [{
+          mo_senate_id: '2', surname: 'Onder', full_name: 'Jane Onder', party: null,
+        }],
+      }));
+
+      // currentYear is 2018 (a DIFFERENT run's own year) — proves the "other year, cache-driven"
+      // path, not the matching-year shortcut.
+      const result = await replayJournalArtifacts(client, 'run-2', {
+        dir, rosterDir, currentYear: 2018, currentYearIdentities: null,
+      });
+
+      assert.equal(result.replayed, 1);
+      assert.equal(result.deferred.length, 0);
+      assert.equal(rows.length, 2, 'Jane now has her own row, separate from Bob\'s');
+      const jane = rows.find((r) => r.full_name === 'Jane Onder');
+      assert.ok(jane);
+      assert.equal(voteCasts.length, 1);
+      assert.equal(voteCasts[0].legislator_id, jane.id, 'Jane\'s vote resolves to JANE, never Bob');
+      assert.notEqual(voteCasts[0].legislator_id, 'leg-bob');
+      assert.equal(existsSync(join(dir, '2026-day1.journal-day.json')), false, 'fully resolved — deleted');
+    });
+  });
+});
+
+test('replayJournalArtifacts: matching-year same-run replay path — currentYear/currentYearIdentities are used directly, no roster-cache read at all', async () => {
+  await withScratchDirAsync(async (dir) => {
+    await withScratchDirAsync(async (rosterDir) => {
+      // rosterDir has NO 2026.json at all — proves the matching-year path never reads the cache.
+      const { client, voteCasts } = makeFakeLegislatorsDb();
+      const currentYearIdentities = await ensureRosterIdentities(client, 'run-3', [{
+        mo_senate_id: '2', surname: 'Onder', full_name: 'Jane Onder', party: null,
+      }]);
+      assert.equal(currentYearIdentities.gated, false);
+
+      writeGateArtifact(dir, '2026-day1', 2026, [{
+        vote_id: 'vote-jane-1', source_key: 'mo-senate-web-2026-2026-day1-vote1', casts: [{ surname: 'Onder', district: null, position: 'yea' }],
+      }]);
+
+      const result = await replayJournalArtifacts(client, 'run-3', {
+        dir, rosterDir, currentYear: 2026, currentYearIdentities,
+      });
+
+      assert.equal(result.replayed, 1);
+      assert.equal(voteCasts.length, 1);
+      assert.equal(voteCasts[0].legislator_id, currentYearIdentities.resolutionRoster[0].legislator_id);
+      assert.equal(existsSync(join(rosterDir, '2026.json')), false, 'no cache file was ever written/read for the matching-year path');
+    });
+  });
+});
+
+test('replayJournalArtifacts: a partially-resolvable artifact (matching-year path) is rewritten with only the unresolved casts, kept on disk', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeLegislatorsDb();
+    const currentYearIdentities = await ensureRosterIdentities(client, 'run-1', [{
+      mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+    }]);
+    writeGateArtifact(dir, 'RDay1', 2018, [{
+      vote_id: 'vote-1',
+      source_key: 'mo-senate-web-2018-RDay1-vote1',
+      casts: [{ surname: 'Onder', district: null, position: 'yea' }, { surname: 'Nobody', district: null, position: 'nay' }],
+    }]);
+    const result = await replayJournalArtifacts(client, 'run-2', { dir, currentYear: 2018, currentYearIdentities });
     assert.equal(result.replayed, 0);
     assert.equal(result.unresolved, 1);
     assert.ok(existsSync(join(dir, 'RDay1.journal-day.json')), 'a partially-resolved artifact is kept, not deleted');
@@ -918,18 +1020,22 @@ test('replayJournalArtifacts: a partially-resolvable artifact is rewritten with 
   });
 });
 
-test('replayJournalArtifacts: still gated (mo_senate_id column missing) — artifacts are left untouched, reported honestly', async () => {
+test('replayJournalArtifacts: rule 3 — a year whose ensure reports gated (missing column) stays deferred, never resolved with a partial mapping', async () => {
   await withScratchDirAsync(async (dir) => {
-    writeFileSync(join(dir, 'RDay1.journal-day.json'), JSON.stringify({
-      pdf_basename: 'RDay1', votes: [{ vote_id: 'v1', source_key: 'k1', casts: [] }],
-    }));
-    const client = {
-      from: () => ({ select: () => ({ not: async () => ({ data: null, error: { message: 'Could not find the \'mo_senate_id\' column of \'legislators\' in the schema cache', code: 'PGRST204' } }) }) }),
-    };
-    const result = await replayJournalArtifacts(client, 'run-2', dir);
-    assert.equal(result.stillGated, true);
-    assert.equal(result.attempted, 1);
-    assert.ok(existsSync(join(dir, 'RDay1.journal-day.json')));
+    await withScratchDirAsync(async (rosterDir) => {
+      const { client, voteCasts } = makeFakeLegislatorsDb({ missingColumn: true });
+      writeGateArtifact(dir, 'RDay1', 2018, [{ vote_id: 'v1', source_key: 'k1', casts: [{ surname: 'Onder', district: null, position: 'yea' }] }]);
+      writeFileSync(join(rosterDir, '2018.json'), JSON.stringify({
+        fetched_at: new Date().toISOString(), members: [{ mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null }],
+      }));
+      const result = await replayJournalArtifacts(client, 'run-1', { dir, rosterDir, currentYear: 2099 });
+      assert.equal(result.replayed, 0);
+      assert.equal(voteCasts.length, 0);
+      assert.equal(result.deferred.length, 1);
+      assert.equal(result.deferred[0].year, 2018);
+      assert.match(result.deferred[0].note, /roster unavailable this invocation/);
+      assert.ok(existsSync(join(dir, 'RDay1.journal-day.json')));
+    });
   });
 });
 

@@ -621,15 +621,21 @@ export async function processJournalDay(client, runId, year, sessionRow, dayRow,
   if (dayGated) {
     mkdirSync(dir, { recursive: true });
     writeFileSync(`${dir}/${dayRow.pdf_basename}.journal-day.json`, JSON.stringify({
+      // FIX ROUND 2 (CRITICAL): `year` is load-bearing for replayJournalArtifacts — an artifact
+      // may ONLY ever be resolved against ITS OWN year's roster mapping (see that function's own
+      // comment for the concrete cross-era misattribution this closes). Without this field, a
+      // later replay has no way to know which era's roster is safe to resolve it against.
+      year,
       pdf_basename: dayRow.pdf_basename,
       journal_url: dayRow.journal_url,
       journal_date: dayRow.journal_date,
       votes: gatedArtifactVotes,
       extracted_run_id: runId,
-      note: 'legislators.mo_senate_id column not found — migration 0008 (supabase/migrations/0008_mo_senate_id.sql) '
-        + 'not yet applied. Casts were extracted but not resolved/persisted to vote_casts. This driver retries '
-        + 'loading the roster (and replays every queued artifact) on every subsequent invocation — once the '
-        + 'migration is applied, the next scheduled run drains this automatically.',
+      note: 'legislators.mo_senate_id column not found, OR a still-live migration-0008 unique-index collision on '
+        + 'mo_senate_id (see ensureRosterIdentities) — this year\'s roster identities are not fully resolvable yet. '
+        + 'Casts were extracted but not resolved/persisted to vote_casts. This driver retries the roster ensure (and '
+        + 'replays every queued artifact against its own year\'s mapping) on every subsequent invocation — once the '
+        + 'relevant migration is applied, a future run drains this automatically.',
     }, null, 2));
   }
 
@@ -657,74 +663,132 @@ export async function processJournalDay(client, runId, year, sessionRow, dayRow,
   };
 }
 
-// ---- gated-artifact replay (task-5-brief.md step 6: "port replayArtifacts' shape; exclude
-// .failed.json") ----
+// ---- gated-artifact replay (FIX ROUND 2, CRITICAL — replay must never resolve blind across
+// eras) ----
 //
-// Pure DB + filesystem — no senate.mo.gov request — safe and cheap on EVERY invocation regardless
-// of which branch of main() ends up running this slot, same rationale as
-// ingest-mo-house.js's replayArtifacts. Filters on the distinctive '.journal-day.json' suffix
-// (see processJournalDay's own comment on why that's safer here than a bare '.json' minus
-// '.failed.json' exclusion).
-export async function replayJournalArtifacts(client, runId, dir = JOURNAL_ARTIFACT_DIR) {
+// BUG FOUND IN RE-REVIEW (empirically traced, not hypothetical): the original replayJournalArtifacts
+// resolved EVERY queued artifact against one global, era-blind roster query
+// (`.not('mo_senate_id','is',null)` — the exact same query shape as the deleted
+// loadSenateRosterForResolution), ran BEFORE this invocation's own roster ensure, and took no year
+// parameter at all. Concrete trace: 2018 Bob Onder is persisted (has a legislators row); 2026 Jane
+// Onder was gated pre-0009 (her district collided with Bob's still-unique row, so she has NO row
+// of her own — her cast sits queued in a `.journal-day.json` artifact). A later invocation's
+// replay queries the broad roster, finds ONLY Bob's row for surname 'Onder' (Jane has none),
+// resolveMoSenator finds a single UNAMBIGUOUS match — Bob's legislator_id — and "resolves" Jane's
+// vote onto Bob. `unresolved:0`, so the artifact is deleted: the misattribution completes silently
+// AND the only durable evidence of it (the queued artifact) is destroyed in the same step.
+//
+// FIX (controller ruling): an artifact may ONLY be resolved against ITS OWN YEAR's roster mapping.
+// Artifacts now carry `year` (processJournalDay writes it — see that function's own comment).
+// Replay groups queued artifacts by year and, per year, obtains the SAME in-memory mapping
+// ensureRosterIdentities would produce for that year:
+//   - if the year matches THIS run's own --year, the caller passes in this run's
+//     already-computed identities (currentYear/currentYearIdentities) — no extra DB work, and
+//     matches whatever this invocation's own roster-ensure just did (fresh live fetch OR a
+//     cache-hit re-ensure, doesn't matter — ensureRosterForRun always re-runs
+//     ensureRosterIdentities regardless of fetchedLive).
+//   - otherwise, that year's roster CACHE (readCache(rosterDir, year)) is read and its cached
+//     members re-run through ensureRosterIdentities — a pure DB check-then-insert/find, NEVER a
+//     live fetch (rule: "never burn extra live-fetch slots silently to force it").
+// If no cache exists for that year, OR that year's mapping reports gated (missing column, or a
+// still-live mo_senate_id collision — rule 3: gating already means the mapping is incomplete),
+// that year's artifacts stay queued UNTOUCHED, with an honest
+// 'replay deferred: year <Y> roster unavailable this invocation' note in the returned `deferred`
+// array. Never resolved blind, never silently forcing a live fetch to obtain one, and (the actual
+// fix) never two different eras' occupants of the same surname/district mixed into one resolution
+// attempt.
+export async function replayJournalArtifacts(client, runId, {
+  dir = JOURNAL_ARTIFACT_DIR,
+  rosterDir = ROSTER_ARTIFACT_DIR,
+  currentYear = null,
+  currentYearIdentities = null,
+} = {}) {
   const empty = {
-    attempted: 0, replayed: 0, stillGated: false, unresolved: 0, unresolvedSample: [],
+    attempted: 0, replayed: 0, unresolved: 0, unresolvedSample: [], deferred: [],
   };
   if (!existsSync(dir)) return empty;
   const files = readdirSync(dir).filter((f) => f.endsWith('.journal-day.json'));
   if (files.length === 0) return empty;
 
-  let roster;
-  try {
-    const { data, error } = await client.from('legislators').select('id,surname,mo_senate_id').not('mo_senate_id', 'is', null);
-    if (error) throw error;
-    roster = (data ?? []).map((r) => ({ legislator_id: r.id, surname: r.surname, mo_senate_id: r.mo_senate_id }));
-  } catch (err) {
-    if (!isMissingColumnError(err, 'mo_senate_id')) throw err;
-    return { ...empty, attempted: files.length, stillGated: true };
+  // Group by year up front. An artifact with no `year` at all (none exist in production per the
+  // controller ruling — this is a defensive, honestly-reported branch, not an expected path) can
+  // never be safely resolved against any era's roster, so it is deferred, never guessed.
+  const byYear = new Map();
+  const deferred = [];
+  for (const file of files) {
+    const filePath = `${dir}/${file}`;
+    const artifact = JSON.parse(readFileSync(filePath, 'utf8'));
+    if (artifact.year == null) {
+      deferred.push({
+        year: null, file, note: 'replay deferred: artifact has no year field — cannot be safely resolved against any era\'s roster',
+      });
+      continue;
+    }
+    if (!byYear.has(artifact.year)) byYear.set(artifact.year, []);
+    byYear.get(artifact.year).push({ filePath, artifact });
   }
 
   let replayed = 0;
   let unresolvedTotal = 0;
   const unresolvedSample = [];
-  for (const file of files) {
-    const filePath = `${dir}/${file}`;
-    const artifact = JSON.parse(readFileSync(filePath, 'utf8'));
-    let allResolved = true;
-    const stillUnresolvedVotes = [];
-    for (const voteEntry of artifact.votes) {
-      const resolvedRows = [];
-      const unresolved = [];
-      for (const cast of voteEntry.casts) {
-        const legislatorId = journalPdf.resolveMoSenator(cast, roster);
-        if (legislatorId) resolvedRows.push({ vote_id: voteEntry.vote_id, legislator_id: legislatorId, position: cast.position, run_id: runId });
-        else unresolved.push(cast);
-      }
-      // sequential (not Promise.all) is deliberate — small, infrequent artifact backlog, same
-      // precedent as ingest-mo-house.js's replayArtifacts.
-      await insertIfAbsent(client, 'vote_casts', resolvedRows, 'vote_id,legislator_id');
-      if (unresolved.length > 0) {
-        allResolved = false;
-        stillUnresolvedVotes.push({ ...voteEntry, casts: unresolved });
-        unresolvedTotal += unresolved.length;
-        if (unresolvedSample.length < 10) unresolvedSample.push(...unresolved.slice(0, 10 - unresolvedSample.length).map((c) => ({ source_key: voteEntry.source_key, ...c })));
-      }
-    }
-    if (allResolved) {
-      unlinkSync(filePath);
-      replayed += 1;
+
+  for (const [year, entries] of byYear) {
+    let identities;
+    if (currentYear != null && Number(year) === Number(currentYear) && currentYearIdentities) {
+      identities = currentYearIdentities;
     } else {
-      writeFileSync(filePath, JSON.stringify({
-        ...artifact,
-        partial: true,
-        votes: stillUnresolvedVotes,
-        last_replay_run_id: runId,
-        last_replay_at: new Date().toISOString(),
-      }, null, 2));
-      console.error(`[${new Date().toISOString()}] replay: ${artifact.pdf_basename} — ${stillUnresolvedVotes.length} vote(s) still have unresolved casts (artifact kept on disk, partial: true)`);
+      const cache = readCache(rosterDir, String(year));
+      if (!cache) {
+        deferred.push({ year, note: `replay deferred: year ${year} roster unavailable this invocation` });
+        continue;
+      }
+      identities = await ensureRosterIdentities(client, runId, cache.members);
+    }
+    if (identities.gated) {
+      deferred.push({ year, note: `replay deferred: year ${year} roster unavailable this invocation` });
+      continue;
+    }
+    const roster = identities.resolutionRoster;
+
+    for (const { filePath, artifact } of entries) {
+      let allResolved = true;
+      const stillUnresolvedVotes = [];
+      for (const voteEntry of artifact.votes) {
+        const resolvedRows = [];
+        const unresolved = [];
+        for (const cast of voteEntry.casts) {
+          const legislatorId = journalPdf.resolveMoSenator(cast, roster);
+          if (legislatorId) resolvedRows.push({ vote_id: voteEntry.vote_id, legislator_id: legislatorId, position: cast.position, run_id: runId });
+          else unresolved.push(cast);
+        }
+        // sequential (not Promise.all) is deliberate — small, infrequent artifact backlog, same
+        // precedent as ingest-mo-house.js's replayArtifacts.
+        await insertIfAbsent(client, 'vote_casts', resolvedRows, 'vote_id,legislator_id');
+        if (unresolved.length > 0) {
+          allResolved = false;
+          stillUnresolvedVotes.push({ ...voteEntry, casts: unresolved });
+          unresolvedTotal += unresolved.length;
+          if (unresolvedSample.length < 10) unresolvedSample.push(...unresolved.slice(0, 10 - unresolvedSample.length).map((c) => ({ source_key: voteEntry.source_key, ...c })));
+        }
+      }
+      if (allResolved) {
+        unlinkSync(filePath);
+        replayed += 1;
+      } else {
+        writeFileSync(filePath, JSON.stringify({
+          ...artifact,
+          partial: true,
+          votes: stillUnresolvedVotes,
+          last_replay_run_id: runId,
+          last_replay_at: new Date().toISOString(),
+        }, null, 2));
+        console.error(`[${new Date().toISOString()}] replay: ${artifact.pdf_basename} (year ${year}) — ${stillUnresolvedVotes.length} vote(s) still have unresolved casts (artifact kept on disk, partial: true)`);
+      }
     }
   }
+
   return {
-    attempted: files.length, replayed, stillGated: false, unresolved: unresolvedTotal, unresolvedSample,
+    attempted: files.length, replayed, unresolved: unresolvedTotal, unresolvedSample, deferred,
   };
 }
 
@@ -811,16 +875,24 @@ async function main() {
   await enforceDurableCooldown(client);
   const runId = await openRun(client, senateWeb.SOURCE);
   try {
-    // Pure DB + filesystem — safe every invocation regardless of which branch below runs this
-    // slot (see replayJournalArtifacts's own comment).
-    const artifactReplay = await replayJournalArtifacts(client, runId);
-
     const sessionRow = await ensureSessionRow(client, runId, args.year);
 
     // At most ONE live network fetch per invocation (roster > journal-index > journal-day PDF,
     // priority order) — see the "local caches" comment block above for why. A slot spent on
     // roster or index closes the run immediately; the very next invocation continues.
     const rosterResult = await ensureRosterForRun(client, runId, args.year);
+
+    // FIX ROUND 2 (CRITICAL): replay moved to AFTER this run's own roster ensure (was: before
+    // ensureSessionRow, using a global era-blind roster query) so that when a queued artifact's
+    // year matches THIS run's --year, replay can use this run's own freshly-ensured
+    // identities/resolutionRoster directly — see replayJournalArtifacts's own comment for the
+    // concrete misattribution this closes. Still pure DB + filesystem for any OTHER year (reads
+    // that year's own roster cache, never a live fetch) — safe and cheap every invocation
+    // regardless of which branch below ends up running this slot.
+    const artifactReplay = await replayJournalArtifacts(client, runId, {
+      currentYear: args.year, currentYearIdentities: rosterResult.identities,
+    });
+
     if (rosterResult.fetchedLive) {
       const counts = {
         days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
