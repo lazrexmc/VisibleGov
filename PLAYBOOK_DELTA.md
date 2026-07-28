@@ -181,7 +181,13 @@ it is. Revisit this section before shipping any summarization or scoring logic.
 4. **Supabase edge blocks secret keys on browser-like user agents.** PowerShell's
    Invoke-RestMethod gets 403 "Forbidden use of secret API key in browser" — use curl/node for
    service-role REST checks.
-5. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
+5. **At Plan-3 deploy time, read LinkedUmp PLAYBOOK_DELTA §4.3-4.4, §5 (four-phase deploy
+   runbook), and §8.2 in place** (`C:\...\MidMoConsultant\LinkedUmp\PLAYBOOK_DELTA.md`):
+   Cloudflare funnels to Workers (use Pages → Connect to Git); registrar DNS cruft fights
+   custom domains; Pages ignores `_headers` Cache-Control on assets — verify deploys at the
+   ORIGIN with curl+cachebuster, never a browser screenshot; never combine `?v=` pins with
+   revalidation headers.
+6. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
    that removing a shim was safe by running the suite — with the shim still present. The
    implementer re-tested with the file actually absent, pushed back with evidence, and was
    right. An adversarial check only counts if it tests the world in the state being claimed
