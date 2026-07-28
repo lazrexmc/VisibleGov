@@ -113,3 +113,61 @@ query-param endpoints below), which are themselves plain HTTP GETs fetchable dir
   individual, named MO Senate roll-call primary source — one document per **day**, not per **vote** (unlike
   the House's one-PDF-per-roll-call `RollCallPDF`), with several to a few dozen votes embedded in
   each day's file depending on floor activity that day.
+
+## uscode/
+
+Captured 2026-07-28 for Task 2 of the glossary implementation plan (US Code fetcher). All fetched
+directly and live from `uscode.house.gov` (the Office of Law Revision Counsel's site; no auth, no
+key) via `curl` with a self-identifying User-Agent
+(`VisibleGov-research/1.0 (civic transparency project; contact lancemccarter1316@hotmail.com)`),
+≥2s apart, 4 requests total (well under the ≤6 budget). Target: 42 U.S.C. 1396b (Medicaid
+payments, referenced by the HR 498 golden's actual bill text).
+
+**Reality vs. the task brief's guess:** the brief speculated OLRC offers a clean per-section
+RSS/XHTML "download" export. It does not. There is no distinct download/export resource reachable
+by a plain GET for a single section - the only working per-section surface is the site's
+interactive `view.xhtml` page (a JSF/Mojarra app), which happens to embed the real official
+section text amid a large navigation-tree + session-ViewState page. No `download`/`export`/`.xml`/
+`.pdf` link of any kind was found in the fetched pages (grepped, confirmed absent) - OLRC's actual
+"download" surface (`https://uscode.house.gov/download/download.shtml`, not fetched - out of
+scope once the per-section path worked) is documented elsewhere as whole-TITLE bulk archives
+(XML/PDF/USLM zips), not per-section. govinfo's USCODE API was never exercised as a fallback
+because the house.gov per-section path worked cleanly on the first request.
+
+- `req1-view.xhtml` + `req1.headers.txt` - live fetch of
+  `https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1396b&num=0&edition=prelim`
+  (200, `text/html;charset=UTF-8`, 810,581 bytes). Confirmed real: `<title>42 USC 1396b: Payment
+  to States</title>`, correct expcite hierarchy (Title 42 > Chapter 7 > Subchapter XIX), genuine
+  statutory body between OLRC's own `<!-- field-start:statute -->` / `<!-- field-end:statute -->`
+  comment markers. **Major finding:** the operative statute text alone (between those two
+  markers, before any HTML-stripping) is 264,322 raw chars / 169,882 chars after stripping - this
+  is OVER this task's own MAX_EXCERPT_CHARS=100000 cap. 1396b is one of the U.S. Code's most
+  heavily amended sections (Medicaid federal-match formula, decades of PL amendments layered in);
+  this is a real property of the actual official text, not a fixture/parsing artifact. Copied
+  verbatim (untrimmed) to `tests/fixtures/uscode/title-42-section-1396b.xhtml` as the production
+  test fixture proving the adapter's OversizeExcerptError path against real content.
+- `req2-view-1396d.xhtml` + `req2.headers.txt` - live fetch of the same URL shape for section
+  1396d (`...title42-section1396d...`), fetched to (a) confirm the URL shape generalizes beyond
+  the one hardcoded section, and (b) get a real, smaller happy-path fixture. 1396d ("Definitions")
+  is directly cross-referenced from within 1396b's own text ("Federal medical assistance
+  percentage (as defined in section 1396d(b)...)"). Stripped operative text is 84,221 chars -
+  under the cap. Opens by literally defining `"medical assistance"`. Copied verbatim to
+  `tests/fixtures/uscode/title-42-section-1396d.xhtml`.
+- `req3.headers.txt` (no body saved - 0 bytes) - live fetch of the same URL shape for a
+  deliberately bogus section (`title42-section99999999`), sent WITHOUT following redirects
+  (`curl` default). **Finding:** unknown citations do not 404 - the server returns `302 Found`
+  with `location: /docnotfound.xhtml`. Node's built-in `fetch()` (used by this project's
+  `fetchWithLimit`) follows redirects by default, so a real adapter call for a bad citation lands
+  on a normal `200 OK` page, not a distinguishable HTTP failure - `!res.ok` in `src/lib/http.js`
+  never fires for this case.
+- `req4-notfound-followed.xhtml` + `req4.headers.txt` - the same bogus-section request, this time
+  with `curl -L` to follow the redirect and capture what a real `fetch()` call actually receives:
+  `200 OK`, `<title>Document not Found</title>`, `<h1>Document not found</h1>`, and critically NO
+  `field-start:statute` marker anywhere in the page. This is why the adapter detects "not found"
+  by marker absence, not by HTTP status. Copied verbatim to
+  `tests/fixtures/uscode/section-not-found.xhtml`.
+
+All four fixtures were grepped for anything key-shaped (`api_key`, `token`, `secret`, `Bearer`,
+etc.) before being committed - the only hits were false positives on the word "Secretary" (HHS
+Secretary, printed throughout the actual statute text). No credentials of any kind are involved;
+the site is fully public and unauthenticated.

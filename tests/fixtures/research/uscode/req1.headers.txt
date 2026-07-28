@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+x-frame-options: SAMEORIGIN
+set-cookie: JSESSIONID=9A03BDBFA4D67CFB23BBFAF6B7A0270F; Path=/; HttpOnly
+content-type: text/html;charset=UTF-8
+transfer-encoding: chunked
+date: Tue, 28 Jul 2026 14:46:36 GMT
+server: 
+

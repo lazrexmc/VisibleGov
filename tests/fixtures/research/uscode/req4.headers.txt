@@ -1,0 +1,17 @@
+HTTP/1.1 302 Found
+x-frame-options: SAMEORIGIN
+set-cookie: JSESSIONID=A76D1B04A503CB992D10B82FB939B7F6; Path=/; HttpOnly
+location: /docnotfound.xhtml
+content-type: text/html;charset=UTF-8
+content-length: 0
+date: Tue, 28 Jul 2026 14:49:46 GMT
+server: 
+
+HTTP/1.1 200 OK
+x-frame-options: SAMEORIGIN
+set-cookie: JSESSIONID=0A8B4689B10BE91B18FC7C3A5519EA2D; Path=/; HttpOnly
+content-type: text/html;charset=UTF-8
+content-length: 4173
+date: Tue, 28 Jul 2026 14:51:48 GMT
+server: 
+
