@@ -33,6 +33,17 @@ create table glossary_terms (
   unique (kind, citation)
 );
 
+-- Postgres treats NULL as distinct from NULL under a unique constraint, so `unique (kind,
+-- citation)` above does NOT dedupe rows with the same kind and an unmapped (NULL) citation —
+-- every referencing bill would mint a fresh glossary_terms row for the same unmapped term,
+-- defeating the write-once/reuse cost model the design relies on (popular-name-only terms like
+-- a commonly cited act with no resolved U.S.C. cite yet). `NULLS NOT DISTINCT` was considered
+-- and rejected: it would collapse ALL same-kind rows with NULL citation into one slot, which
+-- would incorrectly merge unrelated acts that both happen to be unmapped. Instead, dedupe on
+-- (kind, term) specifically for the unmapped case, so distinct unmapped terms of the same kind
+-- stay distinct while a repeat of the exact same unmapped term collapses to one row.
+create unique index glossary_terms_unmapped_uidx on glossary_terms (kind, term) where citation is null;
+
 create table summary_terms (
   summary_id uuid not null references summaries(id),
   term_id    uuid not null references glossary_terms(id),
