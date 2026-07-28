@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Senators - Senators</title>
+    <link rel="stylesheet" href="/Senators/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://www.senate.mo.gov/SenateHome/css/siteMain.css" />
+    <link rel="stylesheet" href="https://www.senate.mo.gov/SenateHome/css/component-library.css" />
+
+    <link rel="stylesheet" href="/Senators/css/site.css?v=M1WcAKOkrTGadeLY4VmuuWFLqEBUQw3wUp76zZOwfAU" />
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+<div b-c6ellt9l7g class="wrapper">
+    <div b-c6ellt9l7g id="TopNavTarget">
+    </div>
+    <main b-c6ellt9l7g role="main" class="pb-3" id="main-content">
+        <style>
+    @media (min-width: 1440px) {
+        .main-container {
+            max-width: 90% !important;
+        }
+    }
+
+    /* Responsive senator images - don't get too large */
+    .senator-img {
+        width: 100%;
+        height: auto;
+        max-width: clamp(120px, 100%, 280px);
+        object-fit: cover;
+        border-radius: 8px;
+        display: block;
+        margin: 0 auto;
+    }
+
+    /* Senator grid - minimum 2 columns, fluid gap */
+    .senators-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: clamp(15px, 3vw, 30px);
+    }
+
+    /* Make all senator cards equal height */
+    .senators-grid > a {
+        display: flex;
+    }
+
+    .senators-grid .card {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .senators-grid .card__footer {
+        margin-top: auto;
+    }
+</style>
+
+<div class="main-container">
+    <div class="content-grid" style="--grid-cols: 3fr 1fr;">
+            <aside class="sidebar-order">
+                <div class="card collapsible-mobile-only collapsed">
+    <div class="card__header card__header--bold"
+         onclick="toggleCard(this)"
+         onkeydown="handleCollapsibleKeydown(event, this, toggleCard)"
+         role="button"
+         aria-expanded="false"
+         tabindex="0">
+        <span aria-labelledby="BillDetailsksHeading" tabindex="0">Senator Information</span>
+        <span class="chevron-arrow" aria-hidden="true"></span>
+    </div>
+    <div class="card__body">
+        <div class="link-card-stack">
+            <a href=https://www.senate.mo.gov/Senators/index/ class="link-card-item">
+                Senators
+            </a>
+            <a href=https://www.senate.mo.gov/Senators/leadership/ class="link-card-item">
+                Senate Leadership
+            </a>
+            <a href=https://www.senate.mo.gov/Senators/SenatorDirectory/ class="link-card-item">
+                Senator Directory
+            </a>
+            <a href=https://www.senate.mo.gov/webPDFs/SeatingChart.pdf class="link-card-item" target="_blank">
+                Chamber Seating Chart
+            </a>
+            <a href=https://www.senate.mo.gov/Senators/TermLimits/ class="link-card-item">
+                Term Limits
+            </a>
+            <a href=https://www.senate.mo.gov/Senators/maps/ class="link-card-item">
+                Individual District Maps
+            </a>
+            <a href=https://www.senate.mo.gov/webPDFs/Maps/Senate-Statewide.pdf class="link-card-item" target="_blank">
+                Statewide District Map (PDF Version)
+            </a>
+        </div>
+    </div>
+</div>
+
+            </aside>
+            <main class="main-order">
+                <div class="card">
+                    <div class="card__header card__header--bold"><span class="heading--label" aria-labelledby="BillDetailsksHeading" tabindex="0">Missouri General Assembly - One Hundred Third General Assembly</span></div>
+                    <div class="card__body">
+                        <div class="senators-grid" role="region">
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=2" aria-label="View Senator Jason Bean details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Bean25.jpg" class="senator-img" alt="Senator Jason Bean">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Jason Bean <br/> District 25
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=3" aria-label="View Senator Doug Beck details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Beck01.jpg" class="senator-img" alt="Senator Doug Beck">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Doug Beck <br/> District 1
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=4" aria-label="View Senator Mike Bernskoetter details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Bernskoetter06.jpg" class="senator-img" alt="Senator Mike Bernskoetter">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Mike Bernskoetter <br/> District 6
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=270" aria-label="View Senator Rusty Black details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Black12.jpg" class="senator-img" alt="Senator Rusty Black">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Rusty Black <br/> District 12
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=5" aria-label="View Senator Rick Brattin details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Brattin31.jpg" class="senator-img" alt="Senator Rick Brattin">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Rick Brattin <br/> District 31
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6" aria-label="View Senator Justin Brown details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Brown16.jpg" class="senator-img" alt="Senator Justin Brown">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Justin Brown <br/> District 16
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=271" aria-label="View Senator Ben Brown details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Brown26.jpg" class="senator-img" alt="Senator Ben Brown">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Ben Brown <br/> District 26
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6376" aria-label="View Senator Jamie Burger details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Burger27.jpg" class="senator-img" alt="Senator Jamie Burger">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Jamie Burger <br/> District 27
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=273" aria-label="View Senator Jill Carter details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Carter32.jpg" class="senator-img" alt="Senator Jill Carter">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Jill Carter <br/> District 32
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=8" aria-label="View Senator Mike Cierpiot details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Cierpiot08.jpg" class="senator-img" alt="Senator Mike Cierpiot">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Mike Cierpiot <br/> District 8
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=272" aria-label="View Senator Mary Elizabeth Coleman details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/coleman22.jpg" class="senator-img" alt="Senator Mary Elizabeth Coleman">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Mary Elizabeth Coleman <br/> District 22
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=9" aria-label="View Senator Sandy Crawford details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/crawford28.jpg" class="senator-img" alt="Senator Sandy Crawford">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Sandy Crawford <br/> District 28
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6371" aria-label="View Senator David Gregory details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Gregory15.jpg" class="senator-img" alt="Senator David Gregory">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator David Gregory <br/> District 15
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6374" aria-label="View Senator Kurtis Gregory details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Gregory21.jpg" class="senator-img" alt="Senator Kurtis Gregory">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Kurtis Gregory <br/> District 21
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6368" aria-label="View Senator Mike Henderson details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Henderson03.jpg" class="senator-img" alt="Senator Mike Henderson">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Mike Henderson <br/> District 3
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=15" aria-label="View Senator Lincoln Hough details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Hough30.jpg" class="senator-img" alt="Senator Lincoln Hough">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Lincoln Hough <br/> District 30
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6377" aria-label="View Senator Brad Hudson details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Hudson33.jpg" class="senator-img" alt="Senator Brad Hudson">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Brad Hudson <br/> District 33
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6369" aria-label="View Senator Patty Lewis details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Lewis07.jpg" class="senator-img" alt="Senator Patty Lewis">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Patty Lewis <br/> District 7
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=17" aria-label="View Senator Tony Luetkemeyer details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Luetkemeyer34.jpg" class="senator-img" alt="Senator Tony Luetkemeyer">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Tony Luetkemeyer <br/> District 34
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=18" aria-label="View Senator Karla May details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/May04.jpg" class="senator-img" alt="Senator Karla May">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Karla May <br/> District 4
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=277" aria-label="View Senator Tracy McCreery details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/McCreery24.jpg" class="senator-img" alt="Senator Tracy McCreery">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Tracy McCreery <br/> District 24
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=19" aria-label="View Senator Mike Moon details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Moon29.jpg" class="senator-img" alt="Senator Mike Moon">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Mike Moon <br/> District 29
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=20" aria-label="View Senator Angela Mosley details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Mosley13.jpg" class="senator-img" alt="Senator Angela Mosley">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Angela Mosley <br/> District 13
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6370" aria-label="View Senator Joe Nicola details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Nicola11.jpg" class="senator-img" alt="Senator Joe Nicola">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Joe Nicola <br/> District 11
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6372" aria-label="View Senator Maggie Nurrenbern details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Nurrenbern17.jpg" class="senator-img" alt="Senator Maggie Nurrenbern">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Maggie Nurrenbern <br/> District 17
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=21" aria-label="View Senator Cindy O&#x27;Laughlin details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Olaughlin18.jpg" class="senator-img" alt="Senator Cindy O&#x27;Laughlin">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Cindy O&#x27;Laughlin <br/> District 18
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=26" aria-label="View Senator Steven Roberts details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Roberts05.jpg" class="senator-img" alt="Senator Steven Roberts">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Steven Roberts <br/> District 5
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6375" aria-label="View Senator Adam Schnelting details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Schnelting23.jpg" class="senator-img" alt="Senator Adam Schnelting">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Adam Schnelting <br/> District 23
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=276" aria-label="View Senator Nick Schroer details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Schroer02.jpg" class="senator-img" alt="Senator Nick Schroer">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Nick Schroer <br/> District 2
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=275" aria-label="View Senator Curtis Trent details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Trent20.jpg" class="senator-img" alt="Senator Curtis Trent">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Curtis Trent <br/> District 20
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=31" aria-label="View Senator Barbara Washington details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Washington09.jpg" class="senator-img" alt="Senator Barbara Washington">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Barbara Washington <br/> District 9
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=6373" aria-label="View Senator Stephen Webber details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Webber19.jpg" class="senator-img" alt="Senator Stephen Webber">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Stephen Webber <br/> District 19
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/Member?id=34" aria-label="View Senator Brian Williams details page" style="text-decoration:none !important">
+                                        <div class="card card--with-footer">
+                                            <div class="card__body">
+                                                <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Williams14.jpg" class="senator-img" alt="Senator Brian Williams">
+                                            </div>
+                                            <div class="card__footer" style="text-align: center; font-weight: bold">
+                                                Senator Brian Williams <br/> District 14
+                                            </div>
+                                        </div>
+                                    </a>
+                                    <a href="https://www.senate.mo.gov/Senators/VacantSenator?district=10" aria-label="View Senator Vacant Vacant details page" style="text-decoration:none !important">
+                                    <div class="card card--with-footer">
+                                        <div class="card__body">
+                                            <img src="https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Vacancy07.jpg" class="senator-img" alt="Senator Vacant Vacant">
+                                        </div>
+                                        <div class="card__footer" style="text-align: center; font-weight: bold">
+                                            Vacant District 10
+                                        </div>
+                                    </div>
+                                    </a>
+                        </div>
+                    </div>
+                </div>
+            </main>
+    </div>
+</div>
+
+<button type="button" class="btn-scroll-top" id="scrollToTopBtn" title="Scroll to top" aria-label="Scroll to top"></button>
+
+    </main>
+
+    <footer b-c6ellt9l7g id="FooterTarget" class="footer">
+    </footer>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+    <script src="/Senators/lib/jquery/dist/jquery.min.js"></script>
+    <script src="/Senators/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+            const resourceBaseUrl = 'https://www.senate.mo.gov/SenateHome/';
+        </script>
+    <script src="https://www.senate.mo.gov/SenateHome/js/mainSite.js"></script>
+
+    
+    <script src="/Senators/js/site.js"></script>
+</div>
+</body>
+</html>
