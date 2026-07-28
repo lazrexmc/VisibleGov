@@ -187,7 +187,9 @@ it is. Revisit this section before shipping any summarization or scoring logic.
    custom domains; Pages ignores `_headers` Cache-Control on assets — verify deploys at the
    ORIGIN with curl+cachebuster, never a browser screenshot; never combine `?v=` pins with
    revalidation headers.
-6. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
+6. **Append controller rulings INTO the brief file.** A reviewer flagged an honest implementer for a "fabricated citation" that was actually verbatim from the controller dispatch - invisible to the reviewer because dispatches are not files. Rulings that extend a brief belong in the brief.
+7. **Attribute cross-process effects before judging honesty.** A background driver loop auto-running newly-committed code wrote an artifact the reviewer pinned on the implementer. Long-lived loops reload code per invocation; check process logs before concluding anyone lied.
+8. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
    that removing a shim was safe by running the suite — with the shim still present. The
    implementer re-tested with the file actually absent, pushed back with evidence, and was
    right. An adversarial check only counts if it tests the world in the state being claimed

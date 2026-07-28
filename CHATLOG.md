@@ -437,3 +437,31 @@ adversarial verification vs fetching referenced statute text from govinfo/US Cod
 (c) verifier treatment for background claims. Overnight execution continues per the standing
 directive: Senate wiring done (171/171), Senate backfill next once the House backfill exits,
 then MO XML + PDFs.
+
+---
+
+## 2026-07-28 (overnight) — Plan 3a executed while Lance slept
+
+Directive fulfilled with both promised boundaries held (zero LLM-API spend; one approved
+dependency). The numbers at dawn: **365,730 individual vote positions** in the live DB.
+
+- **US House: COMPLETE.** 645 roll calls (all of the 119th Congress to date), ~276k casts —
+  every MO Representative wall-to-wall; Onder 645/645. Six "failures" = QUORUM/ADJOURN
+  procedural non-bills (hygiene item).
+- **US Senate: COMPLETE.** New adapter (real senate.gov LIS XML fixtures) + menu-driven ingest;
+  869 votes, ~87k casts, 0 unresolved after two review-driven resolver fix rounds (diacritic
+  folding for Luján; first-name tiebreak; endYear-based historical filtering that cut roster
+  pollution by 2,157). Hawley 869/869, Schmitt 869/869. The Graham/SC "ambiguity" turned out to
+  be a REAL mid-July seat succession (Lindsey→Darline, two-vote vacancy) — forensically
+  confirmed in the final review; the resolver handled it correctly on first encounter.
+- **Missouri House: pipeline proven live end-to-end.** XML adapter (bills/actions/tallies/PDF
+  links) + PDF individual-vote extraction (pdfjs-dist 6.1.200 pinned, Lance-approved) with a
+  hard tally-reconciliation gate — nothing unreconciled is ever stored. A real roll call
+  (HB 1800, 82-61-2-13-5, 158 casts, duplicate surnames district-disambiguated) was fetched,
+  extracted, reconciled, and gated into a replay artifact awaiting migrations. Durable
+  cross-process 30-min ToU cooldown (fixed after a real double-fetch the controller caused and
+  owned); failing-PDF quarantine; 2,099 bill stubs ingested, enrichment continuing on cadence.
+- **Process:** 11 commits, every task independently reviewed, 5 fix rounds, 2 controller
+  overrulings-with-evidence (both forensically confirmed by the final reviewer), final
+  whole-branch review verdict YES + hardening wave + one wave-introduced regression caught by
+  re-review and killed before it could ever fire. 258/258 tests.
