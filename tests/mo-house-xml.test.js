@@ -231,14 +231,19 @@ test('parseMoHouseArgs: defaults', () => {
   assert.equal(args.dryRun, false);
   assert.equal(args.billIdentifier, null);
   assert.equal(args.billXmlFile, null);
+  assert.equal(args.rollcallPdfFile, null);
 });
 
-test('parseMoHouseArgs: --limit, --session, --bill, --bill-xml-file, --dry-run', () => {
-  const args = parseMoHouseArgs(['--session', '261', '--limit', '5', '--bill', 'HB 1800', '--bill-xml-file', '/tmp/x.xml', '--dry-run']);
+test('parseMoHouseArgs: --limit, --session, --bill, --bill-xml-file, --rollcall-pdf-file, --dry-run', () => {
+  const args = parseMoHouseArgs([
+    '--session', '261', '--limit', '5', '--bill', 'HB 1800', '--bill-xml-file', '/tmp/x.xml',
+    '--rollcall-pdf-file', '/tmp/roll.pdf', '--dry-run',
+  ]);
   assert.equal(args.session, '261');
   assert.equal(args.limit, 5);
   assert.equal(args.billIdentifier, 'HB 1800');
   assert.equal(args.billXmlFile, '/tmp/x.xml');
+  assert.equal(args.rollcallPdfFile, '/tmp/roll.pdf');
   assert.equal(args.dryRun, true);
 });
 

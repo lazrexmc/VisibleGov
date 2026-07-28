@@ -22,5 +22,7 @@ export async function fetchWithLimit(url, { source, limiter, headers = {}, as = 
   if (!res.ok) {
     throw new SourceFetchError(`HTTP ${res.status} from ${source}: ${safeUrl}`, { source, url: safeUrl, status: res.status });
   }
-  return as === 'json' ? res.json() : res.text();
+  if (as === 'json') return res.json();
+  if (as === 'arrayBuffer') return res.arrayBuffer(); // binary (PDFs) - added for mo-rollcall-pdf.js
+  return res.text();
 }
