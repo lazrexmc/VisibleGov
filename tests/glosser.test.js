@@ -6,7 +6,7 @@ import {
   buildGlossUserMessage, authorGloss,
   GLOSS_VERIFIER_MODEL, GLOSS_VERIFY_PROMPT_VERSION, GLOSS_VERIFY_MAX_OUTPUT_TOKENS,
   GLOSS_VERIFY_SCHEMA, GLOSS_VERIFY_SYSTEM_PROMPT, buildGlossVerifyMessage, splitGlossSentences,
-  fetchGlossSource,
+  fetchGlossSource, EmptyGlossError, assertGlossNotEmpty,
 } from '../src/lib/glosser.js';
 import { assessVerdicts } from '../src/lib/verifier.js';
 import { parseCitation, extractSubsectionText } from '../src/adapters/uscode.js';
@@ -60,6 +60,14 @@ test('GLOSS_SYSTEM_PROMPT forbids characterization beyond function (no adjective
   const lower = GLOSS_SYSTEM_PROMPT.toLowerCase();
   assert.ok(lower.includes('no adjectives'), "missing rule marker: 'no adjectives'");
   assert.ok(lower.includes('1-2 sentences'), 'missing the 1-2 sentence length constraint');
+});
+
+// Fix wave (Minor finding 3): the model itself should be discouraged from writing dotted
+// abbreviations into gloss_md in the first place, on top of splitGlossSentences' own mechanical
+// protection for whatever it writes anyway.
+test('GLOSS_SYSTEM_PROMPT discourages dotted abbreviations in gloss_md', () => {
+  const lower = GLOSS_SYSTEM_PROMPT.toLowerCase();
+  assert.ok(lower.includes('dotted abbreviations'), "missing rule marker: 'dotted abbreviations'");
 });
 
 // ---- buildGlossUserMessage ----
@@ -138,6 +146,34 @@ test('splitGlossSentences trims surrounding whitespace from each sentence', () =
   );
 });
 
+// ---- fix wave (Minor finding 3): dotted legal abbreviations must not fragment a real sentence ----
+
+test('splitGlossSentences does not split on a dotted U.S.C. citation mid-sentence — exactly 2 real sentences', () => {
+  const result = splitGlossSentences('Under 42 U.S.C. 1396b, states get paid. It caps rates.');
+  assert.deepEqual(result, [
+    'Under 42 U.S.C. 1396b, states get paid.',
+    'It caps rates.',
+  ]);
+});
+
+test('splitGlossSentences protects other dotted abbreviations (Pub. L., Sec., Stat., e.g., i.e., No.) from spurious splits', () => {
+  assert.deepEqual(
+    splitGlossSentences('This amends Pub. L. 117-2, Sec. 3, 100 Stat. 1. It applies immediately.'),
+    ['This amends Pub. L. 117-2, Sec. 3, 100 Stat. 1.', 'It applies immediately.'],
+  );
+  assert.deepEqual(
+    splitGlossSentences('It covers programs (e.g. Medicaid) and, i.e., related agencies. No. 4 is one example.'),
+    ['It covers programs (e.g. Medicaid) and, i.e., related agencies.', 'No. 4 is one example.'],
+  );
+});
+
+test('splitGlossSentences restores the exact original text, dots included, when no real sentence break is present', () => {
+  assert.deepEqual(
+    splitGlossSentences('The Secretary cites 42 U.S.C. 1396b'),
+    ['The Secretary cites 42 U.S.C. 1396b'],
+  );
+});
+
 // splitGlossSentences' output feeds assessVerdicts (reused, not reimplemented) as the sentence
 // count — confirms the two functions actually compose the way glossOne (gloss.js) uses them.
 test('splitGlossSentences count composes with assessVerdicts for the 2-sentence case', () => {
@@ -147,6 +183,40 @@ test('splitGlossSentences count composes with assessVerdicts for the 2-sentence 
     { bullet_index: 1, supported: true },
   ];
   assert.deepEqual(assessVerdicts(verdicts, sentences.length), { complete: true, overall: 'clean' });
+});
+
+// ---- fix wave (Minor finding 4): empty-gloss guard, BEFORE any verify call ----
+
+test('EmptyGlossError is exported and instanceof Error', () => {
+  const err = new EmptyGlossError('gloss is empty');
+  assert.ok(err instanceof Error);
+  assert.equal(err.name, 'EmptyGlossError');
+});
+
+test('assertGlossNotEmpty throws EmptyGlossError when sentences is empty', () => {
+  assert.throws(
+    () => assertGlossNotEmpty([], { term: 'Some Act', termId: 't1' }),
+    (err) => err instanceof EmptyGlossError && err.name === 'EmptyGlossError' && /empty/.test(err.message) && err.term === 'Some Act' && err.termId === 't1',
+  );
+});
+
+test('assertGlossNotEmpty does not throw when sentences is non-empty', () => {
+  assert.doesNotThrow(() => assertGlossNotEmpty(['A sentence.'], { term: 'Some Act', termId: 't1' }));
+});
+
+// Proves the real end-to-end path glossOne (gloss.js) actually exercises: an authored gloss_md of
+// '' (schema-valid — GLOSS_SCHEMA has no minLength on the string — so nothing upstream flags it)
+// splits to zero sentences, and THAT is what assertGlossNotEmpty guards against — never reaching
+// verifyGloss or persistGloss with zero sentences to work from.
+test('assertGlossNotEmpty composes with splitGlossSentences("") to catch a genuinely empty gloss_md before any verify call', () => {
+  const sentences = splitGlossSentences('');
+  assert.deepEqual(sentences, []);
+  assert.throws(() => assertGlossNotEmpty(sentences, { term: 'Some Act', termId: 't1' }), EmptyGlossError);
+});
+
+test('assertGlossNotEmpty also catches a whitespace-only gloss_md (trims to empty)', () => {
+  const sentences = splitGlossSentences('   ');
+  assert.throws(() => assertGlossNotEmpty(sentences, { term: 'Some Act', termId: 't1' }), EmptyGlossError);
 });
 
 // ---- fetchGlossSource: unparseable-citation guard is testable without any network/live client ----
@@ -170,8 +240,9 @@ test('fetchGlossSource rejects null/empty citation before touching the network',
 // actually reaches subsection-level slicing for the real HR 498 golden case (42 U.S.C. 1396b(i)),
 // not just that each piece works in isolation.
 test('a stored AS-CITED citation round-trips through parseCitation to reach subsection slicing for the real HR 498 golden case', () => {
-  // What extract-terms.js's upsertGlossaryTerm now actually stores for HR 498's own raw citation
-  // shape (subsection preserved, per the fix-round-1 controller ruling).
+  // What glossary-terms.js's upsertGlossaryTerm (used by both extract-terms.js and summarize.js)
+  // now actually stores for HR 498's own raw citation shape (subsection preserved, per the
+  // fix-round-1 controller ruling).
   const storedCitation = normalizeCitation('42 U.S.C. 1396b(i)');
   assert.equal(storedCitation, '42 U.S.C. 1396b(i)');
 

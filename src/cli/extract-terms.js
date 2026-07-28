@@ -1,10 +1,19 @@
-import { getClient, openRun, closeRun, insertIfAbsent, isMissingRelationError } from '../lib/db.js';
+import { getClient, openRun, closeRun, isMissingRelationError } from '../lib/db.js';
 import { pickBillText } from '../review/server.js';
-import { parseCitation } from '../adapters/uscode.js';
 import {
   getAnthropicClient, SUMMARY_SCHEMA, MAX_TEXT_CHARS,
   OversizeTextError, SummaryRefusedError, SummaryTruncatedError,
 } from '../lib/summarizer.js';
+import {
+  normalizeTermText, upsertKeyFor, normalizeCitation, persistReferencedTerms, SUMMARY_TERMS_TABLE,
+} from '../lib/glossary-terms.js';
+
+// Fix wave (final review, Important finding 2): normalizeTermText/upsertKeyFor/normalizeCitation
+// and the upsert/join logic itself moved to src/lib/glossary-terms.js so summarize.js can reuse
+// them (see that file's createDraftSummary). Re-exported here UNCHANGED so every existing test
+// import (`from '../src/cli/extract-terms.js'`) and this file's own behavior stay exactly as they
+// were — this backfill's own tests were the review's explicit bar: "behavior unchanged".
+export { normalizeTermText, upsertKeyFor, normalizeCitation };
 
 // Extraction backfill (glossary plan Task 4): for EXISTING summaries that were generated before
 // (or without) referenced_terms ever being persisted, run a small, separate extraction-only call
@@ -18,9 +27,6 @@ export const EXTRACT_PROMPT_VERSION = 'v1';
 // summarizer.js's MAX_OUTPUT_TOKENS (16000) for a full what_it_does/stated_purpose summary.
 export const EXTRACT_MAX_OUTPUT_TOKENS = 4000;
 export const EXTRACT_COST_PER_SUMMARY_USD = 0.03; // per the plan's own estimate (~25 x ~$0.03 ~= $0.75)
-
-const SUMMARY_TERMS_TABLE = 'summary_terms';
-const GLOSSARY_TERMS_TABLE = 'glossary_terms';
 
 // Mirrors SUMMARY_SCHEMA's referenced_terms shape by REFERENCE (controller ruling 1: "JSON-schema
 // output mirroring SUMMARY_SCHEMA's referenced_terms shape") — not a re-typed copy, so the two
@@ -112,51 +118,6 @@ export function planExtraction(summaries, extractedSummaryIds) {
   return summaries.filter((s) => !extractedSummaryIds.has(s.id));
 }
 
-// normalizeTermText: TRIVIAL normalization ONLY — trim + collapse internal whitespace runs to a
-// single space. Controller ruling 2, ledgered from Task 1's review: never rewrite the term text
-// itself (verbatim-from-bill discipline carries over from extraction the same way it governs
-// summarizer.js's referenced_terms rule). This means (kind, term) dedup for unmapped terms is
-// exact-string only — a term printed two different ways across two bills mints two distinct
-// glossary_terms rows. Accepted and documented, not a bug to "fix" with fuzzier normalization.
-export function normalizeTermText(s) {
-  return String(s ?? '').trim().replace(/\s+/g, ' ');
-}
-
-// upsertKeyFor: the branched upsert decision (ledgered from Task 1's review — see migration
-// 0007's comments on glossary_terms_unmapped_uidx). glossary_terms has two unique paths: the
-// base `unique (kind, citation)` constraint when parseCitation resolves citation_raw to a real
-// USC cite, and the partial index `(kind, term) where citation is null` when it can't. Which
-// applies is decided ENTIRELY by whether parseCitation resolves — never by kind, never a guess.
-// Pure: does not itself build the normalized citation string or touch the DB (see
-// upsertGlossaryTerm below for that).
-export function upsertKeyFor(term) {
-  const parsed = parseCitation(term.citation_raw);
-  if (parsed) return { by: 'citation', needs_mapping: false };
-  return { by: 'term', needs_mapping: true };
-}
-
-// normalizeCitation: the stored `glossary_terms.citation` string, AS-CITED granularity (fix
-// round 1 controller ruling, glossary plan Task 5 follow-up). Preserves a captured subsection
-// (parseCitation's `subsection` field — see uscode.js) rather than collapsing every citation to
-// section level: a bill citing "42 U.S.C. 1396b(i)" and one citing "42 U.S.C. 1396b" bare
-// intentionally yield DISTINCT glossary_terms rows. Rationale (controller ruling, recorded here
-// verbatim for the next reader): the design doc's own example term is section-specific ("Social
-// Security Act, Sec. 1903"); a gloss of the actually-cited subsection is more relevant to that
-// bill's reader than a gloss of the whole (possibly huge) section; dedup only splits when bills
-// genuinely cite DIFFERENT subsections of the same section (a modest, accepted cost); and this
-// changes cheaply now because 0007 is still unapplied and this extraction backfill has never run
-// live — no data migration, no existing rows to reconcile. This is also what makes uscode.js's
-// subsection-level oversize fallback (extractSubsectionText, gated on parseCitation re-resolving
-// a subsection from THIS stored string) reachable at all from the live pipeline — see
-// glosser.js's fetchGlossSource, which calls parseCitation on exactly this stored value. Pure:
-// assumes citationRaw already parses (only ever called from the `by: 'citation'` branch below,
-// which upsertKeyFor has already gated on parseCitation succeeding).
-export function normalizeCitation(citationRaw) {
-  const parsed = parseCitation(citationRaw);
-  const base = `${parsed.title} U.S.C. ${parsed.section}`;
-  return parsed.subsection ? `${base}(${parsed.subsection})` : base;
-}
-
 // ---- DB-facing helpers ----
 
 async function loadAllSummaries(client) {
@@ -186,52 +147,6 @@ async function loadExtractedSummaryIds(client, summaryIds, dryRun) {
   return { extractedIds: new Set((data ?? []).map((r) => r.summary_id)), tableMissing: false };
 }
 
-async function findExistingGlossaryTerm(client, { kind, citation, term }) {
-  let query = client.from(GLOSSARY_TERMS_TABLE).select('id').eq('kind', kind);
-  query = citation === null ? query.is('citation', null).eq('term', term) : query.eq('citation', citation);
-  const { data, error } = await query.maybeSingle();
-  if (error) throw new Error(`${GLOSSARY_TERMS_TABLE} lookup failed: ${error.message}`);
-  return data;
-}
-
-// upsertGlossaryTerm: branches per upsertKeyFor, and the two branches need DIFFERENT DB
-// strategies to stay correct against Postgres's actual constraint shapes (real finding, not a
-// style choice):
-//
-// - by:'citation' targets the base `unique (kind, citation)` constraint — a normal, non-partial
-//   unique index, so insertIfAbsent's ON CONFLICT(kind,citation) DO NOTHING path (lib/db.js)
-//   works exactly as it does everywhere else in this codebase.
-// - by:'term' targets glossary_terms_unmapped_uidx, a PARTIAL unique index — `(kind, term) WHERE
-//   citation IS NULL`. Postgres only lets ON CONFLICT infer a partial index when the conflict
-//   clause repeats that index's own WHERE predicate; PostgREST's upsert `on_conflict` parameter
-//   (what insertIfAbsent sends) is a bare column list with no way to express a WHERE clause, so
-//   ON CONFLICT(kind,term) can never resolve to this partial index at all — Postgres would
-//   reject it outright ("no unique or exclusion constraint matching"). This is the SAME shape as
-//   ingest.js's findExistingTerm/upsertTerm working around a nullable start_date breaking
-//   ON CONFLICT dedup: manual check-then-insert instead of insertIfAbsent for this branch only.
-async function upsertGlossaryTerm(client, runId, rawTerm) {
-  const key = upsertKeyFor(rawTerm);
-  const term = normalizeTermText(rawTerm.term);
-  const kind = rawTerm.kind;
-
-  if (key.by === 'citation') {
-    const citation = normalizeCitation(rawTerm.citation_raw);
-    await insertIfAbsent(client, GLOSSARY_TERMS_TABLE,
-      [{ term, kind, citation, status: 'draft', needs_mapping: false, run_id: runId }], 'kind,citation');
-    const existing = await findExistingGlossaryTerm(client, { kind, citation, term: null });
-    if (!existing) throw new Error(`${GLOSSARY_TERMS_TABLE} row for ${kind}/${citation} missing immediately after upsert`);
-    return existing.id;
-  }
-
-  const existing = await findExistingGlossaryTerm(client, { kind, citation: null, term });
-  if (existing) return existing.id;
-  const { data, error } = await client.from(GLOSSARY_TERMS_TABLE)
-    .insert({ term, kind, citation: null, status: 'draft', needs_mapping: true, run_id: runId })
-    .select('id').single();
-  if (error) throw new Error(`${GLOSSARY_TERMS_TABLE} insert failed for ${kind}/"${term}": ${error.message}`);
-  return data.id;
-}
-
 async function extractOne(client, runId, summary, anthropic) {
   const identifier = summary.bills ? summary.bills.identifier : summary.bill_id;
   const title = summary.bills ? summary.bills.title : '';
@@ -244,13 +159,13 @@ async function extractOne(client, runId, summary, anthropic) {
 
   const { json } = await extractTerms(anthropic, { identifier, title, text: textRow.content });
 
-  let termsUpserted = 0;
-  for (const rawTerm of json.referenced_terms ?? []) {
-    const termId = await upsertGlossaryTerm(client, runId, rawTerm);
-    await insertIfAbsent(client, SUMMARY_TERMS_TABLE, [{ summary_id: summary.id, term_id: termId }], 'summary_id,term_id');
-    termsUpserted += 1;
-  }
-  return { termsUpserted };
+  // Fix wave (final review, Important finding 2): the upsert/join loop itself moved to
+  // src/lib/glossary-terms.js's persistReferencedTerms (identical logic, same call order) so
+  // summarize.js's own v2 path can reuse it — see that shared module's own header comment.
+  // Behavior here is UNCHANGED: any DB error still propagates and hard-fails this summary's
+  // extraction (isTypedFailure in main() below doesn't know about DB errors, same as before this
+  // fix — extract-terms.js has always preferred a loud crash over a silently partial backfill).
+  return persistReferencedTerms(client, runId, { summaryId: summary.id, referencedTerms: json.referenced_terms ?? [] });
 }
 
 // ---- main ----

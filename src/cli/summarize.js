@@ -1,4 +1,4 @@
-import { getClient, openRun, closeRun, insertIfAbsent } from '../lib/db.js';
+import { getClient, openRun, closeRun, insertIfAbsent, isMissingRelationError } from '../lib/db.js';
 import { SourceFetchError } from '../lib/errors.js';
 import { billTypeSlug } from '../adapters/us-congress.js';
 import { parseTextVersions, pickTextUrl, stripHtml, sha256, fetchBillTextVersions, fetchTextBody } from '../adapters/us-congress-text.js';
@@ -6,6 +6,9 @@ import {
   getAnthropicClient, summarizeBill, MODEL, PROMPT_VERSION,
   OversizeTextError, SummaryRefusedError, SummaryTruncatedError,
 } from '../lib/summarizer.js';
+import {
+  persistReferencedTerms, GLOSSARY_TERMS_TABLE, SUMMARY_TERMS_TABLE,
+} from '../lib/glossary-terms.js';
 
 const JURISDICTION = 'us-congress';
 const FAILURE_TYPES = [SourceFetchError, OversizeTextError, SummaryRefusedError, SummaryTruncatedError];
@@ -175,15 +178,61 @@ async function markStale(client, staleSummaries) {
   }
 }
 
-async function createDraftSummary(client, runId, { bill, textRow, anthropic }) {
-  const { markdown } = await summarizeBill(anthropic, { identifier: bill.identifier, title: bill.title, text: textRow.content });
+// persistReferencedTermsGracefully: the summarize.js-specific policy wrapper around
+// glossary-terms.js's persistReferencedTerms — factored out (same rationale as gloss.js's
+// persistGloss/extract-terms.js's other pure/DB-only pieces) so it's unit-testable with a fake
+// client alone, no anthropic faking required.
+//
+// Fix wave (final review, Important finding 2), CRITICAL constraint: this is called AFTER the
+// summary draft row already exists (see createDraftSummary below) — that row must stay committed
+// no matter what happens here. glossary_terms/summary_terms may not exist yet (0007 is still an
+// unapplied draft — see that migration's own header comment), so a missing-relation error is
+// caught here, turned into an honest, counted warning (never silently swallowed, never a thrown
+// error that would crash this bill's summarize run), and the caller moves on. Nothing is lost:
+// extract-terms.js's own backfill self-heals this later — once 0007 is applied, running it finds
+// this summary has no summary_terms row yet and extracts its terms retroactively, exactly as it
+// already does today for every summary that predates this fix. Any OTHER (non-missing-relation)
+// DB error is a real bug, not an expected pre-0007 condition, so it propagates unchanged — same
+// as extract-terms.js's own persistence errors do.
+export async function persistReferencedTermsGracefully(client, runId, { bill, summaryId, referencedTerms }) {
+  try {
+    const { termsUpserted } = await persistReferencedTerms(client, runId, { summaryId, referencedTerms });
+    return { termsUpserted, warning: null };
+  } catch (err) {
+    if (isMissingRelationError(err, GLOSSARY_TERMS_TABLE) || isMissingRelationError(err, SUMMARY_TERMS_TABLE)) {
+      return {
+        termsUpserted: 0,
+        warning: `referenced_terms not persisted for bill ${bill.identifier}: migration 0007 not applied (glossary_terms/summary_terms missing) — extract-terms.js's backfill will pick this summary up once 0007 is applied`,
+      };
+    }
+    throw err;
+  }
+}
+
+// Exported (unlike gloss.js's glossOne/extract-terms.js's extractOne, which stay unexported
+// because THEIR non-DB dependency is real network I/O with no clean fake boundary) — this
+// function's only non-DB dependency is the single summarizeBill call, cleanly fakeable at the SDK
+// boundary (client.messages.create), so an end-to-end test can prove the CRITICAL constraint
+// itself: a missing glossary_terms/summary_terms relation must never stop the summary draft from
+// succeeding. See tests/summarize-cli.test.js.
+export async function createDraftSummary(client, runId, { bill, textRow, anthropic }) {
+  const { json, markdown } = await summarizeBill(anthropic, { identifier: bill.identifier, title: bill.title, text: textRow.content });
   // summaries has no unique constraint to upsert against — each generation is a fresh row,
   // matching the summary_notes history model (draft/approve/publish/reject as separate events).
-  const { error } = await client.from('summaries').insert({
+  // .select('id').single() (new — the insert alone used to be fire-and-forget): the join row
+  // persistReferencedTermsGracefully writes below needs this summary's own id.
+  const { data, error } = await client.from('summaries').insert({
     bill_id: bill.id, status: 'draft', body_md: markdown, model: MODEL,
     prompt_version: PROMPT_VERSION, bill_text_hash: textRow.content_hash, run_id: runId,
-  });
+  }).select('id').single();
   if (error) throw new Error(`summary insert failed for bill ${bill.id}: ${error.message}`);
+
+  // Fix wave (final review, Important finding 2): persist json.referenced_terms right here — v2
+  // SUMMARY_SCHEMA already asks opus-5 for these in this SAME billed call that authored markdown
+  // above (near-zero added cost, per the design doc's own "rides in the same call" framing), so
+  // realize that design instead of letting them go straight to the floor and requiring a second,
+  // separately-billed extract-terms.js pass to rediscover them later.
+  return persistReferencedTermsGracefully(client, runId, { bill, summaryId: data.id, referencedTerms: json.referenced_terms ?? [] });
 }
 
 function isTypedFailure(err) {
@@ -246,10 +295,19 @@ async function main() {
     await markStale(client, plan.stale);
 
     let summariesCreated = 0;
+    let glossaryTermsPersisted = 0;
+    // Fix wave (final review, Important finding 2): glossaryWarnings is DISTINCT from failures —
+    // a warning means the summary draft itself succeeded (counted in summariesCreated) but its
+    // referenced_terms could not be persisted (pre-0007 degradation, see
+    // persistReferencedTermsGracefully above). Recorded honestly in the run detail either way,
+    // never silently dropped.
+    const glossaryWarnings = [];
     for (const { bill, textRow } of summaryTargets) {
       try {
-        await createDraftSummary(client, runId, { bill, textRow, anthropic });
+        const { termsUpserted, warning } = await createDraftSummary(client, runId, { bill, textRow, anthropic });
         summariesCreated += 1;
+        glossaryTermsPersisted += termsUpserted;
+        if (warning) glossaryWarnings.push({ identifier: bill.identifier, warning });
       } catch (err) {
         if (isTypedFailure(err)) failures.push({ identifier: bill.identifier, error: err.name, message: err.message });
         else throw err;
@@ -258,11 +316,12 @@ async function main() {
 
     const counts = {
       bills: bills.length, textsFetched: plan.needText.length, staleMarked: plan.stale.length,
-      summariesCreated, failures: failures.length,
+      summariesCreated, glossaryTermsPersisted, glossaryPersistWarnings: glossaryWarnings.length,
+      failures: failures.length,
     };
     const status = failures.length === 0 ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, { counts, failures });
-    console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts, failures }, null, 2));
+    await closeRun(client, runId, status, { counts, failures, glossaryWarnings });
+    console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts, failures, glossaryWarnings }, null, 2));
     if (failures.length > 0) process.exitCode = 2;
   } catch (err) {
     await closeRun(client, runId, 'failed', { error: String(err) });

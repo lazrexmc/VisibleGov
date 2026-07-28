@@ -35,22 +35,64 @@ test('planGlossing treats a gloss_md-set row as alreadyGlossed even if needs_map
   assert.equal(plan.needsMapping.length, 0);
 });
 
-test('planGlossing partitions a mixed batch into all three mutually exclusive buckets', () => {
+test('planGlossing partitions a mixed batch into all four mutually exclusive buckets', () => {
   const terms = [
     { id: 'mapped-done', needs_mapping: false, gloss_md: 'Done.' },
     { id: 'needs-mapping', needs_mapping: true, gloss_md: null },
     { id: 'candidate-1', needs_mapping: false, gloss_md: null },
     { id: 'candidate-2', needs_mapping: false, gloss_md: null },
+    { id: 'rejected-1', needs_mapping: false, gloss_md: null, status: 'rejected' },
   ];
   const plan = planGlossing(terms);
   assert.deepEqual(plan.alreadyGlossed.map((t) => t.id), ['mapped-done']);
   assert.deepEqual(plan.needsMapping.map((t) => t.id), ['needs-mapping']);
+  assert.deepEqual(plan.rejected.map((t) => t.id), ['rejected-1']);
   assert.deepEqual(plan.candidates.map((t) => t.id), ['candidate-1', 'candidate-2']);
 });
 
-test('planGlossing on an empty term list returns three empty buckets', () => {
+test('planGlossing on an empty term list returns four empty buckets', () => {
   const plan = planGlossing([]);
-  assert.deepEqual(plan, { needsMapping: [], alreadyGlossed: [], candidates: [] });
+  assert.deepEqual(plan, {
+    needsMapping: [], alreadyGlossed: [], rejected: [], candidates: [],
+  });
+});
+
+// ---- fix wave (Important finding 1): a rejected-but-never-glossed stub must never re-enter
+// candidates — it would re-bill an author+verify call and write a gloss onto a row Lance already
+// threw out as a bogus extraction. ----
+
+test('planGlossing excludes a rejected, ungloosed stub from candidates — it lands in rejected instead', () => {
+  const terms = [{ id: 'rejected-1', needs_mapping: false, gloss_md: null, status: 'rejected' }];
+  const plan = planGlossing(terms);
+  assert.deepEqual(plan.rejected.map((t) => t.id), ['rejected-1']);
+  assert.equal(plan.candidates.length, 0);
+  assert.equal(plan.needsMapping.length, 0);
+  assert.equal(plan.alreadyGlossed.length, 0);
+});
+
+test('planGlossing: a rejected term that already has a gloss stays in alreadyGlossed (gloss_md check wins first) — the existing, separately-tracked no-re-gloss-path gap, not something this fix changes', () => {
+  const terms = [{ id: 'rejected-glossed', needs_mapping: false, gloss_md: 'Already written.', status: 'rejected' }];
+  const plan = planGlossing(terms);
+  assert.deepEqual(plan.alreadyGlossed.map((t) => t.id), ['rejected-glossed']);
+  assert.equal(plan.rejected.length, 0);
+});
+
+test('planGlossing: a draft (non-rejected) stub with needs_mapping=false and no gloss is still a normal candidate', () => {
+  const terms = [{ id: 'draft-1', needs_mapping: false, gloss_md: null, status: 'draft' }];
+  const plan = planGlossing(terms);
+  assert.deepEqual(plan.candidates.map((t) => t.id), ['draft-1']);
+  assert.equal(plan.rejected.length, 0);
+});
+
+// main()'s --dry-run output maps `candidates` straight into the plan JSON it prints (id, term,
+// kind, citation, status) — status is now included specifically so a reviewer can see, right at
+// the cost-estimate approval gate, that nothing about to be billed is a rejected term. planGlossing
+// is where that candidates array actually comes from, so proving status survives it unaltered here
+// is what makes that dry-run field trustworthy — it is not a formatting-only concern.
+test('planGlossing candidate rows carry status through unaltered, for the dry-run plan output', () => {
+  const terms = [{ id: 't1', needs_mapping: false, gloss_md: null, status: 'draft' }];
+  const plan = planGlossing(terms);
+  assert.equal(plan.candidates[0].status, 'draft');
 });
 
 // ---- persistGloss: write order + retry-eligibility recovery (fix round 2, Important review

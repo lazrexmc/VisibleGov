@@ -43,6 +43,7 @@ export const GLOSS_SYSTEM_PROMPT = [
   '- gloss_md is exactly 1-2 sentences, plain language: an average adult with no legal training should understand it on first read.',
   '- Restate only what the excerpt itself says this provision does. No adjectives about merit, no characterization of impact or intent, no speculation — describe function only.',
   '- No party framing of any kind. Never mention parties, politics, or sponsors.',
+  '- Avoid dotted abbreviations (e.g. "U.S.C.", "Pub. L.") in gloss_md; spell terms out in full where practical so sentence boundaries stay unambiguous.',
   '- supported_by_quote is an exact, verbatim quote copied from the excerpt that backs gloss_md.',
 ].join('\n');
 
@@ -124,16 +125,84 @@ export const GLOSS_VERIFY_SYSTEM_PROMPT = [
   '- overall is "clean" only if every single verdict is supported; if even one sentence fails, overall is "flagged".',
 ].join('\n');
 
+// Fix wave (final review, Minor finding 3): dotted legal abbreviations whose internal periods are
+// NOT sentence-ending punctuation — left unprotected, "Under 42 U.S.C. 1396b, states get paid."
+// split at "U.S." into two spurious fragments, generating an extra per-fragment verifier verdict
+// for text that was only ever one real sentence. Longest/most-specific pattern first (e.g.
+// 'U.S.C.' before 'U.S.', 'Pub. L.' as its own two-word unit) so a shorter pattern never partially
+// matches inside a longer one this list has already protected.
+const DOTTED_ABBREVIATIONS = [
+  /Pub\.\s+L\./g,
+  /U\.S\.C\./g,
+  /U\.S\./g,
+  /e\.g\./g,
+  /i\.e\./g,
+  /Sec\./g,
+  /Stat\./g,
+  /No\./g,
+];
+// String.fromCharCode(1) (U+0001, a control character): never legitimate model output, so safe to
+// use as a period placeholder with no risk of colliding with a real character already in the gloss
+// text — unlike, say, a space, which restoreAbbreviationDots would then be unable to tell apart
+// from every OTHER space in the sentence. Built via fromCharCode rather than a literal escape so
+// the placeholder itself is unambiguous to read here as source text.
+const ABBREV_DOT_PLACEHOLDER = String.fromCharCode(1);
+
+function protectAbbreviationDots(text) {
+  let out = text;
+  for (const pattern of DOTTED_ABBREVIATIONS) {
+    out = out.replace(pattern, (m) => m.replace(/\./g, ABBREV_DOT_PLACEHOLDER));
+  }
+  return out;
+}
+
+function restoreAbbreviationDots(text) {
+  return text.split(ABBREV_DOT_PLACEHOLDER).join('.');
+}
+
 // splitGlossSentences: TRIVIAL sentence splitting only (terminal .!? followed by whitespace/end) —
 // gloss_md is model-authored, constrained by GLOSS_SYSTEM_PROMPT to exactly 1-2 sentences, so this
-// never has to handle arbitrary prose. Pure, mirrors verify.js's parseBullets role (the input the
-// verifier is built from, and the count assessVerdicts checks completeness against).
+// never has to handle arbitrary prose beyond the dotted-abbreviation protection above. Pure,
+// mirrors verify.js's parseBullets role (the input the verifier is built from, and the count
+// assessVerdicts checks completeness against).
 export function splitGlossSentences(glossMd) {
   const text = String(glossMd || '').trim();
   if (!text) return [];
-  const matches = text.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
-  if (!matches) return [text]; // no terminal punctuation found - treat the whole string as one sentence
-  return matches.map((s) => s.trim()).filter(Boolean);
+  const protectedText = protectAbbreviationDots(text);
+  const matches = protectedText.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
+  // no terminal punctuation found (outside protected abbreviations) - treat the whole string as
+  // one sentence, same restore step either way.
+  const rawSentences = matches ? matches.map((s) => s.trim()) : [protectedText];
+  return rawSentences.map(restoreAbbreviationDots).filter(Boolean);
+}
+
+// Fix wave (final review, Minor finding 4): '' technically satisfies GLOSS_SCHEMA's
+// {type:'string'} requirement for gloss_md (no minLength), so an empty-but-schema-valid gloss was
+// never caught as a malformed model response the way a max_tokens truncation would be — and left
+// unchecked, splitGlossSentences('') === [] reaches assessVerdicts as a VACUOUS pass (0 sentences,
+// 0 verdicts is the exact same shape a legitimate "nothing to verify" case would produce), which
+// then persisted as a published-eligible empty gloss (migration 0007's own CHECK constraint has a
+// matching fix — see that migration's header comment).
+export class EmptyGlossError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'EmptyGlossError';
+    Object.assign(this, meta);
+  }
+}
+
+// assertGlossNotEmpty: the empty-gloss guard, factored out as its own pure function (same
+// rationale as gloss.js's persistGloss being split out of glossOne — unit-testable without faking
+// authorGloss/anthropic at all). Called with the already-split sentence count (glossOne's own
+// splitGlossSentences output), BEFORE any verify call is made — an empty gloss should never spend
+// a billed verify call on itself, and must never reach persistGloss.
+export function assertGlossNotEmpty(sentences, { term, termId }) {
+  if (sentences.length === 0) {
+    throw new EmptyGlossError(
+      `gloss for "${term}" (id ${termId}): authored gloss_md is empty — refusing to verify or persist an empty gloss`,
+      { term, termId },
+    );
+  }
 }
 
 export function buildGlossVerifyMessage(term, sentencesJson, excerptText) {

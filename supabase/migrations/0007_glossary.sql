@@ -20,6 +20,10 @@ create table glossary_terms (
   term           text not null,              -- display name, e.g. 'Social Security Act, Sec. 1903'
   kind           text not null check (kind in ('statute','act','agency','program','public_law')),
   citation       text,                       -- normalized cite, e.g. '42 U.S.C. 1396b'
+  -- Background — from the referenced law's official text: gloss_md is the 1-2 sentence
+  -- plain-language explanation, written FROM the term's own official source text (never model
+  -- training knowledge). "Background" is the label this appears under everywhere it's shown — this
+  -- schema comment, the Task 6 review page, and the future public site — per the approved design.
   gloss_md       text,                       -- the 1-2 sentence plain-language explanation
   -- Fix round 2 (Task 5 review, promoted Minor finding): the author model's claimed supporting
   -- quote from the source excerpt (GLOSS_SCHEMA.supported_by_quote in glosser.js) — displayed
@@ -52,8 +56,17 @@ create table glossary_terms (
   -- Task 5 — that's expected, not an error. What's never allowed, at any point in that lifecycle,
   -- is a 'published' row with a missing source or gloss: the public-facing status is the one
   -- boundary that must be fully grounded, so it's the one thing this constraint gates.
+  --
+  -- Fix wave (final review, Minor finding 4): `gloss_md is not null` alone let an empty string
+  -- ('' is NOT null) through — an empty gloss_md would satisfy this CHECK, splitGlossSentences('')
+  -- would vacuously "pass" the verifier as 0 sentences/0 verdicts (assessVerdicts' legitimate
+  -- zero-bullet case, applied here to a case that was never actually empty by design), and the
+  -- row would publish blank. `gloss_md <> ''` closes that gap at the one boundary that actually
+  -- matters (gloss.js's glossOne also gained an app-layer guard for the same gap — see
+  -- glosser.js's assertGlossNotEmpty — but this CHECK is the one that holds regardless of which
+  -- code path writes the row, including a manual review-page edit).
   constraint glossary_terms_published_complete check (
-    status <> 'published' or (source_url is not null and source_hash is not null and gloss_md is not null)
+    status <> 'published' or (source_url is not null and source_hash is not null and gloss_md is not null and gloss_md <> '')
   )
 );
 

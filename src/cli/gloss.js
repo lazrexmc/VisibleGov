@@ -4,6 +4,7 @@ import { assessVerdicts, VerificationIncompleteError } from '../lib/verifier.js'
 import {
   MODEL, PROMPT_VERSION, authorGloss, fetchGlossSource, splitGlossSentences,
   GLOSS_VERIFIER_MODEL, GLOSS_VERIFY_PROMPT_VERSION, verifyGloss,
+  EmptyGlossError, assertGlossNotEmpty,
 } from '../lib/glosser.js';
 import { OversizeExcerptError, UscSectionNotFoundError, SubsectionNotFoundError } from '../adapters/uscode.js';
 import { SourceFetchError, RateLimitedError } from '../lib/errors.js';
@@ -27,7 +28,7 @@ const GLOSSARY_VERIFICATIONS_TABLE = 'glossary_verifications';
 const FAILURE_TYPES = [
   OversizeExcerptError, UscSectionNotFoundError, SubsectionNotFoundError,
   SourceFetchError, RateLimitedError,
-  SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError,
+  SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError, EmptyGlossError,
 ];
 
 function isTypedFailure(err) {
@@ -52,24 +53,44 @@ export function parseArgs(argv) {
 // ---- pure parts ----
 
 // planGlossing: partitions ALL glossary_terms rows into needsMapping (skipped, awaiting curation),
-// alreadyGlossed (gloss_md already set — nothing to do), and candidates (needs_mapping=false,
-// gloss_md still null — eligible to fetch+author+verify). The three buckets are mutually exclusive
-// and exhaustive: Task 4 never sets gloss_md, and only this stage ever does, and only for
-// needs_mapping=false rows — a row can never land in both needsMapping and alreadyGlossed.
+// alreadyGlossed (gloss_md already set — nothing to do), rejected (status='rejected' and never
+// glossed — see below), and candidates (needs_mapping=false, gloss_md still null, status!=
+// 'rejected' — eligible to fetch+author+verify). The four buckets are mutually exclusive and
+// exhaustive: Task 4 never sets gloss_md, and only this stage ever does, and only for
+// needs_mapping=false, non-rejected rows — a row can never land in more than one bucket.
+//
+// Final review fix wave (Important finding 1): a term Lance REJECTS on the review page (Task 6 —
+// e.g. a bogus extraction that isn't really a statute/act/agency/program/public_law reference at
+// all) previously had status='rejected' but was still keyed purely on needs_mapping=false &&
+// gloss_md=null, so it silently re-entered `candidates` on the very next run — a billed
+// author+verify call, and a gloss written onto a row Lance had already thrown out. status is now
+// checked BEFORE the needs_mapping/candidates split (but AFTER the gloss_md check, so a term
+// approved-then-later-rejected that already has a gloss stays in alreadyGlossed, the existing,
+// separately-tracked no-re-gloss-path gap — see the ledger's "Lance decision list" entry).
+//
+// Deliberately the INVERSE of summarize.js's rejection semantics (planWork's own
+// ALREADY_SUMMARIZED_STATUSES set excludes 'rejected' on purpose, so a rejected SUMMARY regenerates
+// on the next run — Lance's prose can always be redone from the same bill text). A rejected
+// glossary TERM means something categorically different: the extraction itself was bogus, not
+// that a correctly-identified term's gloss text needs a rewrite — so here rejection means "leave
+// this alone," the opposite instinct from summaries, and skipping is the correct, honest behavior.
 export function planGlossing(terms) {
   const needsMapping = [];
   const alreadyGlossed = [];
+  const rejected = [];
   const candidates = [];
   for (const t of terms) {
     if (t.gloss_md) {
       alreadyGlossed.push(t);
+    } else if (t.status === 'rejected') {
+      rejected.push(t);
     } else if (t.needs_mapping) {
       needsMapping.push(t);
     } else {
       candidates.push(t);
     }
   }
-  return { needsMapping, alreadyGlossed, candidates };
+  return { needsMapping, alreadyGlossed, rejected, candidates };
 }
 
 // ---- DB-facing helpers ----
@@ -133,6 +154,11 @@ async function glossOne(client, runId, term, anthropic) {
   const { json: glossJson } = await authorGloss(anthropic, { term: term.term, excerptText });
 
   const sentences = splitGlossSentences(glossJson.gloss_md);
+  // Fix wave (Minor finding 4): empty-gloss guard, BEFORE any verify call — '' is schema-valid
+  // per GLOSS_SCHEMA (no minLength), so nothing upstream flags it; see assertGlossNotEmpty's own
+  // comment (glosser.js) for why this can't be left to assessVerdicts' vacuous zero-sentence pass.
+  assertGlossNotEmpty(sentences, { term: term.term, termId: term.id });
+
   const { json: verifyJson } = await verifyGloss(anthropic, { term: term.term, sentences, excerptText });
 
   // Mechanical completeness gate (same discipline as verify.js's verifyOne): overall is DERIVED
@@ -166,7 +192,7 @@ async function main() {
   }
 
   const { terms, tableMissing } = await loadAllTerms(client, args.dryRun);
-  const { needsMapping, alreadyGlossed, candidates } = planGlossing(terms);
+  const { needsMapping, alreadyGlossed, rejected, candidates } = planGlossing(terms);
 
   if (args.dryRun) {
     const out = {
@@ -175,9 +201,14 @@ async function main() {
         terms: terms.length,
         needsMapping: needsMapping.length,
         alreadyGlossed: alreadyGlossed.length,
+        rejected: rejected.length,
         candidates: candidates.length,
       },
-      candidates: candidates.map((t) => ({ id: t.id, term: t.term, kind: t.kind, citation: t.citation })),
+      // status included (fix wave, Important finding 1) so a reviewer can see AT the approval
+      // gate that nothing in this list is status='rejected' — planGlossing already guarantees it,
+      // but the whole point of the dry-run/cost-estimate gate is letting a human verify that
+      // before any billed call runs, not just trust the code silently.
+      candidates: candidates.map((t) => ({ id: t.id, term: t.term, kind: t.kind, citation: t.citation, status: t.status })),
     };
     if (tableMissing) out.note = `(${GLOSSARY_TERMS_TABLE} missing — migration 0007 not applied; treating as zero terms)`;
     console.log(JSON.stringify(out, null, 2));
@@ -227,7 +258,7 @@ async function main() {
 
     const counts = {
       candidates: candidates.length, glossed, flagged,
-      needsMappingSkipped: needsMapping.length, failures: failures.length,
+      needsMappingSkipped: needsMapping.length, rejectedSkipped: rejected.length, failures: failures.length,
     };
     const status = failures.length === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, { counts, failures });
