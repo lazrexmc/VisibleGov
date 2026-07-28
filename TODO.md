@@ -96,6 +96,10 @@
     legislative — Senate-only profile, honestly labeled. Captured 2026-07-28 from Lance's ask;
     decide fold-into-Plan-3 vs fast-follow during the Plan 3 spec.
 
+15. **Giant-bill summarization policy (Lance decision):** 3 bills exceeded the 400k-char oversize gate (HR 8800 1.97M, S 4784 1.88M, HR 9237 567k). Options: raise cap toward opus-5 1M-token context (~$4/giant bill full-text) or chunked summarization design. Gate behaved correctly - nothing truncated silently.
+16. **Verifier output cap fix (next code item):** 2 many-bullet drafts (HR 6955, HR 8595) hit the verifier 16k output cap (SummaryTruncatedError). One-line raise + re-verify (~$0.10, needs approval under policy).
+17. **MO Senate adapter build (research complete + corrected, queued):** journal-day-PDF block parser (bare surnames, printed tallies = reconciliation gate), HTML-fragment discovery, House-conservative cadence. Onder-era coverage verified to 2018.
+
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
 > "I'd like to expose all the politicians by breaking down the bills and laws they propose into

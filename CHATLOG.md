@@ -491,3 +491,34 @@ supports it (zero-spend ingestion); (3) keep the MO House enrichment driver cycl
 cadence, verify the roster+HB1800 replay when its slot fires; (4) keep docs/ledger current.
 Deferred to his return: publish adjudication, QUORUM/ADJOURN data hygiene (touches prod rows),
 glossary design, Plan 3 mockups.
+
+---
+
+## 2026-07-28 (Lance AFK) — batch, MO Senate research, glossary design
+
+Directives executed ("continue the process"; "once completed, update all documentation and move
+to the glossary project"):
+
+1. **Approved 25-bill batch: complete.** 22 new facts-only drafts in the review queue (~$4 as
+   approved). Sonnet verification: 17 CLEAN, **3 FLAGGED for Lance's adjudication** (the trust
+   model catching real questions), 2 pending verification (verifier output hit its 16k cap on
+   many-bullet bills - one-line cap raise queued as next code item). 3 bills correctly REFUSED
+   by the oversize gate (appropriations-class, up to 1.97M chars vs the 400k cap - "will not
+   truncate silently"; chunking-vs-higher-cap is a queued Lance decision, ~$4/giant bill at
+   full text). One controller scripting bug (trailing newline dropped the 25th bill) was
+   caught, disclosed, and the missed bill run within the approved batch (verified clean).
+2. **MO Senate research: complete + review-corrected.** Verdict: partial machine-readability
+   (HTML-fragment endpoints + text-layer journal day-PDFs; NO XML like the House); Onder-era
+   coverage VERIFIED by live 2018 payload (his name in attendance + YEAS lists, 13 votes that
+   day, printed per-vote tallies usable as the reconciliation gate). Review caught a real
+   accuracy defect (doc claimed full names; fixture shows bare surnames like the House) -
+   corrected. Adapter build queued: harder than the House (scraped discovery, journal-block
+   parsing) but no unknowns left except effort.
+3. **Glossary design drafted, decision-ready** (docs/superpowers/specs/2026-07-28-glossary-design.md):
+   recommended A+C hybrid - glosses generated FROM fetched official statute text (uscode.house.gov
+   / govinfo, free), adversarially verified, Lance-adjudicated once, reused everywhere; model
+   knowledge never a factual source. Four decisions await Lance.
+4. MO House driver continues on cadence (enrichment advancing post-fix).
+
+**Awaiting Lance:** glossary decisions; review-queue session (22 drafts, 3 flagged); giant-bill
+policy; verifier-cap fix approval to re-verify 2 drafts; Plan 3 mockups.
