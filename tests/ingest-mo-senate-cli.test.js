@@ -955,9 +955,12 @@ test('replayJournalArtifacts: CRITICAL repro — once the 2026 roster mapping IS
       }));
 
       // currentYear is 2018 (a DIFFERENT run's own year) — proves the "other year, cache-driven"
-      // path, not the matching-year shortcut.
+      // path, not the matching-year shortcut. currentCalendarYear is pinned to 2030 (FIX ROUND 3:
+      // the cache-based path is only permitted for a year strictly before "now" — 2026 must be a
+      // CLOSED, historical year for this scenario to legitimately use its cache, so the test fixes
+      // "now" well past it rather than depending on wall-clock reality).
       const result = await replayJournalArtifacts(client, 'run-2', {
-        dir, rosterDir, currentYear: 2018, currentYearIdentities: null,
+        dir, rosterDir, currentYear: 2018, currentYearIdentities: null, currentCalendarYear: 2030,
       });
 
       assert.equal(result.replayed, 1);
@@ -1035,6 +1038,87 @@ test('replayJournalArtifacts: rule 3 — a year whose ensure reports gated (miss
       assert.equal(result.deferred[0].year, 2018);
       assert.match(result.deferred[0].note, /roster unavailable this invocation/);
       assert.ok(existsSync(join(dir, 'RDay1.journal-day.json')));
+    });
+  });
+});
+
+// ---- FIX ROUND 3 (re-review, residual Critical-class channel) — cache-based replay is only safe
+// for a CLOSED (historical) year; the current, still-open legislative year's roster can change
+// mid-year, so a stale cached snapshot must never be used to resolve it — only a matching-year
+// invocation's own fresh ensure is trusted. ----
+
+test('replayJournalArtifacts: FIX ROUND 3 — a CURRENT-year artifact with a warm-but-stale current-year cache, replayed by a non-matching --year run, stays deferred with zero casts written (the cache must never be used for a still-open year)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    await withScratchDirAsync(async (rosterDir) => {
+      const { client, rows, voteCasts } = makeFakeLegislatorsDb({
+        seedRows: [{
+          id: 'leg-bob', full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', run_id: 'seed',
+        }],
+      });
+      // 2026 is the CURRENT calendar year (pinned, not left to wall-clock reality) — a queued
+      // 2026 artifact, e.g. Jane's vote.
+      writeGateArtifact(dir, '2026-day1', 2026, [{
+        vote_id: 'vote-jane-1', source_key: 'mo-senate-web-2026-2026-day1-vote1', casts: [{ surname: 'Onder', district: null, position: 'yea' }],
+      }]);
+      // A cache file for 2026 DOES exist (e.g. from an earlier invocation this same day) — warm,
+      // but the current session could have changed since it was written. It must be ignored.
+      writeFileSync(join(rosterDir, '2026.json'), JSON.stringify({
+        fetched_at: new Date().toISOString(),
+        members: [{
+          mo_senate_id: '2', surname: 'Onder', full_name: 'Jane Onder', party: null,
+        }],
+      }));
+
+      // This invocation's own --year is 2018 (a --year 2018 backfill run) — does NOT match the
+      // artifact's year (2026), so only the (forbidden-for-current-year) cache path could
+      // otherwise have been reached.
+      const result = await replayJournalArtifacts(client, 'run-1', {
+        dir, rosterDir, currentYear: 2018, currentYearIdentities: null, currentCalendarYear: 2026,
+      });
+
+      assert.equal(result.replayed, 0);
+      assert.equal(voteCasts.length, 0, 'zero casts written — the current-year cache was never consulted for resolution');
+      assert.equal(result.deferred.length, 1);
+      assert.equal(result.deferred[0].year, 2026);
+      assert.equal(result.deferred[0].note, 'replay deferred: year 2026 roster unavailable this invocation');
+      assert.equal(rows.length, 1, 'no new row (e.g. Jane) was created from the current-year cache');
+      assert.ok(existsSync(join(dir, '2026-day1.journal-day.json')), 'the artifact is untouched — never deleted, never rewritten');
+    });
+  });
+});
+
+test('replayJournalArtifacts: FIX ROUND 3 — year-boundary sanity: artifact year == current calendar year defers (matching-path only); artifact year == currentCalendarYear-1 (closed) still resolves via cache, same invocation', async () => {
+  await withScratchDirAsync(async (dir) => {
+    await withScratchDirAsync(async (rosterDir) => {
+      const { client, voteCasts } = makeFakeLegislatorsDb();
+      // Two artifacts, one on each side of the boundary, both replayed by the SAME non-matching
+      // run (--year 1999, matching neither).
+      writeGateArtifact(dir, 'current-day1', 2026, [{
+        vote_id: 'vote-current-1', source_key: 'k-current', casts: [{ surname: 'Smith', district: null, position: 'yea' }],
+      }]);
+      writeGateArtifact(dir, 'closed-day1', 2025, [{
+        vote_id: 'vote-closed-1', source_key: 'k-closed', casts: [{ surname: 'Jones', district: null, position: 'yea' }],
+      }]);
+      writeFileSync(join(rosterDir, '2026.json'), JSON.stringify({
+        fetched_at: new Date().toISOString(), members: [{ mo_senate_id: '9', surname: 'Smith', full_name: 'Sam Smith', party: null }],
+      }));
+      writeFileSync(join(rosterDir, '2025.json'), JSON.stringify({
+        fetched_at: new Date().toISOString(), members: [{ mo_senate_id: '9', surname: 'Jones', full_name: 'Jo Jones', party: null }],
+      }));
+
+      const result = await replayJournalArtifacts(client, 'run-1', {
+        dir, rosterDir, currentYear: 1999, currentYearIdentities: null, currentCalendarYear: 2026,
+      });
+
+      assert.equal(result.replayed, 1, 'only the closed (2025) artifact replays');
+      assert.equal(voteCasts.length, 1);
+      assert.equal(voteCasts[0].vote_id, 'vote-closed-1');
+      assert.deepEqual(
+        result.deferred.map((d) => d.year).sort(),
+        [2026],
+      );
+      assert.ok(existsSync(join(dir, 'current-day1.journal-day.json')), 'the current-year (2026) artifact stays queued, untouched');
+      assert.equal(existsSync(join(dir, 'closed-day1.journal-day.json')), false, 'the closed-year (2025) artifact resolved and was deleted');
     });
   });
 });

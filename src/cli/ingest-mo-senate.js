@@ -686,22 +686,42 @@ export async function processJournalDay(client, runId, year, sessionRow, dayRow,
 //     already-computed identities (currentYear/currentYearIdentities) — no extra DB work, and
 //     matches whatever this invocation's own roster-ensure just did (fresh live fetch OR a
 //     cache-hit re-ensure, doesn't matter — ensureRosterForRun always re-runs
-//     ensureRosterIdentities regardless of fetchedLive).
-//   - otherwise, that year's roster CACHE (readCache(rosterDir, year)) is read and its cached
-//     members re-run through ensureRosterIdentities — a pure DB check-then-insert/find, NEVER a
-//     live fetch (rule: "never burn extra live-fetch slots silently to force it").
-// If no cache exists for that year, OR that year's mapping reports gated (missing column, or a
-// still-live mo_senate_id collision — rule 3: gating already means the mapping is incomplete),
-// that year's artifacts stay queued UNTOUCHED, with an honest
-// 'replay deferred: year <Y> roster unavailable this invocation' note in the returned `deferred`
-// array. Never resolved blind, never silently forcing a live fetch to obtain one, and (the actual
-// fix) never two different eras' occupants of the same surname/district mixed into one resolution
-// attempt.
+//     ensureRosterIdentities regardless of fetchedLive). ALWAYS trusted, any year, because it's
+//     guaranteed fresh this invocation.
+//   - otherwise (a year that is NOT this run's own --year), that year's roster CACHE
+//     (readCache(rosterDir, year)) is read and its cached members re-run through
+//     ensureRosterIdentities — a pure DB check-then-insert/find, NEVER a live fetch (rule: "never
+//     burn extra live-fetch slots silently to force it") — BUT ONLY when that year is strictly
+//     BEFORE the current calendar year (`currentCalendarYear`, real wall-clock year by default).
+//
+// FIX ROUND 3 (re-review, residual Critical-class channel closed): the round-2 fix above still had
+// a narrow gap — the cache-based path was permitted for ANY non-matching year, including the
+// CURRENT (still-open) legislative year. A historical year's roster is a closed, immutable
+// snapshot once its session ends; the CURRENT year's is not (a mid-year appointment/replacement
+// can add a member the cache doesn't know about yet). A `--year 2018` backfill invocation that
+// happens to encounter a queued CURRENT-year artifact could still read a stale current-year cache
+// and reach the exact same wrong-single-match misattribution class round 2 closed for the
+// already-closed case. Fix: the cache-based branch is gated on `Number(year) < currentCalendarYear`
+// — a current-or-future-labeled year NEVER uses the cache fallback, full stop, regardless of
+// whether a cache file happens to exist. Such artifacts stay queued until a matching-year
+// invocation (`--year <that year>`) ensures it directly — "the next --year <current> invocation,
+// which is the natural cadence" (controller ruling), not a new fetch forced by this function.
+//
+// ACCEPTED V1 SIMPLIFICATION (documented, not fixed here — inherited from the House pipeline's own
+// shape, e.g. ingest-mo-house.js's single per-representative fixture roster): a year's roster is
+// treated as ONE snapshot. A member seated mid-year (special election, mid-session appointment) is
+// simply absent from that snapshot — their casts fail toward UNRESOLVED (visible in run detail,
+// honestly counted, never guessed), not toward a wrong match, UNLESS a same-surname/same-district
+// different-person overlap exists WITHIN that one year's own roster — and resolveMoSenator already
+// fails that case to null (0-or-1-match only, never picks between ambiguous candidates). No
+// mid-session roster delta tracking exists in this driver; a real fix would need one, out of scope
+// here.
 export async function replayJournalArtifacts(client, runId, {
   dir = JOURNAL_ARTIFACT_DIR,
   rosterDir = ROSTER_ARTIFACT_DIR,
   currentYear = null,
   currentYearIdentities = null,
+  currentCalendarYear = new Date().getFullYear(),
 } = {}) {
   const empty = {
     attempted: 0, replayed: 0, unresolved: 0, unresolvedSample: [], deferred: [],
@@ -734,15 +754,24 @@ export async function replayJournalArtifacts(client, runId, {
 
   for (const [year, entries] of byYear) {
     let identities;
-    if (currentYear != null && Number(year) === Number(currentYear) && currentYearIdentities) {
+    const isMatchingYear = currentYear != null && Number(year) === Number(currentYear) && currentYearIdentities;
+    if (isMatchingYear) {
       identities = currentYearIdentities;
-    } else {
+    } else if (Number(year) < currentCalendarYear) {
+      // FIX ROUND 3: cache fallback is only reachable for a YEAR STRICTLY BEFORE the current
+      // calendar year — a closed, immutable roster snapshot. See the module comment above.
       const cache = readCache(rosterDir, String(year));
       if (!cache) {
         deferred.push({ year, note: `replay deferred: year ${year} roster unavailable this invocation` });
         continue;
       }
       identities = await ensureRosterIdentities(client, runId, cache.members);
+    } else {
+      // year >= currentCalendarYear (the current, still-open legislative year, or later) and this
+      // isn't this invocation's own --year: no cache fallback, no live fetch forced — only a
+      // matching-year invocation's own fresh ensure is trusted for a not-yet-closed year.
+      deferred.push({ year, note: `replay deferred: year ${year} roster unavailable this invocation` });
+      continue;
     }
     if (identities.gated) {
       deferred.push({ year, note: `replay deferred: year ${year} roster unavailable this invocation` });
