@@ -391,3 +391,17 @@ Decisions so far:
 RESUME POINT: brainstorming skill mid-flight, at the visual/layout questions for the
 profile-first site. Remaining to settle: profile page layout + visual direction (mockups),
 address-lookup empty-state behavior, pre-render/deploy mechanics, then spec → plan → SDD.
+
+### [Lance] (overnight directive, 2026-07-28)
+> Finish the backfill on Onder and if it is complete before I come back, move to the next
+> Missouri based politician and gather their data, continuing on with US Senators and Reps from
+> Missouri then onto Missouri General Assembly Members, is that agreeable while I sleep?
+
+**[Claude]** Agreed with two boundary adjustments (zero Claude-API spend overnight per the
+standing approval policy - new bills stay unsummarized until Lance approves a batch; no new
+runtime deps, so MO individual-vote PDFs wait for morning). Noted that House roll calls carry
+every member's votes, so the running backfill completes ALL 8 MO Reps at once, not just Onder.
+Overnight sequence: (1) finish+verify House backfill; (2) build US Senate roll-call adapter
+via full SDD (fixture-first from senate.gov XML, free) + backfill both 119th sessions -
+unlocks Hawley + Schmitt; (3) mo-house-xml adapter XML side only, honoring the half-hour ToU
+cadence; MO Senate = investigation only. Everything through the normal review gates.
