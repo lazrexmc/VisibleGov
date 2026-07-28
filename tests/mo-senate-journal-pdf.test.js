@@ -386,6 +386,58 @@ test('parseJournalVotes: an emergency-clause block whose nearest preceding "take
   assert.match(failures[0].message, /SB 100.*SB 200|SB 200.*SB 100/);
 });
 
+// ---- code review fix round 3 (controller ruling): the preceding-vote-block cross-check is
+// REQUIRED for emergency-clause attribution, not optional corroboration - a missing or FAILED
+// immediately-preceding block must fail the EC block outright, before the backward scan even runs,
+// rather than trusting a single unverified source. ----
+
+test('parseJournalVotes: an emergency-clause block whose immediately preceding block FAILED (so there is no successful vote to cross-check against) fails loud with the unverifiable reason, even though a "taken up" line and a bill reference both genuinely exist nearby', () => {
+  const text = 'SB 300, entitled: An Act relating to widgets. Was taken up.\n'
+    // Block 1's own motion genuinely has a bill reference (SB 300), but its Absent-with-leave
+    // count is doctored to 5 while only 1 name (Gamma) is printed - deliberately fails reconcile,
+    // so block 1 lands in `failures`, not `votes`.
+    + 'On motion of Senator Test, SB 300 was read the 3rd time and passed by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators\nGamma—5\n'
+    + 'Vacancies—None\n'
+    + 'The President declared the bill passed.\n'
+    + 'The emergency clause was adopted by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  assert.deepEqual(votes, [], 'block 1 failed reconcile, so nothing lands in votes at all');
+  assert.equal(failures.length, 2);
+  const block1Failure = failures.find((f) => f.ordinal === 1);
+  assert.ok(block1Failure, 'expected block 1 itself to be a failure (the reconcile mismatch)');
+  const ecFailure = failures.find((f) => f.ordinal === 2);
+  assert.ok(ecFailure, 'expected the EC block to ALSO be a failure - unverifiable, not silently attributed via the still-findable "taken up" line/bill reference');
+  assert.ok(ecFailure instanceof JournalParseError);
+  assert.equal(ecFailure.category, 'bill_refs');
+  assert.equal(ecFailure.reason, 'emergency-clause attribution unverifiable - preceding vote block missing or failed');
+});
+
+test('parseJournalVotes: an emergency-clause block as the very FIRST block in the day (ordinal 1, no preceding vote can possibly exist) fails loud with the unverifiable reason, never silently attributing to unrelated preamble text', () => {
+  const text = 'SB 999, entitled: An Act relating to widgets, was taken up earlier and is unrelated to this test.\n'
+    + 'The emergency clause was adopted by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  assert.deepEqual(votes, []);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].ordinal, 1);
+  assert.ok(failures[0] instanceof JournalParseError);
+  assert.equal(failures[0].category, 'bill_refs');
+  assert.equal(failures[0].reason, 'emergency-clause attribution unverifiable - preceding vote block missing or failed');
+});
+
 test('parseJournalVotes: a "—None" printed for every non-YEAS category parses as empty arrays / zero counts, never throws', () => {
   const text = 'Was taken up. On motion of Senator Test, SB 100 was read the 3rd time and passed by the following vote:\n'
     + 'YEAS—Senators\nAlpha Beta—2\n'

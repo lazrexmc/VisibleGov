@@ -352,10 +352,17 @@ function extractVacancies(blockText, cursor, ordinal) {
 //
 // This fallback is NOT a general escape hatch for any zero-ref motion - only for a motion matching
 // /emergency\s+clause/i (finding 2's round-1 behavior otherwise stands unchanged: an unknown
-// zero-ref motion still fails loud for human review). And it is never a silent guess: when the
-// immediately preceding vote block exists (i.e. ordinal-1 itself parsed successfully), its own
-// primary bill_refs[0] is cross-checked against the taken-up-derived ref - any disagreement fails
-// loud, naming both values, exactly like every other reconcile gate in this file.
+// zero-ref motion still fails loud for human review).
+//
+// CODE REVIEW FIX ROUND 3 (controller ruling): the cross-check against the immediately preceding
+// vote block is not optional corroboration - it is REQUIRED, not "used when available." Round 2
+// only cross-checked `if (precedingVote)`, which left a real gap: an EC block whose own preceding
+// block FAILED (so there is no successful vote at ordinal-1 to verify against), or an EC appearing
+// as the day's first or second block (no real preceding vote exists at all - the backward-scan
+// window would collapse to document start, an incidental rather than deliberate bound), could
+// silently accept a single unverified backward scan as truth. "Never a guess" means never trusting
+// one unconfirmed source for this fallback - so a missing/failed precedingVote now fails the EC
+// block outright, before the scan even runs, rather than trying anyway with a wide-open window.
 const TAKEN_UP_RE = /taken up/gi;
 
 function lastTakenUpIndexBefore(text, beforeIndex) {
@@ -399,6 +406,22 @@ function resolveBillAttribution(text, anchorStart, ordinal, motion, precedingVot
     );
   }
 
+  // FIX ROUND 3: required, not optional - see the module comment above. Checked BEFORE the scan
+  // even runs, since without a successful preceding vote there is nothing to verify against and
+  // no point spending effort on a result that can never be trusted regardless of what it finds.
+  // Covers both real gaps identified: the preceding block existing but having FAILED (precedingVote
+  // is null whenever `last.ordinal !== ordinal - 1`, whether because ordinal-1 itself threw or
+  // because there is no block at ordinal-1 at all), and an EC at ordinal 1 or 2 where the
+  // backward-scan window would otherwise collapse toward document start.
+  if (!precedingVote) {
+    throw new JournalParseError(
+      `block ${ordinal}: emergency-clause attribution unverifiable - preceding vote block missing or failed`,
+      {
+        ordinal, category: 'bill_refs', reason: 'emergency-clause attribution unverifiable - preceding vote block missing or failed', motion,
+      },
+    );
+  }
+
   const takenUpIdx = lastTakenUpIndexBefore(text, anchorStart);
   if (takenUpIdx === -1) {
     throw new JournalParseError(
@@ -418,7 +441,7 @@ function resolveBillAttribution(text, anchorStart, ordinal, motion, precedingVot
     );
   }
 
-  if (precedingVote && precedingVote.bill_refs[0] !== takenUpRefs[0]) {
+  if (precedingVote.bill_refs[0] !== takenUpRefs[0]) {
     throw new JournalParseError(
       `block ${ordinal}: emergency-clause attribution mismatch - the preceding "taken up" line names ${takenUpRefs[0]} but the immediately preceding vote block's primary bill is ${precedingVote.bill_refs[0]}`,
       {
@@ -475,8 +498,17 @@ export function parseJournalVotes(text) {
     const precedingVote = last && last.ordinal === ordinal - 1 ? last : null;
     // Lower bound for the emergency-clause taken-up-line bill scan (resolveBillAttribution): the
     // start of the PRECEDING vote block's own motion-preamble region, i.e. right after the anchor
-    // two blocks back - so a stray earlier bill mention can never be picked up by accident. 0 (the
-    // whole document so far) when there aren't two prior blocks yet.
+    // two blocks back - so a stray earlier bill mention can never be picked up by accident.
+    //
+    // EXPLICIT, not incidental (fix round 3): for i < 2 (ordinal 1 or 2) this expression falls
+    // back to 0 - the whole document so far - which on its own would be a genuinely wide-open
+    // window. That is deliberately safe, not a gap, ONLY because resolveBillAttribution now
+    // REQUIRES a non-null `precedingVote` before this bound is ever even consulted: ordinal 1 has
+    // no preceding block at all (precedingVote is always null, so the EC block fails before the
+    // scan runs), and ordinal 2's window is only used when block 1 already parsed successfully -
+    // in which case block 1's own primary bill_refs[0] still cross-checks whatever this wide
+    // window finds, so a wrong pick fails loud rather than silently attributing to preamble text
+    // (e.g. THIRD READING OF SENATE BILLS boilerplate) above the day's first bill.
     const precedingWindowStart = i >= 2 ? anchors[i - 2].index + anchors[i - 2][0].length : 0;
     try {
       const {
