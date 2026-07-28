@@ -1,4 +1,4 @@
-# Referenced-Context Glossary — Design (DECISION-READY DRAFT, awaiting Lance)
+# Referenced-Context Glossary — Design (APPROVED by Lance, 2026-07-28)
 
 **Origin (Lance, 2026-07-28, verbatim):** "I've noticed that the golden jsons reference other
 bills, departments or offices that aren't exactly clearly defined in the text when we read it,
@@ -108,7 +108,14 @@ completeness-derivation rule (never trust the verifier's self-report).
 - New fetch sources (uscode.house.gov / govinfo API): free, official, no keys required
   (govinfo has an optional free API key for higher limits — Lance's call if needed).
 
-## Open decisions for Lance (the approval gate)
+## Decisions (Lance, 2026-07-28 — all four resolved)
+
+1. Approach: **A+C hybrid approved** (grounded-fetch generation + curated reuse).
+2. Fetch sources: **uscode.house.gov + govinfo.gov approved**.
+3. Background label: **"Background — from the referenced law_s official text"** + per-entry source link.
+4. Scope: **federal first**; RSMo/revisor.mo.gov joins after the federal pattern proves out.
+
+## Superseded: original open-decision list
 
 1. Approve approach A+C (or redirect).
 2. Approve uscode.house.gov / govinfo.gov as new fetch sources (both official/federal).

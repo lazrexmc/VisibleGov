@@ -522,3 +522,13 @@ to the glossary project"):
 
 **Awaiting Lance:** glossary decisions; review-queue session (22 drafts, 3 flagged); giant-bill
 policy; verifier-cap fix approval to re-verify 2 drafts; Plan 3 mockups.
+
+### [Lance] (2026-07-28, returning)
+> Approved to make the API calls again / What info do you need from me for the glossary
+
+**[Claude]** Verifier-cap fix built+reviewed+merged (32k via streaming); the 2 stalled drafts
+re-verified under the approved ~$0.10 — BOTH came back FLAGGED (truncation had been hiding real
+findings). Queue now: 22 drafts, all verified — 17 clean, 5 flagged. Glossary: Lance resolved
+all four design decisions — A+C hybrid approved; uscode.house.gov + govinfo.gov approved;
+label "Background — from the referenced law's official text"; federal-first. Design doc marked
+APPROVED; implementation plan next.
