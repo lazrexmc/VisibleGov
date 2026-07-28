@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 export const MODEL = 'claude-opus-5';
-export const PROMPT_VERSION = 'v1';
+export const PROMPT_VERSION = 'v2';
 export const MAX_TEXT_CHARS = 400000; // ~100k tokens; larger bills error loudly, never truncate silently
 export const MAX_OUTPUT_TOKENS = 16000; // opus-5 thinking runs by default and counts toward max_tokens; headroom so it can't truncate the JSON output
 
@@ -32,7 +32,7 @@ export class SummaryTruncatedError extends Error {
 export const SUMMARY_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['what_it_does', 'stated_purpose', 'classification'],
+  required: ['what_it_does', 'stated_purpose', 'classification', 'referenced_terms'],
   properties: {
     what_it_does: {
       type: 'array',
@@ -48,6 +48,20 @@ export const SUMMARY_SCHEMA = {
     },
     stated_purpose: { type: 'string', description: "The bill's purpose in plain language, ONLY from the bill's own stated-purpose/findings language; empty string if the bill states none" },
     classification: { type: 'string', enum: ['amends_existing_law', 'new_program', 'appropriation', 'resolution', 'other'] },
+    referenced_terms: {
+      type: 'array',
+      description: 'Statutes, acts, agencies, programs, or public laws the bill text itself names or cites — extraction feeds the glossary pipeline, never rendered into the summary body',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['term', 'kind', 'citation_raw'],
+        properties: {
+          term: { type: 'string', description: 'The name of the statute/act/agency/program/public law exactly as the bill text names it' },
+          kind: { type: 'string', enum: ['statute', 'act', 'agency', 'program', 'public_law'] },
+          citation_raw: { type: 'string', description: "The citation verbatim as printed in the bill text (e.g. '42 U.S.C. 1396b'); empty string if the bill text prints no citation for this term" },
+        },
+      },
+    },
   },
 };
 
@@ -60,6 +74,7 @@ export const SYSTEM_PROMPT = [
   '- No party framing of any kind. Never mention parties, politics, or sponsors.',
   '- Plain language: an average adult with no legal training should understand every point. Spell out programs and acts by name on first mention.',
   '- Omit boilerplate (short title sections, severability, effective-date mechanics) unless it is the substance of the bill.',
+  '- Also populate referenced_terms: for every statute, act, agency, program, or public law the bill text itself names or cites, record {term, kind, citation_raw}. This is facts-only extraction — extract ONLY names/citations the bill text itself prints; never infer a name, kind, or citation the text does not state. citation_raw is verbatim from the bill text (e.g. \'42 U.S.C. 1396b\'), or an empty string if the bill text names the term without printing a citation for it. If the bill text prints no such terms, return an empty array.',
 ].join('\n');
 
 export function buildUserMessage(identifier, title, text) {
