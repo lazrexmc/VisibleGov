@@ -465,3 +465,16 @@ dependency). The numbers at dawn: **365,730 individual vote positions** in the l
   overrulings-with-evidence (both forensically confirmed by the final reviewer), final
   whole-branch review verdict YES + hardening wave + one wave-introduced regression caught by
   re-review and killed before it could ever fire. 258/258 tests.
+
+### [Lance] (2026-07-28)
+> Currently we use an API call to translate the Bills for us, why can't we use the native
+> Claude/Opus I have on this machine rather than reaching out to an API?
+
+**[Claude]** Explained and Lance affirmed ("Good call, I like it"): there is no local Claude -
+the "native" one is the same hosted models via subscription billing. The pipeline stays on the
+API deliberately: (1) author/verifier separation (opus writes, sonnet refutes) requires
+independent pinned calls - in-session summarization would be self-grading; (2) JSON-schema mode
+structurally forces section citations; (3) provenance + golden-set reproducibility need
+versioned identical calls; (4) the per-run approval policy works because metered spend is
+visible and gateable. Costs to date: ~$0.53 total; steady-state projection ~$100-150/yr;
+**Batch API (50% off identical calls) noted as the cost lever for future bulk runs.**
