@@ -128,7 +128,7 @@ test('persistReferencedTermsGracefully: with no referenced_terms, no glossary wr
   assert.equal(calls.length, 0);
 });
 
-test('persistReferencedTermsGracefully: missing glossary_terms relation (0007 unapplied) degrades to an honest warning, never throws', async () => {
+test('persistReferencedTermsGracefully: missing glossary_terms relation (0007 unapplied) degrades to an honest, distinctly-kinded warning, never throws', async () => {
   const client = fakeClient({
     glossary_terms: { data: null, error: MISSING_RELATION_ERROR('glossary_terms') },
   });
@@ -138,19 +138,34 @@ test('persistReferencedTermsGracefully: missing glossary_terms relation (0007 un
     referencedTerms: [{ term: 'Social Security Act', kind: 'act', citation_raw: '42 U.S.C. 1396b' }],
   });
   assert.equal(result.termsUpserted, 0);
-  assert.match(result.warning, /0007/);
-  assert.match(result.warning, /HR 498/);
+  assert.equal(result.warning.kind, 'missing_relation');
+  assert.equal(result.warning.term, null);
+  assert.match(result.warning.message, /0007/);
+  assert.match(result.warning.message, /HR 498/);
 });
 
-test('persistReferencedTermsGracefully: an unrelated (non-missing-relation) DB error still throws — not everything is swallowed', async () => {
+// ---- round 2 (Important finding 1 from the scoped re-review): round 1 only tolerated a
+// missing-relation error and rethrew anything else — a batch-crash hazard the summary draft is
+// supposed to be immune to (any glossary-side error, e.g. a unique-constraint race in
+// upsertGlossaryTerm's manual by:'term' insert branch, or a transient connection error, would
+// propagate out of createDraftSummary, miss FAILURE_TYPES at main()'s per-bill catch, hit the
+// outer catch, and closeRun(..., 'failed') would OVERWRITE the run detail — discarding every
+// count already accumulated for bills already processed). Fixed: this now catches ANY error. ----
+
+test('persistReferencedTermsGracefully: an unrelated (non-missing-relation) DB error degrades to a distinctly-kinded warning too — nothing throws', async () => {
   const client = fakeClient({
     glossary_terms: { data: null, error: { code: '08006', message: 'connection failure' } },
   });
-  await assert.rejects(() => persistReferencedTermsGracefully(client, 'run-1', {
+  const result = await persistReferencedTermsGracefully(client, 'run-1', {
     bill: { identifier: 'HR 498' },
     summaryId: 'sum-1',
     referencedTerms: [{ term: 'Social Security Act', kind: 'act', citation_raw: '42 U.S.C. 1396b' }],
-  }));
+  });
+  assert.equal(result.termsUpserted, 0);
+  assert.equal(result.warning.kind, 'persist_error');
+  assert.match(result.warning.message, /connection failure/);
+  // known — persistReferencedTerms tags the term it was working on when the error hit.
+  assert.equal(result.warning.term, 'Social Security Act');
 });
 
 // ---- createDraftSummary: the CRITICAL constraint end-to-end — the summary draft itself must
@@ -213,7 +228,8 @@ test('createDraftSummary: the summary draft STILL SUCCEEDS when glossary_terms i
   // time glossary persistence is attempted, and that must never be undone by 0007 being missing.
   const result = await createDraftSummary(client, 'run-1', { bill, textRow, anthropic });
   assert.equal(result.termsUpserted, 0);
-  assert.match(result.warning, /0007/);
+  assert.equal(result.warning.kind, 'missing_relation');
+  assert.match(result.warning.message, /0007/);
 });
 
 test('createDraftSummary: a bill with no referenced_terms at all persists cleanly with zero warnings', async () => {
@@ -223,4 +239,76 @@ test('createDraftSummary: a bill with no referenced_terms at all persists cleanl
   const textRow = { content: 'SECTION 1. Text.', content_hash: 'h1' };
   const result = await createDraftSummary(client, 'run-1', { bill, textRow, anthropic });
   assert.deepEqual(result, { termsUpserted: 0, warning: null });
+});
+
+test('createDraftSummary: the summary draft STILL SUCCEEDS when term persistence hits a non-missing-relation error (round-2 Important finding 1)', async () => {
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-1' }, error: null },
+    glossary_terms: { data: null, error: { code: '08006', message: 'connection failure' } },
+  });
+  const anthropic = fakeAnthropicSummary([{ term: 'Social Security Act', kind: 'act', citation_raw: '42 U.S.C. 1396b' }]);
+  const bill = { id: 'b1', identifier: 'HR 498', title: 'Do No Harm' };
+  const textRow = { content: 'SECTION 1. Text.', content_hash: 'h1' };
+
+  const result = await createDraftSummary(client, 'run-1', { bill, textRow, anthropic });
+  assert.equal(result.termsUpserted, 0);
+  assert.equal(result.warning.kind, 'persist_error');
+  assert.match(result.warning.message, /connection failure/);
+});
+
+// ---- round 2's required proof: a non-missing-relation persist error on one bill never erases
+// (or aborts processing of) another bill's already-recorded success. Reproduces main()'s own
+// per-bill accumulation loop (src/cli/summarize.js) directly, since main() itself has no
+// client-injection seam to test through — main() gets this behavior for free precisely BECAUSE
+// createDraftSummary never throws for this class of error (proven above): its outer
+// closeRun(..., 'failed') overwrite path is structurally unreachable for a glossary-persist
+// failure alone. ----
+
+test('batch loop over two bills: a non-missing-relation persist error on bill 2 never erases bill 1\'s success, and processing continues to bill 2\'s own summary', async () => {
+  const client1 = fakeClient({
+    summaries: { data: { id: 'sum-1' }, error: null },
+    glossary_terms: { data: { id: 'term-abc' }, error: null },
+    summary_terms: { data: null, error: null },
+  });
+  const client2 = fakeClient({
+    summaries: { data: { id: 'sum-2' }, error: null },
+    glossary_terms: { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "glossary_terms_kind_citation_key"' } },
+  });
+
+  const anthropic1 = fakeAnthropicSummary([{ term: 'Social Security Act', kind: 'act', citation_raw: '42 U.S.C. 1396b' }]);
+  const anthropic2 = fakeAnthropicSummary([{ term: 'Some Program', kind: 'program', citation_raw: '42 U.S.C. 999' }]);
+
+  const targets = [
+    { bill: { id: 'b1', identifier: 'HR 1', title: 'Bill One' }, textRow: { content: 'T', content_hash: 'h1' }, client: client1, anthropic: anthropic1 },
+    { bill: { id: 'b2', identifier: 'HR 2', title: 'Bill Two' }, textRow: { content: 'T', content_hash: 'h2' }, client: client2, anthropic: anthropic2 },
+  ];
+
+  // Mirrors src/cli/summarize.js's main() loop exactly (summariesCreated/glossaryTermsPersisted/
+  // glossaryWarnings/failures accumulation, try/catch around createDraftSummary).
+  let summariesCreated = 0;
+  let glossaryTermsPersisted = 0;
+  const glossaryWarnings = [];
+  const failures = [];
+  for (const { bill, textRow, client, anthropic } of targets) {
+    try {
+      const { termsUpserted, warning } = await createDraftSummary(client, 'run-1', { bill, textRow, anthropic });
+      summariesCreated += 1;
+      glossaryTermsPersisted += termsUpserted;
+      if (warning) glossaryWarnings.push({ identifier: bill.identifier, warning });
+    } catch (err) {
+      failures.push({ identifier: bill.identifier, message: err.message });
+    }
+  }
+
+  // Both summaries counted — bill 2's draft was never lost, and the loop never aborted early.
+  assert.equal(summariesCreated, 2);
+  // A glossary-persist error must never surface as a batch failure (that's the whole point).
+  assert.equal(failures.length, 0);
+  // Bill 1's term genuinely persisted; bill 2's did not (that's the simulated failure).
+  assert.equal(glossaryTermsPersisted, 1);
+  // The prior bill's success is intact in the run detail — not discarded by bill 2's warning.
+  assert.equal(glossaryWarnings.length, 1);
+  assert.equal(glossaryWarnings[0].identifier, 'HR 2');
+  assert.equal(glossaryWarnings[0].warning.kind, 'persist_error');
+  assert.match(glossaryWarnings[0].warning.message, /duplicate key/);
 });

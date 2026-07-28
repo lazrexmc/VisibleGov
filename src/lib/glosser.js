@@ -125,13 +125,15 @@ export const GLOSS_VERIFY_SYSTEM_PROMPT = [
   '- overall is "clean" only if every single verdict is supported; if even one sentence fails, overall is "flagged".',
 ].join('\n');
 
-// Fix wave (final review, Minor finding 3): dotted legal abbreviations whose internal periods are
-// NOT sentence-ending punctuation — left unprotected, "Under 42 U.S.C. 1396b, states get paid."
+// Fix wave (final review, Minor finding 3; redesigned in round 2 after a re-review caught a
+// silent-merge regression — see below) — dotted legal abbreviations whose internal periods are
+// NOT sentence-ending punctuation: left unprotected, "Under 42 U.S.C. 1396b, states get paid."
 // split at "U.S." into two spurious fragments, generating an extra per-fragment verifier verdict
 // for text that was only ever one real sentence. Longest/most-specific pattern first (e.g.
-// 'U.S.C.' before 'U.S.', 'Pub. L.' as its own two-word unit) so a shorter pattern never partially
-// matches inside a longer one this list has already protected.
+// 'U.S.C.' before 'U.S.', 'Pub. L. No.' as its own three-token unit before 'Pub. L.' alone) so a
+// shorter pattern never partially matches inside a longer one this list has already protected.
 const DOTTED_ABBREVIATIONS = [
+  /Pub\.\s+L\.\s+No\./g,
   /Pub\.\s+L\./g,
   /U\.S\.C\./g,
   /U\.S\./g,
@@ -148,10 +150,50 @@ const DOTTED_ABBREVIATIONS = [
 // the placeholder itself is unambiguous to read here as source text.
 const ABBREV_DOT_PLACEHOLDER = String.fromCharCode(1);
 
+// round 2 (Important finding 2 from the scoped re-review): round 1 protected EVERY dot in a
+// matched abbreviation, including its OWN trailing period — which silently MERGED two real
+// sentences whenever a gloss legitimately ended right at an abbreviation ('The Secretary cites 42
+// U.S.C. It funds Medicaid.' collapsed to ONE sentence, one verdict quietly covering two claims —
+// exactly the under-verification direction that must never happen silently). Fixed by protecting
+// every dot in a matched abbreviation EXCEPT ITS LAST ONE — that final dot is left as a normal,
+// literal period, decided by the SAME terminal-period rule (see protectNonTerminalPeriods below)
+// every other period in the text is judged by. `m.lastIndexOf('.')` finds that abbreviation's own
+// last dot within the match; everything before it gets protected, that one character does not.
 function protectAbbreviationDots(text) {
   let out = text;
   for (const pattern of DOTTED_ABBREVIATIONS) {
-    out = out.replace(pattern, (m) => m.replace(/\./g, ABBREV_DOT_PLACEHOLDER));
+    out = out.replace(pattern, (m) => {
+      const lastDot = m.lastIndexOf('.');
+      return m.slice(0, lastDot).split('.').join(ABBREV_DOT_PLACEHOLDER) + m.slice(lastDot);
+    });
+  }
+  return out;
+}
+
+// A period is a real sentence boundary if it's the last character of the (already-trimmed) text,
+// or if whitespace then an UPPERCASE letter follows it — otherwise (a digit, a lowercase letter,
+// punctuation like a comma, or nothing-but-more-lowercase-word immediately after) it's treated as
+// non-terminal and protected the same way an abbreviation-internal dot is. This is what actually
+// decides an abbreviation's own trailing dot (left raw by protectAbbreviationDots above) case by
+// case: "U.S.C. 1396b" (digit follows) stays merged; "U.S.C. It funds..." (capital follows)
+// splits. Also incidentally protects decimal-point periods ("12.5 percent") from ever becoming a
+// spurious split — an unplanned but welcome side effect of the same rule.
+//
+// Accepted residual (documented, not "fixed" further): an abbreviation's trailing dot followed by
+// whitespace + a capitalized word that ISN'T actually a new sentence ("...covers (e.g. Medicaid)
+// and...") over-splits into an extra fragment. That is the deliberately ACCEPTED failure
+// direction — noisy (an extra, redundant verdict) rather than the silent-merge this round-2 fix
+// exists to close (one verdict quietly covering two real claims). GLOSS_SYSTEM_PROMPT's existing
+// "avoid dotted abbreviations" line is the primary mitigation for both directions at the source.
+function isTerminalPeriod(text, index) {
+  if (index === text.length - 1) return true;
+  return /^\s+[A-Z]/.test(text.slice(index + 1));
+}
+
+function protectNonTerminalPeriods(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i += 1) {
+    out += (text[i] === '.' && !isTerminalPeriod(text, i)) ? ABBREV_DOT_PLACEHOLDER : text[i];
   }
   return out;
 }
@@ -160,15 +202,20 @@ function restoreAbbreviationDots(text) {
   return text.split(ABBREV_DOT_PLACEHOLDER).join('.');
 }
 
-// splitGlossSentences: TRIVIAL sentence splitting only (terminal .!? followed by whitespace/end) —
-// gloss_md is model-authored, constrained by GLOSS_SYSTEM_PROMPT to exactly 1-2 sentences, so this
-// never has to handle arbitrary prose beyond the dotted-abbreviation protection above. Pure,
-// mirrors verify.js's parseBullets role (the input the verifier is built from, and the count
-// assessVerdicts checks completeness against).
+// splitGlossSentences: TRIVIAL sentence splitting only (terminal .!? followed by whitespace/end,
+// with the terminal-period refinement above) — gloss_md is model-authored, constrained by
+// GLOSS_SYSTEM_PROMPT to exactly 1-2 sentences, so this never has to handle arbitrary prose beyond
+// the dotted-abbreviation protection above. Pure, mirrors verify.js's parseBullets role (the input
+// the verifier is built from, and the count assessVerdicts checks completeness against).
 export function splitGlossSentences(glossMd) {
-  const text = String(glossMd || '').trim();
-  if (!text) return [];
-  const protectedText = protectAbbreviationDots(text);
+  const raw = String(glossMd || '').trim();
+  if (!raw) return [];
+  // Sanitize any PRE-EXISTING placeholder byte out of the input first (round 2, re-reviewer
+  // finding): the placeholder is a control character no legitimate model output should ever
+  // contain, but if one somehow leaked in, restoreAbbreviationDots would turn it into a spurious
+  // literal period on the way out — stripped, never trusted, before any protection step runs.
+  const text = raw.split(ABBREV_DOT_PLACEHOLDER).join('');
+  const protectedText = protectNonTerminalPeriods(protectAbbreviationDots(text));
   const matches = protectedText.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
   // no terminal punctuation found (outside protected abbreviations) - treat the whole string as
   // one sentence, same restore step either way.

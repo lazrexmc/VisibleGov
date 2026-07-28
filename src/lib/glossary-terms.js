@@ -113,17 +113,32 @@ export async function upsertGlossaryTerm(client, runId, rawTerm) {
 // glossary_terms stub and join it to summaryId via summary_terms — the exact loop body
 // extract-terms.js's extractOne used to run inline, factored out so summarize.js can call the
 // identical logic (see that file's createDraftSummary) instead of a second copy. Deliberately NO
-// missing-relation tolerance here: that policy decision differs by caller (extract-terms.js wants
-// to hard-fail before any model call even runs — see its own loadExtractedSummaryIds comment;
-// summarize.js wants graceful degradation so a summary draft still succeeds — see that file's
-// persistReferencedTermsGracefully), so it belongs at each call site, not baked into this shared
-// mechanical layer.
+// missing-relation (or any other) error tolerance here — this still throws on the first failing
+// term, same as before this function existed: that policy decision differs by caller
+// (extract-terms.js wants to hard-fail before any model call even runs — see its own
+// loadExtractedSummaryIds comment; summarize.js wants graceful degradation so a summary draft
+// still succeeds — see that file's persistReferencedTermsGracefully), so it belongs at each call
+// site, not baked into this shared mechanical layer.
+//
+// Round 2 (Important finding 1 from the scoped re-review): if a term fails, the thrown error gets
+// `.term`/`.kind` tagged onto it (the term being processed at the moment of failure) — extra,
+// harmless metadata that extract-terms.js's caller never looks at (its own behavior, and its
+// tests, are unaffected), but that summarize.js's persistReferencedTermsGracefully now reads to
+// build an honest, specific warning instead of a generic one.
 export async function persistReferencedTerms(client, runId, { summaryId, referencedTerms }) {
   let termsUpserted = 0;
   for (const rawTerm of referencedTerms) {
-    const termId = await upsertGlossaryTerm(client, runId, rawTerm);
-    await insertIfAbsent(client, SUMMARY_TERMS_TABLE, [{ summary_id: summaryId, term_id: termId }], 'summary_id,term_id');
-    termsUpserted += 1;
+    try {
+      const termId = await upsertGlossaryTerm(client, runId, rawTerm);
+      await insertIfAbsent(client, SUMMARY_TERMS_TABLE, [{ summary_id: summaryId, term_id: termId }], 'summary_id,term_id');
+      termsUpserted += 1;
+    } catch (err) {
+      if (err && typeof err === 'object' && err.term === undefined) {
+        err.term = rawTerm.term;
+        err.kind = rawTerm.kind;
+      }
+      throw err;
+    }
   }
   return { termsUpserted };
 }

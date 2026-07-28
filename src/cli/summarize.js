@@ -185,27 +185,37 @@ async function markStale(client, staleSummaries) {
 //
 // Fix wave (final review, Important finding 2), CRITICAL constraint: this is called AFTER the
 // summary draft row already exists (see createDraftSummary below) — that row must stay committed
-// no matter what happens here. glossary_terms/summary_terms may not exist yet (0007 is still an
-// unapplied draft — see that migration's own header comment), so a missing-relation error is
-// caught here, turned into an honest, counted warning (never silently swallowed, never a thrown
-// error that would crash this bill's summarize run), and the caller moves on. Nothing is lost:
-// extract-terms.js's own backfill self-heals this later — once 0007 is applied, running it finds
-// this summary has no summary_terms row yet and extracts its terms retroactively, exactly as it
-// already does today for every summary that predates this fix. Any OTHER (non-missing-relation)
-// DB error is a real bug, not an expected pre-0007 condition, so it propagates unchanged — same
-// as extract-terms.js's own persistence errors do.
+// no matter what happens here.
+//
+// Round 2 (Important finding 1 from the scoped re-review): round 1 only tolerated a
+// missing-relation error, rethrowing anything else. That was itself a batch-crash hazard the
+// summary draft is supposed to be immune to — the RULING is the summary draft is the product,
+// term persistence is additive, so this now catches ANY error from glossary-side persistence, not
+// just the pre-0007 one (a unique-constraint race in upsertGlossaryTerm's manual by:'term' insert
+// branch, a transient connection error, anything). Missing-relation keeps its OWN distinct warning
+// shape (kind:'missing_relation') so the pre-0007 case stays recognizable at a glance; every other
+// failure gets kind:'persist_error' with the term it was working on when it failed, if known (see
+// persistReferencedTerms's own error-tagging comment). Nothing is lost either way: extract-terms.js's
+// own backfill self-heals this later (its planExtraction keys off summary_terms absence — once
+// this DB issue is resolved, running it finds this summary has no summary_terms row yet and
+// extracts its terms retroactively, exactly as it already does today for every summary that
+// predates this fix).
 export async function persistReferencedTermsGracefully(client, runId, { bill, summaryId, referencedTerms }) {
   try {
     const { termsUpserted } = await persistReferencedTerms(client, runId, { summaryId, referencedTerms });
     return { termsUpserted, warning: null };
   } catch (err) {
-    if (isMissingRelationError(err, GLOSSARY_TERMS_TABLE) || isMissingRelationError(err, SUMMARY_TERMS_TABLE)) {
-      return {
-        termsUpserted: 0,
-        warning: `referenced_terms not persisted for bill ${bill.identifier}: migration 0007 not applied (glossary_terms/summary_terms missing) — extract-terms.js's backfill will pick this summary up once 0007 is applied`,
-      };
-    }
-    throw err;
+    const missingRelation = isMissingRelationError(err, GLOSSARY_TERMS_TABLE) || isMissingRelationError(err, SUMMARY_TERMS_TABLE);
+    return {
+      termsUpserted: 0,
+      warning: {
+        kind: missingRelation ? 'missing_relation' : 'persist_error',
+        term: missingRelation ? null : (err.term ?? null),
+        message: missingRelation
+          ? `migration 0007 not applied (glossary_terms/summary_terms missing) for bill ${bill.identifier} — extract-terms.js's backfill will pick this summary up once 0007 is applied`
+          : `referenced_terms persistence failed for bill ${bill.identifier}${err.term ? ` (term "${err.term}")` : ''}: ${err.message}`,
+      },
+    };
   }
 }
 
@@ -296,11 +306,13 @@ async function main() {
 
     let summariesCreated = 0;
     let glossaryTermsPersisted = 0;
-    // Fix wave (final review, Important finding 2): glossaryWarnings is DISTINCT from failures —
-    // a warning means the summary draft itself succeeded (counted in summariesCreated) but its
-    // referenced_terms could not be persisted (pre-0007 degradation, see
-    // persistReferencedTermsGracefully above). Recorded honestly in the run detail either way,
-    // never silently dropped.
+    // Fix wave (final review, Important finding 2; round 2 widened this to ANY glossary-side
+    // persistence error, not just pre-0007 — see persistReferencedTermsGracefully): glossaryWarnings
+    // is DISTINCT from failures — a warning means the summary draft itself succeeded (counted in
+    // summariesCreated, this loop keeps running to the next bill) but its referenced_terms could
+    // not be persisted. Recorded honestly in the run detail either way, never silently dropped —
+    // and, critically, never thrown, so it can never reach the outer catch below and overwrite
+    // this run's already-accumulated counts/failures via closeRun(..., 'failed').
     const glossaryWarnings = [];
     for (const { bill, textRow } of summaryTargets) {
       try {
