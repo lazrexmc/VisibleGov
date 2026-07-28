@@ -21,6 +21,13 @@ const ROSTER_REPRESENTATIVE_FIXTURE = 'tests/fixtures/research/mo-house-xml/repr
 // why.
 const ROLLCALL_ARTIFACT_DIR = '.superpowers/artifacts/mo-rollcalls';
 
+// Task fix-mo-enrichment: per-bill "has this bill left the needs-enrichment set" marker, and the
+// bill-list fetch cache — see the two dedicated comment blocks below (ahead of
+// selectTargets/hasEnrichedMarker and the bill-list-cadence helpers) for the live-verified bug
+// these fix and why each is shaped this way.
+const MO_BILLS_ARTIFACT_DIR = '.superpowers/artifacts/mo-bills';
+const MO_BILL_LIST_ARTIFACT_DIR = '.superpowers/artifacts/mo-bill-list';
+
 export function parseMoHouseArgs(argv) {
   const out = {
     session: mo.DEFAULT_MO_HOUSE_SESSION, limit: 1, dryRun: false, billIdentifier: null, billXmlFile: null, rollcallPdfFile: null,
@@ -56,11 +63,85 @@ export async function collectBillList(session) {
   return mo.parseMoBillList(xmlText);
 }
 
+// ---- Task fix-mo-enrichment: per-bill enrichment-target tracking ----
+//
+// BUG FOUND LIVE (root-caused, not just hypothesized — see fix-mo-enrichment-report.md for the
+// full evidence trail): selectTargets's default branch used to be `entries.slice(0, args.limit)`
+// with ZERO enrichment-state awareness — every invocation re-selected the exact same first
+// `limit` bills in BillList.XML's own document order, forever, regardless of whether they'd
+// already been fetched+persisted. HB 2 is entry #1 in the real live list (session 261 has no
+// HB 1), so with the driver's default --limit 1, EVERY invocation without an explicit --bill
+// fetched HB 2 again. Live ingestion_runs evidence: of 12 real half-hour slots
+// (2026-07-28T04:50Z-10:54Z), 11 fetched 'HB 2' and only 2 runs ever wrote a new title anywhere
+// (one via an explicit-bill invocation that seeded HB 1800, one an orphaned high-limit run whose
+// ingestion_runs row was left status='running' with finished_at null) — 10
+// consecutive slots made zero enrichment progress. additivePatch (persistBillDetail below) was
+// ALREADY correctly wired (verified: it's been called here since this file's first commit) and
+// correctly prevented HB 2's title from being clobbered on refetch #2 onward — the bug was never
+// "title stays null forever" (HB 2's real fixture DOES parse a non-empty LongTitle, verified
+// directly against tests/fixtures/research/mo-house-xml/HB2-bill-text-pdf-only.xml), it was purely
+// that selectTargets never advanced past the bills it had already finished.
+//
+// FIX: track "has this bill left the needs-enrichment set" via a per-bill marker artifact
+// (hasEnrichedMarker/writeEnrichedMarker below) instead of any DB-column signal. Considered and
+// REJECTED: keying off "bills having NO bill_actions rows" (derivable purely from existing DB
+// state, no new artifact needed) — rejected because persistBillDetail's own
+// `datedActions = parsed.actions.filter((a) => a.date)` (below) already proves a real bill CAN
+// have zero bill_actions rows despite a fully successful enrichment cycle: any Action element
+// without a PubDate is dropped before insertIfAbsent ever runs (see the `droppedActions` log line
+// in persistBillDetail). A bill whose only action(s) happened to lack a PubDate would show zero
+// bill_actions rows forever and reproduce the EXACT SAME false-forever-pending bug this fix exists
+// to close, just moved from "title" to "bill_actions". Both real captured fixtures (HB 2: 1 dated
+// action; HB 1800: 26/26 dated) happen to have every action dated, but that is not a documented
+// guarantee of the source XML (the schema doc does not mark PubDate as required) — an assumption
+// this fix does not need to make. A file-presence-driven marker (same idiom as this file's own
+// ROLLCALL_ARTIFACT_DIR / *.failed.json quarantine — gitignored, trivially inspectable, and
+// operator-resettable by deleting one file) sidesteps that risk entirely: it is written once,
+// unconditionally, after a bill's fetch+parse+persist cycle completes, independent of what fields
+// or child rows that cycle did or didn't end up writing.
+function enrichedMarkerPath(identifier, dir) {
+  return `${dir}/${String(identifier).replace(/\s+/g, '')}.json`;
+}
+
+export function hasEnrichedMarker(identifier, dir = MO_BILLS_ARTIFACT_DIR) {
+  return existsSync(enrichedMarkerPath(identifier, dir));
+}
+
+// Called once, right after a bill's fetch+parse+persist cycle completes successfully (main(),
+// below) — deliberately unconditional on what persistBillDetail's patch/action/vote counts turned
+// out to be, per the rejected-alternative note above.
+export function writeEnrichedMarker(identifier, meta = {}, dir = MO_BILLS_ARTIFACT_DIR) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(enrichedMarkerPath(identifier, dir), JSON.stringify({
+    identifier, enriched_at: new Date().toISOString(), ...meta,
+  }, null, 2));
+}
+
+// One-time migration helper (NOT called from main()'s normal per-invocation path — see
+// fix-mo-enrichment-report.md for how/when this was actually run): bills enriched by a live run
+// BEFORE this marker mechanism existed already carry a non-null `title` in the DB but have no
+// marker file yet, so selectTargets would still reselect each of them exactly once more (harmless
+// — additivePatch again produces an empty patch — but still a wasted cooldown slot). Backfilling
+// a marker for every already-title-filled bill closes that gap without needing a live fetch: pure
+// DB read (`bills.title IS NOT NULL`) plus local marker writes. Idempotent — safe to run any
+// number of times (hasEnrichedMarker only cares about file presence; writeEnrichedMarker just
+// refreshes the timestamp on an existing marker).
+export async function backfillEnrichedMarkers(client, sessionId, dir = MO_BILLS_ARTIFACT_DIR) {
+  const { data, error } = await client.from('bills').select('identifier')
+    .eq('session_id', sessionId).not('title', 'is', null);
+  if (error) throw new Error(`backfillEnrichedMarkers lookup failed: ${error.message}`);
+  for (const row of data ?? []) writeEnrichedMarker(row.identifier, { backfilled: true }, dir);
+  return { backfilled: (data ?? []).length };
+}
+
 // Chooses which bill(s) get a per-bill detail fetch this invocation. --bill-xml-file reads a
 // LOCAL file instead of a live fetch (never counts against moHouseLimiter) — used this task to
 // prove the full bill-detail persistence cycle against an already-captured research fixture
 // without spending the second live 30-minute-gated request (see task-4-report.md for why).
-export function selectTargets(entries, args) {
+// --bill and --bill-xml-file are explicit operator overrides — deliberately NOT filtered by the
+// enriched-marker check below (an operator asking for a specific bill by name is honored,
+// including a deliberate re-fetch of an already-enriched one).
+export function selectTargets(entries, args, dir = MO_BILLS_ARTIFACT_DIR) {
   if (args.billXmlFile) {
     if (!args.billIdentifier) throw new Error('--bill-xml-file requires --bill <identifier>');
     return [{ identifier: args.billIdentifier, localFile: args.billXmlFile }];
@@ -70,11 +151,13 @@ export function selectTargets(entries, args) {
     if (!found) throw new Error(`bill ${args.billIdentifier} not found in fetched bill list`);
     return [{ identifier: found.identifier, bill_xml_url: found.bill_xml_url }];
   }
-  // No documented way to know which bills have RollCall elements without having already
-  // fetched their detail XML (BillList.XML carries no such signal) — list-order is the only
-  // honest default for a first pass. A future overnight pass could prioritize bills not yet
-  // enriched, once some detail has been fetched.
-  return entries.slice(0, args.limit).map((e) => ({ identifier: e.identifier, bill_xml_url: e.bill_xml_url }));
+  // No documented way to PRIORITIZE among not-yet-enriched bills (BillList.XML carries no
+  // "has RollCall elements" signal) — list-order is still the honest default ordering. What
+  // changed (the actual fix): bills that have ALREADY completed an enrichment cycle
+  // (hasEnrichedMarker) are excluded before slicing to --limit, so this driver advances through
+  // the backlog instead of reselecting the same already-done bill(s) forever.
+  const pending = entries.filter((e) => !hasEnrichedMarker(e.identifier, dir));
+  return pending.slice(0, args.limit).map((e) => ({ identifier: e.identifier, bill_xml_url: e.bill_xml_url }));
 }
 
 // ---- durable, cross-process ToU cooldown ----
@@ -181,6 +264,57 @@ export async function enforceDurableCooldown(
   );
 }
 
+// ---- Task fix-mo-enrichment: bill-list refetch cadence ----
+//
+// BUG FOUND LIVE: main() used to unconditionally re-fetch the entire BillList.XML on every
+// invocation before ever reaching the per-bill fetch. Both fetches share the SAME in-process
+// moHouseLimiter instance (house.mo.gov's <=1 req/30min ToU, mechanically enforced) — so the
+// second (per-bill) fetch of every single invocation had to wait out a FULL second 30-minute
+// interval after the first (list) fetch completed. Live proof (ingestion_runs, this source): every
+// started_at/finished_at pair is exactly 30 minutes apart (e.g. 10:24:22 -> 10:54:22) — each
+// invocation spent its ENTIRE cooldown slot on this one redundant list re-fetch, roughly HALVING
+// how many bills this driver can process per hour. The list only regenerates upstream on its own
+// schedule (LastTimeRun timestamps in the research fixture cluster around :01 and :30 past the
+// hour) — re-fetching it every 30 minutes was never buying freshness, only burning budget.
+//
+// FIX: cache the parsed list to a local artifact with a fetch timestamp; only re-fetch live once
+// that cache is >= MO_BILL_LIST_MAX_AGE_MS old (60 min — comfortably covers the upstream refresh
+// cadence with margin, without needing to introspect house.mo.gov's own regeneration schedule
+// precisely). A stale-by-up-to-an-hour list is harmless here: persistBillStubs's writes are
+// purely additive (insertIfAbsent), and any bill genuinely new since the last live fetch is picked
+// up on the next refresh, at most an hour later.
+export const MO_BILL_LIST_MAX_AGE_MS = 60 * 60 * 1000;
+
+function billListCachePath(session, dir) {
+  return `${dir}/${session}.json`;
+}
+
+// Pure + testable without touching the filesystem or mocking a clock in the caller: given the ISO
+// timestamp of the last cached list fetch (or null/undefined if none exists yet), is a fresh live
+// fetch required this invocation? Mirrors remainingCooldownMs's own "no prior => must proceed"
+// convention.
+export function shouldRefetchBillList(lastFetchIso, maxAgeMs = MO_BILL_LIST_MAX_AGE_MS, now = Date.now()) {
+  if (!lastFetchIso) return true;
+  return (now - new Date(lastFetchIso).getTime()) >= maxAgeMs;
+}
+
+export function readCachedBillList(session, dir = MO_BILL_LIST_ARTIFACT_DIR) {
+  const p = billListCachePath(session, dir);
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'));
+  } catch {
+    return null; // a corrupt/partial cache file must never crash the driver — treated as "no cache"
+  }
+}
+
+export function writeCachedBillList(session, entries, dir = MO_BILL_LIST_ARTIFACT_DIR) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(billListCachePath(session, dir), JSON.stringify({
+    session, fetched_at: new Date().toISOString(), entries,
+  }, null, 2));
+}
+
 // ---- persistence ----
 
 async function ensureSessionRow(client, runId, session) {
@@ -207,7 +341,10 @@ async function persistBillStubs(client, runId, sessionRow, entries) {
 // must never be silently clobbered by a re-fetch. additivePatch only fills currently-null
 // fields; bill_actions/votes rely on insertIfAbsent's own unique-constraint dedup instead
 // (unique(bill_id,action_date,description) / unique(source_key)) since those are append-only.
-async function persistBillDetail(client, runId, sessionRow, parsed) {
+// Exported (Task fix-mo-enrichment) so the additivePatch wiring itself can be pinned directly with
+// a stubbed client, not just exercised indirectly through main() — see
+// tests/mo-house-xml.test.js's "persistBillDetail: fills a null title..." tests.
+export async function persistBillDetail(client, runId, sessionRow, parsed) {
   const { data: existing, error: selErr } = await client.from('bills')
     .select('id,title,status,canonical_url')
     .eq('session_id', sessionRow.id).eq('identifier', parsed.bill.identifier).maybeSingle();
@@ -656,8 +793,16 @@ async function persistRoster(client, runId) {
 
 // --dry-run makes ZERO live fetches (fix: previously it still made the live bill-list fetch).
 // Reports from DB state only: how many bill stub rows already exist for this session, and how
-// many still need per-bill enrichment (title IS NULL is exactly the stub-vs-enriched signal
-// persistBillStubs/persistBillDetail already produce — no separate tracking needed).
+// many still need per-bill enrichment.
+//
+// bills_needing_enrichment (title IS NULL) is kept for continuity but is now a LEGACY signal —
+// since Task fix-mo-enrichment, selectTargets no longer uses it (see that function's own comment
+// for why: additivePatch leaves title non-null once set, so this count is still accurate for
+// "never yet fetched", but a bill can also leave the needs-enrichment set via its .enriched marker
+// while some fields stay null, e.g. a bill whose XML genuinely has no RollCall). The new
+// bills_without_enriched_marker + next_targets_preview fields below reflect the ACTUAL signal
+// selectTargets drives from — a DB read plus local marker-file presence checks, still zero live
+// fetches.
 export async function dryRunReport(client, session) {
   const { data: sessionRow, error: sessErr } = await client.from('sessions')
     .select('id,identifier,name')
@@ -670,7 +815,8 @@ export async function dryRunReport(client, session) {
   }
   if (!sessionRow) {
     return {
-      counts: { bills_total: 0, bills_needing_enrichment: 0 },
+      counts: { bills_total: 0, bills_needing_enrichment: 0, bills_without_enriched_marker: 0 },
+      next_targets_preview: [],
       note: `no sessions row yet for identifier=${session} (no live run has happened yet); counts come from the DB, not a live list — zero live fetches made`,
     };
   }
@@ -680,9 +826,38 @@ export async function dryRunReport(client, session) {
   const { count: needingEnrichment, error: needErr } = await client.from('bills')
     .select('id', { count: 'exact', head: true }).eq('session_id', sessionRow.id).is('title', null);
   if (needErr) throw new Error(`dry-run bills-needing-enrichment count failed: ${needErr.message}`);
+  // BUG FOUND WHILE VERIFYING THIS FIX: PostgREST/Supabase caps a single .select() response at
+  // 1000 rows server-side REGARDLESS of an explicit .range() request (verified live: bills_total
+  // was already 2099 for session 261 at the time this was written) — a single unpaginated query
+  // here silently under-counted "pending" bills by however many identifiers sorted past row 1000,
+  // which would have made this report actively misleading rather than merely incomplete. Paginate
+  // in PAGE_SIZE batches until a page returns fewer than PAGE_SIZE rows. Capped at MAX_PAGES as a
+  // sanity backstop (200k identifiers) — this driver's own bill count should never approach that;
+  // hitting the cap is a signal something is wrong, not a value to silently truncate at.
+  const PAGE_SIZE = 1000;
+  const MAX_PAGES = 200;
+  const identifiers = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const from = page * PAGE_SIZE;
+    const { data: idRows, error: idErr } = await client.from('bills')
+      .select('identifier').eq('session_id', sessionRow.id).order('identifier').range(from, from + PAGE_SIZE - 1);
+    if (idErr) throw new Error(`dry-run bill-identifier lookup failed: ${idErr.message}`);
+    identifiers.push(...(idRows ?? []).map((r) => r.identifier));
+    if (!idRows || idRows.length < PAGE_SIZE) break;
+  }
+  const pendingByMarker = identifiers.filter((id) => !hasEnrichedMarker(id));
   return {
-    counts: { bills_total: total ?? 0, bills_needing_enrichment: needingEnrichment ?? 0 },
-    note: 'counts computed from DB state only — zero live fetches made this invocation, per --dry-run',
+    counts: {
+      bills_total: total ?? 0,
+      bills_needing_enrichment: needingEnrichment ?? 0,
+      bills_without_enriched_marker: pendingByMarker.length,
+    },
+    // NOTE: sorted by DB identifier (alphabetical), NOT the true BillList.XML document order
+    // selectTargets uses live/from cache — a sensible preview of what's still pending, not a
+    // promise of the exact next fetch order (that requires an actual list fetch/cache, which
+    // --dry-run deliberately never does).
+    next_targets_preview: pendingByMarker.slice(0, 10),
+    note: 'counts computed from DB state + local .enriched marker artifacts only — zero live fetches made this invocation, per --dry-run',
   };
 }
 
@@ -772,9 +947,23 @@ async function main() {
       return;
     }
 
-    const listXml = await mo.fetchMoBillList(args.session);
-    console.error(`[${new Date().toISOString()}] fetched bill-list XML (session ${args.session})`);
-    const entries = mo.parseMoBillList(listXml);
+    // Task fix-mo-enrichment: only re-fetch BillList.XML live when the cache is stale (or absent)
+    // — see shouldRefetchBillList's own comment for the live-verified bug this closes (every
+    // invocation used to spend its entire cooldown slot on a redundant list re-fetch).
+    const cachedList = readCachedBillList(args.session);
+    let entries;
+    let listFetchMode;
+    if (shouldRefetchBillList(cachedList?.fetched_at ?? null)) {
+      const listXml = await mo.fetchMoBillList(args.session);
+      console.error(`[${new Date().toISOString()}] fetched bill-list XML (live, session ${args.session})`);
+      entries = mo.parseMoBillList(listXml);
+      writeCachedBillList(args.session, entries);
+      listFetchMode = 'live';
+    } else {
+      entries = cachedList.entries;
+      listFetchMode = 'cached';
+      console.error(`[${new Date().toISOString()}] reusing cached bill-list XML from ${cachedList.fetched_at} (< ${MO_BILL_LIST_MAX_AGE_MS / 60000}min old; skipping live list fetch this slot)`);
+    }
     const targets = selectTargets(entries, args);
 
     const sessionRow = await ensureSessionRow(client, runId, args.session);
@@ -804,10 +993,16 @@ async function main() {
       const parsed = mo.parseMoBillXml(xmlText);
       const result = await persistBillDetail(client, runId, sessionRow, parsed);
       billResults.push({ identifier: target.identifier, mode, ...result });
+      // Task fix-mo-enrichment: the bill LEAVES the needs-enrichment set here, unconditionally,
+      // now that its fetch+parse+persist cycle has completed — see selectTargets/
+      // hasEnrichedMarker's own comment for why this is file-presence-driven rather than derived
+      // from any DB column.
+      writeEnrichedMarker(target.identifier, { run_id: runId, bill_id: result.bill_id });
     }
 
     const counts = {
       document_type: 'bill-xml', bills_listed: entries.length, bills_detailed: billResults.length,
+      list_fetch_mode: listFetchMode,
       failures: failures.length, roster, artifact_replay: artifactReplay, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
     };
     const status = failures.length === 0 ? 'succeeded' : 'partial';

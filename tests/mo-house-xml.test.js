@@ -15,6 +15,8 @@ import {
   enforceDurableCooldown, CooldownConvergenceError,
   writeFailureArtifact, readFailureArtifact, excludeQuarantinedPdfs, ROLLCALL_MAX_FAILED_ATTEMPTS,
   replayArtifacts,
+  persistBillDetail, hasEnrichedMarker, writeEnrichedMarker, backfillEnrichedMarkers,
+  shouldRefetchBillList, readCachedBillList, writeCachedBillList, MO_BILL_LIST_MAX_AGE_MS,
 } from '../src/cli/ingest-mo-house.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
@@ -640,4 +642,256 @@ test('replayArtifacts: a mixed directory (a real gate artifact alongside an unre
     // sanity: exactly the one remaining file in the directory.
     assert.deepEqual(readdirSync(dir), ['mo-house-xml-HB2-1.failed.json']);
   });
+});
+
+// ---- Task fix-mo-enrichment ----
+//
+// LIVE BUG: selectTargets's default branch used to be `entries.slice(0, args.limit)` with zero
+// enrichment-state awareness, so every invocation without an explicit --bill re-selected the
+// exact same top-of-list bill(s) forever. Verified live: HB 2 (entry #1 in the real session-261
+// list) was fetched on 11 of 12 real half-hour cooldown slots (2026-07-28T04:50Z-10:54Z) with zero
+// net enrichment progress — additivePatch (already wired since this file's first commit) correctly
+// produced an empty patch on every refetch after the first, but selectTargets never advanced past
+// HB 2 to begin with. These tests pin: (1) additivePatch really is wired end-to-end through
+// persistBillDetail with a stubbed client (not just at the pure-function level — see
+// tests/db.test.js for that), (2) the new marker-file mechanism that lets selectTargets actually
+// advance, and (3) the bill-list refetch cadence fix (every invocation used to burn its entire
+// cooldown slot re-fetching the list before ever reaching the per-bill fetch, live-proven by every
+// ingestion_runs started_at/finished_at pair for this source being exactly 30 minutes apart).
+
+// Minimal fake 'bills' client covering exactly what persistBillDetail's UPDATE path touches
+// (select().eq().eq().maybeSingle(), then update().eq()). parsed.actions/rollcalls are left empty
+// in these tests so insertIfAbsent's own `rows.length === 0` early return (src/lib/db.js) means
+// bill_actions/votes are never touched — the client never needs to stub those tables.
+function fakeBillsUpdateClient(existingRow, updateSpy) {
+  return {
+    from(table) {
+      assert.equal(table, 'bills', 'this fake only stubs the bills table (parsed.actions/rollcalls are empty, so bill_actions/votes never get touched — see insertIfAbsent\'s empty-rows early return)');
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: existingRow, error: null }),
+            }),
+          }),
+        }),
+        update: (patch) => ({
+          eq: async (col, val) => { updateSpy(patch, col, val); return { error: null }; },
+        }),
+      };
+    },
+  };
+}
+
+test('persistBillDetail: additivePatch is wired end-to-end — a stub row with title=null gets updated with the freshly parsed title', async () => {
+  const existing = {
+    id: 'bill-1', title: null, status: null, canonical_url: null,
+  };
+  const updateCalls = [];
+  const client = fakeBillsUpdateClient(existing, (patch, col, val) => updateCalls.push({ patch, col, val }));
+  const parsed = {
+    bill: {
+      identifier: 'HB 2', title: 'X', status: null, canonical_url: null,
+    },
+    actions: [],
+    rollcalls: [],
+  };
+  const result = await persistBillDetail(client, 'run-1', { id: 'session-1' }, parsed);
+  assert.equal(updateCalls.length, 1, 'existing.title was null — additivePatch must produce a non-empty patch, triggering exactly one update()');
+  assert.deepEqual(updateCalls[0].patch, { title: 'X', run_id: 'run-1' });
+  assert.equal(updateCalls[0].col, 'id');
+  assert.equal(updateCalls[0].val, 'bill-1');
+  assert.equal(result.bill_id, 'bill-1');
+});
+
+test('persistBillDetail: a bill already fully enriched (non-null title) is never updated on refetch — the exact "zero progress" behavior observed live on HB 2', async () => {
+  const existing = {
+    id: 'bill-2', title: 'Already Set', status: null, canonical_url: null,
+  };
+  const updateCalls = [];
+  const client = fakeBillsUpdateClient(existing, (patch, col, val) => updateCalls.push({ patch, col, val }));
+  const parsed = {
+    bill: {
+      identifier: 'HB 2', title: 'A different value the refetch parsed', status: null, canonical_url: null,
+    },
+    actions: [],
+    rollcalls: [],
+  };
+  const result = await persistBillDetail(client, 'run-2', { id: 'session-1' }, parsed);
+  assert.equal(updateCalls.length, 0, 'existing.title was already non-null — additivePatch must produce an empty patch, so update() must never be called');
+  assert.equal(result.bill_id, 'bill-2');
+});
+
+// ---- hasEnrichedMarker / writeEnrichedMarker (the actual fix: selectTargets now advances past
+// already-enriched bills via file presence, not any DB column) ----
+
+test('hasEnrichedMarker: false when no marker file exists yet', () => {
+  withScratchArtifactDir((dir) => {
+    assert.equal(hasEnrichedMarker('HB 2', dir), false);
+  });
+});
+
+test('writeEnrichedMarker then hasEnrichedMarker: true once written, keyed on the space-stripped identifier (mirrors buildMoVoteRows source_key convention)', () => {
+  withScratchArtifactDir((dir) => {
+    writeEnrichedMarker('HB 2', { run_id: 'run-1', bill_id: 'bill-1' }, dir);
+    assert.equal(hasEnrichedMarker('HB 2', dir), true);
+    assert.ok(existsSync(join(dir, 'HB2.json')));
+    const onDisk = JSON.parse(readFileSync(join(dir, 'HB2.json'), 'utf8'));
+    assert.equal(onDisk.identifier, 'HB 2');
+    assert.equal(onDisk.run_id, 'run-1');
+    assert.equal(onDisk.bill_id, 'bill-1');
+    assert.ok(onDisk.enriched_at);
+  });
+});
+
+test('a manually-deleted marker re-enables the bill for selection — file-presence-driven, same idiom as the PDF quarantine', () => {
+  withScratchArtifactDir((dir) => {
+    writeEnrichedMarker('HB 2', {}, dir);
+    assert.equal(hasEnrichedMarker('HB 2', dir), true);
+    rmSync(join(dir, 'HB2.json'));
+    assert.equal(hasEnrichedMarker('HB 2', dir), false);
+  });
+});
+
+// ---- selectTargets: the actual regression test for the live bug (HB 2 selected forever) ----
+
+test('selectTargets (no explicit --bill): a bill with an enriched marker is excluded, so the driver advances to the next not-yet-enriched bill — regression test for the live no-op loop', () => {
+  withScratchArtifactDir((dir) => {
+    const entries = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' },
+      { identifier: 'HB 4', bill_xml_url: 'https://x/HB4.xml' },
+    ];
+    writeEnrichedMarker('HB 2', {}, dir); // simulates HB 2 having already completed its cycle
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const targets = selectTargets(entries, args, dir);
+    assert.deepEqual(targets, [{ identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' }], 'must skip the already-enriched HB 2 and select HB 3 next, not reselect HB 2 forever');
+  });
+});
+
+test('selectTargets (no explicit --bill): with nothing enriched yet, behaves exactly as before (list-order, sliced to --limit)', () => {
+  withScratchArtifactDir((dir) => {
+    const entries = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' },
+    ];
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const targets = selectTargets(entries, args, dir);
+    assert.deepEqual(targets, [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }]);
+  });
+});
+
+test('selectTargets: an explicit --bill bypasses the enriched-marker filter — an operator asking for a specific bill is honored even if it was already enriched', () => {
+  withScratchArtifactDir((dir) => {
+    const entries = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }];
+    writeEnrichedMarker('HB 2', {}, dir);
+    const args = parseMoHouseArgs(['--bill', 'HB 2']);
+    const targets = selectTargets(entries, args, dir);
+    assert.deepEqual(targets, [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }]);
+  });
+});
+
+test('selectTargets: --limit larger than the pending backlog returns only what is actually pending, never throws', () => {
+  withScratchArtifactDir((dir) => {
+    const entries = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' },
+    ];
+    writeEnrichedMarker('HB 2', {}, dir);
+    writeEnrichedMarker('HB 3', {}, dir);
+    const args = parseMoHouseArgs(['--limit', '5']);
+    const targets = selectTargets(entries, args, dir);
+    assert.deepEqual(targets, []);
+  });
+});
+
+// ---- backfillEnrichedMarkers (one-time migration helper: bills enriched under the OLD
+// title-only signal, before this marker mechanism existed, need a marker backfilled so
+// selectTargets doesn't reselect each of them exactly once more) ----
+
+function fakeBillsSelectClient(rows) {
+  return {
+    from(table) {
+      assert.equal(table, 'bills');
+      return { select: () => ({ eq: () => ({ not: async () => ({ data: rows, error: null }) }) }) };
+    },
+  };
+}
+
+test('backfillEnrichedMarkers: writes a marker for every bill that already has a non-null title, reports the count', async () => {
+  await withScratchArtifactDirAsync(async (dir) => {
+    const client = fakeBillsSelectClient([{ identifier: 'HB 2' }, { identifier: 'HB 3' }]);
+    const result = await backfillEnrichedMarkers(client, 'session-1', dir);
+    assert.deepEqual(result, { backfilled: 2 });
+    assert.equal(hasEnrichedMarker('HB 2', dir), true);
+    assert.equal(hasEnrichedMarker('HB 3', dir), true);
+    assert.equal(hasEnrichedMarker('HB 4', dir), false);
+  });
+});
+
+test('backfillEnrichedMarkers: idempotent — running it twice does not throw or duplicate anything odd', async () => {
+  await withScratchArtifactDirAsync(async (dir) => {
+    const client = fakeBillsSelectClient([{ identifier: 'HB 2' }]);
+    await backfillEnrichedMarkers(client, 'session-1', dir);
+    const second = await backfillEnrichedMarkers(client, 'session-1', dir);
+    assert.deepEqual(second, { backfilled: 1 });
+    assert.equal(hasEnrichedMarker('HB 2', dir), true);
+  });
+});
+
+// ---- shouldRefetchBillList / readCachedBillList / writeCachedBillList (bill-list refetch
+// cadence: live-proven that every invocation used to burn its entire 30-min cooldown slot on a
+// redundant list re-fetch, since the list fetch and the per-bill fetch share the same in-process
+// moHouseLimiter — see this function's own comment in src/cli/ingest-mo-house.js) ----
+
+test('shouldRefetchBillList: true when there is no prior cached fetch at all', () => {
+  assert.equal(shouldRefetchBillList(null), true);
+  assert.equal(shouldRefetchBillList(undefined), true);
+});
+
+test('shouldRefetchBillList: false when the cache is fresh (well under the max age)', () => {
+  const now = Date.parse('2026-07-28T10:00:00Z');
+  const fetchedAt = '2026-07-28T09:45:00Z'; // 15 minutes old
+  assert.equal(shouldRefetchBillList(fetchedAt, 60 * 60 * 1000, now), false);
+});
+
+test('shouldRefetchBillList: true once the cache reaches maxAgeMs (>=, never waits past it)', () => {
+  const now = Date.parse('2026-07-28T10:00:00Z');
+  const fetchedAt = '2026-07-28T09:00:00Z'; // exactly 60 minutes old
+  assert.equal(shouldRefetchBillList(fetchedAt, 60 * 60 * 1000, now), true);
+});
+
+test('shouldRefetchBillList: false just under maxAgeMs, true just over — boundary check', () => {
+  const now = Date.parse('2026-07-28T10:00:00Z');
+  assert.equal(shouldRefetchBillList('2026-07-28T09:00:01Z', 60 * 60 * 1000, now), false); // 59:59 old
+  assert.equal(shouldRefetchBillList('2026-07-28T08:59:59Z', 60 * 60 * 1000, now), true); // 60:01 old
+});
+
+test('readCachedBillList: null when no cache file exists', () => {
+  withScratchArtifactDir((dir) => {
+    assert.equal(readCachedBillList('261', dir), null);
+  });
+});
+
+test('readCachedBillList: null (never throws) on a corrupt cache file', () => {
+  withScratchArtifactDir((dir) => {
+    writeFileSync(join(dir, '261.json'), 'not valid json{{{');
+    assert.equal(readCachedBillList('261', dir), null);
+  });
+});
+
+test('writeCachedBillList then readCachedBillList: round-trips session, entries, and a fetched_at timestamp', () => {
+  withScratchArtifactDir((dir) => {
+    const entries = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }];
+    writeCachedBillList('261', entries, dir);
+    const cached = readCachedBillList('261', dir);
+    assert.equal(cached.session, '261');
+    assert.deepEqual(cached.entries, entries);
+    assert.ok(cached.fetched_at);
+    assert.equal(shouldRefetchBillList(cached.fetched_at), false, 'a cache just written must not be considered stale');
+  });
+});
+
+test('MO_BILL_LIST_MAX_AGE_MS is 60 minutes', () => {
+  assert.equal(MO_BILL_LIST_MAX_AGE_MS, 60 * 60 * 1000);
 });
