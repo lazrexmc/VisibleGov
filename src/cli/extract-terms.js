@@ -23,9 +23,10 @@ export { normalizeTermText, upsertKeyFor, normalizeCitation };
 // able to version independently.
 export const EXTRACT_MODEL = 'claude-sonnet-5';
 export const EXTRACT_PROMPT_VERSION = 'v1';
-// Tiny output on purpose: a handful of {term, kind, citation_raw} triples, nowhere near
-// summarizer.js's MAX_OUTPUT_TOKENS (16000) for a full what_it_does/stated_purpose summary.
-export const EXTRACT_MAX_OUTPUT_TOKENS = 4000;
+// Matches summarizer.js's MAX_OUTPUT_TOKENS: the original 4000 "tiny output" assumption did not
+// survive contact with reference-dense bills — 4 of the first 25 live extractions (HCONRES 113,
+// HR 6955, HR 9770, HR 8595) hit the cap on sonnet-5's thinking + a long referenced_terms list.
+export const EXTRACT_MAX_OUTPUT_TOKENS = 16000;
 export const EXTRACT_COST_PER_SUMMARY_USD = 0.03; // per the plan's own estimate (~25 x ~$0.03 ~= $0.75)
 
 // Mirrors SUMMARY_SCHEMA's referenced_terms shape by REFERENCE (controller ruling 1: "JSON-schema
