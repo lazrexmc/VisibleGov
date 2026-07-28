@@ -373,3 +373,21 @@ endpoint, and a Set-vs-multiset drift-check blind spot matching the real goldens
 Trust-model v2 (adversarial verify + adjudicate) and the per-run API approval policy both
 born this session from Lance's own calls. MO research: house.mo.gov official XML + text-layer
 roll-call PDFs = primary-source path to MO individual votes (no auth, ToU-clean).
+
+---
+
+## 2026-07-28 — Plan 3 brainstorm (in progress, paused for the night)
+
+Decisions so far:
+1. **Launch scope: "site with votes only"** - backfill ALL remaining House rolls (free,
+   rate-limited) so profiles show complete voting records with bill titles; plain-language
+   summaries grow incrementally via Lance-approved batch runs (no big upfront spend).
+2. **Hosting: free .pages.dev first**, then attach **visiblegov.helpingpeoplehelpingpeople.com**
+   (subdomain of Lance's owned domain - one CNAME; a /path was ruled out: Pages serves
+   hostnames, paths need a proxy worker + base-path rewrites everywhere).
+3. **Visual companion accepted but deferred** - next session opens with profile-page mockups
+   in the browser tab (Lance: "yea, we'll do that later, I'm going to bed for now").
+
+RESUME POINT: brainstorming skill mid-flight, at the visual/layout questions for the
+profile-first site. Remaining to settle: profile page layout + visual direction (mockups),
+address-lookup empty-state behavior, pre-render/deploy mechanics, then spec → plan → SDD.
