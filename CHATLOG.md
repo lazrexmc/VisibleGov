@@ -321,3 +321,22 @@ had already failed harmlessly on "credit balance too low" (no spend occurred, te
 fetched and stored, re-run skips straight to the model calls) - it will not be retried until
 Lance both adds credits AND approves the run. Also recommended the mechanical version of this
 policy: set a monthly spend limit in console.anthropic.com -> Billing -> Limits.
+
+### [Lance] (at the first review gate, 3 drafts in queue)
+> Fuck, I'm not sure if I'm the guy to be reviewing these. I understand what it says but I still
+> have to run it through a few LLMs to get it to give me the details, pros, cons, conclusion and
+> other information without a biased angle. Maybe a system from a foreign entity would be the
+> best option to review the work, but it's not me. My best option is to just trust claude...
+
+**[Claude]** Pushed back on "just trust claude" (single-model output isn't verification -
+PLAYBOOK §6, and the author model reviewing itself is a conflict of interest), reframed the
+human role (bullet-vs-cited-section lookup, not policy analysis), and offered three trust
+models. **Lance chose: adversarial verify + he adjudicates.** Every draft now gets an
+independent adversarial refutation pass (verifier model = claude-sonnet-5, deliberately
+different weights than the opus-5 author; prompt instructs it to try to REFUTE each bullet
+against its cited section) before human review; flags surface in the review page with reasons
+and evidence quotes; Lance adjudicates flags rather than cold-reading everything; unflagged
+summaries he can approve on a skim. Different-vendor verification remains a future upgrade for
+stronger independence. Spec trust-model section updated; slice-2 plan amended with Task 10
+(verifier + migration 0004 + review-page verification strip). Verify runs remain subject to
+Lance's per-run API approval policy.

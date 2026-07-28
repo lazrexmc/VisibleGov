@@ -451,6 +451,29 @@ test('planWork skips bills already summarized at current hash', () => {
 
 ---
 
+### Task 10: Adversarial verification pass (trust-model update, Lance 2026-07-27)
+
+**Files:**
+- Create: `supabase/migrations/0004_summary_verifications.sql`, `src/lib/verifier.js`, `src/cli/verify.js`
+- Modify: `src/review/server.js`, `src/review/page.html`, `package.json` (script `"verify": "node --env-file=.env src/cli/verify.js"`)
+- Test: `tests/verifier.test.js`, `tests/review-logic.test.js` (additions)
+
+**Interfaces:**
+- Consumes: summarizer.js patterns (client factory, typed errors, JSON-schema output), db.js, review server internals.
+- Migration 0004 (draft-then-apply, Lance runs it): `create table summary_verifications (id uuid primary key default gen_random_uuid(), summary_id uuid not null references summaries(id), verdicts jsonb not null, overall text not null check (overall in ('clean','flagged')), model text not null, prompt_version text not null, created_at timestamptz default now()); alter table summary_verifications enable row level security;` — NO anon policy (staff-only).
+- `src/lib/verifier.js` produces: `VERIFIER_MODEL = 'claude-sonnet-5'` (deliberately different weights than the opus-5 author — do not "upgrade" it to opus); `VERIFY_PROMPT_VERSION = 'v1'`; `VERIFY_SCHEMA` — {verdicts: [{bullet_index int, section string, supported bool, reason string, evidence_quote string}] (all required, additionalProperties false), overall enum clean|flagged}; `VERIFY_SYSTEM_PROMPT` — adversarial stance, must contain the markers 'refute', 'cited section', 'fully supported', 'quote'; `buildVerifyMessage(identifier, bulletsJson, text)`; `verifyBill(client, {identifier, bullets, text}) → {json}` — reuses the oversize/refusal/truncation typed-error pattern (import OversizeTextError etc. from summarizer.js or re-declare minimally); max_tokens MAX_OUTPUT_TOKENS from summarizer.
+- `src/cli/verify.js` produces: `npm run verify -- [--dry-run]` — selects summaries with status in (draft, stale) having NO summary_verifications row yet, loads each bill's current text + parses bullets from the summary's body_md (pure exported `parseBullets(body_md) → [{index, point, section}]` — the renderer's inverse, tested), calls verifyBill per summary, inserts summary_verifications row with provenance; per-summary typed failures recorded, batch continues; exit 0/2/1; --dry-run lists what would verify with zero model calls; missing ANTHROPIC_API_KEY → BLOCKED exit 1.
+- Review server additions: `/api/item/:id` response gains `verification: {overall, verdicts, model, created_at} | null` (latest row for that summary); `/api/queue` items gain `verified: 'clean'|'flagged'|'unverified'`. Page: verification strip above the draft — green "verifier found all N bullets supported" / amber per-bullet flags showing reason + evidence_quote (escaped!) / grey "unverified". Pure exported `verificationBadge(verification|null) → {state, label}` tested.
+- LIVE verify runs are gated by Lance's standing per-run API approval policy — the implementer does NOT run `npm run verify` live; tests are pure, dry-run against DB is allowed.
+
+- [ ] **Step 1:** failing tests (schema shape incl. required fields + additionalProperties; prompt markers; parseBullets round-trips renderMarkdown output incl. multiple bullets and the no-purpose case; verificationBadge states; server logic additions).
+- [ ] **Step 2:** implement migration + verifier + CLI + server/page additions.
+- [ ] **Step 3:** `npm test` all pass; `npm run verify -- --dry-run` against live DB (expect 3 unverified drafts listed).
+- [ ] **Step 4:** commit `feat: adversarial verification pass - sonnet refutes opus, flags to review page`.
+- [ ] **Step 5:** GATE — Lance applies 0004, then approves the live verify run (3 sonnet calls, ~$0.20).
+
+---
+
 ## Self-review notes (done at write time)
 
 - **Spec coverage:** implements the spec's summarization pipeline (facts-only rule verbatim in the prompt), review-queue trust model (Lance approves each; publish gated through approved), staleness (hash mismatch → stale), prompt versioning + golden set (§4.3), editor_notes internal-only fix, and the freshness footer's data source (view). Deferred to Plan 3: public site, static pre-render on publish, address lookup. MO summarization deferred pending Task 9 findings (Lance's federal-first call).

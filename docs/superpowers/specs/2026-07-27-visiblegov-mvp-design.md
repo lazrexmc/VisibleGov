@@ -29,9 +29,15 @@ being usable by regular people.
   to see items that are in the works that are upcoming that may come to vote soon.") This is a
   mechanical trigger rule, not editorial curation. All other bills get bare listings with official
   links — nothing hidden, just not yet summarized.
-- **Trust model: Lance approves every summary before it publishes.** Drafts land in a review
-  queue; nothing goes public without human approval. Second-model adversarial pre-screening
-  (PLAYBOOK §6) is a later addition when volume demands it.
+- **Trust model (updated 2026-07-27, at Lance's call after the first review session): two-stage.**
+  (1) Every draft gets an **adversarial verification pass** by a different model than the author
+  (initially claude-sonnet-5 verifying claude-opus-5 output; a different-vendor verifier is the
+  planned upgrade for stronger independence — PLAYBOOK §6 pulled forward from "when volume
+  demands"). The verifier is prompted to REFUTE: for each bullet, locate the cited section and
+  determine whether the claim is fully supported by that section alone; flags carry a reason and
+  an evidence quote. (2) **Lance adjudicates**: flagged bullets come to him with the flag
+  explained; unflagged summaries he can approve on a skim. Nothing publishes without his click,
+  but his role is adjudication and accountability, not primary verification.
 - **Architecture: Approach A — proven stack + ingestion CLI** (chosen over Cloudflare-native
   Workers automation and framework SSR). Supabase + Cloudflare Pages + a Node CLI for
   ingestion/summarization, run manually first, promoted to GitHub Actions cron once trusted.
