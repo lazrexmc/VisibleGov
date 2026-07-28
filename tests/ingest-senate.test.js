@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs } from '../src/cli/ingest.js';
+import { readFileSync } from 'node:fs';
+import { parseArgs, isCurrentMember } from '../src/cli/ingest.js';
 import {
   resolveSenator, finalizeSenateVote, isKnownBillIdentifier,
   lastNameFromFullName, firstNameFromFullName, stateAbbreviation,
 } from '../src/adapters/us-senate.js';
+
+const membersJson = JSON.parse(readFileSync('tests/fixtures/us-congress/members-mo.json', 'utf8'));
 
 const SENATORS = [
   { legislator_id: 'leg-hawley', state: 'MO', last_name: 'Hawley' },
@@ -76,13 +79,41 @@ test('resolveSenator tiebreaks an ambiguous (state, last_name) match on first_na
   assert.equal(resolveSenator(cast, MURKOWSKI_AK), 'leg-murkowski-frank');
 });
 
-test('resolveSenator tiebreak is prefix-tolerant (cast first_name is a prefix of the DB one)', () => {
+test('resolveSenator tiebreaks the real Warner/VA ambiguity (Mark Warner, current, vs John Warner, historical)', () => {
+  // Real case from the live backfill. first_name is 'Mark' (not 'Mark R.') — the production
+  // shape loadCurrentSenators actually produces via firstNameFromFullName('Warner, Mark R.'),
+  // which drops the middle initial the same way it does for every other senator.
   const senators = [
-    { legislator_id: 'leg-warner-mark', state: 'VA', last_name: 'Warner', first_name: 'Mark R.' },
+    { legislator_id: 'leg-warner-mark', state: 'VA', last_name: 'Warner', first_name: 'Mark' },
     { legislator_id: 'leg-warner-john', state: 'VA', last_name: 'Warner', first_name: 'John' },
   ];
   const cast = { state: 'VA', last_name: 'Warner', first_name: 'Mark', party: 'D' };
   assert.equal(resolveSenator(cast, senators), 'leg-warner-mark');
+});
+
+// Real case from the live backfill (confirmed directly against the DB's terms/legislators rows):
+// SC has both 'Graham, Lindsey' (current) and 'Graham, Darline' (also lacks an end date in our
+// data) — surname-ambiguous even after ensureSenateMembers' isCurrentMember filter, since that
+// filter operates on the raw congress.gov payload and can't fix a same-shaped duplicate there.
+const GRAHAM_SC = [
+  {
+    legislator_id: 'leg-graham-lindsey', state: 'SC',
+    last_name: lastNameFromFullName('Graham, Lindsey'), first_name: firstNameFromFullName('Graham, Lindsey'),
+  },
+  {
+    legislator_id: 'leg-graham-darline', state: 'SC',
+    last_name: lastNameFromFullName('Graham, Darline'), first_name: firstNameFromFullName('Graham, Darline'),
+  },
+];
+
+test('resolveSenator tiebreaks the real Graham/SC ambiguity — Lindsey direction', () => {
+  const cast = { state: 'SC', last_name: 'Graham', first_name: 'Lindsey', party: 'R' };
+  assert.equal(resolveSenator(cast, GRAHAM_SC), 'leg-graham-lindsey');
+});
+
+test('resolveSenator tiebreaks the real Graham/SC ambiguity — Darline direction', () => {
+  const cast = { state: 'SC', last_name: 'Graham', first_name: 'Darline', party: 'R' };
+  assert.equal(resolveSenator(cast, GRAHAM_SC), 'leg-graham-darline');
 });
 
 test('resolveSenator returns null when still ambiguous after the first-name tiebreak (never guesses)', () => {
@@ -146,6 +177,41 @@ test('isKnownBillIdentifier recognizes the congress.gov bill-type vocabulary and
   assert.equal(isKnownBillIdentifier('S 123'), true);
   assert.equal(isKnownBillIdentifier('PN373'), false);
   assert.equal(isKnownBillIdentifier(null), false);
+});
+
+// ---- isCurrentMember (fix round 2): the actual current-member signal in the raw congress.gov
+// /member payload — endYear appears on a term item once, and only once, that term has ended.
+// Round 1 wrongly claimed no endYear exists anywhere in this payload (sampled only the first few
+// current-delegation fixture entries); re-review caught it against the fixture's OWN Bond/
+// Carnahan rows, which do carry endYear. Tested here directly against those same real entries. ----
+
+test('isCurrentMember filters out fully-historical members using the real fixture (Bond, Carnahan)', () => {
+  const bond = membersJson.members.find((m) => m.name === 'Bond, Christopher S.');
+  const carnahan = membersJson.members.find((m) => m.name === 'Carnahan, Jean');
+  assert.ok(bond, 'fixture must contain Bond, Christopher S.');
+  assert.ok(carnahan, 'fixture must contain Carnahan, Jean');
+  assert.equal(isCurrentMember(bond), false);
+  assert.equal(isCurrentMember(carnahan), false);
+});
+
+test('isCurrentMember keeps a currently-serving member using the real fixture (Hawley)', () => {
+  const hawley = membersJson.members.find((m) => m.name === 'Hawley, Josh');
+  assert.ok(hawley, 'fixture must contain Hawley, Josh');
+  assert.equal(isCurrentMember(hawley), true);
+});
+
+test('isCurrentMember keeps a member whose ongoing term is not their FIRST term item (checks ANY, not just latest)', () => {
+  // Synthetic but realistic: a past House term that has closed (endYear present) followed by an
+  // ongoing Senate term (no endYear yet) — must still be kept, matching the doc comment's claim.
+  const pastHouseNowSenate = {
+    name: 'Example, Pat',
+    terms: { item: [{ chamber: 'House of Representatives', startYear: 2015, endYear: 2019 }, { chamber: 'Senate', startYear: 2019 }] },
+  };
+  assert.equal(isCurrentMember(pastHouseNowSenate), true);
+});
+
+test('isCurrentMember returns false for a member with no term items at all', () => {
+  assert.equal(isCurrentMember({ name: 'Nobody', terms: { item: [] } }), false);
 });
 
 // ---- supporting pure helpers used by ensureSenateMembers / loadCurrentSenators ----

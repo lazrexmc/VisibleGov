@@ -315,27 +315,37 @@ async function loadCurrentSenators(client, { dryRun }) {
   return { senators, note: null };
 }
 
+// Fix round 2 (re-review caught round 1's factual error): a raw congress.gov member's term item
+// carries `endYear` once — and ONLY once — that term has actually ended. Round 1's "no endYear
+// anywhere" claim was wrong; it was checked against only the first few (current-delegation)
+// entries of tests/fixtures/us-congress/members-mo.json, which naturally lack endYear because
+// they're ongoing. The full fixture has endYear on 45 of its 55 term items (e.g. Bond -> endYear
+// 2011, Carnahan -> endYear 2002); it's absent exactly on the currently-serving ones (Hawley,
+// Schmitt, Onder...). That IS a cheap, reliable current-member signal. A member is kept iff AT
+// LEAST ONE of their term items lacks endYear — not just their latest one — so a member who
+// served a past House term (which has closed with an endYear) and is now serving an ongoing
+// Senate term (no endYear yet) is still correctly kept.
+export function isCurrentMember(rawMember) {
+  const items = rawMember.terms?.item ?? [];
+  return items.some((t) => t.endYear == null);
+}
+
 // LIVE-ONLY (Task 3 exercises this path; never called during --dry-run). Pages congress.gov's
-// full member list, filters to current-Senate members by reusing parseMemberList's chamber-
-// detection semantics, insertIfAbsent by bioguide_id, then upserts a us-congress/senate term per
-// member carrying their state (converted to a USPS abbreviation) in the term's `district` column.
+// full member list, filters to CURRENT members (isCurrentMember, above) and then to Senate
+// chamber by reusing parseMemberList's chamber-detection semantics, insertIfAbsent by
+// bioguide_id, then upserts a us-congress/senate term per member carrying their state (converted
+// to a USPS abbreviation) in the term's `district` column.
 //
-// Post-live-backfill investigation (fix pass after Task 3): does the /member list payload carry
-// anything cheap to filter historical members on (a `currentMember` boolean, a term end year)?
-// Inspected the real member-object shape (tests/fixtures/us-congress/members-mo.json is the same
-// list-endpoint resource, just state-filtered — the per-member shape is identical) — each entry
-// has only: bioguideId, depiction, district, name, partyName, state, terms.item[] (each item has
-// ONLY {chamber, startYear} — no endYear), updateDate, url. No currentMember field, no end date,
-// anywhere. Confirmed empirically too: even the state-filtered fixture already contains long-
-// retired MO senators (Bond, Carnahan, Talent, Ashcroft, Danforth, Eagleton, Symington...), so
-// this endpoint was never current-only to begin with. Per brief ruling: not cheaply determinable
-// from this payload -> historical rows are left in place; resolveSenator's first-name tiebreak
-// (above) is the actual mitigation, not a member-list filter. (The `/member/{bioguideId}` DETAIL
-// endpoint reportedly does carry currentMember, but that's a separate per-member request for
-// every one of ~450+ senators ever ingested — out of scope for this fix pass.)
+// Historical rows already inserted by round 1 (before this filter existed) remain in the DB —
+// additive discipline (PLAYBOOK §3.5) means this fix doesn't retroactively delete or reconcile
+// past writes. resolveSenator's first-name tiebreak (above) still exists and still matters for
+// those already-ingested rows, and as a second line of defense against any edge case this filter
+// itself doesn't catch (e.g. a member whose current term's endYear the API has already back-
+// filled ahead of the actual end-of-term date).
 export async function ensureSenateMembers(client, runId) {
   const failures = [];
   const senateMembers = [];
+  let filteredHistorical = 0;
   let offset = 0;
   for (;;) {
     let json;
@@ -353,9 +363,11 @@ export async function ensureSenateMembers(client, runId) {
     if (withTerms.length < raw.length) {
       failures.push({ step: `member page offset=${offset}`, message: `${raw.length - withTerms.length} member(s) with no terms skipped (not fatal)` });
     }
+    const current = withTerms.filter(isCurrentMember);
+    filteredHistorical += withTerms.length - current.length;
     let members = [];
     try {
-      members = us.parseMemberList({ members: withTerms });
+      members = us.parseMemberList({ members: current });
     } catch (err) {
       failures.push({ step: `member page offset=${offset}`, message: err.message });
     }
@@ -379,7 +391,7 @@ export async function ensureSenateMembers(client, runId) {
       role: { chamber: 'senate', district: senate.stateAbbreviation(m.state), start_date: null, end_date: null },
     });
   }
-  return { count: senateMembers.length, failures };
+  return { count: senateMembers.length, filteredHistorical, failures };
 }
 
 // Writes votes (+ bills already resolved by collectUsSenate) and only the RESOLVED casts —
@@ -489,6 +501,7 @@ async function runUsSenate(args) {
     const totalFailures = data.failures.length + ensured.failures.length;
     const counts = {
       votes: data.votes.length, bills: data.bills.length, senate_members_ensured: ensured.count,
+      senate_members_filtered_historical: ensured.filteredHistorical,
       casts: resolved + unresolved.length, resolved, unresolved: unresolved.length, failures: totalFailures,
     };
     const status = totalFailures === 0 ? 'succeeded' : 'partial';
