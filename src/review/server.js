@@ -52,6 +52,18 @@ export function validateDecisionInput({ action, body_md, note }) {
   return null;
 }
 
+// Task 6 (glossary review queue), controller ruling #2: same rule as validateDecisionInput,
+// mirrored for the glossary domain's editable field (gloss_md instead of body_md). Kept as a
+// distinct function — not a generalized field name — so validateDecisionInput's existing
+// contract/tests (and its exact error text) stay untouched; NOTE_ACTION (the known-action set) is
+// still the single shared source of truth, reused here rather than redeclared.
+export function validateGlossaryDecisionInput({ action, gloss_md, note }) {
+  if (!NOTE_ACTION[action]) return 'unknown action';
+  if (action === 'edit' && !gloss_md) return 'gloss_md is required for edit';
+  if (action === 'reject' && !note) return 'note is required for reject';
+  return null;
+}
+
 // Controller ruling #4: yeas = 'yea' casts, nays = 'nay' casts; other positions not shown.
 export function countVoteCasts(casts) {
   let yeas = 0;
@@ -86,25 +98,53 @@ export function pickBillText(texts, targetHash) {
 // Task 10 (adversarial verification pass): reduces a summary_verifications row (or none, if the
 // summary hasn't been verified yet) to a display-ready {state, label}. Pure so both the API
 // (queue's 'verified' field) and tests can exercise it without a DB.
-export function verificationBadge(verification) {
+//
+// deriveVerificationBadge is the shared mechanical derivation (null -> unverified; overall clean
+// -> green with a count; otherwise -> amber with an unsupported/total count) — the SAME derivation
+// Task 6's glossary tab uses (controller ruling #3: "same mechanical overall derivation display as
+// summaries"). Only the noun differs: verifier.js's verdicts index summary BULLETS; glosser.js's
+// verdicts index gloss SENTENCES (see glosser.js's own comment on GLOSS_VERIFY_SCHEMA) — using the
+// domain-correct noun here keeps the review page's own labels honest rather than reusing "bullets"
+// for a gloss that has none.
+function deriveVerificationBadge(verification, noun) {
   if (!verification) return { state: 'unverified', label: 'Unverified' };
   const verdicts = verification.verdicts || [];
   if (verification.overall === 'clean') {
-    return { state: 'clean', label: `Verifier found all ${verdicts.length} bullets supported` };
+    return { state: 'clean', label: `Verifier found all ${verdicts.length} ${noun} supported` };
   }
   const unsupported = verdicts.filter((v) => !v.supported).length;
-  return { state: 'flagged', label: `Verifier flagged ${unsupported} of ${verdicts.length} bullets` };
+  return { state: 'flagged', label: `Verifier flagged ${unsupported} of ${verdicts.length} ${noun}` };
 }
 
-// A summary can be re-verified over time (e.g. after a re-run); the latest row by created_at is
-// the one that matters for display — same "last wins" pattern as pickLatestVote.
-export function latestVerificationBySummary(rows) {
+export function verificationBadge(verification) {
+  return deriveVerificationBadge(verification, 'bullets');
+}
+
+// Task 6: glossary tab's equivalent of verificationBadge, over glossary_verifications rows.
+export function glossVerificationBadge(verification) {
+  return deriveVerificationBadge(verification, 'sentences');
+}
+
+// A summary (or glossary term) can be re-verified over time (e.g. after a re-run); the latest row
+// by created_at is the one that matters for display — same "last wins" pattern as pickLatestVote.
+function latestVerificationByKey(rows, keyField) {
   const map = new Map();
   for (const r of rows || []) {
-    const existing = map.get(r.summary_id);
-    if (!existing || (r.created_at ?? '') > (existing.created_at ?? '')) map.set(r.summary_id, r);
+    const key = r[keyField];
+    const existing = map.get(key);
+    if (!existing || (r.created_at ?? '') > (existing.created_at ?? '')) map.set(key, r);
   }
   return map;
+}
+
+export function latestVerificationBySummary(rows) {
+  return latestVerificationByKey(rows, 'summary_id');
+}
+
+// Task 6: glossary tab's equivalent of latestVerificationBySummary, over glossary_verifications
+// rows keyed by term_id.
+export function latestVerificationByTerm(rows) {
+  return latestVerificationByKey(rows, 'term_id');
 }
 
 // Migration 0004 (summary_verifications) may not be applied yet when this server runs — a query
@@ -118,6 +158,22 @@ export function resolveVerificationRows({ data, error }, table = 'summary_verifi
     throw error;
   }
   return data ?? [];
+}
+
+// Task 6, controller ruling #2: migration 0007's glossary_terms_published_complete CHECK (source_url
+// / source_hash / gloss_md all required once status='published') will reject a publish attempt on a
+// bare stub. That must be surfaced honestly, not pre-filtered away silently — but per this file's
+// no-upstream-error-strings-reach-the-page discipline (sendServerError's own comment), the raw
+// Postgres error text still never reaches the client; this predicate only lets the caller recognize
+// THIS specific, known, non-sensitive business-rule violation so it can respond with its own safe,
+// clear message instead of falling into the generic 500 funnel. Postgres reports a CHECK violation
+// as SQLSTATE 23514 (check_violation); the constraint name in the message pins it to this exact
+// constraint, not any other CHECK on the table.
+export function isPublishCompletenessViolation(error) {
+  if (!error) return false;
+  const code = error.code;
+  const msg = String(error.message || '').toLowerCase();
+  return code === '23514' && msg.includes('glossary_terms_published_complete');
 }
 
 // CSRF guard for POST /api/decision. A cross-origin <form enctype="text/plain"> is a no-preflight
@@ -354,6 +410,164 @@ async function handleDecision(client, req, res) {
   }
 }
 
+// ---- Task 6: glossary review queue route handlers ----
+//
+// Mirrors handleQueue/handleItem/handleDecision above exactly (controller ruling #2: "same
+// TRANSITIONS-table pattern") — glossary_terms in place of summaries, term_id in place of
+// summary_id, glossary_notes in place of summary_notes. nextStatus/mapNoteAction are reused
+// UNCHANGED (no glossary-specific transition table exists; the lifecycle is identical).
+//
+// Controller ruling #6: migration 0007 (glossary_terms itself, not just its verifications table)
+// may not be applied at all when this server runs — unlike summaries, whose table has existed
+// since 0001. A missing glossary_terms relation must degrade to an honest, self-describing 200
+// response ({available:false, reason}), never a 500, and must never affect the existing summary
+// queue (see the "GET /api/item/:id (summary route) still works" regression test).
+
+async function handleGlossaryQueue(client, res) {
+  if (!client) { sendJson(res, 500, { error: 'internal error' }); return; }
+  try {
+    const { data, error } = await client
+      .from('glossary_terms')
+      .select('id,term,kind,citation,needs_mapping,gloss_md,status,created_at')
+      .in('status', QUEUE_STATUSES)
+      .order('created_at', { ascending: true });
+    if (error) {
+      if (isMissingRelationError(error, 'glossary_terms')) {
+        sendJson(res, 200, { available: false, reason: 'migration 0007 not applied', items: [] });
+        return;
+      }
+      throw error;
+    }
+
+    const ids = (data ?? []).map((row) => row.id);
+    let latestVerification = new Map();
+    if (ids.length > 0) {
+      const verResult = await client
+        .from('glossary_verifications').select('term_id,overall,verdicts,created_at').in('term_id', ids);
+      latestVerification = latestVerificationByTerm(resolveVerificationRows(verResult, 'glossary_verifications'));
+    }
+
+    sendJson(res, 200, {
+      available: true,
+      items: (data ?? []).map((row) => ({
+        id: row.id,
+        status: row.status,
+        term: row.term,
+        kind: row.kind,
+        citation: row.citation,
+        needs_mapping: row.needs_mapping,
+        has_gloss: Boolean(row.gloss_md),
+        created_at: row.created_at,
+        verified: glossVerificationBadge(latestVerification.get(row.id) ?? null).state,
+      })),
+    });
+  } catch (err) {
+    sendServerError(res, 'glossary-queue', err);
+  }
+}
+
+async function handleGlossaryItem(client, res, id) {
+  if (!client) { sendJson(res, 500, { error: 'internal error' }); return; }
+  try {
+    const { data: term, error: tErr } = await client
+      .from('glossary_terms')
+      .select('id,term,kind,citation,gloss_md,supported_by_quote,source_url,status,needs_mapping,created_at,published_at')
+      .eq('id', id).maybeSingle();
+    if (tErr) {
+      if (isMissingRelationError(tErr, 'glossary_terms')) {
+        sendJson(res, 200, { available: false, reason: 'migration 0007 not applied' });
+        return;
+      }
+      throw tErr;
+    }
+    if (!term) { sendJson(res, 404, { error: 'not found' }); return; }
+
+    const verResult = await client
+      .from('glossary_verifications')
+      .select('overall,verdicts,model,created_at')
+      .eq('term_id', id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const verRows = resolveVerificationRows(verResult, 'glossary_verifications');
+    const verification = verRows[0] ?? null;
+
+    sendJson(res, 200, { available: true, term, verification });
+  } catch (err) {
+    sendServerError(res, 'glossary-item', err);
+  }
+}
+
+async function handleGlossaryDecision(client, req, res) {
+  let bodyBuf;
+  try {
+    bodyBuf = await readBody(req, BODY_LIMIT);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { sendJson(res, 413, { error: 'payload too large' }); return; }
+    sendJson(res, 400, { error: 'bad request' });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(bodyBuf.toString('utf8'));
+  } catch {
+    sendJson(res, 400, { error: 'invalid JSON' });
+    return;
+  }
+
+  const { term_id, action, gloss_md, note } = payload ?? {};
+  if (!term_id) { sendJson(res, 400, { error: 'term_id is required' }); return; }
+  const validationError = validateGlossaryDecisionInput({ action, gloss_md, note });
+  if (validationError) { sendJson(res, 400, { error: validationError }); return; }
+
+  try {
+    const { data: term, error: tErr } = await client
+      .from('glossary_terms').select('id,status').eq('id', term_id).maybeSingle();
+    if (tErr) {
+      if (isMissingRelationError(tErr, 'glossary_terms')) {
+        sendJson(res, 503, { error: 'migration 0007 not applied' });
+        return;
+      }
+      throw tErr;
+    }
+    if (!term) { sendJson(res, 404, { error: 'not found' }); return; }
+
+    let newStatus;
+    try {
+      newStatus = nextStatus(term.status, action);
+    } catch {
+      sendJson(res, 400, { error: 'illegal transition' });
+      return;
+    }
+
+    const patch = { status: newStatus };
+    if (action === 'edit') patch.gloss_md = gloss_md;
+    if (action === 'publish') patch.published_at = new Date().toISOString();
+
+    const { error: uErr } = await client.from('glossary_terms').update(patch).eq('id', term_id);
+    if (uErr) {
+      // Controller ruling #2: don't let the queue's own client-side filtering be the only gate —
+      // if the DB CHECK fires anyway (e.g. an approved-but-never-glossed row), surface it honestly
+      // as a clear 400, not a generic 500 (isPublishCompletenessViolation's own comment explains
+      // why the raw Postgres text still isn't what reaches the client).
+      if (isPublishCompletenessViolation(uErr)) {
+        sendJson(res, 400, { error: 'cannot publish: term is missing gloss_md, source_url, or source_hash' });
+        return;
+      }
+      throw uErr;
+    }
+
+    const { error: nErr } = await client.from('glossary_notes').insert({
+      term_id, note: note ?? '', action: mapNoteAction(action),
+    });
+    if (nErr) throw nErr;
+
+    sendJson(res, 200, { status: newStatus });
+  } catch (err) {
+    sendServerError(res, 'glossary-decision', err);
+  }
+}
+
 // ---- Router ----
 
 // clientOverride is test-only dependency injection (a fake Supabase-shaped client) — production
@@ -372,6 +586,22 @@ export async function requestListener(req, res, clientOverride) {
   if (req.method === 'POST' && pathname === '/api/decision') {
     if (!isAllowedDecisionRequest(req.headers)) { sendJson(res, 403, { error: 'forbidden' }); return; }
     await handleDecision(client, req, res);
+    return;
+  }
+
+  // Task 6: glossary review queue routes. Route allowlist extended per the brief — same
+  // isAllowedDecisionRequest CSRF guard (it's header-based, not route-specific) gates this POST too.
+  if (req.method === 'GET' && pathname === '/api/glossary/queue') { await handleGlossaryQueue(client, res); return; }
+
+  const glossaryItemMatch = pathname.match(/^\/api\/glossary\/item\/([^/]+)$/);
+  if (req.method === 'GET' && glossaryItemMatch) {
+    await handleGlossaryItem(client, res, decodeURIComponent(glossaryItemMatch[1]));
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/glossary/decision') {
+    if (!isAllowedDecisionRequest(req.headers)) { sendJson(res, 403, { error: 'forbidden' }); return; }
+    await handleGlossaryDecision(client, req, res);
     return;
   }
 

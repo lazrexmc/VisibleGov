@@ -6,6 +6,8 @@ import {
   nextStatus, mapNoteAction, validateDecisionInput, countVoteCasts, pickLatestVote,
   pickBillText, readBody, BodyTooLargeError, requestListener, isAllowedDecisionRequest,
   verificationBadge, latestVerificationBySummary, resolveVerificationRows,
+  validateGlossaryDecisionInput, glossVerificationBadge, latestVerificationByTerm,
+  isPublishCompletenessViolation,
   HOST, PORT,
 } from '../src/review/server.js';
 
@@ -288,6 +290,11 @@ function fakeQuery(result, onCall) {
     order: record('order'),
     limit: record('limit'),
     maybeSingle: record('maybeSingle'),
+    // update/insert (Task 6's decision handlers, mirroring handleDecision's existing writes):
+    // chain through the same builder and resolve to the same canned {data,error} result — enough
+    // for happy-path decision tests where the write is expected to succeed.
+    update: record('update'),
+    insert: record('insert'),
     then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
   };
   return builder;
@@ -452,3 +459,413 @@ test('unknown route returns 404', () => withServer(async (base) => {
   const res = await fetch(`${base}/nope`);
   assert.equal(res.status, 404);
 }));
+
+// ============================================================================
+// Task 6: glossary review queue (mirrors the summary review server exactly —
+// controller ruling 2 — same TRANSITIONS/nextStatus/mapNoteAction reused unchanged)
+// ============================================================================
+
+const GLOSSARY_MISSING_RELATION_ERROR = {
+  code: 'PGRST205',
+  message: "Could not find the table 'public.glossary_terms' in the schema cache",
+};
+
+const GLOSSARY_VERIFICATIONS_MISSING_ERROR = {
+  code: 'PGRST205',
+  message: "Could not find the table 'public.glossary_verifications' in the schema cache",
+};
+
+// ---- validateGlossaryDecisionInput (mirrors validateDecisionInput's rules, gloss_md in place of body_md) ----
+
+test('validateGlossaryDecisionInput: edit without gloss_md is invalid', () => {
+  assert.match(validateGlossaryDecisionInput({ action: 'edit', gloss_md: '', note: '' }), /gloss_md is required/);
+});
+
+test('validateGlossaryDecisionInput: edit with gloss_md is valid', () => {
+  assert.equal(validateGlossaryDecisionInput({ action: 'edit', gloss_md: 'A short gloss.', note: '' }), null);
+});
+
+test('validateGlossaryDecisionInput: reject without note is invalid', () => {
+  assert.match(validateGlossaryDecisionInput({ action: 'reject', note: '' }), /note is required/);
+});
+
+test('validateGlossaryDecisionInput: reject with note is valid', () => {
+  assert.equal(validateGlossaryDecisionInput({ action: 'reject', note: 'not a real citation' }), null);
+});
+
+test('validateGlossaryDecisionInput: approve/publish do not require note', () => {
+  assert.equal(validateGlossaryDecisionInput({ action: 'approve' }), null);
+  assert.equal(validateGlossaryDecisionInput({ action: 'publish' }), null);
+});
+
+test('validateGlossaryDecisionInput: unknown action is invalid', () => {
+  assert.match(validateGlossaryDecisionInput({ action: 'delete' }), /unknown action/);
+});
+
+// ---- glossVerificationBadge (same mechanical derivation as verificationBadge, "sentences" wording
+// per the gloss verifier's own domain — glosser.js verifies gloss SENTENCES, not summary bullets) ----
+
+test('glossVerificationBadge: null verification -> grey unverified', () => {
+  assert.deepEqual(glossVerificationBadge(null), { state: 'unverified', label: 'Unverified' });
+});
+
+test('glossVerificationBadge: overall clean -> green, names how many sentences were checked', () => {
+  const v = { overall: 'clean', verdicts: [{ supported: true }, { supported: true }] };
+  assert.deepEqual(glossVerificationBadge(v), { state: 'clean', label: 'Verifier found all 2 sentences supported' });
+});
+
+test('glossVerificationBadge: overall flagged -> amber, names how many of how many failed', () => {
+  const v = { overall: 'flagged', verdicts: [{ supported: true }, { supported: false }] };
+  assert.deepEqual(glossVerificationBadge(v), { state: 'flagged', label: 'Verifier flagged 1 of 2 sentences' });
+});
+
+// ---- latestVerificationByTerm (same "latest wins" pattern as latestVerificationBySummary, keyed
+// by term_id instead of summary_id) ----
+
+test('latestVerificationByTerm keeps only the most recent row per term_id', () => {
+  const rows = [
+    { term_id: 't1', created_at: '2026-01-01T00:00:00Z', overall: 'flagged' },
+    { term_id: 't1', created_at: '2026-02-01T00:00:00Z', overall: 'clean' },
+    { term_id: 't2', created_at: '2026-01-15T00:00:00Z', overall: 'clean' },
+  ];
+  const map = latestVerificationByTerm(rows);
+  assert.equal(map.size, 2);
+  assert.equal(map.get('t1').overall, 'clean');
+  assert.equal(map.get('t2').overall, 'clean');
+});
+
+test('latestVerificationByTerm on empty/absent input returns an empty map', () => {
+  assert.equal(latestVerificationByTerm([]).size, 0);
+  assert.equal(latestVerificationByTerm(undefined).size, 0);
+});
+
+// ---- isPublishCompletenessViolation (controller ruling 2: surface the DB CHECK error honestly,
+// never pre-filter it away silently) ----
+
+test('isPublishCompletenessViolation: true for the glossary_terms_published_complete CHECK violation', () => {
+  const err = { code: '23514', message: 'new row for relation "glossary_terms" violates check constraint "glossary_terms_published_complete"' };
+  assert.equal(isPublishCompletenessViolation(err), true);
+});
+
+test('isPublishCompletenessViolation: false for an unrelated CHECK violation', () => {
+  const err = { code: '23514', message: 'violates check constraint "glossary_terms_kind_check"' };
+  assert.equal(isPublishCompletenessViolation(err), false);
+});
+
+test('isPublishCompletenessViolation: false for a non-check-violation error', () => {
+  const err = { code: '08006', message: 'connection failure' };
+  assert.equal(isPublishCompletenessViolation(err), false);
+});
+
+test('isPublishCompletenessViolation: false for null/absent error', () => {
+  assert.equal(isPublishCompletenessViolation(null), false);
+  assert.equal(isPublishCompletenessViolation(undefined), false);
+});
+
+// ---- CSRF route allowlist extended to /api/glossary/decision (same isAllowedDecisionRequest guard) ----
+
+test('POST /api/glossary/decision with Content-Type text/plain -> 403 (same CSRF vector as /api/decision)', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/glossary/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ term_id: 'x', action: 'approve' }),
+  });
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { error: 'forbidden' });
+}));
+
+test('POST /api/glossary/decision with a foreign Origin -> 403', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/glossary/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+    body: JSON.stringify({ term_id: 'x', action: 'approve' }),
+  });
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { error: 'forbidden' });
+}));
+
+test('POST /api/glossary/decision with application/json and no Origin passes the CSRF guard (not 403)', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/glossary/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ term_id: 'x', action: 'approve' }),
+  });
+  assert.notEqual(res.status, 403);
+}));
+
+// ---- graceful degradation: pre-0007 (glossary_terms missing), the review server must never 500 —
+// controller ruling 6 ----
+
+test('GET /api/glossary/queue returns {available:false} (200, not 500) when glossary_terms is missing', () => {
+  const client = fakeClient({
+    glossary_terms: { data: null, error: GLOSSARY_MISSING_RELATION_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, false);
+    assert.match(body.reason, /0007/);
+    assert.deepEqual(body.items, []);
+  }, client);
+});
+
+test('GET /api/glossary/item/:id returns {available:false} (200, not 500) when glossary_terms is missing', () => {
+  const client = fakeClient({
+    glossary_terms: { data: null, error: GLOSSARY_MISSING_RELATION_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/item/t1`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, false);
+    assert.match(body.reason, /0007/);
+  }, client);
+});
+
+test('POST /api/glossary/decision returns an honest non-500 error when glossary_terms is missing', () => {
+  const client = fakeClient({
+    glossary_terms: { data: null, error: GLOSSARY_MISSING_RELATION_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term_id: 't1', action: 'approve' }),
+    });
+    assert.notEqual(res.status, 500);
+    assert.notEqual(res.status, 403);
+    const body = await res.json();
+    assert.match(body.error, /0007/);
+  }, client);
+});
+
+test('GET /api/item/:id (summary route) still works when glossary_terms is missing — the two queues do not interfere', () => {
+  const client = fakeClient({
+    summaries: {
+      data: {
+        id: 'sum1', bill_id: 'b1', status: 'draft', body_md: '- x (Sec 1)', model: 'claude-opus-5',
+        prompt_version: 'v1', bill_text_hash: 'h1', created_at: '2026-01-01T00:00:00Z', published_at: null,
+      },
+      error: null,
+    },
+    bills: { data: { identifier: 'HR 1', title: 'A Bill', canonical_url: 'https://example.test/hr1' }, error: null },
+    bill_texts: { data: [], error: null },
+    votes: { data: [], error: null },
+    summary_verifications: { data: [], error: null },
+    glossary_terms: { data: null, error: GLOSSARY_MISSING_RELATION_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/item/sum1`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.summary.id, 'sum1');
+  }, client);
+});
+
+// ---- happy path: glossary queue ----
+
+test('GET /api/glossary/queue returns items with term/kind/citation/needs_mapping/verified fields', () => {
+  const client = fakeClient({
+    glossary_terms: {
+      data: [
+        { id: 't1', term: 'Social Security Act, Sec. 1903', kind: 'statute', citation: '42 U.S.C. 1396b', needs_mapping: false, gloss_md: 'A gloss.', status: 'draft', created_at: '2026-01-01T00:00:00Z' },
+        { id: 't2', term: 'Some Popular-Name Act', kind: 'act', citation: null, needs_mapping: true, gloss_md: null, status: 'draft', created_at: '2026-01-02T00:00:00Z' },
+      ],
+      error: null,
+    },
+    glossary_verifications: {
+      data: [{ term_id: 't1', overall: 'clean', verdicts: [{ supported: true }], created_at: '2026-01-03T00:00:00Z' }],
+      error: null,
+    },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, true);
+    assert.equal(body.items.length, 2);
+    const t1 = body.items.find((it) => it.id === 't1');
+    assert.equal(t1.term, 'Social Security Act, Sec. 1903');
+    assert.equal(t1.kind, 'statute');
+    assert.equal(t1.citation, '42 U.S.C. 1396b');
+    assert.equal(t1.needs_mapping, false);
+    assert.equal(t1.has_gloss, true);
+    assert.equal(t1.verified, 'clean');
+    const t2 = body.items.find((it) => it.id === 't2');
+    assert.equal(t2.needs_mapping, true);
+    assert.equal(t2.citation, null);
+    assert.equal(t2.has_gloss, false);
+    assert.equal(t2.verified, 'unverified');
+  }, client);
+});
+
+test('GET /api/glossary/queue degrades verified:"unverified" (not 500) when glossary_verifications is missing', () => {
+  const client = fakeClient({
+    glossary_terms: {
+      data: [{ id: 't1', term: 'X', kind: 'statute', citation: 'y', needs_mapping: false, gloss_md: 'g', status: 'draft', created_at: '2026-01-01T00:00:00Z' }],
+      error: null,
+    },
+    glossary_verifications: { data: null, error: GLOSSARY_VERIFICATIONS_MISSING_ERROR },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, true);
+    assert.equal(body.items[0].verified, 'unverified');
+  }, client);
+});
+
+// ---- happy path: glossary item ----
+
+test('GET /api/glossary/item/:id returns the full term + latest verification', () => {
+  const client = fakeClient({
+    glossary_terms: {
+      data: {
+        id: 't1', term: 'Social Security Act, Sec. 1903', kind: 'statute', citation: '42 U.S.C. 1396b',
+        gloss_md: 'A gloss.', supported_by_quote: 'the exact quote', source_url: 'https://uscode.house.gov/x',
+        status: 'draft', needs_mapping: false, created_at: '2026-01-01T00:00:00Z', published_at: null,
+      },
+      error: null,
+    },
+    glossary_verifications: {
+      data: [{ overall: 'clean', verdicts: [{ supported: true }], model: 'claude-sonnet-5', created_at: '2026-01-02T00:00:00Z' }],
+      error: null,
+    },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/item/t1`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, true);
+    assert.equal(body.term.term, 'Social Security Act, Sec. 1903');
+    assert.equal(body.term.supported_by_quote, 'the exact quote');
+    assert.equal(body.term.source_url, 'https://uscode.house.gov/x');
+    assert.equal(body.verification.overall, 'clean');
+  }, client);
+});
+
+test('GET /api/glossary/item/:id returns 404 for an unknown id', () => {
+  const client = fakeClient({ glossary_terms: { data: null, error: null } });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/item/nope`);
+    assert.equal(res.status, 404);
+  }, client);
+});
+
+// ---- happy path: glossary decision ----
+
+test('POST /api/glossary/decision approve: draft -> approved, writes glossary_notes with mapped action', () => {
+  const calls = [];
+  const client = fakeClient(
+    {
+      glossary_terms: { data: { id: 't1', status: 'draft' }, error: null },
+      glossary_notes: { data: null, error: null },
+    },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term_id: 't1', action: 'approve' }),
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { status: 'approved' });
+    const noteInsert = calls.find((c) => c.table === 'glossary_notes' && c.method === 'insert');
+    assert.ok(noteInsert, 'expected a glossary_notes insert');
+    assert.equal(noteInsert.args[0].action, 'approved');
+    assert.equal(noteInsert.args[0].term_id, 't1');
+  }, client);
+});
+
+test('POST /api/glossary/decision edit: patches gloss_md, not body_md', () => {
+  const calls = [];
+  const client = fakeClient(
+    {
+      glossary_terms: { data: { id: 't1', status: 'draft' }, error: null },
+      glossary_notes: { data: null, error: null },
+    },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term_id: 't1', action: 'edit', gloss_md: 'A revised gloss.' }),
+    });
+    assert.equal(res.status, 200);
+    const update = calls.find((c) => c.table === 'glossary_terms' && c.method === 'update');
+    assert.ok(update, 'expected a glossary_terms update');
+    assert.equal(update.args[0].gloss_md, 'A revised gloss.');
+    assert.equal(update.args[0].body_md, undefined);
+  }, client);
+});
+
+test('POST /api/glossary/decision with an illegal transition -> 400', () => {
+  const client = fakeClient({
+    glossary_terms: { data: { id: 't1', status: 'draft' }, error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term_id: 't1', action: 'publish' }),
+    });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'illegal transition' });
+  }, client);
+});
+
+test('POST /api/glossary/decision for an unknown term_id -> 404', () => {
+  const client = fakeClient({ glossary_terms: { data: null, error: null } });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term_id: 'nope', action: 'approve' }),
+    });
+    assert.equal(res.status, 404);
+  }, client);
+});
+
+// ---- controller ruling 2: the publish-completeness DB CHECK is surfaced honestly, not swallowed ----
+
+test('POST /api/glossary/decision publish on a bare stub surfaces the CHECK violation as 400, not a generic 500', () => {
+  let updateCallCount = 0;
+  const client = {
+    from(table) {
+      if (table === 'glossary_terms') {
+        return {
+          select() { return this; },
+          eq() { return this; },
+          maybeSingle: async () => ({ data: { id: 't1', status: 'approved' }, error: null }),
+          update: () => ({
+            eq: async () => {
+              updateCallCount += 1;
+              return {
+                error: {
+                  code: '23514',
+                  message: 'new row for relation "glossary_terms" violates check constraint "glossary_terms_published_complete"',
+                },
+              };
+            },
+          }),
+        };
+      }
+      throw new Error(`unexpected table in this test: ${table}`);
+    },
+  };
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term_id: 't1', action: 'publish' }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /gloss_md|source_url|source_hash/);
+    assert.equal(updateCallCount, 1);
+  }, client);
+});
