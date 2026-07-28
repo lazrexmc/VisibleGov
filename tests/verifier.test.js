@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VERIFIER_MODEL, VERIFY_PROMPT_VERSION, VERIFY_SCHEMA, VERIFY_SYSTEM_PROMPT,
+  VERIFY_MAX_OUTPUT_TOKENS,
   buildVerifyMessage, verifyBill, assessVerdicts, VerificationIncompleteError,
 } from '../src/lib/verifier.js';
 import { MODEL, MAX_TEXT_CHARS, OversizeTextError, renderMarkdown } from '../src/lib/summarizer.js';
@@ -16,6 +17,13 @@ test('VERIFIER_MODEL is claude-sonnet-5, deliberately a different weight class t
 
 test('VERIFY_PROMPT_VERSION pinned', () => {
   assert.equal(VERIFY_PROMPT_VERSION, 'v1');
+});
+
+// Many-bullet summaries (HR 6955, HR 8595) threw SummaryTruncatedError against summarizer.js's
+// 16000-token cap: sonnet-5's adaptive thinking plus a full per-bullet verdicts JSON exceeded it.
+// The verifier needs its own, larger cap rather than reusing the summarizer's.
+test('VERIFY_MAX_OUTPUT_TOKENS is at least 32000, and deliberately not summarizer.js MAX_OUTPUT_TOKENS', () => {
+  assert.ok(VERIFY_MAX_OUTPUT_TOKENS >= 32000);
 });
 
 // ---- schema shape ----

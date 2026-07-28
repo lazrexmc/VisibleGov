@@ -3,7 +3,7 @@
 // summarizer.js's constants/typed-error pattern rather than re-declaring it — same failure
 // shapes, same caps.
 import {
-  MAX_TEXT_CHARS, MAX_OUTPUT_TOKENS,
+  MAX_TEXT_CHARS,
   OversizeTextError, SummaryRefusedError, SummaryTruncatedError,
 } from './summarizer.js';
 
@@ -12,6 +12,13 @@ import {
 // verifier to match the author's weight class would defeat that.
 export const VERIFIER_MODEL = 'claude-sonnet-5';
 export const VERIFY_PROMPT_VERSION = 'v1';
+
+// Deliberately NOT summarizer.js's MAX_OUTPUT_TOKENS (16000): the verifier emits a full JSON
+// verdict per bullet (section, supported, reason, evidence_quote) on top of claude-sonnet-5's
+// adaptive thinking, which together can exceed 16k for many-bullet summaries — live-diagnosed
+// via SummaryTruncatedError on HR 6955 and HR 8595. 32k gives real headroom; a pathological case
+// that still hits it correctly stays a typed SummaryTruncatedError, never a silent truncation.
+export const VERIFY_MAX_OUTPUT_TOKENS = 32000;
 
 export const VERIFY_SCHEMA = {
   type: 'object',
@@ -95,13 +102,17 @@ export async function verifyBill(client, { identifier, bullets, text }) {
     throw new OversizeTextError(`bill text ${text.length} chars exceeds ${MAX_TEXT_CHARS}; will not truncate silently`, { identifier, length: text.length });
   }
   const bulletsJson = JSON.stringify(bullets);
-  const response = await client.messages.create({
+  // Streaming, not .create(): >16k max_tokens on a non-streaming request risks SDK HTTP timeouts
+  // (documented SDK guidance). finalMessage() awaits the stream to completion and returns the
+  // same complete Message shape .create() would, so everything below is unchanged.
+  const stream = client.messages.stream({
     model: VERIFIER_MODEL,
-    max_tokens: MAX_OUTPUT_TOKENS,
+    max_tokens: VERIFY_MAX_OUTPUT_TOKENS,
     system: VERIFY_SYSTEM_PROMPT,
     output_config: { format: { type: 'json_schema', schema: VERIFY_SCHEMA } },
     messages: [{ role: 'user', content: buildVerifyMessage(identifier, bulletsJson, text) }],
   });
+  const response = await stream.finalMessage();
   if (response.stop_reason === 'refusal') {
     throw new SummaryRefusedError(`model declined to verify ${identifier}`, { identifier });
   }
