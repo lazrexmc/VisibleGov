@@ -199,6 +199,57 @@ User-Agent `VisibleGov research (contact: repo owner)`, >=2s apart (full request
   above) and `/26info/Journals/RDay470409900-906.pdf` (Day 47, 4/9/2026, 7 pages — an intermediate
   attempt that also turned out vote-free, superseded by DAY39.pdf).
 
+**2026-07-28, Task 1 follow-up: Wayback Machine capture of the 2018 roster.** senate.mo.gov no
+longer serves a 2018-era roster at any URL found above, so per controller approval the **one
+authorized additional host**, `web.archive.org`, was used to retrieve an **Internet Archive
+capture of the official page** (not a live senate.mo.gov fetch). Budget: <=8 requests to
+web.archive.org, same UA, >=2s apart. **5 requests used:** two CDX API listing calls that came
+back empty/malformed on the first attempt due to a URL-encoding mistake (query 1: 200, 3 bytes,
+empty `[]`; corrected query 2: 200, 234,479 bytes, 1000 rows, revealed the result set was truncated
+mid-alphabet), a third CDX call scoped to root-level `/18info/*` files only (200, 171,950 bytes,
+756 rows, still noisy because query-string variants share a path depth), a fourth CDX call adding
+a keyword regex filter (`roster|senalpha|alpha|senator|member|biog|directory`) across the whole
+`/18info/*` tree (200, 12,108 bytes, 61 rows — this is what actually found the target), and one
+final fetch of the identified snapshot's raw content (200, 51,017 bytes).
+
+- **Correction to the task instruction:** no HTML roster page exists in the Wayback Machine's
+  index of `senate.mo.gov/18info/*` either — the CDX keyword search covered the *entire* `/18info/`
+  tree (not just the root) and the only consolidated (all-senators) roster-shaped artifacts found
+  were `2018Roster.pdf` and `2018SenateRoster.xlsx`, both directly under `/18info/`. The `mem*.htm`
+  pages found in the same search (`/18info/members/mem01.htm` through `mem33.htm`) are individual
+  per-senator bio-page redirects/404s, not a roster listing. **Saved as
+  `roster-2018-wayback.pdf`, not `.html`** — the underlying official document was always a PDF
+  directory, not a webpage.
+- `roster-2018-wayback.pdf` — Internet Archive capture of
+  `https://web.archive.org/web/20250311182418id_/https://www.senate.mo.gov/18info/2018Roster.pdf`
+  (crawled by IA 2025-03-11, 51,017 bytes, `Content-Type: application/pdf`). **Confirmed
+  contemporaneous, not a later reconstruction:** the response's `x-archive-orig-last-modified`
+  header reads `Tue, 09 Jan 2018 19:29:38 GMT`, matching the "Rev. 1/8/18" date printed at the
+  bottom of the document itself — i.e. senate.mo.gov served this exact unmodified file from
+  January 2018 until at least IA's March 2025 crawl. Text-layer, confirmed via direct extraction
+  (no OCR). Title: "MISSOURI SENATE - 99TH GENERAL ASSEMBLY", a phone/room staff directory, one
+  entry per senator: `SURNAME, FIRSTNAME–DISTRICT` header line, then Room number, Phone number, an
+  internal extension, and staff names, e.g.:
+  ```
+  ONDER, BOB–2. . . . . . . . . . . . . . . 331. . . . . . . . . . 751-1282
+    Internal Number. . . . . . . . . . . . . . . . . . . . . . . . . . 3020
+    Amanda Bell, Theckla Spainhower
+  ```
+  **Onder district 2 verified**, resolving Task 1's original gap. **34 total entries: 33 named
+  senators + 1 vacancy** (`VACANT–17`) — matches the 34-seat chamber count independently observed
+  in `roster-current.html` (2026). **No party affiliation is printed anywhere in this document**
+  either (grepped, absent) — consistent with `roster-current.html`'s same finding, i.e. party
+  appears to never be printed on any MO Senate roster-shaped artifact found in either era.
+- **Parse-shape difference a parser-writer needs:** `roster-current.html` is DOM/CSS-selector
+  scraping (`Senator FIRST LAST <br/> District NN` inside `.card__footer` divs, see above).
+  `roster-2018-wayback.pdf` is **text-layer PDF extraction** against a
+  `SURNAME, FIRSTNAME–DISTRICT` line-header regex (surname/first-name comma-separated, district
+  number after an en-dash `–`, followed by dot-leader padding `. . . .` before the room number) —
+  a structurally different parse path, not a variant of the same one. A parser needing both years
+  will need two separate branches (HTML DOM parse for current/recent years' `/Senators/` app,
+  PDF text parse for archived years' phone-directory PDFs), and should not assume a single roster
+  schema covers both.
+
 ## uscode/
 
 Captured 2026-07-28 for Task 2 of the glossary implementation plan (US Code fetcher). All fetched
