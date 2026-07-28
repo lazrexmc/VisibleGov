@@ -320,36 +320,121 @@ function extractVacancies(blockText, cursor, ordinal) {
   return m[1] === 'None' ? 0 : Number(m[1]);
 }
 
+// ---- parsing: bill attribution (motion, or - emergency-clause continuations only - the
+// preceding "taken up" line) ----
+//
 // CODE REVIEW FIX ROUND 1 (finding 2, load-bearing): bill_refs is what ties a parsed vote to the
 // actual bill - it must never be silently wrong or silently absent, because nothing downstream can
-// recover the correct bill from a vote_casts row alone. A block whose motion mechanically yields
-// ZERO bill references (whether from a genuinely bill-less motion sentence, like Day 39's real
-// emergency-clause-adoption block, or from any future extractMotionSentence boundary mistake that
-// truncates past the reference) is therefore diverted into `failures` - a typed, reviewable
-// failure - rather than ever landing in `votes` as an unattributed vote. This is a deliberate
-// product trade-off, not an accident: the ONE real bill-less block across both fixtures (Day 39's
-// emergency-clause adoption, procedurally tied to the immediately preceding SB 1421 passage but
-// not itself naming a bill) now surfaces as a failure for a human to attribute, instead of being
-// silently stored with no bill_refs at all. If genuinely bill-less procedural roll calls turn out
-// to be common, that failure pattern is the signal to revisit this rule - not a reason to guess.
-function requireBillRefs(motion, ordinal) {
-  const bill_refs = extractBillRefs(motion);
-  if (bill_refs.length === 0) {
+// recover the correct bill from a vote_casts row alone.
+//
+// CODE REVIEW FIX ROUND 2 (controller ruling): round 1 diverted EVERY zero-bill-ref motion to
+// `failures`, including Day 39's real emergency-clause-adoption block - but an emergency-clause
+// vote is a genuine recorded vote (every EC bill gets one), and a day containing one would then
+// NEVER complete under Task 5's planned day-completeness rule. The journal DOES print the
+// attribution mechanically for this case, just not inside the EC motion sentence itself - reading
+// it is not a guess, it just isn't in the same sentence.
+//
+// Verified against real bytes in BOTH fixtures before implementing (the ruling's own example
+// phrasing, 'SB 1421, with SCS, was taken up by Senator X', does NOT appear in either real
+// fixture - every real "taken up" sentence in both is bare: 'Was taken up.', 'Was taken up by
+// Senator Dixon.', 'Was called from the Consent Calendar and taken up.' - never names the bill
+// itself). The bill name lives in an EARLIER, separate sentence:
+// '<bill ref>[, introduced by Senator X][, with SCS], entitled:' followed by the bill's title
+// block and its own period-terminated 'An Act ...' description - i.e. TWO real sentences separate
+// 'taken up' from the bill name, not one (an earlier draft of this fix assumed one and was wrong -
+// extractMotionSentence's single-period lookback lands on 'Was taken up.' alone, which never names
+// a bill; caught only by running this against the real Day 39 fixture, not asserted a priori). So
+// the actual mechanism is NOT "the sentence containing taken up" but "the nearest bill token
+// printed anywhere before the taken-up phrase" - found by scanning BILL_TOKEN_RE backward from the
+// taken-up occurrence, bounded below by the start of the PRECEDING vote block's own motion-preamble
+// region (two anchors back) so a stale, unrelated bill from much earlier in the day can never be
+// picked up by accident.
+//
+// This fallback is NOT a general escape hatch for any zero-ref motion - only for a motion matching
+// /emergency\s+clause/i (finding 2's round-1 behavior otherwise stands unchanged: an unknown
+// zero-ref motion still fails loud for human review). And it is never a silent guess: when the
+// immediately preceding vote block exists (i.e. ordinal-1 itself parsed successfully), its own
+// primary bill_refs[0] is cross-checked against the taken-up-derived ref - any disagreement fails
+// loud, naming both values, exactly like every other reconcile gate in this file.
+const TAKEN_UP_RE = /taken up/gi;
+
+function lastTakenUpIndexBefore(text, beforeIndex) {
+  const re = new RegExp(TAKEN_UP_RE);
+  let match;
+  let lastIdx = -1;
+  while ((match = re.exec(text))) {
+    if (match.index >= beforeIndex) break;
+    lastIdx = match.index;
+  }
+  return lastIdx;
+}
+
+// The nearest bill token (by BILL_TOKEN_RE, same grammar extractBillRefs uses) whose match starts
+// strictly before `beforeIndex` and at or after `lowerBound` - i.e. "the last bill mentioned in
+// this window," not a sentence-scoped search. Returns the SAME ['TYPE N', ...] shape as
+// extractBillRefs (a single token can itself be a combined vehicle, e.g. 'SBs 894 and 921').
+function nearestBillRefBefore(text, beforeIndex, lowerBound) {
+  const re = new RegExp(BILL_TOKEN_RE);
+  let match;
+  let best = null;
+  while ((match = re.exec(text))) {
+    if (match.index >= beforeIndex) break;
+    if (match.index >= lowerBound) best = match;
+  }
+  if (!best) return [];
+  const numbers = best[2].match(/\d+/g) || [];
+  return numbers.map((n) => `${best[1]} ${n}`);
+}
+
+function resolveBillAttribution(text, anchorStart, ordinal, motion, precedingVote, precedingWindowStart) {
+  const motionRefs = extractBillRefs(motion);
+  if (motionRefs.length > 0) return { bill_refs: motionRefs, attribution: 'motion' };
+
+  if (!/emergency\s+clause/i.test(motion)) {
     throw new JournalParseError(
       `block ${ordinal}: no bill reference found in motion - needs human review`,
       {
-        ordinal,
-        category: 'bill_refs',
-        reason: 'no bill reference found in motion - needs human review',
-        motion,
+        ordinal, category: 'bill_refs', reason: 'no bill reference found in motion - needs human review', motion,
       },
     );
   }
-  return bill_refs;
+
+  const takenUpIdx = lastTakenUpIndexBefore(text, anchorStart);
+  if (takenUpIdx === -1) {
+    throw new JournalParseError(
+      `block ${ordinal}: emergency-clause block has no bill reference in its own motion and no preceding "taken up" line was found - needs human review`,
+      {
+        ordinal, category: 'bill_refs', reason: 'no preceding taken-up line found for emergency-clause attribution - needs human review', motion,
+      },
+    );
+  }
+  const takenUpRefs = nearestBillRefBefore(text, takenUpIdx, precedingWindowStart);
+  if (takenUpRefs.length === 0) {
+    throw new JournalParseError(
+      `block ${ordinal}: emergency-clause block's nearest preceding "taken up" line has no bill reference near it either - needs human review`,
+      {
+        ordinal, category: 'bill_refs', reason: 'preceding taken-up line names no bill - needs human review', motion,
+      },
+    );
+  }
+
+  if (precedingVote && precedingVote.bill_refs[0] !== takenUpRefs[0]) {
+    throw new JournalParseError(
+      `block ${ordinal}: emergency-clause attribution mismatch - the preceding "taken up" line names ${takenUpRefs[0]} but the immediately preceding vote block's primary bill is ${precedingVote.bill_refs[0]}`,
+      {
+        ordinal,
+        category: 'bill_refs',
+        reason: 'emergency-clause attribution discrepancy between the preceding taken-up line and the preceding vote block',
+        takenUpRef: takenUpRefs[0],
+        precedingVoteRef: precedingVote.bill_refs[0],
+      },
+    );
+  }
+
+  return { bill_refs: takenUpRefs, attribution: 'preceding_taken_up' };
 }
 
-function parseVoteBlock(blockText, ordinal, motion) {
-  const bill_refs = requireBillRefs(motion, ordinal);
+function parseVoteBlock(blockText, ordinal, motion, bill_refs, attribution) {
   const yeas = requireCategory(blockText, 0, 'yeas', ordinal);
   const nays = requireCategory(blockText, yeas.matchEnd, 'nays', ordinal);
   const absent = requireCategory(blockText, nays.matchEnd, 'absent', ordinal);
@@ -359,6 +444,7 @@ function parseVoteBlock(blockText, ordinal, motion) {
     ordinal,
     motion,
     bill_refs,
+    attribution,
     yeas: yeas.names,
     nays: nays.names,
     absent: absent.names,
@@ -385,8 +471,18 @@ export function parseJournalVotes(text) {
     const blockEnd = i + 1 < anchors.length ? anchors[i + 1].index : text.length;
     const blockText = text.slice(anchorEnd, blockEnd);
     const motion = extractMotionSentence(text, anchor.index, anchorEnd);
+    const last = votes[votes.length - 1];
+    const precedingVote = last && last.ordinal === ordinal - 1 ? last : null;
+    // Lower bound for the emergency-clause taken-up-line bill scan (resolveBillAttribution): the
+    // start of the PRECEDING vote block's own motion-preamble region, i.e. right after the anchor
+    // two blocks back - so a stray earlier bill mention can never be picked up by accident. 0 (the
+    // whole document so far) when there aren't two prior blocks yet.
+    const precedingWindowStart = i >= 2 ? anchors[i - 2].index + anchors[i - 2][0].length : 0;
     try {
-      votes.push(parseVoteBlock(blockText, ordinal, motion));
+      const {
+        bill_refs, attribution,
+      } = resolveBillAttribution(text, anchor.index, ordinal, motion, precedingVote, precedingWindowStart);
+      votes.push(parseVoteBlock(blockText, ordinal, motion, bill_refs, attribution));
     } catch (err) {
       if (err instanceof JournalParseError) failures.push(err);
       else throw err;

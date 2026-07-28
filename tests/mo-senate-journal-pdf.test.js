@@ -11,10 +11,13 @@ const FIXTURES = 'tests/fixtures/research/mo-senate';
 // Loaded once and reused - extractJournalText is the only async step. Both real fixtures per
 // task-4-brief.md: Day 37 (2018, Onder era, 13 votes, incl. hyphenated Chappelle-Nadal) and Day 39
 // (2026, 11 YEAS blocks = 10 passages + 1 emergency-clause adoption, incl. district-suffix
-// collisions Brown (16)/Brown (26) and Gregory (15)/Gregory (21)). CODE REVIEW FIX ROUND 1
-// (finding 2): the emergency-clause block has no bill reference in its own motion text, so under
-// the new zero-bill-refs-fails-loud gate it now lands in `failures`, not `votes` - Day 39 is
-// therefore 10 votes + 1 failure, not 11 votes + 0 failures (see the dedicated test below).
+// collisions Brown (16)/Brown (26) and Gregory (15)/Gregory (21)). CODE REVIEW FIX ROUND 1 (finding
+// 2) diverted any zero-bill-ref motion to `failures`, which briefly meant Day 39's emergency-clause
+// block landed in `failures` too. CODE REVIEW FIX ROUND 2 (controller ruling) narrowed that: an
+// emergency-clause motion specifically gets mechanical attribution from the nearest preceding
+// "taken up" line instead, so it is back in `votes` - Day 39 is 11 votes, 0 failures (see the
+// dedicated tests below for both the round-1 gate on OTHER zero-ref motions, still in force, and
+// round-2's emergency-clause attribution).
 const day37Buffer = readFileSync(`${FIXTURES}/2018-day37-journal-onder-era.pdf`);
 const day37Text = await extractJournalText(day37Buffer);
 const day37 = parseJournalVotes(day37Text);
@@ -102,6 +105,10 @@ test('parseJournalVotes (Day 37, real fixture): all 13 vote blocks parse, zero f
   assert.equal(day37.failures.length, 0);
 });
 
+test('parseJournalVotes (Day 37, real fixture): every block attributes from its own motion (no emergency-clause continuations exist in this fixture)', () => {
+  assert.ok(day37.votes.every((v) => v.attribution === 'motion'));
+});
+
 test('parseJournalVotes (Day 37, real fixture): ordinals are stable 1-based sequential order', () => {
   assert.deepEqual(day37.votes.map((v) => v.ordinal), Array.from({ length: 13 }, (_, i) => i + 1));
 });
@@ -113,6 +120,7 @@ test('parseJournalVotes (Day 37, real fixture): the SBs 894 & 921 block matches 
     ordinal: 6,
     motion: 'On motion of Senator Libla, SS for SCS for SBs 894 and 921 was read the 3rd time and passed by the following vote:',
     bill_refs: ['SB 894', 'SB 921'],
+    attribution: 'motion',
     yeas: [
       'Brown', 'Chappelle-Nadal', 'Cierpiot', 'Crawford', 'Cunningham', 'Curls', 'Dixon', 'Eigel',
       'Emery', 'Hegeman', 'Holsman', 'Hoskins', 'Hummel', 'Koenig', 'Libla', 'Munzlinger', 'Nasheed',
@@ -177,13 +185,12 @@ test('parseJournalVotes (Day 37, real fixture): single-bill motions with no subs
 
 // ---- parseJournalVotes (Day 39, real fixture): format stability across sessions ----
 
-test('parseJournalVotes (Day 39, real fixture): CONTROLLER RULING 1 ground truth is 11 YEAS blocks total (10 third-reading passages + 1 emergency-clause adoption) - but code review fix round 1 (finding 2) routes the bill-less emergency-clause block to `failures`, so votes.length is 10, not 11', () => {
-  assert.equal(day39.votes.length, 10);
-  assert.equal(day39.failures.length, 1);
-  assert.equal(day39.votes.length + day39.failures.length, 11, 'the 11-block ground truth still accounts for every parsed block, split across votes/failures');
+test('parseJournalVotes (Day 39, real fixture): CODE REVIEW FIX ROUND 2 (controller ruling) - all 11 blocks parse, 0 failures. Round 1 had diverted the bill-less emergency-clause block to `failures`; the ruling requires it back in `votes` (EC votes are genuine recorded votes, and a day containing one must be able to complete) via mechanical attribution, not a guess', () => {
+  assert.equal(day39.votes.length, 11);
+  assert.equal(day39.failures.length, 0);
 });
 
-test('parseJournalVotes (Day 39, real fixture): every returned vote reconciles', () => {
+test('parseJournalVotes (Day 39, real fixture): every vote reconciles', () => {
   for (const v of day39.votes) {
     assert.equal(v.yeas.length, v.tallies.yeas, `block ${v.ordinal} yeas`);
     assert.equal(v.nays.length, v.tallies.nays, `block ${v.ordinal} nays`);
@@ -191,14 +198,26 @@ test('parseJournalVotes (Day 39, real fixture): every returned vote reconciles',
   }
 });
 
-test('parseJournalVotes (Day 39, real fixture): CODE REVIEW FIX ROUND 1 (finding 2) - the emergency-clause adoption block has NO bill reference in its own motion text, so it is diverted into `failures` (typed, reviewable) instead of being silently stored as an unattributed vote', () => {
-  const failure = day39.failures.find((f) => f.ordinal === 9);
-  assert.ok(failure, 'expected the emergency-clause block (ordinal 9) to be a failure');
-  assert.ok(failure instanceof JournalParseError);
-  assert.equal(failure.category, 'bill_refs');
-  assert.equal(failure.reason, 'no bill reference found in motion - needs human review');
-  assert.equal(failure.motion, 'The emergency clause was adopted by the following vote:');
-  assert.ok(!day39.votes.some((v) => /emergency clause/i.test(v.motion)), 'the emergency-clause block must not appear in votes at all');
+test('parseJournalVotes (Day 39, real fixture): every vote carries an `attribution` field, and every Day 39 vote is \'motion\' EXCEPT the emergency-clause block', () => {
+  for (const v of day39.votes) {
+    assert.ok(v.attribution === 'motion' || v.attribution === 'preceding_taken_up', `block ${v.ordinal} has an unrecognized attribution value: ${v.attribution}`);
+  }
+  const nonMotion = day39.votes.filter((v) => v.attribution !== 'motion');
+  assert.equal(nonMotion.length, 1);
+  assert.equal(nonMotion[0].ordinal, 9);
+});
+
+test('parseJournalVotes (Day 39, real fixture): CODE REVIEW FIX ROUND 2 - the emergency-clause block (ordinal 9) has bill_refs mechanically attributed from the nearest preceding "taken up" line (SB 1421\'s own introduction/description text), attribution \'preceding_taken_up\', motion left verbatim and un-edited', () => {
+  const ec = day39.votes.find((v) => v.ordinal === 9);
+  assert.ok(ec, 'expected the emergency-clause block to be present in votes');
+  assert.equal(ec.motion, 'The emergency clause was adopted by the following vote:', 'the motion string itself must stay verbatim - attribution provenance is a separate field, not an edit to motion');
+  assert.deepEqual(ec.bill_refs, ['SB 1421']);
+  assert.equal(ec.attribution, 'preceding_taken_up');
+  // Cross-check: SB 1421's own passage vote (the immediately preceding block, ordinal 8) has the
+  // SAME primary bill ref - proving the two independent sources (the taken-up-line scan and the
+  // preceding vote block) actually agree on the real fixture, not just individually non-empty.
+  const precedingPassage = day39.votes.find((v) => v.ordinal === 8);
+  assert.equal(precedingPassage.bill_refs[0], 'SB 1421');
 });
 
 test('parseJournalVotes (Day 39, real fixture): a 3-bill combined vehicle with an Oxford comma ("SBs 907, 1154, and 1272")', () => {
@@ -307,6 +326,64 @@ test('parseJournalVotes: a genuinely bill-less motion (no bill token anywhere in
   assert.equal(failures[0].category, 'bill_refs');
   assert.equal(failures[0].reason, 'no bill reference found in motion - needs human review');
   assert.match(failures[0].message, /no bill reference found in motion/);
+});
+
+// ---- code review fix round 2 (controller ruling): emergency-clause continuations attribute
+// mechanically from the nearest preceding "taken up" line - but ONLY when that line (and a bill
+// reference near it) actually exists; otherwise this still fails loud like any other unresolved
+// zero-ref motion, never a guess. ----
+
+test('parseJournalVotes: an emergency-clause block with NO preceding "taken up" line anywhere in the text fails loud - the taken-up line is required, not optional, even though it names the fallback path', () => {
+  const text = 'SB 500, entitled: An Act relating to widgets. On motion of Senator Test, SB 500 was read the 3rd time and passed by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n'
+    + 'The President declared the bill passed.\n'
+    // No "taken up" phrase anywhere between the SB 500 passage and the EC block below.
+    + 'The emergency clause was adopted by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  assert.deepEqual(votes.map((v) => v.ordinal), [1]);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].ordinal, 2);
+  assert.equal(failures[0].category, 'bill_refs');
+  assert.match(failures[0].reason, /no preceding taken-up line found/);
+});
+
+test('parseJournalVotes: an emergency-clause block whose nearest preceding "taken up" line names a DIFFERENT bill than the immediately preceding vote block\'s primary ref fails loud, naming the discrepancy - never silently picks one', () => {
+  const text = 'SB 100, introduced by Senator Test, entitled: An Act relating to widgets. Was taken up.\n'
+    + 'On motion of Senator Test, SB 200 was read the 3rd time and passed by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n'
+    + 'The President declared the bill passed.\n'
+    + 'The emergency clause was adopted by the following vote:\n'
+    + 'YEAS—Senators\nAlpha Beta—2\n'
+    + 'NAYS—Senators—None\n'
+    + 'Absent—Senators—None\n'
+    + 'Absent with leave—Senators—None\n'
+    + 'Vacancies—None\n';
+  const { votes, failures } = parseJournalVotes(text);
+  // Block 1's own motion genuinely reads "SB 200" (not SB 100 - the "taken up" line a sentence
+  // earlier names a different bill entirely), so block 1 itself parses fine with bill_refs
+  // ['SB 200']; it is the EC block's cross-check against that SB 200 that must fail, naming both.
+  assert.deepEqual(votes.map((v) => v.ordinal), [1]);
+  assert.equal(votes[0].bill_refs[0], 'SB 200');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].ordinal, 2);
+  assert.equal(failures[0].category, 'bill_refs');
+  assert.match(failures[0].reason, /discrepancy/);
+  assert.equal(failures[0].takenUpRef, 'SB 100');
+  assert.equal(failures[0].precedingVoteRef, 'SB 200');
+  assert.match(failures[0].message, /SB 100.*SB 200|SB 200.*SB 100/);
 });
 
 test('parseJournalVotes: a "—None" printed for every non-YEAS category parses as empty arrays / zero counts, never throws', () => {
