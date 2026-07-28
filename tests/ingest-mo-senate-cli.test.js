@@ -15,13 +15,14 @@ import {
   hasDoneMarker, writeDoneMarker,
   selectJournalDayWorklist,
   remainingCooldownMs, formatCooldownWait, enforceDurableCooldown, CooldownConvergenceError,
-  ensureSessionRow, persistRosterRows, loadSenateRosterForResolution,
+  ensureSessionRow, ensureRosterIdentities,
   ensureRosterForRun, ensureIndexForRun,
   processJournalDay, replayJournalArtifacts, dryRunReport,
 } from '../src/cli/ingest-mo-senate.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-senate';
 const day37Pdf = readFileSync(`${FIXTURES}/2018-day37-journal-onder-era.pdf`);
+const day39Pdf = readFileSync(`${FIXTURES}/2026-day39-journal.pdf`);
 const journalList2018Html = readFileSync(`${FIXTURES}/journallist-2018.html`, 'utf8');
 
 function withScratchDir(fn) {
@@ -460,81 +461,183 @@ test('ensureSessionRow: inserts the exact row shape (task-5-brief.md step 2) and
   assert.equal(row.id, 'sess-1');
 });
 
-// ---- roster gating branch (isMissingColumnError) ----
-
-function fakeLegislatorsClient({ gated = false } = {}) {
-  const upserts = [];
-  return {
-    upserts,
-    client: {
-      from(table) {
-        assert.equal(table, 'legislators');
-        return {
-          upsert: async (rows, opts) => {
-            upserts.push({ rows, opts });
-            if (gated) return { error: { message: 'Could not find the \'mo_senate_id\' column of \'legislators\' in the schema cache', code: 'PGRST204' } };
-            return { error: null };
-          },
-        };
-      },
-    },
-  };
-}
-
-test('persistRosterRows: normal case — inserts every member row with mo_senate_id as the conflict key, gated:false', async () => {
-  const { client, upserts } = fakeLegislatorsClient();
-  const members = [{
-    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
-  }];
-  const result = await persistRosterRows(client, 'run-1', members);
-  assert.deepEqual(result, { attempted: 1, persisted: 1, gated: false });
-  assert.deepEqual(upserts[0].rows, [{
-    full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', run_id: 'run-1',
-  }]);
-  assert.equal(upserts[0].opts.onConflict, 'mo_senate_id');
-});
-
-test('persistRosterRows: roster-gating branch — a missing mo_senate_id column is reported honestly, never thrown as an opaque error', async () => {
-  const { client } = fakeLegislatorsClient({ gated: true });
-  const members = [{
-    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
-  }];
-  const result = await persistRosterRows(client, 'run-1', members);
-  assert.equal(result.gated, true);
-  assert.equal(result.persisted, 0);
-  assert.match(result.note, /migration 0008/);
-});
-
-test('persistRosterRows: an unrelated DB error still throws (only the mo_senate_id gate is swallowed)', async () => {
-  const client = { from: () => ({ upsert: async () => ({ error: { message: 'connection refused' } }) }) };
-  await assert.rejects(() => persistRosterRows(client, 'run-1', [{
-    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
-  }]), /connection refused/);
-});
-
-test('loadSenateRosterForResolution: maps id/surname/mo_senate_id to legislator_id/surname/mo_senate_id, scoped to the given districts', async () => {
-  const inCalls = [];
+// ---- roster identity (FIX ROUND 1, CRITICAL — cross-era mo_senate_id collision) ----
+//
+// In-memory fake modeling the real legislators table across the fix. `uniqueMoSenateId: true`
+// simulates the world BEFORE migration 0009 is applied (0008's still-live unique index on
+// mo_senate_id rejects a second row for an already-claimed district with Postgres 23505, the
+// reviewer's exact repro); `uniqueMoSenateId: false` simulates the world AFTER 0009 (a plain
+// non-unique index — multiple eras' occupants of the same district can each get their own row).
+// `missingColumn: true` simulates 0008 itself not being applied at all (PGRST204) — orthogonal to
+// the unique-index question, same as before this fix round.
+function makeFakeLegislatorsDb({ uniqueMoSenateId = false, missingColumn = false } = {}) {
+  const rows = [];
+  let counter = 0;
   const client = {
-    from: (table) => {
+    from(table) {
       assert.equal(table, 'legislators');
       return {
         select: () => ({
-          in: async (col, vals) => {
-            inCalls.push([col, vals]);
-            return { data: [{ id: 'leg-1', surname: 'Onder', mo_senate_id: '2' }], error: null };
-          },
+          eq: (c1, v1) => ({
+            eq: (c2, v2) => ({
+              maybeSingle: async () => {
+                if (missingColumn) {
+                  return { data: null, error: { code: 'PGRST204', message: "Could not find the 'mo_senate_id' column of 'legislators' in the schema cache" } };
+                }
+                const found = rows.find((r) => r[c1] === v1 && r[c2] === v2);
+                return { data: found ? { id: found.id } : null, error: null };
+              },
+            }),
+          }),
+        }),
+        insert: (row) => ({
+          select: () => ({
+            single: async () => {
+              if (missingColumn) {
+                return { data: null, error: { code: 'PGRST204', message: "Could not find the 'mo_senate_id' column of 'legislators' in the schema cache" } };
+              }
+              if (uniqueMoSenateId && row.mo_senate_id != null && rows.some((r) => r.mo_senate_id === row.mo_senate_id)) {
+                return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "legislators_mo_senate_id_uidx"' } };
+              }
+              counter += 1;
+              const inserted = { id: `leg-${counter}`, ...row };
+              rows.push(inserted);
+              return { data: { id: inserted.id }, error: null };
+            },
+          }),
         }),
       };
     },
   };
-  const roster = await loadSenateRosterForResolution(client, ['2', '16']);
-  assert.deepEqual(inCalls, [['mo_senate_id', ['2', '16']]]);
-  assert.deepEqual(roster, [{ legislator_id: 'leg-1', surname: 'Onder', mo_senate_id: '2' }]);
+  return { client, rows };
+}
+
+test('ensureRosterIdentities: normal case — inserts a new (full_name, mo_senate_id) row, found:0 inserted:1, gated:false', async () => {
+  const { client, rows } = makeFakeLegislatorsDb();
+  const members = [{
+    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+  }];
+  const result = await ensureRosterIdentities(client, 'run-1', members);
+  assert.deepEqual(
+    {
+      attempted: result.attempted, found: result.found, inserted: result.inserted, gated: result.gated,
+    },
+    {
+      attempted: 1, found: 0, inserted: 1, gated: false,
+    },
+  );
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0], {
+    id: 'leg-1', full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', run_id: 'run-1',
+  });
+  assert.deepEqual(result.resolutionRoster, [{ legislator_id: 'leg-1', surname: 'Onder', mo_senate_id: '2' }]);
+});
+
+test('ensureRosterIdentities: an already-ensured (full_name, mo_senate_id) pair is found, never re-inserted — found:1 inserted:0 (IMPORTANT fix: honest counts, not persisted:rows.length)', async () => {
+  const { client, rows } = makeFakeLegislatorsDb();
+  const members = [{
+    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+  }];
+  await ensureRosterIdentities(client, 'run-1', members);
+  const result = await ensureRosterIdentities(client, 'run-2', members); // same member, a second run
+  assert.equal(result.found, 1);
+  assert.equal(result.inserted, 0);
+  assert.equal(result.gated, false);
+  assert.equal(rows.length, 1, 'no duplicate row was created for the same (full_name, mo_senate_id) pair');
+});
+
+test('ensureRosterIdentities: missing mo_senate_id column (0008 not applied) is reported honestly, gated:true, never thrown', async () => {
+  const { client } = makeFakeLegislatorsDb({ missingColumn: true });
+  const members = [{
+    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+  }];
+  const result = await ensureRosterIdentities(client, 'run-1', members);
+  assert.equal(result.gated, true);
+  assert.equal(result.missingColumn, true);
+  assert.equal(result.found, 0);
+  assert.equal(result.inserted, 0);
+  assert.match(result.note, /migration 0008/);
+});
+
+test('ensureRosterIdentities: an unrelated DB error still throws (only the two known gate errors are swallowed)', async () => {
+  const client = { from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'connection refused' } }) }) }) }) }) };
+  await assert.rejects(() => ensureRosterIdentities(client, 'run-1', [{
+    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+  }]), /connection refused/);
+});
+
+// ---- CRITICAL — the reviewer's exact repro: 2018 Onder, then a 2026 run for the SAME district
+// (2), now held by a different person (Vogel) ----
+
+test('ensureRosterIdentities: CRITICAL repro, PRE-0009 — a later era colliding on district identity is GATED with an honest note naming migration 0009, never a silent skip', async () => {
+  const { client, rows } = makeFakeLegislatorsDb({ uniqueMoSenateId: true }); // 0008 live, 0009 NOT yet applied
+  const era2018 = await ensureRosterIdentities(client, 'run-2018', [{
+    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+  }]);
+  assert.deepEqual(
+    { found: era2018.found, inserted: era2018.inserted, gated: era2018.gated },
+    { found: 0, inserted: 1, gated: false },
+  );
+
+  const era2026 = await ensureRosterIdentities(client, 'run-2026', [{
+    mo_senate_id: '2', surname: 'Vogel', full_name: 'Jason Vogel', party: null,
+  }]);
+  assert.equal(era2026.gated, true, 'the 2026 run must be gated — Vogel can never get his own row while the unique index is still live');
+  assert.equal(era2026.inserted, 0);
+  assert.deepEqual(era2026.collided, [{ full_name: 'Jason Vogel', mo_senate_id: '2' }]);
+  assert.match(era2026.note, /migration 0009/);
+  assert.match(era2026.note, /Jason Vogel/);
+  // Onder's original row is untouched — this is a detected+reported gate, never a silent
+  // overwrite or a silent no-op reported as success (the original Critical bug).
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].full_name, 'Bob Onder');
+});
+
+test('ensureRosterIdentities: CRITICAL repro, POST-0009 — both eras get their own row; each era resolves ONLY to its own occupant', async () => {
+  const { client, rows } = makeFakeLegislatorsDb({ uniqueMoSenateId: false }); // 0009 applied
+  const era2018 = await ensureRosterIdentities(client, 'run-2018', [{
+    mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+  }]);
+  const era2026 = await ensureRosterIdentities(client, 'run-2026', [{
+    mo_senate_id: '2', surname: 'Vogel', full_name: 'Jason Vogel', party: null,
+  }]);
+  assert.equal(era2018.gated, false);
+  assert.equal(era2026.gated, false);
+  assert.equal(rows.length, 2, 'both Onder and Vogel now have their own legislators row for district 2');
+  assert.notEqual(era2018.resolutionRoster[0].legislator_id, era2026.resolutionRoster[0].legislator_id);
+
+  // The load-bearing fix, proven against the REAL resolveMoSenator: each era's own
+  // resolutionRoster (the in-memory mapping built during THAT ensure call) resolves a bare
+  // surname to THAT era's own legislator_id — 2026 votes resolve to Vogel, 2018 votes resolve to
+  // Onder, never crossed, because resolution is scoped to one era's roster at a time, never a
+  // global district-only query.
+  assert.equal(resolveMoSenator({ surname: 'Vogel', district: null }, era2026.resolutionRoster), era2026.resolutionRoster[0].legislator_id);
+  assert.equal(resolveMoSenator({ surname: 'Onder', district: null }, era2018.resolutionRoster), era2018.resolutionRoster[0].legislator_id);
+});
+
+test('ensureRosterIdentities: POST-0009 same-surname cross-era case — two different people, same surname, same district, different eras — each era resolves to its own row', async () => {
+  const { client, rows } = makeFakeLegislatorsDb({ uniqueMoSenateId: false });
+  const eraA = await ensureRosterIdentities(client, 'run-a', [{
+    mo_senate_id: '5', surname: 'Smith', full_name: 'Alice Smith', party: null,
+  }]);
+  const eraB = await ensureRosterIdentities(client, 'run-b', [{
+    mo_senate_id: '5', surname: 'Smith', full_name: 'Bob Smith', party: null,
+  }]);
+  assert.equal(eraA.gated, false);
+  assert.equal(eraB.gated, false);
+  assert.equal(rows.length, 2);
+  assert.notEqual(eraA.resolutionRoster[0].legislator_id, eraB.resolutionRoster[0].legislator_id);
+  // Each era's own resolution roster contains ONLY its own occupant — a same-surname cast in era
+  // A resolves against eraA's roster alone, never ambiguous against era B's same-surname row.
+  assert.equal(eraA.resolutionRoster.length, 1);
+  assert.equal(eraB.resolutionRoster.length, 1);
+  assert.equal(resolveMoSenator({ surname: 'Smith', district: null }, eraA.resolutionRoster), eraA.resolutionRoster[0].legislator_id);
+  assert.equal(resolveMoSenator({ surname: 'Smith', district: null }, eraB.resolutionRoster), eraB.resolutionRoster[0].legislator_id);
 });
 
 // ---- roster/index cache orchestration (fetchLive/dir injected — no network) ----
 
-test('ensureRosterForRun: cache hit — never calls fetchLive, still persists (idempotent) via persistRosterRows', async () => {
+test('ensureRosterForRun: cache hit — never calls fetchLive, still ensures identities every invocation (idempotent, pure DB op)', async () => {
   await withScratchDirAsync(async (dir) => {
     writeFileSync(join(dir, '2018.json'), JSON.stringify({
       fetched_at: new Date().toISOString(),
@@ -542,29 +645,34 @@ test('ensureRosterForRun: cache hit — never calls fetchLive, still persists (i
         mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
       }],
     }));
-    const { client, upserts } = fakeLegislatorsClient();
+    const { client, rows } = makeFakeLegislatorsDb();
     const fetchLive = async () => { throw new Error('must not fetch live on a cache hit'); };
     const result = await ensureRosterForRun(client, 'run-1', 2018, { fetchLive, dir });
     assert.equal(result.fetchedLive, false);
     assert.equal(result.members[0].surname, 'Onder');
-    assert.equal(upserts.length, 1, 'persistRosterRows still runs every invocation (pure DB op, no network)');
+    assert.equal(result.identities.inserted, 1);
+    assert.equal(rows.length, 1, 'ensureRosterIdentities still runs every invocation (pure DB op, no network)');
   });
 });
 
 test('ensureRosterForRun: cache miss — calls the injected fetchLive exactly once and writes the cache', async () => {
   await withScratchDirAsync(async (dir) => {
-    const { client } = fakeLegislatorsClient();
+    const { client } = makeFakeLegislatorsDb();
     let fetchCalls = 0;
     const fetchLive = async (source) => {
       fetchCalls += 1;
       assert.equal(source.format, 'pdf');
-      return { members: [{
-        mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
-      }], vacancies: 1 };
+      return {
+        members: [{
+          mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null,
+        }],
+        vacancies: 1,
+      };
     };
     const result = await ensureRosterForRun(client, 'run-1', 2018, { fetchLive, dir });
     assert.equal(result.fetchedLive, true);
     assert.equal(fetchCalls, 1);
+    assert.equal(result.identities.inserted, 1);
     assert.ok(existsSync(join(dir, '2018.json')));
   });
 });
@@ -654,6 +762,48 @@ test('processJournalDay: real Day 37 fixture end-to-end — 13 votes written, ca
   // Every other real name in the fixture's lists is unresolved against this tiny fake roster.
   assert.ok(result.casts.unresolved > 0);
   assert.equal(result.casts.resolved, tables.vote_casts.length);
+});
+
+test('processJournalDay: real Day 39 fixture (2026) end-to-end — the attribution:"preceding_taken_up" vote (ordinal 9, SB 1421 emergency clause) writes to votes+vote_casts identically to every other block (MINOR fix round 1 b)', async () => {
+  const { client, tables } = makeFakeDb();
+  const sessionRow = { id: 'sess-2026' };
+  const dayRow = {
+    journal_url: 'https://www.senate.mo.gov/26info/pdf-jrnl/DAY39.pdf',
+    journal_date: '2026-03-25',
+    pdf_basename: '2026-day39',
+  };
+  // Roberts is Absent-with-leave in EVERY block of the real Day 39 fixture, including block 9
+  // (verified directly against the real fixture, not assumed) — a reliable real name to prove the
+  // emergency-clause block's casts flow through the exact same resolve/insert path as every other
+  // block, never dropped by a branch specific to preceding_taken_up attribution.
+  const roster = [{ legislator_id: 'leg-roberts', surname: 'Roberts', mo_senate_id: '9' }];
+
+  const args = { journalPdfFile: `${FIXTURES}/2026-day39-journal.pdf` };
+  const result = await processJournalDay(client, 'run-1', 2026, sessionRow, dayRow, args, { gated: false, roster });
+
+  assert.equal(result.votes_parsed, 11);
+  assert.equal(result.votes_written, 11);
+  assert.equal(result.failures, 0);
+  assert.deepEqual(result.attribution, { motion: 10, preceding_taken_up: 1 });
+  assert.equal(tables.votes.length, 11);
+
+  const ecVote = tables.votes.find((v) => v.source_key === 'mo-senate-web-2026-2026-day39-vote9');
+  assert.ok(ecVote, 'the emergency-clause vote (ordinal 9) must be written just like any other block');
+  assert.equal(ecVote.result, null);
+  assert.equal(ecVote.vote_date, '2026-03-25');
+  assert.equal(ecVote.chamber, 'senate');
+  assert.equal(ecVote.jurisdiction_id, 'mo-legislature');
+
+  // bill_id resolves to SB 1421 (the preceding-taken-up-attributed primary ref) — proves the
+  // attribution's bill_refs flowed all the way through to the bill-stub ensure + primary-ref
+  // lookup, not just the parser's own return value.
+  const sb1421 = tables.bills.find((b) => b.identifier === 'SB 1421');
+  assert.ok(sb1421);
+  assert.equal(ecVote.bill_id, sb1421.id);
+
+  const robertsCastOnEc = tables.vote_casts.find((c) => c.legislator_id === 'leg-roberts' && c.vote_id === ecVote.id);
+  assert.ok(robertsCastOnEc, 'Roberts (absent-with-leave on every block, incl. the EC block) must resolve and be cast — proves casts are not dropped on the preceding_taken_up path');
+  assert.equal(robertsCastOnEc.position, 'absent');
 });
 
 test('processJournalDay: roster-gated branch — writes a per-day gate artifact instead of vote_casts rows', async () => {

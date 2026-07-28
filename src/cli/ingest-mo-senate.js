@@ -152,6 +152,16 @@ async function fetchAndParseRosterLive(source) {
     const html = await senateWeb.fetchSenateRoster(source.url);
     return senateWeb.parseSenateRosterHtml(html);
   }
+  // MINOR (fix round 1): the 2018 archive source.url is web.archive.org, NOT senate.mo.gov, yet
+  // this reuses senateWeb.SOURCE/moSenateLimiter (the senate.mo.gov host limiter) rather than a
+  // dedicated per-host limiter. Deliberate, not an oversight: this fetch happens at most once per
+  // MO_SENATE_ROSTER_MAX_AGE_MS (24h, see ensureRosterForRun's cache) for the one archival year
+  // this driver knows about, so a dedicated Wayback-specific limiter+SOURCE would be real added
+  // complexity for a fetch this infrequent — simplicity wins over precision here. Known
+  // consequence: a failure on this specific fetch reports `source: 'mo-senate-web'` (via
+  // fetchWithLimit's error meta), which misattributes the failing host until a dedicated limiter
+  // is added — acceptable given how rarely this path runs, but worth knowing when reading a
+  // failure log.
   const arrayBuffer = await fetchWithLimit(source.url, { source: senateWeb.SOURCE, limiter: senateWeb.moSenateLimiter, as: 'arrayBuffer' });
   const text = await journalPdf.extractJournalText(Buffer.from(arrayBuffer));
   return senateWeb.parseSenateRosterPdf(text);
@@ -378,38 +388,107 @@ export async function ensureSessionRow(client, runId, year) {
   return data;
 }
 
-// task-5-brief.md step 3: insertIfAbsent(...) then isMissingColumnError(err,'mo_senate_id') gates
-// member persistence — same PERSISTENCE GATE convention as ingest-mo-house.js's persistRoster
-// (migration 0005 there, 0008 here). run_id is added for provenance parity with
-// ingest-mo-house.js's persistRoster even though the brief's own row sketch omits it — additive,
-// harmless, documented in task-5-report.md.
-export async function persistRosterRows(client, runId, members) {
-  const rows = members.map((m) => ({
-    full_name: m.full_name, party: m.party, surname: m.surname, mo_senate_id: m.mo_senate_id, run_id: runId,
-  }));
-  try {
-    await insertIfAbsent(client, 'legislators', rows, 'mo_senate_id');
-  } catch (err) {
-    if (isMissingColumnError(err, 'mo_senate_id')) {
-      return {
-        attempted: rows.length, persisted: 0, gated: true,
-        note: 'legislators.mo_senate_id column not found — migration 0008 (supabase/migrations/0008_mo_senate_id.sql) not yet applied; roster persistence skipped this run. bills/votes are unaffected; casts go to the gated-artifact path.',
-      };
-    }
-    throw err;
-  }
-  return { attempted: rows.length, persisted: rows.length, gated: false };
+// ---- roster identity (FIX ROUND 1, CRITICAL — cross-era mo_senate_id collision) ----
+//
+// BUG FOUND IN REVIEW (empirically reproduced): the original persistRosterRows keyed
+// insertIfAbsent's upsert on the bare 'mo_senate_id' column, which migration 0008 makes a
+// TABLE-WIDE UNIQUE index. A district number is per-era metadata, not a stable person identity —
+// it gets reused by a new person every time a senator leaves office (a real, expected event, not
+// an edge case). The first person ever ingested for a district therefore permanently owned that
+// row: a 2026 run for district 2 (now held by someone other than Onder) would silently no-op on
+// the upsert conflict while still reporting persisted:1 (masking the failure), and if the new
+// occupant happened to share a surname with the frozen row, resolveMoSenator would attribute
+// their votes to the WRONG person with zero signal anything was wrong.
+//
+// FIX (controller ruling): (full_name, mo_senate_id) is the working per-era find-or-create key,
+// not mo_senate_id alone — check-then-insert per member, never a bulk upsert. Migration 0009
+// (supabase/migrations/0009_mo_senate_id_nonunique.sql, draft — Lance applies; 0008 is already
+// live) drops 0008's unique index so a genuinely new (full_name, mo_senate_id) pair can always
+// get its own row. Until 0009 lands, a second era's insert for an already-claimed district still
+// hits the old unique index — detected via isMoSenateIdUniqueViolation below (Postgres 23505 on
+// legislators_mo_senate_id_uidx) and treated as a GATED state (same honest-skip convention as a
+// missing column), never a silent misattribution. The astronomically-rare wrong-merge case
+// (two DIFFERENT people sharing the exact same full_name AND the same district, in different
+// eras) is accepted, not handled — a real cross-source identity merge (TODO 8) is the actual fix
+// for that, out of scope here.
+function isMoSenateIdUniqueViolation(err) {
+  if (!err) return false;
+  const code = err.code;
+  const msg = String(err.message || '').toLowerCase();
+  if (code === '23505') return msg.includes('mo_senate_id') || msg.includes('legislators_mo_senate_id_uidx');
+  // PostgREST error shapes vary by driver/version — fall back to message-text matching, same
+  // defensive convention as isMissingColumnError/isMissingRelationError (src/lib/db.js).
+  return msg.includes('legislators_mo_senate_id_uidx') && (msg.includes('duplicate key') || msg.includes('already exists'));
 }
 
-// task-5-brief.md step 3: "select back {id,surname,mo_senate_id} where mo_senate_id in the
-// roster's districts". Shaped { legislator_id, surname, mo_senate_id } to match
-// resolveMoSenator's documented roster-row contract (CONTROLLER RULING 2). Callers only invoke
-// this once persistRosterRows has already reported gated:false this run.
-export async function loadSenateRosterForResolution(client, districts) {
-  const { data, error } = await client.from('legislators').select('id,surname,mo_senate_id')
-    .in('mo_senate_id', districts);
-  if (error) throw error;
-  return (data ?? []).map((r) => ({ legislator_id: r.id, surname: r.surname, mo_senate_id: r.mo_senate_id }));
+// IMPORTANT FIX (code review): the original persistRosterRows reported persisted:rows.length
+// UNCONDITIONALLY, even when the upsert silently no-op'd on a stale-owner conflict — masking the
+// Critical bug above rather than surfacing it. found/inserted are now both counted from what
+// ACTUALLY happened per member, never assumed. resolutionRoster is built ENTIRELY from this call's
+// own per-member lookups/inserts — this is the other half of the fix: ensureRosterForRun (below)
+// now uses THIS in-memory mapping directly as the resolution roster, instead of any global
+// district-scoped DB query (the deleted loadSenateRosterForResolution) — a query scoped only by
+// district number, not by full_name/era, would still mix two different eras' occupants of the
+// same district into one resolution roster even post-0009, reintroducing the same misattribution
+// risk one level up.
+// Wraps a raw Supabase/PostgREST error into a real Error (greppable message, never
+// String(err) === '[object Object]') while preserving `.code` — isMissingColumnError and
+// isMoSenateIdUniqueViolation both inspect `.code`/`.message`, and any error that isn't one of
+// those two known gate shapes must still surface as a proper thrown Error, not a raw plain object.
+function wrapDbError(err, context) {
+  const wrapped = new Error(`${context}: ${err.message}`);
+  wrapped.code = err.code;
+  return wrapped;
+}
+
+export async function ensureRosterIdentities(client, runId, members) {
+  let found = 0;
+  let inserted = 0;
+  let missingColumn = false;
+  const collided = [];
+  const resolutionRoster = [];
+
+  for (const m of members) {
+    try {
+      const { data: existing, error: selErr } = await client.from('legislators')
+        .select('id')
+        .eq('full_name', m.full_name)
+        .eq('mo_senate_id', m.mo_senate_id)
+        .maybeSingle();
+      if (selErr) throw wrapDbError(selErr, `mo-senate roster lookup failed for ${m.full_name}`);
+      if (existing) {
+        found += 1;
+        resolutionRoster.push({ legislator_id: existing.id, surname: m.surname, mo_senate_id: m.mo_senate_id });
+        continue;
+      }
+      const { data: createdRow, error: insErr } = await client.from('legislators')
+        .insert({
+          full_name: m.full_name, party: m.party, surname: m.surname, mo_senate_id: m.mo_senate_id, run_id: runId,
+        })
+        .select('id')
+        .single();
+      if (insErr) throw wrapDbError(insErr, `mo-senate roster insert failed for ${m.full_name}`);
+      inserted += 1;
+      resolutionRoster.push({ legislator_id: createdRow.id, surname: m.surname, mo_senate_id: m.mo_senate_id });
+    } catch (err) {
+      if (isMissingColumnError(err, 'mo_senate_id')) { missingColumn = true; continue; }
+      if (isMoSenateIdUniqueViolation(err)) { collided.push({ full_name: m.full_name, mo_senate_id: m.mo_senate_id }); continue; }
+      throw err;
+    }
+  }
+
+  const gated = missingColumn || collided.length > 0;
+  let note;
+  if (missingColumn) {
+    note = 'legislators.mo_senate_id column not found — migration 0008 (supabase/migrations/0008_mo_senate_id.sql) not yet applied; roster persistence skipped this run. bills/votes are unaffected; casts go to the gated-artifact path.';
+  } else if (collided.length > 0) {
+    const names = collided.map((c) => `${c.full_name} (district ${c.mo_senate_id})`).join(', ');
+    note = `legislators_mo_senate_id_uidx still enforces a table-wide unique index on mo_senate_id — migration 0009 (supabase/migrations/0009_mo_senate_id_nonunique.sql) not yet applied. ${collided.length} roster member(s) collided with an existing row already claiming their district under a different name: ${names}. This is the cross-era identity collision migration 0009 fixes — casts go to the gated-artifact path until it lands.`;
+  }
+
+  return {
+    attempted: members.length, found, inserted, gated, collided, missingColumn, resolutionRoster, note,
+  };
 }
 
 // fetchLive/dir are injectable purely for testability (a fake fetcher + scratch cache dir), same
@@ -426,13 +505,13 @@ export async function ensureRosterForRun(client, runId, year, {
     writeCache(dir, cacheKey, {
       source_url: source.url, format: source.format, members, vacancies,
     });
-    const persist = await persistRosterRows(client, runId, members);
+    const identities = await ensureRosterIdentities(client, runId, members);
     return {
-      fetchedLive: true, members, persist,
+      fetchedLive: true, members, identities,
     };
   }
-  const persist = await persistRosterRows(client, runId, cache.members);
-  return { fetchedLive: false, members: cache.members, persist };
+  const identities = await ensureRosterIdentities(client, runId, cache.members);
+  return { fetchedLive: false, members: cache.members, identities };
 }
 
 // dir is injectable, same rationale as ensureRosterForRun.
@@ -744,12 +823,12 @@ async function main() {
     const rosterResult = await ensureRosterForRun(client, runId, args.year);
     if (rosterResult.fetchedLive) {
       const counts = {
-        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.persist.gated,
+        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
         artifact_replay: artifactReplay, slot: 'roster',
       };
-      await closeRun(client, runId, 'succeeded', { counts, roster: rosterResult.persist });
+      await closeRun(client, runId, 'succeeded', { counts, roster: rosterResult.identities });
       console.log(JSON.stringify({
-        mode: 'live', run_id: runId, status: 'succeeded', counts, roster: rosterResult.persist,
+        mode: 'live', run_id: runId, status: 'succeeded', counts, roster: rosterResult.identities,
       }, null, 2));
       return;
     }
@@ -757,7 +836,7 @@ async function main() {
     const indexResult = await ensureIndexForRun(args.year);
     if (indexResult.fetchedLive) {
       const counts = {
-        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.persist.gated,
+        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
         artifact_replay: artifactReplay, slot: 'journal-index',
       };
       await closeRun(client, runId, 'succeeded', { counts });
@@ -767,11 +846,12 @@ async function main() {
       return;
     }
 
-    let resolutionRoster = [];
-    if (!rosterResult.persist.gated) {
-      const districts = rosterResult.members.map((m) => m.mo_senate_id);
-      resolutionRoster = await loadSenateRosterForResolution(client, districts);
-    }
+    // FIX ROUND 1 (Critical): the resolution roster is now the IN-MEMORY mapping
+    // ensureRosterIdentities just built for THIS era's own members — never a global
+    // district-scoped DB query (loadSenateRosterForResolution, deleted). See
+    // ensureRosterIdentities's own comment for why a district-only query would still risk mixing
+    // two different eras' occupants of the same seat.
+    const resolutionRoster = rosterResult.identities.gated ? [] : rosterResult.identities.resolutionRoster;
 
     const worklist = selectJournalDayWorklist(indexResult.rows, args);
     const dayResults = [];
@@ -779,13 +859,13 @@ async function main() {
     let totalFailures = 0;
     let totalCastsResolved = 0;
     let totalCastsUnresolved = 0;
-    let anyGated = rosterResult.persist.gated;
+    let anyGated = rosterResult.identities.gated;
     const unresolvedSample = [];
     const attribution = { motion: 0, preceding_taken_up: 0 };
 
     for (const dayRow of worklist.days) {
       const result = await processJournalDay(client, runId, args.year, sessionRow, dayRow, args, {
-        gated: rosterResult.persist.gated, roster: resolutionRoster,
+        gated: rosterResult.identities.gated, roster: resolutionRoster,
       });
       dayResults.push(result);
       totalVotes += result.votes_written;
@@ -815,7 +895,7 @@ async function main() {
     };
     const status = totalFailures === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, {
-      counts, dayResults, roster: rosterResult.persist, unresolvedSample,
+      counts, dayResults, roster: rosterResult.identities, unresolvedSample,
     });
     console.log(JSON.stringify({
       mode: 'live', run_id: runId, status, counts, dayResults,

@@ -1,0 +1,24 @@
+-- Draft (Lance applies — 0008 is already live). Fixes a real cross-era identity-collision bug
+-- found in code review of the mo-senate ingest driver (src/cli/ingest-mo-senate.js), empirically
+-- reproduced: 0008's UNIQUE index on legislators.mo_senate_id means the FIRST person ever
+-- ingested for a given district permanently owns that row. A district number is per-era
+-- metadata, not a stable person identity — it gets reused by a new person every time a senator
+-- leaves office (a real, expected event, not an edge case). Concretely: a 2018 run ingests Onder
+-- for district 2; a later 2026 run for district 2 (now held by someone else) silently no-ops on
+-- the upsert conflict while the driver still reports success, and if the new occupant happens to
+-- share a surname with the frozen row, mo-senate-journal-pdf.js's resolveMoSenator would
+-- attribute their votes to the WRONG person with zero signal anything was wrong.
+--
+-- district (mo_senate_id) is per-era metadata, not a stable person-identity key. (full_name,
+-- mo_senate_id) is the working per-era find-or-create key used by
+-- src/cli/ingest-mo-senate.js's ensureRosterIdentities, pending a real cross-source identity
+-- merge (TODO 8 — bioguide_id/openstates_id/mo_house_id/mo_senate_id rows for the same real
+-- person are not yet unified). A plain (non-unique) index is kept so lookups by district stay
+-- fast; uniqueness is deliberately no longer enforced at the district level.
+--
+-- Until this migration is applied, ingest-mo-senate.js detects the still-unique index's
+-- duplicate-key error (Postgres 23505 on legislators_mo_senate_id_uidx) and treats it as a gated
+-- state — the same honest-skip convention already used for a missing column — rather than
+-- silently misattributing votes.
+drop index if exists legislators_mo_senate_id_uidx;
+create index legislators_mo_senate_id_idx on legislators (mo_senate_id) where mo_senate_id is not null;
