@@ -340,3 +340,16 @@ summaries he can approve on a skim. Different-vendor verification remains a futu
 stronger independence. Spec trust-model section updated; slice-2 plan amended with Task 10
 (verifier + migration 0004 + review-page verification strip). Verify runs remain subject to
 Lance's per-run API approval policy.
+
+### [Lance] (mid-task, during slice-2 publish flow)
+> We're really utilizing this solely so we can build a profile for each politician but we have
+> to know what they are voting on and then beable to transalte that the regular person
+
+**[Claude]** Locked in as the Plan-3 center of gravity: the **legislator profile page is the
+product**; bills and summaries are its feedstock. Concretely: the profile = who they are + what
+they voted on (casts incl. missed votes) + what each of those bills does in one plain-language
+line (the summary pipeline's output) + bills they sponsored. The bill page exists to support
+the profile (click-through from a vote row), not the reverse. This also validates the
+vote-triggered summarization rule: we translate exactly the bills that appear on profiles,
+nothing else. Onder's profile is already assemblable from live data: 5 federal casts + 3
+verified summaries of the bills behind them + his MO term.
