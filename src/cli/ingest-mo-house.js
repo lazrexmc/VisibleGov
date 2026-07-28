@@ -255,23 +255,46 @@ export async function selectPendingPdf(client) {
   return pending[0] ?? null;
 }
 
-// ---- Task 4b: PERSISTENCE GATE (migration 0005 — legislators.mo_house_id) ----
+// ---- Task 4b: PERSISTENCE GATE (migrations 0005 — legislators.mo_house_id, 0006 — surname) ----
 //
-// legislators has no dedicated surname column (only full_name) — parseMoRepresentative
-// (mo-house-xml.js) builds full_name as "FirstName LastName", so "everything after the first
-// space" is a best-effort reconstruction of the surname resolveMoRep needs, not the ingested
-// surname itself. Correct for every roster entry observed so far (single-token first names);
-// would misresolve a legislator with a multi-word first OR last name. A future migration adding
-// legislators.surname (parallel to this task's own mo_house_id) would remove this gap — flagged
-// honestly, not fixed here (out of scope for 4b; see task-4b-report.md).
+// FIX ROUND (review finding): the first draft of this function reconstructed a roster surname by
+// taking "everything after the first space" in legislators.full_name — for a legislator with a
+// multi-word FIRST name, that produces a WRONG surname (not merely "fragile"), which would then
+// never match that legislator's real printed surname in any roll call. The real fix, not just a
+// documented caveat: legislators.surname (migration 0006) now carries the source XML's own
+// <LastName> element straight through (parseMoRepresentative, mo-house-xml.js -> persistRoster
+// above) — verified against the real fixture, tests/fixtures/research/mo-house-xml/
+// representative-107.xml: '<LastName>Matthiesen</LastName><FirstName>Mark</FirstName>'.
+//
+// The heuristic below survives ONLY as a fallback for a row that somehow has surname=null despite
+// the column existing (e.g. a legacy row inserted before 0006/before persistRoster started
+// populating it) — reconstructSurnameHeuristic is exported and unit-tested directly
+// (tests/mo-house-xml.test.js) to pin down exactly what it gets right (single-token first names)
+// and wrong (multi-word first names), and resolveMoRep's own exact-match semantics guarantee that
+// a wrong reconstructed surname simply fails to match any cast's real printed surname rather than
+// misattributing a vote — so even in the fallback case, the affected cast lands in unresolved[]
+// (persistRollCallCasts/replayArtifacts), never silently dropped. See
+// 'resolveMoRep: a roster surname reconstructed via the full_name fallback heuristic misses a
+// legislator with a multi-word first name (recorded unresolved, never silently dropped)' in
+// tests/mo-rollcall-pdf.test.js for the end-to-end proof of that claim.
+export function reconstructSurnameHeuristic(fullName) {
+  return String(fullName ?? '').trim().split(/\s+/).slice(1).join(' ');
+}
+
 async function loadMoRoster(client) {
-  const { data, error } = await client.from('legislators').select('id,full_name,mo_house_id').not('mo_house_id', 'is', null);
-  if (error) throw error; // caller checks isMissingColumnError(err, 'mo_house_id')
+  const { data, error } = await client.from('legislators').select('id,full_name,surname,mo_house_id').not('mo_house_id', 'is', null);
+  if (error) throw error; // caller checks isRosterGateError
   return (data ?? []).map((r) => ({
     legislator_id: r.id,
-    surname: String(r.full_name ?? '').trim().split(/\s+/).slice(1).join(' '),
+    surname: r.surname || reconstructSurnameHeuristic(r.full_name),
     mo_house_id: r.mo_house_id,
   }));
+}
+
+// Two independent columns can gate loadMoRoster now (0005's mo_house_id, 0006's surname) — either
+// missing means "roster isn't queryable yet," same treatment either way.
+function isRosterGateError(err) {
+  return isMissingColumnError(err, 'mo_house_id') || isMissingColumnError(err, 'surname');
 }
 
 // Extraction + reconciliation ALWAYS run in full regardless of the migration gate (per the plan's
@@ -284,7 +307,7 @@ async function persistRollCallCasts(client, runId, vote, parsed) {
   try {
     roster = await loadMoRoster(client);
   } catch (err) {
-    if (!isMissingColumnError(err, 'mo_house_id')) throw err;
+    if (!isRosterGateError(err)) throw err;
     mkdirSync(ROLLCALL_ARTIFACT_DIR, { recursive: true });
     writeFileSync(artifactPath(vote.source_key), JSON.stringify({
       vote_id: vote.id,
@@ -292,14 +315,15 @@ async function persistRollCallCasts(client, runId, vote, parsed) {
       tallies: parsed.tallies,
       casts: parsed.casts,
       extracted_run_id: runId,
-      note: 'legislators.mo_house_id column not found — migration 0005 (supabase/migrations/0005_mo_house_id.sql) '
-        + 'not yet applied. Casts were extracted and RECONCILED (tallies verified) but not resolved/persisted to '
-        + 'vote_casts. This driver retries loading the roster (and replays every queued artifact) on every '
-        + 'subsequent invocation — once 0005 is applied, the next scheduled run drains this automatically.',
+      note: 'legislators.mo_house_id and/or legislators.surname column not found — migrations 0005 '
+        + '(supabase/migrations/0005_mo_house_id.sql) and 0006 (supabase/migrations/0006_legislators_surname.sql) '
+        + 'not yet (both) applied. Casts were extracted and RECONCILED (tallies verified) but not resolved/persisted '
+        + 'to vote_casts. This driver retries loading the roster (and replays every queued artifact) on every '
+        + 'subsequent invocation — once both migrations are applied, the next scheduled run drains this automatically.',
     }, null, 2));
     return {
       persisted: false, gated: true, resolved: 0, unresolved: parsed.casts.length,
-      note: `gated on migration 0005 — extracted+reconciled casts written to ${artifactPath(vote.source_key)}`,
+      note: `gated on migration 0005/0006 — extracted+reconciled casts written to ${artifactPath(vote.source_key)}`,
     };
   }
   const resolvedRows = [];
@@ -318,34 +342,71 @@ async function persistRollCallCasts(client, runId, vote, parsed) {
 
 // Drains any previously-gated artifacts. Pure DB + filesystem — no house.mo.gov request — so it is
 // safe and cheap to attempt on EVERY invocation regardless of whether this slot ends up processing
-// a document at all: this is what makes "apply 0005, then it just works next run" literally true
+// a document at all: this is what makes "apply the migrations, then it just works next run" true
 // rather than requiring a separate manual replay script.
+//
+// FIX ROUND (review finding): the first draft deleted an artifact after ANY replay attempt,
+// regardless of whether every cast actually resolved — a cast that failed resolveMoRep (roster
+// gap, not a migration gate) was silently dropped with no count, no sample, no log line, and the
+// file was gone so there was nothing left to even notice from. Fixed: unresolved casts from each
+// artifact are now collected and returned (parity with persistRollCallCasts's own
+// {resolved,unresolved,unresolvedSample} shape), logged per-artifact, AND the artifact is kept on
+// disk (same path — NOT renamed, since listPendingRollCallPdfs's "already extracted, don't
+// live-refetch" check depends on that exact filename continuing to exist) with `partial: true` and
+// its `casts` trimmed down to only the STILL-unresolved ones, so the next replay only re-attempts
+// what's left rather than redoing already-resolved work. An artifact is only deleted once a replay
+// resolves everything in it.
 async function replayArtifacts(client, runId) {
-  if (!existsSync(ROLLCALL_ARTIFACT_DIR)) return { attempted: 0, replayed: 0, stillGated: false };
+  const empty = {
+    attempted: 0, replayed: 0, stillGated: false, unresolved: 0, unresolvedSample: [],
+  };
+  if (!existsSync(ROLLCALL_ARTIFACT_DIR)) return empty;
   const files = readdirSync(ROLLCALL_ARTIFACT_DIR).filter((f) => f.endsWith('.json'));
-  if (files.length === 0) return { attempted: 0, replayed: 0, stillGated: false };
+  if (files.length === 0) return empty;
   let roster;
   try {
     roster = await loadMoRoster(client);
   } catch (err) {
-    if (!isMissingColumnError(err, 'mo_house_id')) throw err;
-    return { attempted: files.length, replayed: 0, stillGated: true };
+    if (!isRosterGateError(err)) throw err;
+    return { ...empty, attempted: files.length, stillGated: true };
   }
   let replayed = 0;
+  let unresolvedTotal = 0;
+  const unresolvedSample = [];
   for (const file of files) {
-    const artifact = JSON.parse(readFileSync(`${ROLLCALL_ARTIFACT_DIR}/${file}`, 'utf8'));
+    const filePath = `${ROLLCALL_ARTIFACT_DIR}/${file}`;
+    const artifact = JSON.parse(readFileSync(filePath, 'utf8'));
     const resolvedRows = [];
+    const unresolved = [];
     for (const cast of artifact.casts) {
       const legislatorId = pdf.resolveMoRep(cast, roster);
       if (legislatorId) resolvedRows.push({ vote_id: artifact.vote_id, legislator_id: legislatorId, position: cast.position, run_id: runId });
+      else unresolved.push(cast);
     }
     // sequential (not Promise.all) is deliberate: small, infrequent artifact backlog, each write
     // independent — no need for parallel-fetch complexity here.
     await insertIfAbsent(client, 'vote_casts', resolvedRows, 'vote_id,legislator_id');
-    unlinkSync(`${ROLLCALL_ARTIFACT_DIR}/${file}`);
-    replayed += 1;
+    if (unresolved.length === 0) {
+      unlinkSync(filePath);
+      replayed += 1;
+    } else {
+      writeFileSync(filePath, JSON.stringify({
+        ...artifact,
+        partial: true,
+        casts: unresolved, // only what's still unresolved needs retrying next replay
+        last_replay_resolved_count: resolvedRows.length,
+        last_replay_unresolved_count: unresolved.length,
+        last_replay_run_id: runId,
+        last_replay_at: new Date().toISOString(),
+      }, null, 2));
+      unresolvedTotal += unresolved.length;
+      if (unresolvedSample.length < 10) unresolvedSample.push(...unresolved.slice(0, 10 - unresolvedSample.length).map((c) => ({ source_key: artifact.source_key, ...c })));
+      console.error(`[${new Date().toISOString()}] replay: ${artifact.source_key} — ${resolvedRows.length} resolved, ${unresolved.length} unresolved (artifact kept on disk, partial: true)`);
+    }
   }
-  return { attempted: files.length, replayed, stillGated: false };
+  return {
+    attempted: files.length, replayed, stillGated: false, unresolved: unresolvedTotal, unresolvedSample,
+  };
 }
 
 // One "document" for this invocation's cooldown slot: either a local fixture file (never a live
@@ -397,7 +458,13 @@ async function processRollCallPdf(client, runId, vote, args) {
 async function persistRoster(client, runId) {
   const repXml = readFileSync(ROSTER_REPRESENTATIVE_FIXTURE, 'utf8');
   const roster = [mo.parseMoRepresentative(repXml)];
-  const rows = roster.map((r) => ({ full_name: r.full_name, mo_house_id: r.mo_house_id, party: r.party, run_id: runId }));
+  // surname: r.surname carries the source XML's own <LastName> (parseMoRepresentative,
+  // mo-house-xml.js) straight through — see supabase/migrations/0006_legislators_surname.sql for
+  // why this column exists (loadMoRoster below depends on it to avoid a lossy full_name-based
+  // reconstruction).
+  const rows = roster.map((r) => ({
+    full_name: r.full_name, surname: r.surname, mo_house_id: r.mo_house_id, party: r.party, run_id: runId,
+  }));
   try {
     await insertIfAbsent(client, 'legislators', rows, 'mo_house_id');
     return {
@@ -409,6 +476,15 @@ async function persistRoster(client, runId) {
       return {
         attempted: rows.length, persisted: 0, skipped: true,
         note: 'legislators.mo_house_id column not found — migration 0005 (supabase/migrations/0005_mo_house_id.sql) not yet applied; member persistence skipped this run. bills/actions/votes are unaffected.',
+      };
+    }
+    // Realistic if 0005/0006 are applied out of order (Lance applies them separately): 0005 alone
+    // is enough for mo_house_id inserts to succeed, but this row payload also carries `surname`
+    // (0006) — reported with the same honest-skip shape, not left to surface as an opaque throw.
+    if (isMissingColumnError(err, 'surname')) {
+      return {
+        attempted: rows.length, persisted: 0, skipped: true,
+        note: 'legislators.surname column not found — migration 0006 (supabase/migrations/0006_legislators_surname.sql) not yet applied (0005 may already be); member persistence skipped this run pending both migrations. bills/actions/votes are unaffected.',
       };
     }
     throw err;

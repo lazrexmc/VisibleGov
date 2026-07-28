@@ -6,7 +6,9 @@ import {
   normalizeMoBillIdentifier, parseMoBillList, parseMoMemberList, parseMoRepresentative,
   parseMoBillXml, joinRollcalls, buildMoVoteRows,
 } from '../src/adapters/mo-house-xml.js';
-import { parseMoHouseArgs, remainingCooldownMs, formatCooldownWait, selectTargets } from '../src/cli/ingest-mo-house.js';
+import {
+  parseMoHouseArgs, remainingCooldownMs, formatCooldownWait, selectTargets, reconstructSurnameHeuristic,
+} from '../src/cli/ingest-mo-house.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
 const billListXml = readFileSync(`${FIXTURES}/bill-list-sample-truncated.xml`, 'utf8');
@@ -300,4 +302,36 @@ test('formatCooldownWait formats whole minutes and seconds, rounding up to the n
   assert.equal(formatCooldownWait(90 * 1000), '1m 30s');
   assert.equal(formatCooldownWait(500), '0m 1s');
   assert.equal(formatCooldownWait(0), '0m 0s');
+});
+
+// ---- reconstructSurnameHeuristic (loadMoRoster's fallback-only path — Task 4b fix round) ----
+//
+// legislators.surname (migration 0006) is now the PRIMARY source loadMoRoster uses, populated
+// straight from the real fixture's <LastName> element (parseMoRepresentative). This heuristic only
+// runs when a row's surname is somehow still null despite the column existing. Pinned here exactly
+// so the real failure mode is documented, not glossed over as mere "fragility": it is CORRECT for
+// a single-token first name and WRONG for a multi-word first name — never merely imprecise.
+
+test('reconstructSurnameHeuristic: correct for the real fixture shape (single-token first name)', () => {
+  assert.equal(reconstructSurnameHeuristic('Mark Matthiesen'), 'Matthiesen');
+});
+
+test('reconstructSurnameHeuristic: WRONG for a multi-word first name — this is the real, non-silent failure mode', () => {
+  // "Mary Jane Smith" (first name "Mary Jane", surname "Smith") — the heuristic has no way to
+  // know where the first name ends, so it takes "everything after the first space" and produces
+  // "Jane Smith", not the real surname "Smith". See resolveMoRep's own test in
+  // tests/mo-rollcall-pdf.test.js for proof this wrong value still can't silently misattribute a
+  // vote — it just fails to match, landing the cast in unresolved[].
+  assert.equal(reconstructSurnameHeuristic('Mary Jane Smith'), 'Jane Smith');
+});
+
+test('reconstructSurnameHeuristic: empty/null input yields an empty string, not a throw', () => {
+  assert.equal(reconstructSurnameHeuristic(''), '');
+  assert.equal(reconstructSurnameHeuristic(null), '');
+  assert.equal(reconstructSurnameHeuristic(undefined), '');
+});
+
+test('reconstructSurnameHeuristic: a bare single-token full_name (no space at all) yields an empty surname', () => {
+  // Realistic edge case: no first name on record at all — the heuristic can't invent one.
+  assert.equal(reconstructSurnameHeuristic('Matthiesen'), '');
 });

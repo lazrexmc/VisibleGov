@@ -1,0 +1,25 @@
+-- Draft (Lance applies — draft-then-apply). Task 4b fix round.
+--
+-- Adds a dedicated surname column so MO House roll-call vote resolution (resolveMoRep,
+-- src/adapters/mo-rollcall-pdf.js) can match against the legislator's REAL printed surname
+-- instead of reconstructing a guess from `full_name`.
+--
+-- Why this exists: legislators.full_name is a display string built by
+-- src/adapters/mo-house-xml.js's parseMoRepresentative as "FirstName LastName" (a simple
+-- space-join of the source XML's own <FirstName>/<LastName> elements — verified against the real
+-- fixture tests/fixtures/research/mo-house-xml/representative-107.xml: '<LastName>Matthiesen
+-- </LastName><FirstName>Mark</FirstName>'). Reconstructing a surname from full_name by taking
+-- "everything after the first space" breaks for any legislator with a multi-word first OR last
+-- name. The source XML's <LastName> element is already parsed correctly into
+-- parseMoRepresentative's own `surname` field — this column lets that value survive the
+-- roster's round-trip through the `legislators` table instead of being discarded at persist time
+-- and reconstructed (lossily) later.
+--
+-- Applies alongside 0005 (legislators.mo_house_id) — kept as a separate file rather than folded
+-- into 0005 because 0005 was already committed/referenced by name in Task 4's report before this
+-- gap was found; both are still unapplied drafts as of this fix, so Lance can apply them together.
+-- Until this is applied, src/cli/ingest-mo-house.js's loadMoRoster falls back to the same
+-- heuristic reconstruction it always has, documented (not hidden) as fragile — see its own comment
+-- for exactly which failure mode that leaves and why it's still safe (recorded in unresolved[],
+-- never silently dropped).
+alter table legislators add column surname text;

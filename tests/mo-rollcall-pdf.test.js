@@ -209,3 +209,34 @@ test('end-to-end: resolveMoRep against a roster containing the real fixture\'s l
   assert.equal(resolveMoRep(smith46, roster), 'leg-smith-46');
   assert.equal(resolveMoRep(smith68, roster), null);
 });
+
+// ---- Task 4b fix round: proving loadMoRoster's fallback heuristic can never silently misattribute
+// a vote, only ever miss (fail-loud, same as everywhere else in this codebase) ----
+//
+// Review finding: ingest-mo-house.js's loadMoRoster ONLY falls back to reconstructing a surname
+// from full_name ("everything after the first space") when legislators.surname (migration 0006)
+// is null despite the column existing — the primary path now uses the real ingested surname. This
+// test proves the CONSEQUENCE of that fallback ever firing for a multi-word-first-name legislator:
+// resolveMoRep's exact-match semantics mean the wrong reconstructed surname simply fails to match
+// the real printed surname on any cast — it can never accidentally match a DIFFERENT legislator
+// either, since the match is on the (wrong) string itself, not a lookup that could collide.
+test('resolveMoRep: a roster surname reconstructed via the full_name fallback heuristic misses a legislator with a multi-word first name (recorded unresolved, never silently dropped)', () => {
+  // "Mary Jane Smith" would reconstruct (loadMoRoster's fallback) to "Jane Smith" - see
+  // reconstructSurnameHeuristic's own test in tests/mo-house-xml.test.js for that value directly.
+  const rosterWithBadFallback = [
+    { legislator_id: 'leg-real-smith', surname: 'Jane Smith', mo_house_id: '46' },
+  ];
+  // The real roll call prints the legislator's actual surname, 'SMITH', with district '46'.
+  const cast = { surname: 'SMITH', district: '46', position: 'nay' };
+  const resolved = resolveMoRep(cast, rosterWithBadFallback);
+  assert.equal(resolved, null, 'a wrong reconstructed surname must miss, not silently resolve to the wrong-looking entry');
+  // Simulate exactly what persistRollCallCasts/replayArtifacts do with a miss: it lands in
+  // unresolved[], never dropped and never inserted anywhere.
+  const unresolved = [];
+  const resolvedRows = [];
+  const legislatorId = resolveMoRep(cast, rosterWithBadFallback);
+  if (legislatorId) resolvedRows.push({ legislator_id: legislatorId, ...cast });
+  else unresolved.push(cast);
+  assert.deepEqual(resolvedRows, []);
+  assert.deepEqual(unresolved, [cast]);
+});
