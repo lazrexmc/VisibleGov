@@ -478,3 +478,16 @@ structurally forces section citations; (3) provenance + golden-set reproducibili
 versioned identical calls; (4) the per-run approval policy works because metered spend is
 visible and gateable. Costs to date: ~$0.53 total; steady-state projection ~$100-150/yr;
 **Batch API (50% off identical calls) noted as the cost lever for future bulk runs.**
+
+### [Lance] (2026-07-28, going AFK)
+> Gerat progress Claude, I have to afk for a long period of time, continue the process
+
+**[Claude]** Autonomous continuation plan (boundaries held: no publishing without Lance, no
+model spend beyond the already-approved 25-bill batch, no destructive data ops): (1) finish +
+verify the summarize/verify batch, stage drafts in the review queue for his return; (2) review
+the MO Senate research when it lands and — per the standing overnight directive's "then onto
+Missouri General Assembly Members" — build the MO Senate adapter through full SDD if the source
+supports it (zero-spend ingestion); (3) keep the MO House enrichment driver cycling on its ToU
+cadence, verify the roster+HB1800 replay when its slot fires; (4) keep docs/ledger current.
+Deferred to his return: publish adjudication, QUORUM/ADJOURN data hygiene (touches prod rows),
+glossary design, Plan 3 mockups.
