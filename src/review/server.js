@@ -76,6 +76,30 @@ export function pickBillText(texts, targetHash) {
   ), null);
 }
 
+// Task 10 (adversarial verification pass): reduces a summary_verifications row (or none, if the
+// summary hasn't been verified yet) to a display-ready {state, label}. Pure so both the API
+// (queue's 'verified' field) and tests can exercise it without a DB.
+export function verificationBadge(verification) {
+  if (!verification) return { state: 'unverified', label: 'Unverified' };
+  const verdicts = verification.verdicts || [];
+  if (verification.overall === 'clean') {
+    return { state: 'clean', label: `Verifier found all ${verdicts.length} bullets supported` };
+  }
+  const unsupported = verdicts.filter((v) => !v.supported).length;
+  return { state: 'flagged', label: `Verifier flagged ${unsupported} of ${verdicts.length} bullets` };
+}
+
+// A summary can be re-verified over time (e.g. after a re-run); the latest row by created_at is
+// the one that matters for display — same "last wins" pattern as pickLatestVote.
+export function latestVerificationBySummary(rows) {
+  const map = new Map();
+  for (const r of rows || []) {
+    const existing = map.get(r.summary_id);
+    if (!existing || (r.created_at ?? '') > (existing.created_at ?? '')) map.set(r.summary_id, r);
+  }
+  return map;
+}
+
 // CSRF guard for POST /api/decision. A cross-origin <form enctype="text/plain"> is a no-preflight
 // "simple request" — the browser will happily send it to 127.0.0.1:8991 from any open tab, with
 // no CORS check, because we never answer OPTIONS. Two independent conditions close that off:
@@ -177,11 +201,22 @@ async function handleQueue(client, res) {
       .in('status', ['draft', 'stale'])
       .order('created_at', { ascending: true });
     if (error) throw error;
+
+    const ids = (data ?? []).map((row) => row.id);
+    let latestVerification = new Map();
+    if (ids.length > 0) {
+      const { data: verRows, error: vErr } = await client
+        .from('summary_verifications').select('summary_id,overall,verdicts,created_at').in('summary_id', ids);
+      if (vErr) throw vErr;
+      latestVerification = latestVerificationBySummary(verRows ?? []);
+    }
+
     sendJson(res, 200, (data ?? []).map((row) => ({
       id: row.id,
       status: row.status,
       created_at: row.created_at,
       bill: row.bills ? { identifier: row.bills.identifier, title: row.bills.title } : null,
+      verified: verificationBadge(latestVerification.get(row.id) ?? null).state,
     })));
   } catch (err) {
     sendServerError(res, 'queue', err);
@@ -221,6 +256,15 @@ async function handleItem(client, res, id) {
       vote = { question: latestVote.question, result: latestVote.result, yeas, nays };
     }
 
+    const { data: verRows, error: verErr } = await client
+      .from('summary_verifications')
+      .select('overall,verdicts,model,created_at')
+      .eq('summary_id', id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (verErr) throw verErr;
+    const verification = (verRows && verRows[0]) ? verRows[0] : null;
+
     sendJson(res, 200, {
       summary: {
         id: summary.id, status: summary.status, body_md: summary.body_md, model: summary.model,
@@ -229,6 +273,7 @@ async function handleItem(client, res, id) {
       bill: bill ? { identifier: bill.identifier, title: bill.title, canonical_url: bill.canonical_url } : null,
       text: text ? text.content : null,
       vote,
+      verification,
     });
   } catch (err) {
     sendServerError(res, 'item', err);

@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import {
   nextStatus, mapNoteAction, validateDecisionInput, countVoteCasts, pickLatestVote,
   pickBillText, readBody, BodyTooLargeError, requestListener, isAllowedDecisionRequest,
+  verificationBadge, latestVerificationBySummary,
   HOST, PORT,
 } from '../src/review/server.js';
 
@@ -142,6 +143,41 @@ test('pickBillText falls back to the most-recently-retrieved row when no hash ma
 
 test('pickBillText returns null for an empty list', () => {
   assert.equal(pickBillText([], 'anything'), null);
+});
+
+// ---- verificationBadge (Task 10: adversarial verification pass) ----
+
+test('verificationBadge: null verification -> grey unverified', () => {
+  assert.deepEqual(verificationBadge(null), { state: 'unverified', label: 'Unverified' });
+});
+
+test('verificationBadge: overall clean -> green, names how many bullets were checked', () => {
+  const v = { overall: 'clean', verdicts: [{ supported: true }, { supported: true }, { supported: true }] };
+  assert.deepEqual(verificationBadge(v), { state: 'clean', label: 'Verifier found all 3 bullets supported' });
+});
+
+test('verificationBadge: overall flagged -> amber, names how many of how many failed', () => {
+  const v = { overall: 'flagged', verdicts: [{ supported: true }, { supported: false }, { supported: false }] };
+  assert.deepEqual(verificationBadge(v), { state: 'flagged', label: 'Verifier flagged 2 of 3 bullets' });
+});
+
+// ---- latestVerificationBySummary (a summary can be re-verified; latest row wins, like pickLatestVote) ----
+
+test('latestVerificationBySummary keeps only the most recent row per summary_id', () => {
+  const rows = [
+    { summary_id: 's1', created_at: '2026-01-01T00:00:00Z', overall: 'flagged' },
+    { summary_id: 's1', created_at: '2026-02-01T00:00:00Z', overall: 'clean' },
+    { summary_id: 's2', created_at: '2026-01-15T00:00:00Z', overall: 'clean' },
+  ];
+  const map = latestVerificationBySummary(rows);
+  assert.equal(map.size, 2);
+  assert.equal(map.get('s1').overall, 'clean');
+  assert.equal(map.get('s2').overall, 'clean');
+});
+
+test('latestVerificationBySummary on empty/absent input returns an empty map', () => {
+  assert.equal(latestVerificationBySummary([]).size, 0);
+  assert.equal(latestVerificationBySummary(undefined).size, 0);
 });
 
 // ---- readBody / 1MB cap ----

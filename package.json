@@ -9,6 +9,7 @@
     "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js",
     "summarize": "node --env-file=.env src/cli/summarize.js",
+    "verify": "node --env-file=.env src/cli/verify.js",
     "review": "node --env-file=.env src/review/server.js"
   },
   "dependencies": {

@@ -20,6 +20,14 @@
   #draft-rendered { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; background: #fafafa; }
   #draft-rendered ul { margin: 0.25rem 0; padding-left: 1.25rem; }
   #draft-rendered p { margin: 0.5rem 0; }
+  .verify-strip { border-radius: 6px; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; font-size: 0.9rem; }
+  .verify-strip.verify-clean { background: #e8f5e9; border: 1px solid #a5d6a7; color: #1b5e20; }
+  .verify-strip.verify-flagged { background: #fff8e1; border: 1px solid #ffe082; color: #8d6e00; }
+  .verify-strip.verify-unverified { background: #f0f0f0; border: 1px solid #ccc; color: #666; }
+  .verify-label { font-weight: 600; }
+  .verify-flags { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+  .verify-flags li { margin-bottom: 0.5rem; }
+  .verify-quote { font-style: italic; opacity: 0.85; margin-top: 0.15rem; }
   label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
   textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; padding: 0.5rem; }
   .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
@@ -44,6 +52,7 @@
   </section>
   <section class="pane pane-draft">
     <div id="vote-strip" class="vote-strip">No vote on file.</div>
+    <div id="verification-strip" class="verify-strip verify-unverified"></div>
     <div id="draft-rendered"></div>
     <label for="draft-edit">Edit draft (Markdown)</label>
     <textarea id="draft-edit" rows="12"></textarea>
@@ -86,6 +95,53 @@
     document.getElementById('status-msg').textContent = msg;
   }
 
+  // Mirrors src/review/server.js's verificationBadge() — null/no verification yet vs. clean vs.
+  // flagged, with a human-readable count in the label.
+  function verificationBadge(verification) {
+    if (!verification) return { state: 'unverified', label: 'Unverified' };
+    var verdicts = verification.verdicts || [];
+    if (verification.overall === 'clean') {
+      return { state: 'clean', label: 'Verifier found all ' + verdicts.length + ' bullets supported' };
+    }
+    var unsupported = verdicts.filter(function (v) { return !v.supported; }).length;
+    return { state: 'flagged', label: 'Verifier flagged ' + unsupported + ' of ' + verdicts.length + ' bullets' };
+  }
+
+  // Verifier-provided strings (reason, evidence_quote, section) are model output and MUST be
+  // rendered via textContent, never innerHTML — built entirely with DOM APIs for that reason.
+  function renderVerification(verification) {
+    var strip = document.getElementById('verification-strip');
+    strip.textContent = '';
+    strip.className = 'verify-strip';
+    var badge = verificationBadge(verification);
+    strip.classList.add('verify-' + badge.state);
+
+    var label = document.createElement('div');
+    label.className = 'verify-label';
+    label.textContent = badge.label;
+    strip.appendChild(label);
+
+    if (badge.state === 'flagged') {
+      var list = document.createElement('ul');
+      list.className = 'verify-flags';
+      var verdicts = verification.verdicts || [];
+      for (var i = 0; i < verdicts.length; i++) {
+        var v = verdicts[i];
+        if (v.supported) continue;
+        var li = document.createElement('li');
+        var head = document.createElement('div');
+        head.textContent = 'Bullet ' + (v.bullet_index + 1) + ' (' + v.section + '): ' + v.reason;
+        var quote = document.createElement('div');
+        quote.className = 'verify-quote';
+        quote.textContent = 'Evidence: "' + v.evidence_quote + '"';
+        li.appendChild(head);
+        li.appendChild(quote);
+        list.appendChild(li);
+      }
+      strip.appendChild(list);
+    }
+  }
+
   async function loadQueue() {
     const select = document.getElementById('queue');
     let items = [];
@@ -125,6 +181,7 @@
       document.getElementById('draft-rendered').innerHTML = renderMarkdown(data.summary.body_md || '');
       document.getElementById('draft-edit').value = data.summary.body_md || '';
       document.getElementById('note').value = '';
+      renderVerification(data.verification || null);
 
       const vs = document.getElementById('vote-strip');
       vs.textContent = data.vote
