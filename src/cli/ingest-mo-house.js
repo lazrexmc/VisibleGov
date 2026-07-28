@@ -103,19 +103,19 @@ export function formatCooldownWait(ms) {
   return `${mins}m ${secs}s`;
 }
 
-// Queries the most recent source='mo-house-xml' ingestion_runs row REGARDLESS of status —
-// an in-flight 'running' row (another process mid-fetch right now) must count too, not just a
-// closed 'succeeded'/'failed' one, or two processes starting within the same instant could both
-// pass the check. Waits out any remaining cooldown before returning; never aborts, never skips
-// the check silently (a lookup failure is a hard error, not a swallowed skip).
-//
-// KNOWN RESIDUAL GAP (documented honestly, not fixed here — see task-4-report.md): two processes
-// launched at the EXACT same instant could both query before either has inserted its own run
-// row, and both pass. This closes the SEQUENTIAL gap the review found (processes minutes apart
-// with no shared in-memory state) but is not a full distributed lock. Acceptable for a
-// single-operator overnight driver; would need real locking (e.g. a Postgres advisory lock) for
-// truly concurrent launches, which is out of scope for this fix.
-export async function enforceDurableCooldown(client, minIntervalMs = mo.MO_HOUSE_MIN_INTERVAL_MS) {
+// FINAL-REVIEW FIX (convergence race): a typed, dedicated error for enforceDurableCooldown's
+// "never converged" case — never mistaken for the plain lookup-failed Error above, and carries
+// the iteration count for debugging. Thrown only if the loop below truly never converges, which
+// per its own comment should be impossible under normal operation.
+export class CooldownConvergenceError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'CooldownConvergenceError';
+    Object.assign(this, meta);
+  }
+}
+
+async function queryLastMoHouseRunStartedAt(client) {
   const { data, error } = await client
     .from('ingestion_runs')
     .select('started_at')
@@ -124,12 +124,61 @@ export async function enforceDurableCooldown(client, minIntervalMs = mo.MO_HOUSE
     .limit(1)
     .maybeSingle();
   if (error) throw new Error(`mo-house cooldown lookup failed: ${error.message}`);
-  if (!data) return; // no prior run recorded for this source at all — nothing to wait for
-  const remaining = remainingCooldownMs(data.started_at, minIntervalMs);
-  if (remaining > 0) {
-    console.error(`[${new Date().toISOString()}] ToU cooldown: waiting ${formatCooldownWait(remaining)} (last fetch ${data.started_at})`);
-    await new Promise((r) => setTimeout(r, remaining));
+  return data ? data.started_at : null; // null = no prior run recorded for this source at all
+}
+
+// Queries the most recent source='mo-house-xml' ingestion_runs row REGARDLESS of status —
+// an in-flight 'running' row (another process mid-fetch right now) must count too, not just a
+// closed 'succeeded'/'failed' one, or two processes starting within the same instant could both
+// pass the check. Waits out any remaining cooldown before returning; never aborts, never skips
+// the check silently (a lookup failure is a hard error, not a swallowed skip).
+//
+// FINAL-REVIEW FIX (convergence race): the original implementation read ingestion_runs ONCE,
+// slept out whatever remaining cooldown that single read implied, then returned unconditionally.
+// Two processes starting within the same cooldown window would both read the same last
+// started_at, compute the same remaining wait, sleep to the same wake time, and BOTH proceed
+// without ever re-checking — the exact double-fetch this whole mechanism exists to prevent, just
+// moved from "no shared state at all" (the original bug this file already fixed once) to "shared
+// state read once, then trusted stale."
+//
+// Fixed by LOOPING: after every sleep, re-query ingestion_runs from scratch and recompute
+// `remaining` against that FRESH read. Only a fresh read showing remaining <= 0 is allowed to let
+// this process proceed. If a different process claimed the slot mid-sleep (a newer started_at now
+// exists), the fresh read reflects that — an equal-or-larger remaining wait — and this loops
+// again. Capped at maxIterations (default 10) as a sanity backstop: each iteration either
+// proceeds or discovers a strictly-newer started_at, and wall-clock time only moves forward, so
+// convergence within a handful of checks is a near-certainty under normal operation; never
+// converging within maxIterations means something is actually wrong (clock skew, a
+// corrupted/future-dated started_at) — that must fail loud, not spin forever.
+//
+// KNOWN RESIDUAL GAP (documented honestly, not fixed here — see task-4-report.md /
+// task-4b-report.md): two processes whose FRESH final reads land at the EXACT same instant (both
+// observe remaining <= 0 before either has inserted its own new run row) could still both pass.
+// This loop closes the "stale shared read" gap above; it is still not a full distributed lock.
+// Acceptable for a single-operator overnight driver; would need real locking (e.g. a Postgres
+// advisory lock) for truly concurrent launches, which is out of scope for this fix.
+//
+// sleep is injected (defaults to a real setTimeout-based wait) purely for testability — a unit
+// test can stub it to resolve instantly while still observing the requested wait durations and
+// the number of fresh re-checks performed.
+export async function enforceDurableCooldown(
+  client,
+  minIntervalMs = mo.MO_HOUSE_MIN_INTERVAL_MS,
+  { sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }), maxIterations = 10 } = {},
+) {
+  for (let attempt = 1; attempt <= maxIterations; attempt += 1) {
+    const lastStartedAt = await queryLastMoHouseRunStartedAt(client);
+    const remaining = remainingCooldownMs(lastStartedAt, minIntervalMs);
+    if (remaining <= 0) return; // fresh read confirms the cooldown has elapsed — safe to proceed
+    console.error(`[${new Date().toISOString()}] ToU cooldown: waiting ${formatCooldownWait(remaining)} (last fetch ${lastStartedAt}, re-check ${attempt}/${maxIterations})`);
+    await sleep(remaining);
   }
+  throw new CooldownConvergenceError(
+    `mo-house cooldown did not converge after ${maxIterations} fresh re-checks — this should be `
+      + 'impossible in normal operation (see enforceDurableCooldown\'s own comment); failing loud '
+      + 'rather than looping forever',
+    { maxIterations, minIntervalMs },
+  );
 }
 
 // ---- persistence ----
@@ -225,6 +274,79 @@ function artifactPath(sourceKey) {
   return `${ROLLCALL_ARTIFACT_DIR}/${sourceKey}.json`;
 }
 
+// ---- FINAL-REVIEW FIX: failing-PDF quarantine ----
+//
+// Bug found in whole-branch review: a PDF that persistently fails extraction/reconciliation
+// (RollCallParseError) was never recorded anywhere durable — listPendingRollCallPdfs had no way
+// to know a source_key had already been tried and failed, so it sorted first (source_key
+// ascending) FOREVER and got a fresh LIVE re-fetch every single cooldown slot, permanently
+// wedging the queue behind one bad document instead of making progress on the rest of the
+// backlog.
+//
+// Fix: a failure writes a `<source_key>.failed.json` artifact to the SAME artifacts dir as the
+// success/gate artifact (artifactPath above) — same directory, different suffix, so the two never
+// collide and both are visible side by side for a human to inspect. Each artifact tracks an
+// `attempts` counter that INCREMENTS (never resets) across repeated failures of the same
+// source_key. Once attempts reaches ROLLCALL_MAX_FAILED_ATTEMPTS, excludeQuarantinedPdfs
+// permanently excludes that source_key from the live queue — "permanently" only in the sense that
+// nothing in this driver ever deletes the file; an operator can always delete it by hand to
+// re-enable a retry (e.g. after a code fix lands for a parsing gap the PDF exposed). That is a
+// deliberate, cheap, file-presence-driven "reset" rather than a dedicated CLI flag or DB column.
+//
+// THRESHOLD (3): below 3 attempts, retry is allowed — a single failure (or two) is plausibly a
+// transient hiccup (a momentarily malformed fetch, a not-actually-broken layout quirk), and
+// house.mo.gov's own 30-min cooldown already spaces retries far apart, so retrying costs little.
+// At 3 independent LIVE attempts on 3 separate cooldown slots all failing the SAME document,
+// "transient" stops being a credible explanation — this is a genuinely bad PDF (or a real parser
+// gap) that will not resolve itself, and continuing to burn the scarce 30-min budget on it instead
+// of the rest of the backlog is the actual bug this fixes.
+export const ROLLCALL_MAX_FAILED_ATTEMPTS = 3;
+
+function failedArtifactPath(dir, sourceKey) {
+  return `${dir}/${sourceKey}.failed.json`;
+}
+
+// dir is injectable (defaults to the real ROLLCALL_ARTIFACT_DIR) purely so this and
+// writeFailureArtifact/excludeQuarantinedPdfs can be unit-tested against a scratch directory
+// without touching the real gitignored artifacts dir a live driver process may be using
+// concurrently.
+export function readFailureArtifact(sourceKey, dir = ROLLCALL_ARTIFACT_DIR) {
+  const p = failedArtifactPath(dir, sourceKey);
+  if (!existsSync(p)) return null;
+  return JSON.parse(readFileSync(p, 'utf8'));
+}
+
+export function writeFailureArtifact(sourceKey, pdfUrl, err, dir = ROLLCALL_ARTIFACT_DIR) {
+  const existing = readFailureArtifact(sourceKey, dir);
+  const attempts = (existing ? existing.attempts : 0) + 1;
+  mkdirSync(dir, { recursive: true });
+  const record = {
+    source_key: sourceKey,
+    pdf_url: pdfUrl,
+    error: { name: err.name, message: err.message },
+    failed_at: new Date().toISOString(),
+    attempts,
+  };
+  writeFileSync(failedArtifactPath(dir, sourceKey), JSON.stringify(record, null, 2));
+  return record;
+}
+
+// Pure filter, directly unit-tested (no DB required): drops any candidate whose .failed.json has
+// reached ROLLCALL_MAX_FAILED_ATTEMPTS. listPendingRollCallPdfs below is a thin DB-querying
+// wrapper around this.
+export function excludeQuarantinedPdfs(candidates, dir = ROLLCALL_ARTIFACT_DIR) {
+  let skippedFailed = 0;
+  const kept = candidates.filter((v) => {
+    const failure = readFailureArtifact(v.source_key, dir);
+    if (failure && failure.attempts >= ROLLCALL_MAX_FAILED_ATTEMPTS) {
+      skippedFailed += 1;
+      return false;
+    }
+    return true;
+  });
+  return { kept, skippedFailed };
+}
+
 // Live-DB check while building this task caught a real bug in an earlier draft of this query:
 // `jurisdiction_id='mo-legislature' AND source_url IS NOT NULL` is NOT specific to mo-house-xml
 // roll-call PDFs — dozens of OpenStates-sourced 'mo-ocd-vote/...' rows in the SAME jurisdiction
@@ -240,19 +362,28 @@ async function listPendingRollCallPdfs(client) {
     .order('source_key', { ascending: true });
   if (error) throw new Error(`pending roll-call PDF lookup failed: ${error.message}`);
   const undone = (candidates ?? []).filter((v) => !existsSync(artifactPath(v.source_key)));
-  if (undone.length === 0) return [];
+  if (undone.length === 0) return { pending: [], skippedFailed: 0 };
+  const { kept, skippedFailed } = excludeQuarantinedPdfs(undone);
+  if (skippedFailed > 0) {
+    console.error(`[${new Date().toISOString()}] roll-call PDF queue: skipping ${skippedFailed} permanently-failing PDF(s) (>= ${ROLLCALL_MAX_FAILED_ATTEMPTS} failed attempts — see *.failed.json in ${ROLLCALL_ARTIFACT_DIR})`);
+  }
+  if (kept.length === 0) return { pending: [], skippedFailed };
   const { data: casted, error: castErr } = await client
     .from('vote_casts')
     .select('vote_id')
-    .in('vote_id', undone.map((v) => v.id));
+    .in('vote_id', kept.map((v) => v.id));
   if (castErr) throw new Error(`vote_casts lookup failed: ${castErr.message}`);
   const castedIds = new Set((casted ?? []).map((c) => c.vote_id));
-  return undone.filter((v) => !castedIds.has(v.id));
+  return { pending: kept.filter((v) => !castedIds.has(v.id)), skippedFailed };
 }
 
+// Returns { next, skippedFailed }: next is the highest-priority still-eligible pending PDF (or
+// null if none), skippedFailed is how many candidates were excluded by the quarantine above.
+// skippedFailed is surfaced by main() into run detail even on an invocation that ends up
+// processing a different document entirely (see the FINDING 2 fix note in main()).
 export async function selectPendingPdf(client) {
-  const pending = await listPendingRollCallPdfs(client);
-  return pending[0] ?? null;
+  const { pending, skippedFailed } = await listPendingRollCallPdfs(client);
+  return { next: pending[0] ?? null, skippedFailed };
 }
 
 // ---- Task 4b: PERSISTENCE GATE (migrations 0005 — legislators.mo_house_id, 0006 — surname) ----
@@ -440,7 +571,22 @@ async function processRollCallPdf(client, runId, vote, args) {
     if (!(err instanceof pdf.RollCallParseError)) throw err;
     // THE INTEGRITY GATE: a roll call that doesn't reconcile is NEVER stored — recorded as a
     // failure (skip != empty), not silently dropped, not persisted.
-    return { source_key: vote.source_key, mode, failure: { step: `rollcall parse ${vote.source_key}`, message: err.message } };
+    //
+    // FINAL-REVIEW FIX (permanently-failing PDF wedges the queue): previously this failure was
+    // only reported in this run's own result/log — nothing durable recorded that THIS source_key
+    // had already failed, so listPendingRollCallPdfs kept re-selecting it (source_key-ascending
+    // sort) and it got a fresh LIVE re-fetch every cooldown slot, forever. Now a `.failed.json`
+    // artifact is written (see writeFailureArtifact/ROLLCALL_MAX_FAILED_ATTEMPTS above); once it
+    // reaches the retry cap, excludeQuarantinedPdfs removes this source_key from the queue so the
+    // driver can make progress on the rest of the backlog instead of retrying the same bad
+    // document indefinitely.
+    const failureArtifact = writeFailureArtifact(vote.source_key, vote.source_url, err);
+    return {
+      source_key: vote.source_key,
+      mode,
+      failure: { step: `rollcall parse ${vote.source_key}`, message: err.message },
+      failureArtifact: { attempts: failureArtifact.attempts, quarantined: failureArtifact.attempts >= ROLLCALL_MAX_FAILED_ATTEMPTS },
+    };
   }
 
   const persistResult = await persistRollCallCasts(client, runId, vote, parsed);
@@ -588,11 +734,18 @@ async function main() {
     // rationale. This invocation processes exactly ONE document either way: one roll-call PDF, or
     // (only when zero are pending) the existing bill-list + selectTargets bill-XML path below.
     const wantsExplicitBill = Boolean(args.billIdentifier || args.billXmlFile);
-    const pendingPdf = wantsExplicitBill ? null : await selectPendingPdf(client);
+    // FINDING 2 fix: the pending-PDF queue check (and its skippedFailed/quarantine count) runs
+    // whenever no explicit --bill/--bill-xml-file was given, regardless of whether this slot ends
+    // up processing a PDF or falls through to the bill-xml path below — skippedFailedPdfs is
+    // surfaced into run detail either way (both counts objects below).
+    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0 } : await selectPendingPdf(client);
+    const { next: pendingPdf, skippedFailed: skippedFailedPdfs } = pdfQueue;
     if (pendingPdf) {
       const result = await processRollCallPdf(client, runId, pendingPdf, args);
       const failures = result.failure ? [result.failure] : [];
-      const counts = { document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length };
+      const counts = {
+        document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length, skipped_failed_pdfs: skippedFailedPdfs,
+      };
       const status = failures.length === 0 ? 'succeeded' : 'partial';
       await closeRun(client, runId, status, { counts, rollCallResult: result, failures });
       console.log(JSON.stringify({
@@ -638,7 +791,7 @@ async function main() {
 
     const counts = {
       document_type: 'bill-xml', bills_listed: entries.length, bills_detailed: billResults.length,
-      failures: failures.length, roster, artifact_replay: artifactReplay,
+      failures: failures.length, roster, artifact_replay: artifactReplay, skipped_failed_pdfs: skippedFailedPdfs,
     };
     const status = failures.length === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, { counts, billResults, failures, roster });

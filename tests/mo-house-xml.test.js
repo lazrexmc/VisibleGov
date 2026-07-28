@@ -1,4 +1,8 @@
-import { readFileSync } from 'node:fs';
+import {
+  readFileSync, mkdtempSync, rmSync, existsSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -8,6 +12,8 @@ import {
 } from '../src/adapters/mo-house-xml.js';
 import {
   parseMoHouseArgs, remainingCooldownMs, formatCooldownWait, selectTargets, reconstructSurnameHeuristic,
+  enforceDurableCooldown, CooldownConvergenceError,
+  writeFailureArtifact, readFailureArtifact, excludeQuarantinedPdfs, ROLLCALL_MAX_FAILED_ATTEMPTS,
 } from '../src/cli/ingest-mo-house.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
@@ -334,4 +340,214 @@ test('reconstructSurnameHeuristic: empty/null input yields an empty string, not 
 test('reconstructSurnameHeuristic: a bare single-token full_name (no space at all) yields an empty surname', () => {
   // Realistic edge case: no first name on record at all — the heuristic can't invent one.
   assert.equal(reconstructSurnameHeuristic('Matthiesen'), '');
+});
+
+// ---- enforceDurableCooldown (final-review FINDING 1: cooldown convergence race) ----
+//
+// Bug found in whole-branch review: the pre-fix implementation read ingestion_runs ONCE, slept
+// out whatever remaining cooldown that single read implied, then proceeded unconditionally — two
+// processes starting within the same cooldown window would read the same last started_at, sleep
+// to the same wake time, and both proceed. Fixed by looping: after every sleep, re-query from
+// scratch and only proceed once a FRESH read shows remaining <= 0. sleep is injected (never a real
+// setTimeout in these tests) so the loop's re-check behavior can be observed deterministically and
+// instantly.
+
+// Stubs the exact chain enforceDurableCooldown drives (.from('ingestion_runs').select().eq()
+// .order().limit().maybeSingle()) and returns queued responses in order, one per call (repeating
+// the last one if called more times than responses provided) — lets a single test simulate
+// successive DB reads returning different rows, which the static-per-table fakeClient pattern
+// used elsewhere in this repo (tests/review-logic.test.js) does not support.
+function queuedIngestionRunsClient(responses) {
+  let call = 0;
+  const client = {
+    from(table) {
+      assert.equal(table, 'ingestion_runs', 'enforceDurableCooldown must only query ingestion_runs');
+      return {
+        select: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: () => ({
+                maybeSingle: async () => {
+                  const response = responses[Math.min(call, responses.length - 1)];
+                  call += 1;
+                  return response;
+                },
+              }),
+            }),
+          }),
+        }),
+      };
+    },
+  };
+  return { client, callCount: () => call };
+}
+
+test('enforceDurableCooldown: no prior run at all — proceeds on the first read, never sleeps', async () => {
+  const { client, callCount } = queuedIngestionRunsClient([{ data: null, error: null }]);
+  const sleep = async () => { throw new Error('must not sleep when there is no prior run'); };
+  await enforceDurableCooldown(client, 30 * 60 * 1000, { sleep });
+  assert.equal(callCount(), 1);
+});
+
+test('enforceDurableCooldown: loops on a fresh re-check after each sleep, converging only once a FRESH read shows remaining <= 0 (regression: convergence race)', async () => {
+  const minIntervalMs = 30 * 60 * 1000;
+  const now = Date.now();
+  const responses = [
+    // 1st read: last run started ~5 min ago -> ~25 min remaining
+    { data: { started_at: new Date(now - 5 * 60 * 1000).toISOString() }, error: null },
+    // 2nd read (after the 1st sleep): a NEWER started_at appeared — another process claimed the
+    // slot mid-sleep — so remaining actually went UP, not down (~29 min remaining). Proves the
+    // loop used a genuinely fresh read, not a cached/stale one.
+    { data: { started_at: new Date(now - 1 * 60 * 1000).toISOString() }, error: null },
+    // 3rd read (after the 2nd sleep): clear — cooldown has fully elapsed, proceed.
+    { data: { started_at: new Date(now - minIntervalMs).toISOString() }, error: null },
+  ];
+  const { client, callCount } = queuedIngestionRunsClient(responses);
+  const sleeps = [];
+  const sleep = async (ms) => { sleeps.push(ms); };
+  await enforceDurableCooldown(client, minIntervalMs, { sleep });
+  assert.equal(callCount(), 3, 'expected 3 fresh reads: the initial read + one re-check after each of the 2 sleeps');
+  assert.equal(sleeps.length, 2, 'expected exactly 2 sleeps, one after read 1 and one after read 2');
+  assert.ok(sleeps[0] > 24 * 60 * 1000 && sleeps[0] <= 25 * 60 * 1000, `expected ~25min first wait, got ${sleeps[0]}ms`);
+  assert.ok(sleeps[1] > 28 * 60 * 1000 && sleeps[1] <= 29 * 60 * 1000, `expected ~29min second wait, got ${sleeps[1]}ms`);
+  assert.ok(sleeps[1] > sleeps[0], 'second wait must reflect the newer, later started_at (a bigger remaining time) — proof the re-check used a fresh read, not the first one');
+});
+
+test('enforceDurableCooldown: throws a typed CooldownConvergenceError after maxIterations fresh re-checks that never converge (fail loud, not forever)', async () => {
+  const minIntervalMs = 30 * 60 * 1000;
+  const { client, callCount } = queuedIngestionRunsClient([
+    // every read is "just started" relative to the real clock — never converges
+    { data: { started_at: new Date().toISOString() }, error: null },
+  ]);
+  let sleepCalls = 0;
+  const sleep = async () => { sleepCalls += 1; };
+  await assert.rejects(
+    () => enforceDurableCooldown(client, minIntervalMs, { sleep, maxIterations: 3 }),
+    (err) => {
+      assert.ok(err instanceof CooldownConvergenceError);
+      assert.equal(err.name, 'CooldownConvergenceError');
+      assert.equal(err.maxIterations, 3);
+      return true;
+    },
+  );
+  assert.equal(callCount(), 3, 'expected exactly maxIterations fresh reads before giving up');
+  assert.equal(sleepCalls, 3, 'expected a sleep after each of the 3 non-converging reads');
+});
+
+test('enforceDurableCooldown: a lookup failure is a hard error, never silently swallowed by the loop', async () => {
+  const client = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          order: () => ({
+            limit: () => ({
+              maybeSingle: async () => ({ data: null, error: { message: 'connection refused' } }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  };
+  await assert.rejects(
+    () => enforceDurableCooldown(client, 30 * 60 * 1000, { sleep: async () => {} }),
+    /mo-house cooldown lookup failed: connection refused/,
+  );
+});
+
+// ---- failing-PDF quarantine (final-review FINDING 2: a permanently-failing PDF must not wedge
+// the queue) ----
+//
+// Bug found in whole-branch review: a PDF that persistently fails extraction/reconciliation
+// (RollCallParseError) stayed "pending" forever, sorted first (source_key ascending), and got a
+// fresh LIVE re-fetch every 30-minute cooldown slot. Fixed: a failure writes a `<source_key>
+// .failed.json` artifact with an incrementing `attempts` counter; once attempts reaches
+// ROLLCALL_MAX_FAILED_ATTEMPTS (3), excludeQuarantinedPdfs drops that source_key from the queue.
+// dir is injected (a scratch temp dir, never the real ROLLCALL_ARTIFACT_DIR) so these tests never
+// touch the gitignored artifacts dir a live driver process may be using concurrently.
+
+function withScratchArtifactDir(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'visiblegov-rollcall-'));
+  try {
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('writeFailureArtifact: first failure writes attempts=1 with the error name+message and pdf_url', () => {
+  withScratchArtifactDir((dir) => {
+    const err = Object.assign(new Error('parsed cast counts do not reconcile: yes: parsed 2 vs printed 5'), { name: 'RollCallParseError' });
+    const record = writeFailureArtifact('mo-house-xml-HB1800-4', 'https://documents.house.mo.gov/billtracking/bills261/rollcalls/034.008.pdf', err, dir);
+    assert.equal(record.attempts, 1);
+    assert.equal(record.source_key, 'mo-house-xml-HB1800-4');
+    assert.equal(record.pdf_url, 'https://documents.house.mo.gov/billtracking/bills261/rollcalls/034.008.pdf');
+    assert.deepEqual(record.error, { name: 'RollCallParseError', message: err.message });
+    assert.ok(record.failed_at);
+
+    const onDisk = readFailureArtifact('mo-house-xml-HB1800-4', dir);
+    assert.deepEqual(onDisk, record);
+  });
+});
+
+test('writeFailureArtifact: attempts increments (never resets) across repeated failures of the SAME source_key', () => {
+  withScratchArtifactDir((dir) => {
+    const err = Object.assign(new Error('boom'), { name: 'RollCallParseError' });
+    const first = writeFailureArtifact('mo-house-xml-HB1800-4', 'https://x/034.008.pdf', err, dir);
+    const second = writeFailureArtifact('mo-house-xml-HB1800-4', 'https://x/034.008.pdf', err, dir);
+    const third = writeFailureArtifact('mo-house-xml-HB1800-4', 'https://x/034.008.pdf', err, dir);
+    assert.equal(first.attempts, 1);
+    assert.equal(second.attempts, 2);
+    assert.equal(third.attempts, 3);
+  });
+});
+
+test('excludeQuarantinedPdfs: a source_key below the retry cap (attempts < 3) is kept in the queue', () => {
+  withScratchArtifactDir((dir) => {
+    const err = Object.assign(new Error('boom'), { name: 'RollCallParseError' });
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir); // attempts=1
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir); // attempts=2
+    const candidates = [{ id: 'v1', source_key: 'mo-house-xml-HB1-1' }];
+    const { kept, skippedFailed } = excludeQuarantinedPdfs(candidates, dir);
+    assert.equal(skippedFailed, 0);
+    assert.deepEqual(kept, candidates);
+  });
+});
+
+test('excludeQuarantinedPdfs: skips a source_key once attempts reaches ROLLCALL_MAX_FAILED_ATTEMPTS (3), while an unrelated never-failed source_key stays in the queue', () => {
+  withScratchArtifactDir((dir) => {
+    assert.equal(ROLLCALL_MAX_FAILED_ATTEMPTS, 3);
+    const err = Object.assign(new Error('boom'), { name: 'RollCallParseError' });
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir);
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir);
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir); // 3rd failure -> quarantined
+    const candidates = [
+      { id: 'v1', source_key: 'mo-house-xml-HB1-1' },
+      { id: 'v2', source_key: 'mo-house-xml-HB2-1' }, // never failed — must stay in the queue
+    ];
+    const { kept, skippedFailed } = excludeQuarantinedPdfs(candidates, dir);
+    assert.equal(skippedFailed, 1);
+    assert.deepEqual(kept, [{ id: 'v2', source_key: 'mo-house-xml-HB2-1' }]);
+  });
+});
+
+test('excludeQuarantinedPdfs: a manually-deleted .failed.json re-enables the PDF — the skip is driven purely by file presence, no other state', () => {
+  withScratchArtifactDir((dir) => {
+    const err = Object.assign(new Error('boom'), { name: 'RollCallParseError' });
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir);
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir);
+    writeFailureArtifact('mo-house-xml-HB1-1', 'https://x/1.pdf', err, dir); // attempts=3, quarantined
+    const candidates = [{ id: 'v1', source_key: 'mo-house-xml-HB1-1' }];
+
+    const before = excludeQuarantinedPdfs(candidates, dir);
+    assert.equal(before.skippedFailed, 1);
+    assert.deepEqual(before.kept, []);
+
+    const failedPath = join(dir, 'mo-house-xml-HB1-1.failed.json');
+    assert.ok(existsSync(failedPath), 'sanity: the failure artifact must actually exist on disk before deletion');
+    rmSync(failedPath); // simulates an operator's manual reset — no code path in this driver does this
+
+    const after = excludeQuarantinedPdfs(candidates, dir);
+    assert.equal(after.skippedFailed, 0);
+    assert.deepEqual(after.kept, candidates);
+  });
 });
