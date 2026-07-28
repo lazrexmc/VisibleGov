@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs, planExtraction, normalizeTermText, upsertKeyFor,
-  EXTRACTION_SCHEMA, EXTRACT_MODEL, EXTRACT_PROMPT_VERSION,
+  EXTRACTION_SCHEMA, EXTRACT_MODEL, EXTRACT_PROMPT_VERSION, EXTRACT_SYSTEM_PROMPT,
 } from '../src/cli/extract-terms.js';
 import { SUMMARY_SCHEMA } from '../src/lib/summarizer.js';
 
@@ -93,6 +93,26 @@ test('EXTRACTION_SCHEMA referenced_terms items require term/kind/citation_raw, a
 test('extraction constants pinned: sonnet model, own v1 prompt version, distinct from the summarizer\'s', () => {
   assert.equal(EXTRACT_MODEL, 'claude-sonnet-5');
   assert.equal(EXTRACT_PROMPT_VERSION, 'v1');
+});
+
+// ---- EXTRACT_SYSTEM_PROMPT: brought to Task 3's test bar (summarizer.js's SYSTEM_PROMPT) ----
+
+test('EXTRACT_SYSTEM_PROMPT encodes the facts-only extraction rule: never infer, restricted to what the bill text itself prints', () => {
+  const lower = EXTRACT_SYSTEM_PROMPT.toLowerCase();
+  assert.ok(lower.includes('never infer'), "missing rule marker: 'never infer'");
+  assert.ok(
+    lower.includes('the bill text itself'),
+    'extraction instruction must restrict to names/citations the bill text itself prints',
+  );
+});
+
+test('EXTRACT_SYSTEM_PROMPT mirrors Task 3\'s exhaustive framing — completeness (every referenced term) and scope (only what the text itself prints) both explicit', () => {
+  const lower = EXTRACT_SYSTEM_PROMPT.toLowerCase();
+  assert.ok(
+    lower.includes('for every statute, act, agency, program, or public law the bill text itself names or cites'),
+    "missing the exhaustive-completeness framing mirrored from summarizer.js's SYSTEM_PROMPT",
+  );
+  assert.ok(lower.includes('only'), 'missing the scope-restricting "only" alongside the completeness framing');
 });
 
 // ---- parseArgs: same --dry-run shape as the other CLIs ----

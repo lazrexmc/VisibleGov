@@ -21,8 +21,14 @@ create table glossary_terms (
   kind           text not null check (kind in ('statute','act','agency','program','public_law')),
   citation       text,                       -- normalized cite, e.g. '42 U.S.C. 1396b'
   gloss_md       text,                       -- the 1-2 sentence plain-language explanation
-  source_url     text not null,              -- the official text it was written from
-  source_hash    text not null,              -- sha256 of the fetched source excerpt
+  -- Nullable, NOT "not null": Task 4 inserts a bare STUB row here the moment a bill references a
+  -- term (term/kind/citation only, status='draft') — it has no source to cite yet. Task 5's gloss
+  -- stage is what fetches the term's primary text and fills these in (alongside gloss_md). A
+  -- column-level not null here would make every Task-4 stub insert fail; the real integrity
+  -- guarantee — nothing bare-sourced may ever reach 'published' — lives in the check constraint
+  -- below instead, at the boundary that actually matters.
+  source_url     text,                       -- the official text it was written from
+  source_hash    text,                       -- sha256 of the fetched source excerpt
   status         text not null default 'draft' check (status in ('draft','approved','published','rejected','stale')),
   model          text, prompt_version text, run_id uuid,
   created_at     timestamptz default now(), published_at timestamptz,
@@ -30,7 +36,17 @@ create table glossary_terms (
   -- parseCitation can't resolve to a fetchable source (no guessing at a URL) — this flags them
   -- for a human to map manually instead of silently dropping or fabricating a source_url.
   needs_mapping  boolean default false,
-  unique (kind, citation)
+  unique (kind, citation),
+  -- Lifecycle this constraint enforces: Task 4 creates bare stubs (term/kind/citation only,
+  -- status='draft', source_url/source_hash/gloss_md all NULL) → Task 5 fetches the term's
+  -- official source and writes gloss_md + source_url + source_hash → Task 6's review page lets
+  -- Lance adjudicate (approve/reject) → publish. A stub may sit bare indefinitely waiting on
+  -- Task 5 — that's expected, not an error. What's never allowed, at any point in that lifecycle,
+  -- is a 'published' row with a missing source or gloss: the public-facing status is the one
+  -- boundary that must be fully grounded, so it's the one thing this constraint gates.
+  constraint glossary_terms_published_complete check (
+    status <> 'published' or (source_url is not null and source_hash is not null and gloss_md is not null)
+  )
 );
 
 -- Postgres treats NULL as distinct from NULL under a unique constraint, so `unique (kind,

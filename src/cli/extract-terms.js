@@ -35,9 +35,14 @@ export const EXTRACTION_SCHEMA = {
   },
 };
 
+// Completeness AND scope, both explicit (Task 3 test bar — see summarizer.js's SYSTEM_PROMPT,
+// which this line deliberately mirrors verbatim): "for every ... the bill text itself names or
+// cites" is the completeness half (don't skip any that are there); "ONLY ... the bill text
+// itself prints; never infer" is the scope half (don't invent any that aren't).
 export const EXTRACT_SYSTEM_PROMPT = [
-  'You extract ONLY the statutes, acts, agencies, programs, and public laws that a piece of United States legislative bill text itself names or cites.',
-  'This is facts-only extraction, nothing else: extract only names/citations the bill text itself prints; never infer a name, kind, or citation the text does not state.',
+  'You extract referenced terms from United States legislative bill text for a civic-transparency glossary pipeline.',
+  'For every statute, act, agency, program, or public law the bill text itself names or cites, record {term, kind, citation_raw}.',
+  'This is facts-only extraction, nothing else: extract ONLY names/citations the bill text itself prints; never infer a name, kind, or citation the text does not state.',
   "citation_raw is verbatim from the bill text (e.g. '42 U.S.C. 1396b'), or an empty string if the bill text names the term without printing a citation for it.",
   'If the bill text prints no such terms, return an empty array for referenced_terms.',
 ].join('\n');
