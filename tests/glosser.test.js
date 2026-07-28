@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   MODEL, PROMPT_VERSION, MAX_OUTPUT_TOKENS, GLOSS_SCHEMA, GLOSS_SYSTEM_PROMPT,
   buildGlossUserMessage, authorGloss,
@@ -8,6 +9,10 @@ import {
   fetchGlossSource,
 } from '../src/lib/glosser.js';
 import { assessVerdicts } from '../src/lib/verifier.js';
+import { parseCitation, extractSubsectionText } from '../src/adapters/uscode.js';
+import { normalizeCitation } from '../src/cli/extract-terms.js';
+
+const section1396b = readFileSync('tests/fixtures/uscode/title-42-section-1396b.xhtml', 'utf8');
 
 // ---- constants (controller ruling 1: opus-5 authors, sonnet-5 verifies — the established pair) ----
 
@@ -153,4 +158,33 @@ test('fetchGlossSource rejects a citation with no parseable title/section before
 test('fetchGlossSource rejects null/empty citation before touching the network', async () => {
   await assert.rejects(() => fetchGlossSource(''), /not a parseable USC citation/);
   await assert.rejects(() => fetchGlossSource(null), /not a parseable USC citation/);
+});
+
+// ---- fix round 1 (controller ruling): AS-CITED citation granularity round-trips end-to-end ----
+//
+// extract-terms.js's normalizeCitation now PRESERVES a captured subsection in the stored
+// glossary_terms.citation value (e.g. '42 U.S.C. 1396b(i)', not just '42 U.S.C. 1396b'). This
+// proves the full live-pipeline chain — store (normalizeCitation) -> re-parse
+// (parseCitation, exactly as fetchGlossSource calls it on term.citation) -> slice
+// (extractSubsectionText, exactly as fetchGlossSource's OversizeExcerptError fallback calls it) —
+// actually reaches subsection-level slicing for the real HR 498 golden case (42 U.S.C. 1396b(i)),
+// not just that each piece works in isolation.
+test('a stored AS-CITED citation round-trips through parseCitation to reach subsection slicing for the real HR 498 golden case', () => {
+  // What extract-terms.js's upsertGlossaryTerm now actually stores for HR 498's own raw citation
+  // shape (subsection preserved, per the fix-round-1 controller ruling).
+  const storedCitation = normalizeCitation('42 U.S.C. 1396b(i)');
+  assert.equal(storedCitation, '42 U.S.C. 1396b(i)');
+
+  // fetchGlossSource (glosser.js) re-parses exactly this stored value via parseCitation — the
+  // subsection must survive the store-then-reparse round trip, not just the original raw text.
+  const reparsed = parseCitation(storedCitation);
+  assert.deepEqual(reparsed, { title: 42, section: '1396b', subsection: 'i' });
+
+  // And reparsed.subsection is what actually drives a correct, real, well-under-cap excerpt when
+  // the whole section oversizes — the exact fallback fetchGlossSource performs on
+  // OversizeExcerptError — proven against the real fixture (169,882 chars whole-section, over the
+  // 100k cap), not a synthetic one.
+  const excerpt = extractSubsectionText(section1396b, reparsed.subsection, { title: reparsed.title, section: reparsed.section });
+  assert.ok(excerpt.length > 0 && excerpt.length < 100000);
+  assert.match(excerpt, /organ transplant/i);
 });

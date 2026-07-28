@@ -135,6 +135,28 @@ export function upsertKeyFor(term) {
   return { by: 'term', needs_mapping: true };
 }
 
+// normalizeCitation: the stored `glossary_terms.citation` string, AS-CITED granularity (fix
+// round 1 controller ruling, glossary plan Task 5 follow-up). Preserves a captured subsection
+// (parseCitation's `subsection` field — see uscode.js) rather than collapsing every citation to
+// section level: a bill citing "42 U.S.C. 1396b(i)" and one citing "42 U.S.C. 1396b" bare
+// intentionally yield DISTINCT glossary_terms rows. Rationale (controller ruling, recorded here
+// verbatim for the next reader): the design doc's own example term is section-specific ("Social
+// Security Act, Sec. 1903"); a gloss of the actually-cited subsection is more relevant to that
+// bill's reader than a gloss of the whole (possibly huge) section; dedup only splits when bills
+// genuinely cite DIFFERENT subsections of the same section (a modest, accepted cost); and this
+// changes cheaply now because 0007 is still unapplied and this extraction backfill has never run
+// live — no data migration, no existing rows to reconcile. This is also what makes uscode.js's
+// subsection-level oversize fallback (extractSubsectionText, gated on parseCitation re-resolving
+// a subsection from THIS stored string) reachable at all from the live pipeline — see
+// glosser.js's fetchGlossSource, which calls parseCitation on exactly this stored value. Pure:
+// assumes citationRaw already parses (only ever called from the `by: 'citation'` branch below,
+// which upsertKeyFor has already gated on parseCitation succeeding).
+export function normalizeCitation(citationRaw) {
+  const parsed = parseCitation(citationRaw);
+  const base = `${parsed.title} U.S.C. ${parsed.section}`;
+  return parsed.subsection ? `${base}(${parsed.subsection})` : base;
+}
+
 // ---- DB-facing helpers ----
 
 async function loadAllSummaries(client) {
@@ -193,8 +215,7 @@ async function upsertGlossaryTerm(client, runId, rawTerm) {
   const kind = rawTerm.kind;
 
   if (key.by === 'citation') {
-    const parsed = parseCitation(rawTerm.citation_raw);
-    const citation = `${parsed.title} U.S.C. ${parsed.section}`;
+    const citation = normalizeCitation(rawTerm.citation_raw);
     await insertIfAbsent(client, GLOSSARY_TERMS_TABLE,
       [{ term, kind, citation, status: 'draft', needs_mapping: false, run_id: runId }], 'kind,citation');
     const existing = await findExistingGlossaryTerm(client, { kind, citation, term: null });

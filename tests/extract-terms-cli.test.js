@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseArgs, planExtraction, normalizeTermText, upsertKeyFor,
+  parseArgs, planExtraction, normalizeTermText, upsertKeyFor, normalizeCitation,
   EXTRACTION_SCHEMA, EXTRACT_MODEL, EXTRACT_PROMPT_VERSION, EXTRACT_SYSTEM_PROMPT,
 } from '../src/cli/extract-terms.js';
 import { SUMMARY_SCHEMA } from '../src/lib/summarizer.js';
@@ -67,6 +67,30 @@ test('upsertKeyFor: a popular-name-only citation (no USC cite printed) upserts b
 test('upsertKeyFor: a "section X of title Y" citation resolves by citation', () => {
   const key = upsertKeyFor({ term: 'Some Program', kind: 'program', citation_raw: 'section 1396b of title 42' });
   assert.deepEqual(key, { by: 'citation', needs_mapping: false });
+});
+
+// ---- normalizeCitation: AS-CITED granularity (fix round 1 controller ruling) — a captured
+// subsection is PRESERVED in the stored citation, not collapsed to section level, so a bill
+// citing 1396b(i) and one citing 1396b bare yield distinct glossary_terms rows, and so uscode.js's
+// subsection-level oversize fallback (extractSubsectionText) is reachable end-to-end from the
+// live extraction pipeline (parseCitation re-resolves the subsection from this exact stored value
+// — see glosser.js's fetchGlossSource). ----
+
+test('normalizeCitation preserves a captured subsection in the stored citation (e.g. HR 498\'s own 1396b(i) cite)', () => {
+  assert.equal(normalizeCitation('42 U.S.C. 1396b(i)'), '42 U.S.C. 1396b(i)');
+});
+
+test('normalizeCitation leaves a bare section citation unchanged — no subsection to preserve', () => {
+  assert.equal(normalizeCitation('42 U.S.C. 1396b'), '42 U.S.C. 1396b');
+});
+
+test('normalizeCitation normalizes loose formatting (section symbol, "section X of title Y") to the canonical shape', () => {
+  assert.equal(normalizeCitation('42 U.S.C. §1396b'), '42 U.S.C. 1396b');
+  assert.equal(normalizeCitation('section 1396b of title 42'), '42 U.S.C. 1396b');
+});
+
+test('normalizeCitation preserves a subsection on a dashed section number too (e.g. 1396r-4(f))', () => {
+  assert.equal(normalizeCitation('42 U.S.C. 1396r-4(f)'), '42 U.S.C. 1396r-4(f)');
 });
 
 // ---- EXTRACTION_SCHEMA: mirrors SUMMARY_SCHEMA's referenced_terms shape (tiny output) ----
