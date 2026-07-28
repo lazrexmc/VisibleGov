@@ -40,21 +40,48 @@ function normalizeWhitespace(s) {
   return String(s || '').replace(/\s+/g, ' ').trim();
 }
 
+function countBySection(bullets) {
+  const counts = new Map();
+  for (const b of bullets) counts.set(b.section, (counts.get(b.section) || 0) + 1);
+  return counts;
+}
+
 // golden/fresh are summary JSON shapes: {what_it_does: [{point, section}], stated_purpose, classification}.
 // Controller ruling: a null golden.classification means "not recoverable from the stored body_md"
 // (see buildGoldenJson) — treated as not comparable, never a drift signal on its own.
+//
+// Section-citation comparison is COUNT-AWARE (multiset), not plain Set membership. Real goldens
+// cite the same section repeatedly — e.g. HR 498's golden cites 'Sec. 2(b)' on 9 of its 11
+// bullets. Under Set membership, collapsing all 9 of those bullets down to 1 still leaves
+// 'Sec. 2(b)' "present", so missingSections would read [] and the run would PASS despite ~73%
+// content loss. Instead: for each section, a "shortfall" is max(0, goldenCount - freshCount) —
+// how many of that section's golden citations have no counterpart in fresh. drift fires when the
+// sum of shortfalls exceeds 30% of the golden's total citation count. missingSections lists only
+// sections with a shortfall, annotated '<section> (x<shortfall>)' so the count loss is visible at
+// a glance (not just that the section still appears at least once).
 export function compareSummaries(golden, fresh) {
   const classificationChanged = golden.classification !== null
     && golden.classification !== fresh.classification;
 
   const purposeChanged = normalizeWhitespace(golden.stated_purpose) !== normalizeWhitespace(fresh.stated_purpose);
 
-  const goldenSections = (golden.what_it_does || []).map((b) => b.section);
-  const freshSections = new Set((fresh.what_it_does || []).map((b) => b.section));
-  const missingSections = goldenSections.filter((s) => !freshSections.has(s));
-  const missingRatio = goldenSections.length === 0 ? 0 : missingSections.length / goldenSections.length;
+  const goldenBullets = golden.what_it_does || [];
+  const freshBullets = fresh.what_it_does || [];
+  const goldenCounts = countBySection(goldenBullets);
+  const freshCounts = countBySection(freshBullets);
 
-  const bulletCountDelta = (fresh.what_it_does || []).length - (golden.what_it_does || []).length;
+  let totalMissing = 0;
+  const missingSections = [];
+  for (const [section, goldenCount] of goldenCounts) {
+    const shortfall = Math.max(0, goldenCount - (freshCounts.get(section) || 0));
+    if (shortfall > 0) {
+      totalMissing += shortfall;
+      missingSections.push(`${section} (x${shortfall})`);
+    }
+  }
+  const missingRatio = goldenBullets.length === 0 ? 0 : totalMissing / goldenBullets.length;
+
+  const bulletCountDelta = freshBullets.length - goldenBullets.length;
   const drift = classificationChanged || purposeChanged || missingRatio > DRIFT_THRESHOLD;
 
   return { classificationChanged, purposeChanged, bulletCountDelta, missingSections, drift };

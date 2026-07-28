@@ -89,7 +89,56 @@ test('compareSummaries: dropped sections beyond the 30% threshold are flagged as
   };
   const result = compareSummaries(baseGolden, fresh);
   assert.equal(result.drift, true);
-  assert.deepEqual(result.missingSections.sort(), ['Sec. 2', 'Sec. 3(a)']);
+  assert.deepEqual(result.missingSections.sort(), ['Sec. 2 (x1)', 'Sec. 3(a) (x1)']);
+});
+
+test('compareSummaries: count-aware — a section collapsed from many golden citations to few is a shortfall even though it still "appears" (mirrors HR 498: 9 of 11 bullets cite the same section)', () => {
+  // golden: 9x 'Sec. 2(b)' + 1x 'Sec. 1' + 1x 'Sec. 3' = 11 total citations.
+  const golden = {
+    ...baseGolden,
+    what_it_does: [
+      ...Array.from({ length: 9 }, (_, i) => ({ point: `Point ${i}`, section: 'Sec. 2(b)' })),
+      { point: 'Point A', section: 'Sec. 1' },
+      { point: 'Point B', section: 'Sec. 3' },
+    ],
+  };
+  // fresh: collapses the 9 'Sec. 2(b)' bullets down to 1 — plain Set membership would call this
+  // "present" (missingSections: []), but 8 of those 9 citations have no counterpart in fresh.
+  const fresh = {
+    ...baseGolden,
+    what_it_does: [
+      { point: 'Combined point', section: 'Sec. 2(b)' },
+      { point: 'Point A', section: 'Sec. 1' },
+      { point: 'Point B', section: 'Sec. 3' },
+    ],
+  };
+  const result = compareSummaries(golden, fresh);
+  // shortfall = 9 - 1 = 8; ratio = 8/11 ≈ 0.727 > 0.3
+  assert.deepEqual(result.missingSections, ['Sec. 2(b) (x8)']);
+  assert.equal(result.drift, true);
+});
+
+test('compareSummaries: count-aware — duplicate-section citation counts preserved (even if bullet order differs) is NOT drift', () => {
+  // mirrors HR 1366's shape: 5x 'Sec. 2(a)' + 3x 'Sec. 2(b)' + 1x 'Sec. 3' = 9 total citations.
+  const golden = {
+    ...baseGolden,
+    what_it_does: [
+      ...Array.from({ length: 5 }, (_, i) => ({ point: `A${i}`, section: 'Sec. 2(a)' })),
+      ...Array.from({ length: 3 }, (_, i) => ({ point: `B${i}`, section: 'Sec. 2(b)' })),
+      { point: 'C', section: 'Sec. 3' },
+    ],
+  };
+  const fresh = {
+    ...baseGolden,
+    what_it_does: [
+      { point: 'C-reordered', section: 'Sec. 3' },
+      ...Array.from({ length: 3 }, (_, i) => ({ point: `B${i}-reworded`, section: 'Sec. 2(b)' })),
+      ...Array.from({ length: 5 }, (_, i) => ({ point: `A${i}-reworded`, section: 'Sec. 2(a)' })),
+    ],
+  };
+  const result = compareSummaries(golden, fresh);
+  assert.deepEqual(result.missingSections, []);
+  assert.equal(result.drift, false);
 });
 
 test('compareSummaries: missing sections at or below the 30% threshold are NOT drift', () => {
