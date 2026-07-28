@@ -1,5 +1,5 @@
 import {
-  readFileSync, mkdtempSync, rmSync, existsSync,
+  readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import {
   parseMoHouseArgs, remainingCooldownMs, formatCooldownWait, selectTargets, reconstructSurnameHeuristic,
   enforceDurableCooldown, CooldownConvergenceError,
   writeFailureArtifact, readFailureArtifact, excludeQuarantinedPdfs, ROLLCALL_MAX_FAILED_ATTEMPTS,
+  replayArtifacts,
 } from '../src/cli/ingest-mo-house.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
@@ -524,9 +525,12 @@ test('excludeQuarantinedPdfs: skips a source_key once attempts reaches ROLLCALL_
       { id: 'v1', source_key: 'mo-house-xml-HB1-1' },
       { id: 'v2', source_key: 'mo-house-xml-HB2-1' }, // never failed — must stay in the queue
     ];
-    const { kept, skippedFailed } = excludeQuarantinedPdfs(candidates, dir);
+    const { kept, skippedFailed, skippedKeys } = excludeQuarantinedPdfs(candidates, dir);
     assert.equal(skippedFailed, 1);
     assert.deepEqual(kept, [{ id: 'v2', source_key: 'mo-house-xml-HB2-1' }]);
+    // Re-review: a bare count gives an operator no way to know WHICH document is quarantined
+    // without listing the artifacts dir by hand — skippedKeys names it directly.
+    assert.deepEqual(skippedKeys, ['mo-house-xml-HB1-1']);
   });
 });
 
@@ -549,5 +553,91 @@ test('excludeQuarantinedPdfs: a manually-deleted .failed.json re-enables the PDF
     const after = excludeQuarantinedPdfs(candidates, dir);
     assert.equal(after.skippedFailed, 0);
     assert.deepEqual(after.kept, candidates);
+  });
+});
+
+// ---- replayArtifacts must ignore .failed.json (re-review regression: a plain '.json' suffix
+// filter also matched the quarantine artifacts writeFailureArtifact writes, and those carry no
+// `casts` field — replayArtifacts's `for (const cast of artifact.casts)` threw an UNCAUGHT
+// TypeError on every invocation the moment any PDF had failed even once, a total driver outage
+// that gets worse once migrations 0005/0006 land, since this function runs unconditionally on
+// every invocation regardless of the migration gate) ----
+
+async function withScratchArtifactDirAsync(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'visiblegov-rollcall-'));
+  try {
+    return await fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Minimal fake client covering exactly the two tables replayArtifacts's happy path touches:
+// legislators (loadMoRoster) and vote_casts (insertIfAbsent). Any other table is a test bug.
+function fakeReplayClient(legislatorsRows) {
+  return {
+    from(table) {
+      if (table === 'legislators') {
+        return { select: () => ({ not: async () => ({ data: legislatorsRows, error: null }) }) };
+      }
+      if (table === 'vote_casts') {
+        return { upsert: async () => ({ error: null }) };
+      }
+      throw new Error(`fakeReplayClient: unexpected table "${table}"`);
+    },
+  };
+}
+
+test('replayArtifacts: a directory containing ONLY a .failed.json (no real gate artifact) is skipped cleanly — no throw, not counted in attempted', async () => {
+  await withScratchArtifactDirAsync(async (dir) => {
+    const err = Object.assign(new Error('boom'), { name: 'RollCallParseError' });
+    writeFailureArtifact('mo-house-xml-HB2-1', 'https://x/2.pdf', err, dir);
+
+    const result = await replayArtifacts(fakeReplayClient([]), 'run-1', dir);
+    assert.deepEqual(result, {
+      attempted: 0, replayed: 0, stillGated: false, unresolved: 0, unresolvedSample: [],
+    });
+    // the .failed.json itself must be untouched — replayArtifacts never even looked at it
+    assert.ok(existsSync(join(dir, 'mo-house-xml-HB2-1.failed.json')));
+  });
+});
+
+test('replayArtifacts: a mixed directory (a real gate artifact alongside an unrelated .failed.json) replays only the real one — the .failed.json is never counted, never read as a cast list, and survives untouched', async () => {
+  await withScratchArtifactDirAsync(async (dir) => {
+    // Real gate artifact, same shape persistRollCallCasts writes when migration 0005/0006 isn't
+    // applied yet: { vote_id, source_key, tallies, casts, extracted_run_id, note }.
+    const gateArtifact = {
+      vote_id: 'vote-1',
+      source_key: 'mo-house-xml-HB1-1',
+      tallies: { yes: 1, no: 0, present: 0, absent: 0, vacancies: 0 },
+      casts: [{ surname: 'MATTHIESEN', district: null, position: 'yea' }],
+      extracted_run_id: 'run-0',
+      note: 'test fixture',
+    };
+    writeFileSync(join(dir, 'mo-house-xml-HB1-1.json'), JSON.stringify(gateArtifact, null, 2));
+
+    // A DIFFERENT source_key's failure artifact, sitting in the same directory (the realistic
+    // case: one PDF gated on the migration, an unrelated PDF permanently failing extraction).
+    const err = Object.assign(new Error('boom'), { name: 'RollCallParseError' });
+    writeFailureArtifact('mo-house-xml-HB2-1', 'https://x/2.pdf', err, dir);
+
+    const roster = [{
+      id: 'leg-matthiesen', full_name: 'Mark Matthiesen', surname: 'Matthiesen', mo_house_id: '107',
+    }];
+    const result = await replayArtifacts(fakeReplayClient(roster), 'run-2', dir);
+
+    assert.equal(result.attempted, 1, 'only the real .json artifact counts — the .failed.json must not');
+    assert.equal(result.replayed, 1, 'MATTHIESEN resolves against the roster, so the gate artifact fully replays');
+    assert.equal(result.unresolved, 0);
+
+    // the real artifact is deleted once fully replayed (existing behavior, unchanged)...
+    assert.equal(existsSync(join(dir, 'mo-house-xml-HB1-1.json')), false);
+    // ...but the unrelated .failed.json must still be there, completely untouched.
+    assert.ok(existsSync(join(dir, 'mo-house-xml-HB2-1.failed.json')));
+    const stillFailed = readFailureArtifact('mo-house-xml-HB2-1', dir);
+    assert.equal(stillFailed.attempts, 1);
+
+    // sanity: exactly the one remaining file in the directory.
+    assert.deepEqual(readdirSync(dir), ['mo-house-xml-HB2-1.failed.json']);
   });
 });

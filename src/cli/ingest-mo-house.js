@@ -333,18 +333,21 @@ export function writeFailureArtifact(sourceKey, pdfUrl, err, dir = ROLLCALL_ARTI
 
 // Pure filter, directly unit-tested (no DB required): drops any candidate whose .failed.json has
 // reached ROLLCALL_MAX_FAILED_ATTEMPTS. listPendingRollCallPdfs below is a thin DB-querying
-// wrapper around this.
+// wrapper around this. Returns skippedKeys (not just a count) — re-review flagged that a bare
+// count gives an operator no way to know WHICH document(s) are quarantined without going and
+// listing the artifacts dir by hand; the keys are cheap to carry through and make the log
+// line/run-detail actually actionable.
 export function excludeQuarantinedPdfs(candidates, dir = ROLLCALL_ARTIFACT_DIR) {
-  let skippedFailed = 0;
+  const skippedKeys = [];
   const kept = candidates.filter((v) => {
     const failure = readFailureArtifact(v.source_key, dir);
     if (failure && failure.attempts >= ROLLCALL_MAX_FAILED_ATTEMPTS) {
-      skippedFailed += 1;
+      skippedKeys.push(v.source_key);
       return false;
     }
     return true;
   });
-  return { kept, skippedFailed };
+  return { kept, skippedFailed: skippedKeys.length, skippedKeys };
 }
 
 // Live-DB check while building this task caught a real bug in an earlier draft of this query:
@@ -362,28 +365,28 @@ async function listPendingRollCallPdfs(client) {
     .order('source_key', { ascending: true });
   if (error) throw new Error(`pending roll-call PDF lookup failed: ${error.message}`);
   const undone = (candidates ?? []).filter((v) => !existsSync(artifactPath(v.source_key)));
-  if (undone.length === 0) return { pending: [], skippedFailed: 0 };
-  const { kept, skippedFailed } = excludeQuarantinedPdfs(undone);
+  if (undone.length === 0) return { pending: [], skippedFailed: 0, skippedKeys: [] };
+  const { kept, skippedFailed, skippedKeys } = excludeQuarantinedPdfs(undone);
   if (skippedFailed > 0) {
-    console.error(`[${new Date().toISOString()}] roll-call PDF queue: skipping ${skippedFailed} permanently-failing PDF(s) (>= ${ROLLCALL_MAX_FAILED_ATTEMPTS} failed attempts — see *.failed.json in ${ROLLCALL_ARTIFACT_DIR})`);
+    console.error(`[${new Date().toISOString()}] roll-call PDF queue: skipping ${skippedFailed} permanently-failing PDF(s): ${skippedKeys.join(', ')} (>= ${ROLLCALL_MAX_FAILED_ATTEMPTS} failed attempts — see *.failed.json in ${ROLLCALL_ARTIFACT_DIR})`);
   }
-  if (kept.length === 0) return { pending: [], skippedFailed };
+  if (kept.length === 0) return { pending: [], skippedFailed, skippedKeys };
   const { data: casted, error: castErr } = await client
     .from('vote_casts')
     .select('vote_id')
     .in('vote_id', kept.map((v) => v.id));
   if (castErr) throw new Error(`vote_casts lookup failed: ${castErr.message}`);
   const castedIds = new Set((casted ?? []).map((c) => c.vote_id));
-  return { pending: kept.filter((v) => !castedIds.has(v.id)), skippedFailed };
+  return { pending: kept.filter((v) => !castedIds.has(v.id)), skippedFailed, skippedKeys };
 }
 
-// Returns { next, skippedFailed }: next is the highest-priority still-eligible pending PDF (or
-// null if none), skippedFailed is how many candidates were excluded by the quarantine above.
-// skippedFailed is surfaced by main() into run detail even on an invocation that ends up
+// Returns { next, skippedFailed, skippedKeys }: next is the highest-priority still-eligible
+// pending PDF (or null if none), skippedFailed/skippedKeys describe what the quarantine above
+// excluded. Both are surfaced by main() into run detail even on an invocation that ends up
 // processing a different document entirely (see the FINDING 2 fix note in main()).
 export async function selectPendingPdf(client) {
-  const { pending, skippedFailed } = await listPendingRollCallPdfs(client);
-  return { next: pending[0] ?? null, skippedFailed };
+  const { pending, skippedFailed, skippedKeys } = await listPendingRollCallPdfs(client);
+  return { next: pending[0] ?? null, skippedFailed, skippedKeys };
 }
 
 // ---- Task 4b: PERSISTENCE GATE (migrations 0005 — legislators.mo_house_id, 0006 — surname) ----
@@ -487,12 +490,26 @@ async function persistRollCallCasts(client, runId, vote, parsed) {
 // its `casts` trimmed down to only the STILL-unresolved ones, so the next replay only re-attempts
 // what's left rather than redoing already-resolved work. An artifact is only deleted once a replay
 // resolves everything in it.
-async function replayArtifacts(client, runId) {
+//
+// FIX ROUND (re-review, final-review hardening): a plain `f.endsWith('.json')` filter also
+// matches the `<source_key>.failed.json` quarantine artifacts writeFailureArtifact writes
+// (Finding 2 above) — '.failed.json'.endsWith('.json') is true. Those carry no `casts` field at
+// all, so `for (const cast of artifact.casts)` below threw an UNCAUGHT TypeError
+// ("artifact.casts is not iterable") on every single invocation of this driver from the moment
+// ANY PDF had failed even once — a total outage, and one that would only get WORSE the moment
+// migrations 0005/0006 land (this function runs unconditionally, every invocation, regardless of
+// the gate). Fixed by excluding `.failed.json` explicitly, not just incidentally.
+//
+// dir is injectable (defaults to the real ROLLCALL_ARTIFACT_DIR) and this is now exported purely
+// so it can be unit-tested against a scratch directory without touching the real gitignored
+// artifacts dir a live driver process may be using concurrently — same convention as
+// readFailureArtifact/writeFailureArtifact/excludeQuarantinedPdfs above.
+export async function replayArtifacts(client, runId, dir = ROLLCALL_ARTIFACT_DIR) {
   const empty = {
     attempted: 0, replayed: 0, stillGated: false, unresolved: 0, unresolvedSample: [],
   };
-  if (!existsSync(ROLLCALL_ARTIFACT_DIR)) return empty;
-  const files = readdirSync(ROLLCALL_ARTIFACT_DIR).filter((f) => f.endsWith('.json'));
+  if (!existsSync(dir)) return empty;
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.failed.json'));
   if (files.length === 0) return empty;
   let roster;
   try {
@@ -505,7 +522,7 @@ async function replayArtifacts(client, runId) {
   let unresolvedTotal = 0;
   const unresolvedSample = [];
   for (const file of files) {
-    const filePath = `${ROLLCALL_ARTIFACT_DIR}/${file}`;
+    const filePath = `${dir}/${file}`;
     const artifact = JSON.parse(readFileSync(filePath, 'utf8'));
     const resolvedRows = [];
     const unresolved = [];
@@ -734,17 +751,17 @@ async function main() {
     // rationale. This invocation processes exactly ONE document either way: one roll-call PDF, or
     // (only when zero are pending) the existing bill-list + selectTargets bill-XML path below.
     const wantsExplicitBill = Boolean(args.billIdentifier || args.billXmlFile);
-    // FINDING 2 fix: the pending-PDF queue check (and its skippedFailed/quarantine count) runs
-    // whenever no explicit --bill/--bill-xml-file was given, regardless of whether this slot ends
-    // up processing a PDF or falls through to the bill-xml path below — skippedFailedPdfs is
-    // surfaced into run detail either way (both counts objects below).
-    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0 } : await selectPendingPdf(client);
-    const { next: pendingPdf, skippedFailed: skippedFailedPdfs } = pdfQueue;
+    // FINDING 2 fix: the pending-PDF queue check (and its skippedFailed/quarantine count+keys)
+    // runs whenever no explicit --bill/--bill-xml-file was given, regardless of whether this slot
+    // ends up processing a PDF or falls through to the bill-xml path below — surfaced into run
+    // detail either way (both counts objects below).
+    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0, skippedKeys: [] } : await selectPendingPdf(client);
+    const { next: pendingPdf, skippedFailed: skippedFailedPdfs, skippedKeys: skippedFailedPdfKeys } = pdfQueue;
     if (pendingPdf) {
       const result = await processRollCallPdf(client, runId, pendingPdf, args);
       const failures = result.failure ? [result.failure] : [];
       const counts = {
-        document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length, skipped_failed_pdfs: skippedFailedPdfs,
+        document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
       };
       const status = failures.length === 0 ? 'succeeded' : 'partial';
       await closeRun(client, runId, status, { counts, rollCallResult: result, failures });
@@ -791,7 +808,7 @@ async function main() {
 
     const counts = {
       document_type: 'bill-xml', bills_listed: entries.length, bills_detailed: billResults.length,
-      failures: failures.length, roster, artifact_replay: artifactReplay, skipped_failed_pdfs: skippedFailedPdfs,
+      failures: failures.length, roster, artifact_replay: artifactReplay, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
     };
     const status = failures.length === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, { counts, billResults, failures, roster });
