@@ -47,6 +47,10 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   count + dollar estimate stated up front. Mechanical enforcement exists where possible (e.g.
   the golden-check `GOLDEN_CHECK_APPROVED` gate) - extend that pattern to new model-calling
   tools.
-- **Trust model v2:** summaries are opus-5-authored → sonnet-5 adversarially verified
-  (mechanically completeness-gated - never trust the verifier's self-reported overall) →
-  Lance adjudicates/publishes. Facts-only rule per the spec; nothing editorial, ever.
+- **Trust model v3 (adopted 2026-07-28 for glossary; summaries at their next batch; spec:
+  docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from official
+  text only → sonnet-5 adversarially verifies (mechanically completeness-gated - never trust
+  the verifier's self-report) → verified-CLEAN items auto-approve and auto-publish with
+  per-item audit logging; Lance reviews FLAGGED items only (process auditor, not truth
+  certifier). Public rendering must carry receipts (source link + supporting quote). Facts-only
+  rule per the spec; nothing editorial, ever.

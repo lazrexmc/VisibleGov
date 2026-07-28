@@ -1,4 +1,12 @@
-# Trust Model v3 — Process-Audit Adjudication (DRAFT, awaiting Lance's approval)
+# Trust Model v3 — Process-Audit Adjudication (ADOPTED for glossary, 2026-07-28)
+
+> **Adoption record (2026-07-28, same day as draft):** Lance chose **fully automatic** for
+> mechanism 2 — verified-clean items auto-approve AND auto-publish with no human touch; he
+> reviews flagged items only ("that's too much time and work for a human, im not an LLM").
+> Glossary adopts now; summaries adopt at their next batch under the same rules. Sampling
+> stays available as an optional audit tool, not an obligation. Open decisions 1 and 4 are
+> thereby resolved (no mandatory sample; summaries follow); 2 (second vendor) and 3 (label
+> wording) remain open.
 
 **Origin (Lance, 2026-07-28, verbatim):** "My biggest concern is me approving them, I'm not a
 lawyer or a judge. I just have to believe what is displayed to me is true. My best bet,
