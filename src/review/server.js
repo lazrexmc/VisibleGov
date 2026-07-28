@@ -21,6 +21,13 @@ const TRANSITIONS = {
   stale: { approve: 'approved', reject: 'rejected', edit: 'draft' },
 };
 
+// Real-use gap (Lance, live): 'approved' MUST stay in the queue. approve->publish is a legal
+// transition (see TRANSITIONS above), but if approved rows aren't listed here they become
+// invisible the moment they're approved — the only status with a legal onward move and nowhere
+// to make it from. draft/stale are the two "needs a first decision" states; approved is "needs
+// publishing" — all three belong in the working queue.
+const QUEUE_STATUSES = ['draft', 'stale', 'approved'];
+
 export function nextStatus(current, action) {
   const next = TRANSITIONS[current] && TRANSITIONS[current][action];
   if (!next) throw new Error('illegal transition');
@@ -211,7 +218,7 @@ async function handleQueue(client, res) {
     const { data, error } = await client
       .from('summaries')
       .select('id,status,created_at,bills(identifier,title)')
-      .in('status', ['draft', 'stale'])
+      .in('status', QUEUE_STATUSES)
       .order('created_at', { ascending: true });
     if (error) throw error;
 

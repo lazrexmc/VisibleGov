@@ -95,6 +95,30 @@
     document.getElementById('status-msg').textContent = msg;
   }
 
+  // Mirrors src/review/server.js's TRANSITIONS table (action names only — the server is still
+  // the enforcement authority; an illegal action still 400s there regardless of what the UI
+  // shows). approved has no 'edit'/'approve' action, only publish/reject — without this, the
+  // buttons for those illegal actions stayed visible on an approved item with no way to tell
+  // that clicking them would fail.
+  var STATUS_ACTIONS = {
+    draft: ['edit', 'approve', 'reject'],
+    stale: ['edit', 'approve', 'reject'],
+    approved: ['publish', 'reject'],
+  };
+
+  function updateActionButtons(status) {
+    var actions = STATUS_ACTIONS[status] || [];
+    var buttonsByAction = {
+      edit: document.getElementById('btn-save-edit'),
+      approve: document.getElementById('btn-approve'),
+      reject: document.getElementById('btn-reject'),
+      publish: document.getElementById('btn-publish'),
+    };
+    for (var action in buttonsByAction) {
+      buttonsByAction[action].style.display = actions.indexOf(action) !== -1 ? '' : 'none';
+    }
+  }
+
   // Mirrors src/review/server.js's verificationBadge() — null/no verification yet vs. clean vs.
   // flagged, with a human-readable count in the label.
   function verificationBadge(verification) {
@@ -182,6 +206,7 @@
       document.getElementById('draft-edit').value = data.summary.body_md || '';
       document.getElementById('note').value = '';
       renderVerification(data.verification || null);
+      updateActionButtons(data.summary.status);
 
       const vs = document.getElementById('vote-strip');
       vs.textContent = data.vote

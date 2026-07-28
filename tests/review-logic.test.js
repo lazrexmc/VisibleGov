@@ -276,22 +276,30 @@ function withServer(fn, clientOverride) {
 // ---- fake Supabase-shaped client (test-only) ----
 // Every postgrest-js query builder method returns the same chainable, thenable object regardless
 // of call order — mirrors real Supabase's builder shape closely enough to drive handleQueue/
-// handleItem through a real HTTP round trip without a live DB.
-function fakeQuery(result) {
+// handleItem through a real HTTP round trip without a live DB. onCall, if given, records every
+// builder-method invocation (table, method, args) so a test can assert on what was actually
+// queried (e.g. which statuses a .in('status', [...]) call asked for), not just the fake result.
+function fakeQuery(result, onCall) {
+  const record = (method) => (...args) => { if (onCall) onCall(method, args); return builder; };
   const builder = {
-    select: () => builder,
-    in: () => builder,
-    eq: () => builder,
-    order: () => builder,
-    limit: () => builder,
-    maybeSingle: () => builder,
+    select: record('select'),
+    in: record('in'),
+    eq: record('eq'),
+    order: record('order'),
+    limit: record('limit'),
+    maybeSingle: record('maybeSingle'),
     then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
   };
   return builder;
 }
 
-function fakeClient(resultsByTable) {
-  return { from: (table) => fakeQuery(resultsByTable[table] ?? { data: null, error: null }) };
+function fakeClient(resultsByTable, onCall) {
+  return {
+    from: (table) => fakeQuery(
+      resultsByTable[table] ?? { data: null, error: null },
+      onCall ? (method, args) => onCall(table, method, args) : undefined,
+    ),
+  };
 }
 
 // ---- fix: review server must degrade, not 500, when summary_verifications is missing (0004 not
@@ -335,6 +343,47 @@ test('GET /api/item/:id returns verification:null (200, not 500) when summary_ve
     const body = await res.json();
     assert.equal(body.verification, null);
     assert.equal(body.summary.id, 'sum1');
+  }, client);
+});
+
+// ---- fix: approved summaries must stay in the review queue until published (real-use gap:
+// approve->publish is a legal transition, but an approved row was invisible the moment it left
+// draft/stale, with no UI path back to it) ----
+
+test('GET /api/queue queries summaries with status in (draft, stale, approved)', () => {
+  const calls = [];
+  const client = fakeClient(
+    {
+      summaries: { data: [], error: null },
+    },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    await fetch(`${base}/api/queue`);
+    const statusFilter = calls.find((c) => c.table === 'summaries' && c.method === 'in' && c.args[0] === 'status');
+    assert.ok(statusFilter, 'expected a summaries .in("status", [...]) call');
+    assert.deepEqual(statusFilter.args[1].slice().sort(), ['approved', 'draft', 'stale']);
+  }, client);
+});
+
+test('GET /api/queue includes an approved-status row with its status (not just draft/stale)', () => {
+  const client = fakeClient({
+    summaries: {
+      data: [
+        { id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z', bills: { identifier: 'HR 1', title: 'Bill One' } },
+        { id: 's2', status: 'approved', created_at: '2026-01-02T00:00:00Z', bills: { identifier: 'HR 2', title: 'Bill Two' } },
+      ],
+      error: null,
+    },
+    summary_verifications: { data: [], error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const approvedItem = body.find((it) => it.id === 's2');
+    assert.ok(approvedItem, 'approved row must appear in the queue response');
+    assert.equal(approvedItem.status, 'approved');
   }, client);
 });
 
