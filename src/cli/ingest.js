@@ -310,6 +310,7 @@ async function loadCurrentSenators(client, { dryRun }) {
     // same way a House seat maps to a numbered district, so ensureSenateMembers stores the
     // state's USPS abbreviation here rather than requiring a migration.
     last_name: senate.lastNameFromFullName(r.legislators?.full_name),
+    first_name: senate.firstNameFromFullName(r.legislators?.full_name), // resolveSenator's ambiguity tiebreak
   }));
   return { senators, note: null };
 }
@@ -318,6 +319,20 @@ async function loadCurrentSenators(client, { dryRun }) {
 // full member list, filters to current-Senate members by reusing parseMemberList's chamber-
 // detection semantics, insertIfAbsent by bioguide_id, then upserts a us-congress/senate term per
 // member carrying their state (converted to a USPS abbreviation) in the term's `district` column.
+//
+// Post-live-backfill investigation (fix pass after Task 3): does the /member list payload carry
+// anything cheap to filter historical members on (a `currentMember` boolean, a term end year)?
+// Inspected the real member-object shape (tests/fixtures/us-congress/members-mo.json is the same
+// list-endpoint resource, just state-filtered — the per-member shape is identical) — each entry
+// has only: bioguideId, depiction, district, name, partyName, state, terms.item[] (each item has
+// ONLY {chamber, startYear} — no endYear), updateDate, url. No currentMember field, no end date,
+// anywhere. Confirmed empirically too: even the state-filtered fixture already contains long-
+// retired MO senators (Bond, Carnahan, Talent, Ashcroft, Danforth, Eagleton, Symington...), so
+// this endpoint was never current-only to begin with. Per brief ruling: not cheaply determinable
+// from this payload -> historical rows are left in place; resolveSenator's first-name tiebreak
+// (above) is the actual mitigation, not a member-list filter. (The `/member/{bioguideId}` DETAIL
+// endpoint reportedly does carry currentMember, but that's a separate per-member request for
+// every one of ~450+ senators ever ingested — out of scope for this fix pass.)
 export async function ensureSenateMembers(client, runId) {
   const failures = [];
   const senateMembers = [];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseArgs } from '../src/cli/ingest.js';
 import {
   resolveSenator, finalizeSenateVote, isKnownBillIdentifier,
-  lastNameFromFullName, stateAbbreviation,
+  lastNameFromFullName, firstNameFromFullName, stateAbbreviation,
 } from '../src/adapters/us-senate.js';
 
 const SENATORS = [
@@ -39,6 +39,65 @@ test('resolveSenator returns null when no senator matches (missing)', () => {
 test('resolveSenator returns null against an empty senators list (pre-ensureSenateMembers reality)', () => {
   const cast = { state: 'MO', last_name: 'Hawley', first_name: 'Josh', party: 'R' };
   assert.equal(resolveSenator(cast, []), null);
+});
+
+// ---- fix pass (post-Task-3 live backfill: 869 votes, ~87k casts, 4 senators unresolved on
+// every vote — 3,474 skipped casts): diacritic folding + first-name ambiguity tiebreak ----
+
+test('resolveSenator folds diacritics on both sides (senate.gov XML strips accents, our DB does not)', () => {
+  // Real case: legislators.full_name = 'Luján, Ben Ray' (from congress.gov), but senate.gov
+  // roll-call XML casts carry last_name = 'Lujan' with no accent.
+  const senators = [{ legislator_id: 'leg-lujan', state: 'NM', last_name: 'Luján' }];
+  const cast = { state: 'NM', last_name: 'Lujan', first_name: 'Ben', party: 'D' };
+  assert.equal(resolveSenator(cast, senators), 'leg-lujan');
+});
+
+test('resolveSenator folds diacritics the other direction too (accented cast, plain DB) for symmetry', () => {
+  const senators = [{ legislator_id: 'leg-lujan', state: 'NM', last_name: 'Lujan' }];
+  const cast = { state: 'NM', last_name: 'Luján', first_name: 'Ben', party: 'D' };
+  assert.equal(resolveSenator(cast, senators), 'leg-lujan');
+});
+
+const MURKOWSKI_AK = [
+  { legislator_id: 'leg-murkowski-lisa', state: 'AK', last_name: 'Murkowski', first_name: 'Lisa' },
+  { legislator_id: 'leg-murkowski-frank', state: 'AK', last_name: 'Murkowski', first_name: 'Frank H.' },
+];
+
+test('resolveSenator tiebreaks an ambiguous (state, last_name) match on first_name (Murkowski, current)', () => {
+  // Real case: ensureSenateMembers's unfiltered /member list ingested both the current AK
+  // senator (Lisa Murkowski) and a historical one (Frank H. Murkowski, 1981-2002) — (state,
+  // last_name) alone can't disambiguate; the cast's own first_name can.
+  const cast = { state: 'AK', last_name: 'Murkowski', first_name: 'Lisa', party: 'R' };
+  assert.equal(resolveSenator(cast, MURKOWSKI_AK), 'leg-murkowski-lisa');
+});
+
+test('resolveSenator tiebreaks an ambiguous (state, last_name) match on first_name (Murkowski, historical)', () => {
+  const cast = { state: 'AK', last_name: 'Murkowski', first_name: 'Frank', party: 'R' };
+  assert.equal(resolveSenator(cast, MURKOWSKI_AK), 'leg-murkowski-frank');
+});
+
+test('resolveSenator tiebreak is prefix-tolerant (cast first_name is a prefix of the DB one)', () => {
+  const senators = [
+    { legislator_id: 'leg-warner-mark', state: 'VA', last_name: 'Warner', first_name: 'Mark R.' },
+    { legislator_id: 'leg-warner-john', state: 'VA', last_name: 'Warner', first_name: 'John' },
+  ];
+  const cast = { state: 'VA', last_name: 'Warner', first_name: 'Mark', party: 'D' };
+  assert.equal(resolveSenator(cast, senators), 'leg-warner-mark');
+});
+
+test('resolveSenator returns null when still ambiguous after the first-name tiebreak (never guesses)', () => {
+  // Two candidates that ALSO share a first name after folding — the tiebreak itself can't
+  // disambiguate, so this must stay unresolved rather than pick one arbitrarily.
+  const senators = [
+    { legislator_id: 'leg-a', state: 'AK', last_name: 'Murkowski', first_name: 'Lisa' },
+    { legislator_id: 'leg-b', state: 'AK', last_name: 'Murkowski', first_name: 'Lisa Marie' },
+  ];
+  const cast = { state: 'AK', last_name: 'Murkowski', first_name: 'Lisa', party: 'R' };
+  assert.equal(resolveSenator(cast, senators), null);
+});
+
+test('resolveSenator returns null when the cast has no first_name to tiebreak with', () => {
+  assert.equal(resolveSenator({ state: 'AK', last_name: 'Murkowski', first_name: '' }, MURKOWSKI_AK), null);
 });
 
 // ---- question-composition rule (design ruling #3) ----
@@ -98,6 +157,16 @@ test('lastNameFromFullName splits congress.gov "Last, First Middle" format', () 
 
 test('lastNameFromFullName falls back to the whole string when there is no comma', () => {
   assert.equal(lastNameFromFullName('Hawley'), 'Hawley');
+});
+
+test('firstNameFromFullName takes the first token after the comma, dropping middle initials', () => {
+  assert.equal(firstNameFromFullName('Onder, Robert F.'), 'Robert');
+  assert.equal(firstNameFromFullName('Warner, Mark R.'), 'Mark');
+  assert.equal(firstNameFromFullName('Luján, Ben Ray'), 'Ben');
+});
+
+test('firstNameFromFullName returns empty string when there is no comma', () => {
+  assert.equal(firstNameFromFullName('Hawley'), '');
 });
 
 test('stateAbbreviation converts congress.gov full state names to the USPS code Senate XML uses', () => {

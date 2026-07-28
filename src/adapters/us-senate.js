@@ -161,17 +161,48 @@ export function finalizeSenateVote(vote, issue) {
   return { ...vote, bill_identifier: billIdentifier, question };
 }
 
-// Design ruling #1: match on (state, last_name) case-insensitive/trim; 0 or >1 matches → null
-// (caller records the cast's identity fields into unresolved[] and skips the cast — never
-// guessed, never placeholder-inserted). `senators` rows: { legislator_id, state, last_name }.
+// Fold diacritics + casefold, e.g. 'Lujan' (with acute accent) -> 'lujan'. Live Task-3 backfill
+// (869 votes, ~87k casts) found senate.gov roll-call XML strips accents from cast last names
+// ('Lujan', no accent) while our legislators table (sourced from congress.gov) keeps them
+// ('Lujan' with accent, i.e. 'Luján, Ben Ray') - folding on BOTH sides of the comparison is
+// what makes that pair equal.
+function fold(s) {
+  // Filters out Unicode combining diacritical marks (code points 0x0300-0x036F) after NFD
+  // normalization decomposes an accented letter (e.g. the 'a' in Luján)
+  // into a base letter plus a combining mark, so this leaves the bare base letter behind.
+  const decomposed = String(s ?? '').normalize('NFD');
+  let out = '';
+  for (const ch of decomposed) {
+    const code = ch.codePointAt(0);
+    if (code >= 0x0300 && code <= 0x036f) continue;
+    out += ch;
+  }
+  return out.trim().toLowerCase();
+}
+
+// Design ruling #1: match on (state, last_name), diacritic-folded + case-insensitive/trimmed.
+// 0 matches -> null. >1 matches -> attempt a first-name tiebreak (also live-discovered: congress.gov's
+// unfiltered /member list has no reliable "current member" signal — see ensureSenateMembers — so
+// e.g. AK/Murkowski legitimately matches both Lisa (current) and Frank H. (1981-2002) once both
+// are ingested). Tiebreak compares cast.first_name against the first token of the senator's
+// 'Last, First [Middle]' full_name, prefix-tolerant in either direction (folded/casefolded) to
+// absorb nickname/short-form mismatches. Still 0 or >1 after the tiebreak -> null, same as before
+// — never guessed, never placeholder-inserted; caller records the cast's identity into
+// unresolved[] and skips it. `senators` rows: { legislator_id, state, last_name, first_name }.
 export function resolveSenator(cast, senators) {
-  const state = String(cast.state ?? '').trim().toLowerCase();
-  const lastName = String(cast.last_name ?? '').trim().toLowerCase();
-  const matches = senators.filter((s) => (
-    String(s.state ?? '').trim().toLowerCase() === state
-    && String(s.last_name ?? '').trim().toLowerCase() === lastName
-  ));
-  return matches.length === 1 ? matches[0].legislator_id : null;
+  const state = fold(cast.state);
+  const lastName = fold(cast.last_name);
+  const matches = senators.filter((s) => fold(s.state) === state && fold(s.last_name) === lastName);
+  if (matches.length === 1) return matches[0].legislator_id;
+  if (matches.length === 0) return null;
+
+  const castFirst = fold(cast.first_name);
+  if (!castFirst) return null;
+  const tieBroken = matches.filter((s) => {
+    const dbFirst = fold(s.first_name);
+    return dbFirst.length > 0 && (dbFirst.startsWith(castFirst) || castFirst.startsWith(dbFirst));
+  });
+  return tieBroken.length === 1 ? tieBroken[0].legislator_id : null;
 }
 
 // congress.gov member names are 'Last, First [Middle]' (verified against
@@ -181,6 +212,15 @@ export function lastNameFromFullName(fullName) {
   const s = String(fullName ?? '').trim();
   const i = s.indexOf(',');
   return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
+// Companion to lastNameFromFullName, for resolveSenator's ambiguity tiebreak — e.g.
+// 'Warner, Mark R.' -> 'Mark' (first token after the comma; middle initials dropped).
+export function firstNameFromFullName(fullName) {
+  const s = String(fullName ?? '').trim();
+  const i = s.indexOf(',');
+  if (i === -1) return '';
+  return s.slice(i + 1).trim().split(/\s+/)[0] ?? '';
 }
 
 // congress.gov's /member endpoints return the full state name (e.g. 'Missouri'), but Senate
