@@ -278,12 +278,16 @@ async function handleQueue(client, res) {
       .order('created_at', { ascending: true });
     if (error) throw error;
 
-    const ids = (data ?? []).map((row) => row.id);
+    // Same header-overflow guard as the glossary queue below: full small-table select + in-JS
+    // filter, never .in() over the whole queue's ids (25 summaries fit today; the glossary tab
+    // proved the pattern breaks past ~200 ids).
+    const idSet = new Set((data ?? []).map((row) => row.id));
     let latestVerification = new Map();
-    if (ids.length > 0) {
+    if (idSet.size > 0) {
       const verResult = await client
-        .from('summary_verifications').select('summary_id,overall,verdicts,created_at').in('summary_id', ids);
-      latestVerification = latestVerificationBySummary(resolveVerificationRows(verResult));
+        .from('summary_verifications').select('summary_id,overall,verdicts,created_at');
+      const rows = resolveVerificationRows(verResult).filter((r) => idSet.has(r.summary_id));
+      latestVerification = latestVerificationBySummary(rows);
     }
 
     sendJson(res, 200, (data ?? []).map((row) => ({
@@ -439,12 +443,18 @@ async function handleGlossaryQueue(client, res) {
       throw error;
     }
 
-    const ids = (data ?? []).map((row) => row.id);
+    // Fetch ALL verification rows, never .in('term_id', ids): with 400+ queue terms the id-list
+    // URL exceeded undici's 16KB header cap (UND_ERR_HEADERS_OVERFLOW → 500, found live the day
+    // 0007 was applied). The table only holds one small row per gloss attempt; filtering to
+    // queue ids happens in latestVerificationByTerm's Map lookup anyway.
+    const idSet = new Set((data ?? []).map((row) => row.id));
     let latestVerification = new Map();
-    if (ids.length > 0) {
+    if (idSet.size > 0) {
       const verResult = await client
-        .from('glossary_verifications').select('term_id,overall,verdicts,created_at').in('term_id', ids);
-      latestVerification = latestVerificationByTerm(resolveVerificationRows(verResult, 'glossary_verifications'));
+        .from('glossary_verifications').select('term_id,overall,verdicts,created_at');
+      const rows = resolveVerificationRows(verResult, 'glossary_verifications')
+        .filter((r) => idSet.has(r.term_id));
+      latestVerification = latestVerificationByTerm(rows);
     }
 
     sendJson(res, 200, {
