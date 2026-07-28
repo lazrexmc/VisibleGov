@@ -1,0 +1,19 @@
+{
+  "identifier": "HR 845",
+  "bill_text_hash": "8f48027e63b9263717e684ad908347fbba47fc476de4879e09b3f84faa54514a",
+  "prompt_version": "v1",
+  "json": {
+    "what_it_does": [
+      {
+        "point": "Requires the Secretary of the Interior, within 60 days of the bill becoming law, to reissue a 2020 federal rule that removed the gray wolf (Canis lupus) from the federal list of endangered and threatened wildlife.",
+        "section": "Sec. 2"
+      },
+      {
+        "point": "Bars courts from reviewing the reissuance of that rule.",
+        "section": "Sec. 3"
+      }
+    ],
+    "stated_purpose": "To require the Secretary of the Interior to reissue regulations removing the gray wolf from the list of endangered and threatened wildlife under the Endangered Species Act of 1973.",
+    "classification": null
+  }
+}

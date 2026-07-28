@@ -1,0 +1,55 @@
+{
+  "identifier": "HR 498",
+  "bill_text_hash": "37438dffb5da5b5e3eb40e345928326d5f83a04c3ed7a546d89f80daec77e9cd",
+  "prompt_version": "v1",
+  "json": {
+    "what_it_does": [
+      {
+        "point": "Bars federal Medicaid payments to states for any amount spent on defined 'specified gender transition procedures' for a person under 18 who is enrolled in a state Medicaid plan or a waiver of that plan.",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Also bars federal Medicaid payments for the costs of administering a state program that provides those procedures and drugs to people under 18.",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Defines 'specified gender transition procedures' as procedures done for the purpose of intentionally changing a person's body — including by disrupting its development, inhibiting its natural functions, or modifying its appearance — so that it no longer corresponds to the person's sex.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Lists covered surgeries under that definition, including castration, sterilization, removal of testicles or ovaries, vasectomy, tubal ligation, hysterectomy, genital construction or removal procedures, throat/voice-box cartilage reduction, mastectomy, and any cosmetic surgery that feminizes or masculinizes facial or other physical features.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Also includes chest implants to create feminine breasts, erection or testicular prostheses, and fat or artificial implants in the buttocks.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Also includes providing medications such as puberty-blocking drugs (gonadotropin-releasing hormone analogues) and doses of testosterone, estrogen, progesterone, or other androgens greater than what a healthy person of the same age and sex would naturally produce.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Creates exceptions, when provided by a health care provider with the consent of a parent or legal guardian, for puberty-blocking drugs used to normalize puberty in a child with early (precocious) puberty.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Creates exceptions for treatment of a medically verifiable genetic disorder of sex development, or abnormal sex chromosome structure, sex hormone production, or hormone action as determined by a physician through genetic or biochemical testing.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Creates exceptions for treating an infection, disease, injury, or disorder caused or worsened by a previously performed listed procedure, and for a physical condition that a physician certifies places the person in imminent danger of death or loss of a major bodily function; procedures done to relieve mental distress are not covered by this exception.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Creates an exception for procedures to restore or reconstruct the body to correspond to the person's sex after one or more of the listed procedures, which may include removal of a pseudo phallus or breast augmentation.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Defines 'sex' as male or female as biologically determined, with 'female' meaning a person whose reproductive system at some point produces, transports, and uses eggs for fertilization, and 'male' meaning a person whose reproductive system at some point produces, transports, and uses sperm — including where this would be the case but for a developmental or genetic anomaly or historical accident.",
+        "section": "Sec. 2(b)"
+      }
+    ],
+    "stated_purpose": "To amend title XIX of the Social Security Act to prohibit federal Medicaid funding for gender transition procedures for minors.",
+    "classification": null
+  }
+}

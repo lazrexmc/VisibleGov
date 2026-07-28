@@ -1,0 +1,47 @@
+{
+  "identifier": "HR 1366",
+  "bill_text_hash": "aa70984e057dfe07a7c24c33900d0807da39882f89af10c85f5fe0c2ecb419db",
+  "prompt_version": "v1",
+  "json": {
+    "what_it_does": [
+      {
+        "point": "Amends federal mining law (Section 2337 of the Revised Statutes) to allow the holder of a lode or placer mining claim to locate as many 'mill sites' as are reasonably necessary for operations included in an approved plan of operations. A mill site is defined as public land reasonably necessary for waste rock or tailings disposal or other activities incidental to mineral development or production.",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Defines the public land eligible for these mill sites as land open to location under the general mining laws, including land found to contain minerals, land found not to contain minerals, and land whose mineral character has not been determined.",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Limits each individual mill site to 5 acres, states that a mill site does not give the holder any mineral rights, and states that mill sites located under this new provision cannot be patented (that is, cannot be converted to private ownership).",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Allows a mill site to be located on the same tract of public land where the claimant already holds a lode or placer mining claim, and states that locating a mill site does not affect the validity of existing mining claims or associated rights.",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Includes savings provisions stating that the new authority does not create new rights on land closed to mining, does not change any law or administrative action that withdrew land from mining, does not limit federal authority to regulate mining under listed laws such as the Federal Land Policy and Management Act of 1976, the Wilderness Act, the Endangered Species Act of 1973, and the National Historic Preservation Act, does not restore rights extinguished by a prior land closure or withdrawal, and does not modify section 404 of division E of the Consolidated Appropriations Act, 2024.",
+        "section": "Sec. 2(a)"
+      },
+      {
+        "point": "Creates a new account in the U.S. Treasury called the Abandoned Hardrock Mine Fund.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Directs that annual claim maintenance fees collected on mill sites located under the new provision be deposited into the Abandoned Hardrock Mine Fund.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Allows the Secretary of the Interior to spend money from the Fund without further action by Congress, but only to carry out the abandoned hardrock mine reclamation program under section 40704 of the Infrastructure Investment and Jobs Act, and requires the money to be allocated and transferred according to that section's rules.",
+        "section": "Sec. 2(b)"
+      },
+      {
+        "point": "Makes technical changes to the mining claim fee statute in the Omnibus Budget Reconciliation Act of 1993, replacing references to 'the Mining Law of 1872' with citations to sections 2319 through 2344 of the Revised Statutes and reorganizing existing fee text into lettered and numbered subparagraphs.",
+        "section": "Sec. 2(c)"
+      }
+    ],
+    "stated_purpose": "",
+    "classification": null
+  }
+}
