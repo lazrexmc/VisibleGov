@@ -5,6 +5,7 @@ import {
   normalizePersonName,
   chamberFromRole,
   normalizeLegiscanDistrict,
+  buildLegiscanNameVariants,
   findCandidateLegislatorRows,
   resolveOrCreateLegiscanPerson,
   LegiscanIdentityConflictError,
@@ -72,19 +73,28 @@ function makeFakeDb({
       }
       assert.equal(table, 'legislators');
       return {
+        // A single .eq() call is used TWO ways by legiscan-identity.js: chained into
+        // .maybeSingle()/.single() (exact-key lookup, row re-read), OR awaited directly for a
+        // plain list result (fetchColumnDerivedCandidates' mo_senate_id/mo_house_id fallback
+        // query) — the returned object supports both: it carries {data,error} directly (so
+        // `await ...eq(...)` destructures correctly) AND the two single-row methods.
         select: () => ({
-          eq: (c1, v1) => ({
-            maybeSingle: async () => {
-              if (missingColumn && c1 === 'legiscan_people_id') return { data: null, error: missingColumnError };
-              const found = legislators.find((l) => l[c1] === v1);
-              return { data: found ? { ...found } : null, error: null };
-            },
-            single: async () => {
-              const found = legislators.find((l) => l[c1] === v1);
-              if (!found) return { data: null, error: { message: `no row with ${c1}=${v1}` } };
-              return { data: { ...found }, error: null };
-            },
-          }),
+          eq: (c1, v1) => {
+            const matchedRows = legislators.filter((l) => l[c1] === v1);
+            const isLegiscanIdLookup = missingColumn && c1 === 'legiscan_people_id';
+            return {
+              data: isLegiscanIdLookup ? null : matchedRows.map((r) => ({ ...r })),
+              error: isLegiscanIdLookup ? missingColumnError : null,
+              maybeSingle: async () => {
+                if (isLegiscanIdLookup) return { data: null, error: missingColumnError };
+                return { data: matchedRows[0] ? { ...matchedRows[0] } : null, error: null };
+              },
+              single: async () => {
+                if (matchedRows.length === 0) return { data: null, error: { message: `no row with ${c1}=${v1}` } };
+                return { data: { ...matchedRows[0] }, error: null };
+              },
+            };
+          },
         }),
         insert: (row) => ({
           select: () => ({
@@ -341,34 +351,147 @@ test('resolveOrCreateLegiscanPerson: missing legiscan_people_id column (migratio
   assert.equal(legislators.length, 0, 'nothing written while gated');
 });
 
-// ---- the real Onder record: THE named worked example (task-5-brief.md CONTROLLER RULING 2) — a
-// concrete, real finding, not assumed ----
+// ---- CONTROLLER RULING 3, AMENDED (fix round 1): source-printed nickname variants ----
 
-test('resolveOrCreateLegiscanPerson: REAL Onder fixture record ("Robert Onder", people_id 16351) against a fake row mirroring his LIVE mo_senate shape ("Bob Onder") — a genuine no_match under CONTROLLER RULING 3\'s conservative-only normalization; a benign duplicate row is created, NOT a merge', async () => {
+test('buildLegiscanNameVariants: given-name form only when no nickname is printed (Fitzwater — nickname:"")', () => {
+  assert.deepEqual(buildLegiscanNameVariants(fitzwater), ['Travis Fitzwater']);
+});
+
+test('buildLegiscanNameVariants: given-name + nickname form when the source itself prints one (real Onder record: nickname:"Bob")', () => {
+  const onder = dataset1608.people.find((p) => p.people_id === 16351);
+  assert.deepEqual(buildLegiscanNameVariants(onder), ['Robert Onder', 'Bob Onder']);
+});
+
+// ---- the real Onder record: THE named worked example (task-5-brief.md CONTROLLER RULING 2) — a
+// concrete, real finding, not assumed. Fix round 1 (controller adjudication on task-5-report.md
+// concern 2): ruling 3 amended to include source-printed nickname variants; this is now the
+// project's first REAL cross-source convergence. ----
+
+test('resolveOrCreateLegiscanPerson: REAL Onder fixture record ("Robert Onder", people_id 16351) against a fake row mirroring his LIVE mo_senate shape ("Bob Onder", COLUMN-derived evidence only — no terms row, matching the real current gap in ensureRosterIdentities) -> the nickname variant now yields a single match, additivePatch attach: the project\'s first real cross-source convergence', async () => {
   const onder = dataset1608.people.find((p) => p.people_id === 16351);
   const { client, legislators } = makeFakeDb({
     // Mirrors the REAL live mo_senate roster shape exactly (tests/mo-senate-web.test.js /
-    // tests/ingest-mo-senate-cli.test.js: full_name 'Bob Onder', mo_senate_id '2'; docs/research/
-    // 2026-07-28-mo-senate-sources.md: district 2, term 2015-01-07 to 2023-01-04).
+    // tests/ingest-mo-senate-cli.test.js: full_name 'Bob Onder', mo_senate_id '2') AND the REAL
+    // current gap (concern 1): src/cli/ingest-mo-senate.js's ensureRosterIdentities writes
+    // mo_senate_id directly onto the legislators row but NO terms row at all — deliberately no
+    // termRows here, so this test exercises the column-derived evidence fallback, not terms.
     legislatorRows: [{
       id: 'leg-onder-live', full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', legiscan_people_id: null, run_id: 'seed',
-    }],
-    termRows: [{
-      legislator_id: 'leg-onder-live', chamber: 'senate', district: '2', start_date: '2015-01-07', end_date: '2023-01-04',
     }],
   });
 
   // dataset-2018-1608's own real roll-call dates fall in September 2018 (e.g. vote/774312.json:
-  // "date":"2018-09-12") — squarely inside Onder's 2015-2023 term, so the era filter is NOT what
-  // produces the no_match below.
+  // "date":"2018-09-12") — squarely inside Onder's real 2015-2023 term, though era is moot here
+  // anyway since column-derived evidence carries no dates (documented, not silently assumed).
   const result = await resolveOrCreateLegiscanPerson(client, 'run-1', onder, { startDate: '2018-09-01', endDate: '2018-09-30' });
 
+  assert.equal(result.matched, true);
+  assert.equal(result.created, false);
+  assert.equal(result.reason, 'single_candidate');
+  assert.equal(result.legislator_id, 'leg-onder-live');
+  assert.equal(legislators.length, 1, 'no new row — LegiScan\'s "Robert Onder" attaches to the EXISTING "Bob Onder" row via the nickname variant');
+  assert.equal(legislators[0].legiscan_people_id, 16351);
+});
+
+test('resolveOrCreateLegiscanPerson: a nickname variant that collides with a DIFFERENT existing row\'s name is AMBIGUOUS, never picked', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [
+      {
+        id: 'leg-given', full_name: 'Robert Testson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+      {
+        id: 'leg-nick', full_name: 'Bob Testson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+    ],
+    termRows: [
+      {
+        legislator_id: 'leg-given', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
+      },
+      {
+        legislator_id: 'leg-nick', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
+      },
+    ],
+  });
+  const person = {
+    people_id: 99002, name: 'Robert Testson', nickname: 'Bob', last_name: 'Testson', role: 'Sen', district: 'SD-009', party: null,
+  };
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
   assert.equal(result.matched, false);
   assert.equal(result.created, true);
-  assert.equal(result.reason, 'no_candidate');
-  assert.equal(legislators.length, 2, 'LegiScan\'s "Robert Onder" gets its OWN new row — a benign duplicate, per ruling 3\'s asymmetric-cost design');
-  const newRow = legislators.find((l) => l.id === result.legislator_id);
-  assert.equal(newRow.full_name, 'Robert Onder');
-  assert.equal(newRow.legiscan_people_id, 16351);
-  assert.equal(legislators.find((l) => l.id === 'leg-onder-live').legiscan_people_id, null, 'the live mo_senate row is untouched — no wrong merge');
+  assert.equal(result.reason, 'ambiguous');
+  assert.equal(result.candidateCount, 2, 'the given-name variant hits leg-given, the nickname variant hits leg-nick — two DIFFERENT rows, never guessed between');
+  assert.equal(legislators.find((l) => l.id === 'leg-given').legiscan_people_id, null);
+  assert.equal(legislators.find((l) => l.id === 'leg-nick').legiscan_people_id, null);
+});
+
+// ---- CONCERN 1, fixed (controller ruling): per-source identity columns as evidence when `terms`
+// rows are absent — both evidence paths, plus the neither-case ----
+
+test('findCandidateLegislatorRows: terms-evidence path (terms row present, no chamber column set) still finds the candidate', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }],
+    termRows: [{
+      legislator_id: 'leg-1', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
+    }],
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate',
+    district: '4',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].legislator_id, 'leg-1');
+});
+
+test('findCandidateLegislatorRows: column-derived fallback (mo_senate_id set, NO terms row at all) finds the candidate — the real ensureRosterIdentities gap', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-1', full_name: 'Jane Smith', mo_senate_id: '4', run_id: 'seed',
+    }],
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate',
+    district: '4',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].legislator_id, 'leg-1');
+  assert.equal(candidates[0].start_date, null, 'column-derived evidence carries no dates — honestly documented, not assumed');
+});
+
+test('findCandidateLegislatorRows: terms evidence is preferred, not duplicated — a legislator with BOTH a matching terms row AND the chamber column set is exactly ONE candidate', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-1', full_name: 'Jane Smith', mo_senate_id: '4', run_id: 'seed',
+    }],
+    termRows: [{
+      legislator_id: 'leg-1', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
+    }],
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate',
+    district: '4',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 1, 'no double-counting between the terms row and the column-derived fallback');
+});
+
+test('findCandidateLegislatorRows: the neither-case — no terms row AND no chamber-bearing column set — is never a candidate, an honest exclusion', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }], // no mo_senate_id, no terms row
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate',
+    district: '4',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 0);
 });

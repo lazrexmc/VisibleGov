@@ -55,14 +55,39 @@ export function eraOverlaps(row, era) {
   return true;
 }
 
+// buildNameVariantSet — CONTROLLER RULING 3, AMENDED (fix round 1, controller adjudication on
+// task-5-report.md concern 2): conservative normalization stands, with ONE principled extension —
+// when the SOURCE ITSELF prints an alternate name form for a person (LegiScan's own
+// `person.nickname` field is the first concrete case: verified in the real fixture,
+// `nickname:"Bob"` on Robert Onder, people_id 16351), the candidate's name-variant set is
+// { given-name form, source-printed alternate form }, each matched EXACTLY under the SAME
+// conservative folding normalizePersonName already does — never a fuzzy/edit-distance match, never
+// a nickname table this module invents or looks up. This is still exact matching over PRINTED
+// variants; the asymmetric-cost rule (fail toward duplicates) is intact: ambiguity ACROSS variants
+// (one variant hits row A, a different variant hits a DIFFERENT row B) is still 'ambiguous', never
+// picked. `candidate.nameVariants` (optional array of RAW alternate full-name strings — the
+// caller's job to construct from ITS OWN source data, e.g. legiscan-identity.js's
+// buildLegiscanNameVariants) is unioned with `candidate.full_name` after normalization.
+function buildNameVariantSet(candidate) {
+  const variants = new Set();
+  variants.add(normalizePersonName(candidate.full_name));
+  for (const raw of candidate.nameVariants ?? []) {
+    const norm = normalizePersonName(raw);
+    if (norm) variants.add(norm);
+  }
+  return variants;
+}
+
 // matchLegislator — THE reusable matching function (CONTROLLER RULING 1's literal words):
-// candidate: { full_name, chamber, district, era: { start, end } } (full_name is RAW, not
-// pre-normalized — this function owns normalization so every caller normalizes identically).
+// candidate: { full_name, chamber, district, era: { start, end }, nameVariants? } (full_name is
+// RAW, not pre-normalized — this function owns normalization so every caller normalizes
+// identically; nameVariants is an optional array of additional RAW source-printed alternate full
+// names, see buildNameVariantSet above).
 // existingRows: a POOL of candidate rows already fetched by the caller's own source-specific
 // query (e.g. legiscan-identity.js's findCandidateLegislatorRows queries `terms` joined to
-// `legislators`) — this function does NOT touch a database; it is pure and independently testable
-// for exactly that reason. Each row: { legislator_id, full_name, chamber, district, start_date,
-// end_date }.
+// `legislators`, plus a per-source identity-column fallback) — this function does NOT touch a
+// database; it is pure and independently testable for exactly that reason. Each row:
+// { legislator_id, full_name, chamber, district, start_date, end_date }.
 //
 // Returns { outcome: 'match' | 'no_match' | 'ambiguous', matches: [...] } — 'matches' always
 // carries every row that satisfied the full predicate (0, 1, or 2+ elements), so a caller can log
@@ -71,12 +96,12 @@ export function eraOverlaps(row, era) {
 // matching logic; the CALLER (e.g. resolveOrCreateLegiscanPerson) decides what to do with
 // 'ambiguous' (create a new row, log it for review — never guess-merge).
 export function matchLegislator(candidate, existingRows) {
-  const nameNorm = normalizePersonName(candidate.full_name);
+  const nameVariants = buildNameVariantSet(candidate);
   const districtNorm = candidate.district == null ? null : String(candidate.district).trim();
   const filtered = (existingRows ?? []).filter((row) => (
     row.chamber === candidate.chamber
     && String(row.district ?? '').trim() === districtNorm
-    && normalizePersonName(row.full_name) === nameNorm
+    && nameVariants.has(normalizePersonName(row.full_name))
     && eraOverlaps(row, candidate.era)
   ));
   // Dedupe by legislator_id: the SAME real person can legitimately hold more than one `terms` row

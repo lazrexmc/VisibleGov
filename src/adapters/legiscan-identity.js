@@ -59,21 +59,79 @@ export function normalizeLegiscanDistrict(district) {
   return String(Number(m[1]));
 }
 
+// buildLegiscanNameVariants — CONTROLLER RULING 3, AMENDED (fix round 1). LegiScan's own person
+// record prints a `nickname` field alongside `name`/`first_name`/`last_name` (verified in the real
+// fixture: Robert Onder, people_id 16351, `name:"Robert Onder"`, `nickname:"Bob"`). When present,
+// the nickname variant is built the SAME shape `name` itself already is (first + last, no middle
+// name, no suffix — verified: Onder's own `name` field omits `middle_name:"Frank"` and
+// `suffix:"Jr."` too), just with `nickname` substituted for the given first name: `"Bob Onder"`.
+// This is the source's OWN printed data (person.nickname), never a nickname table this module
+// invents or looks up elsewhere — see person-identity.js's buildNameVariantSet for how this feeds
+// into matchLegislator's still-exact (never fuzzy) comparison.
+export function buildLegiscanNameVariants(legiscanPerson) {
+  const variants = [legiscanPerson.name];
+  const nickname = String(legiscanPerson.nickname ?? '').trim();
+  const lastName = String(legiscanPerson.last_name ?? '').trim();
+  if (nickname && lastName) variants.push(`${nickname} ${lastName}`);
+  return variants;
+}
+
+// ---- per-source identity-column fallback (CONCERN 1 fix round — controller ruling) ----
+//
+// A REAL, currently-live gap: src/cli/ingest-mo-senate.js's ensureRosterIdentities stamps
+// legislators.mo_senate_id directly from the era roster but writes NO `terms` row at all (verified
+// by reading that file — the roster ensure only ever inserts/updates the `legislators` row itself).
+// mo-house-xml.js's mo_house_id column exists for the identical reason. Without this fallback,
+// findCandidateLegislatorRows would find ZERO real candidates for any legislator persisted only
+// through those two drivers — including the running example, Bob Onder's live mo_senate row.
+//
+// A row with mo_senate_id='2' IS senate/district-2 evidence (the column exists ONLY for MO
+// senators, stamped only by the mo-senate driver); same for mo_house_id/house. `terms` rows remain
+// the PREFERRED evidence when present — they carry real start_date/end_date, so era-overlap can
+// genuinely be checked. Column-derived evidence carries NO dates at all (start_date/end_date: null
+// below) — era-overlap can never rule it out (eraOverlaps treats null as "cannot rule out
+// overlap"), which is an honestly-documented weaker signal, not silently assumed correct. Used
+// ONLY as a fallback for legislator_ids the `terms` query did not already find (`alreadyFoundIds`)
+// — never a duplicate/second candidate entry for a legislator that already has terms evidence.
+// A legislator row with NEITHER a `terms` row NOR the chamber-relevant column set is never fetched
+// by either query, so it is never a candidate at all — an honest exclusion, not a silent gap.
+const CHAMBER_DISTRICT_COLUMN = { senate: 'mo_senate_id', house: 'mo_house_id' };
+
+async function fetchColumnDerivedCandidates(client, chamber, district, alreadyFoundLegislatorIds) {
+  const column = CHAMBER_DISTRICT_COLUMN[chamber];
+  if (!column) return []; // an unrecognized chamber has no column-evidence fallback at all
+  const { data, error } = await client.from('legislators').select(`id,full_name,${column}`).eq(column, district);
+  if (error) {
+    // Migration 0005/0008 not applied in this environment: no column-derived evidence is
+    // available, but this is NOT fatal to the overall lookup — terms-based evidence (if any) still
+    // stands on its own; this fallback simply contributes nothing this call.
+    if (isMissingColumnError(error, column)) return [];
+    throw new Error(`legiscan-identity column-derived candidate lookup failed (${column}): ${error.message}`);
+  }
+  return (data ?? [])
+    .filter((row) => !alreadyFoundLegislatorIds.has(row.id))
+    .map((row) => ({
+      legislator_id: row.id, full_name: row.full_name, chamber, district, start_date: null, end_date: null,
+    }));
+}
+
 // ---- era-scoped candidate lookup (CONTROLLER RULING 5 / task-5-brief.md's explicit interface) ----
 //
 // Queries `terms` (chamber + district — a server-side filter that bounds this to a handful of
 // rows: one seat's occupants across every era on file, never more) joined to `legislators` for
 // full_name, per the mo-senate Critical bug's own fix shape (src/cli/ingest-mo-senate.js's
-// ensureRosterIdentities/resolveMoSenator comments) — NEVER a bare district lookup on its own.
-// Plain .select() (not selectAll, src/lib/db.js:85) is correct here per the brief: the chamber+
-// district filter alone already bounds the result set nowhere near the 1000-row page default.
+// ensureRosterIdentities/resolveMoSenator comments) — NEVER a bare district lookup on its own. Then
+// falls back to per-source identity-column evidence (fetchColumnDerivedCandidates above) for any
+// legislator the `terms` query didn't already surface. Plain .select() (not selectAll,
+// src/lib/db.js:85) is correct here per the brief: the chamber+district filter alone already
+// bounds each query's result set nowhere near the 1000-row page default.
 //
-// The REAL era-overlap + normalized-name filtering happens in matchLegislator (src/lib/person-
-// identity.js) — this function's own job is strictly the DB fetch + reshaping into the pool
-// matchLegislator expects, so the actual matching predicate lives in exactly one place, reusable
-// by every future source.
+// The REAL era-overlap + normalized-name(-variant) filtering happens in matchLegislator
+// (src/lib/person-identity.js) — this function's own job is strictly the DB fetch(es) + reshaping
+// into the pool matchLegislator expects, so the actual matching predicate lives in exactly one
+// place, reusable by every future source.
 export async function findCandidateLegislatorRows(client, {
-  fullNameNormalized, chamber, district, sessionStartDate, sessionEndDate,
+  fullNameNormalized, nameVariantsNormalized = [], chamber, district, sessionStartDate, sessionEndDate,
 }) {
   const { data, error } = await client
     .from('terms')
@@ -81,7 +139,7 @@ export async function findCandidateLegislatorRows(client, {
     .eq('chamber', chamber)
     .eq('district', district);
   if (error) throw new Error(`legiscan-identity candidate lookup failed: ${error.message}`);
-  const pool = (data ?? []).map((t) => ({
+  const termsPool = (data ?? []).map((t) => ({
     legislator_id: t.legislator_id,
     full_name: t.legislators?.full_name ?? null,
     chamber: t.chamber,
@@ -89,13 +147,18 @@ export async function findCandidateLegislatorRows(client, {
     start_date: t.start_date,
     end_date: t.end_date,
   }));
-  // fullNameNormalized is already normalized by the caller (resolveOrCreateLegiscanPerson) —
-  // passed straight through to matchLegislator's `candidate.full_name`. normalizePersonName is
-  // idempotent on an already-normalized string (lowercase, no punctuation, no comma), so this is
-  // safe even though matchLegislator normalizes again internally.
+  const termsLegislatorIds = new Set(termsPool.map((r) => r.legislator_id));
+  const columnPool = await fetchColumnDerivedCandidates(client, chamber, district, termsLegislatorIds);
+  const pool = [...termsPool, ...columnPool];
+  // fullNameNormalized/nameVariantsNormalized are already normalized by the caller
+  // (resolveOrCreateLegiscanPerson) — passed straight through to matchLegislator's
+  // `candidate.full_name`/`nameVariants`. normalizePersonName is idempotent on an
+  // already-normalized string (lowercase, no punctuation, no comma), so this is safe even though
+  // matchLegislator normalizes again internally.
   const { matches } = matchLegislator(
     {
       full_name: fullNameNormalized,
+      nameVariants: nameVariantsNormalized,
       chamber,
       district,
       era: { start: sessionStartDate ?? null, end: sessionEndDate ?? null },
@@ -160,8 +223,13 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
   const chamber = chamberFromRole(legiscanPerson.role);
   const district = normalizeLegiscanDistrict(legiscanPerson.district);
   const fullNameNormalized = normalizePersonName(legiscanPerson.name);
+  // CONTROLLER RULING 3 (amended, fix round 1): include the source-printed nickname variant, if
+  // any (buildLegiscanNameVariants) — still exact matching, never fuzzy (see that function's own
+  // comment and person-identity.js's buildNameVariantSet).
+  const nameVariantsNormalized = buildLegiscanNameVariants(legiscanPerson).map(normalizePersonName);
   const candidates = await findCandidateLegislatorRows(client, {
     fullNameNormalized,
+    nameVariantsNormalized,
     chamber,
     district,
     sessionStartDate: sessionWindow.startDate ?? null,
