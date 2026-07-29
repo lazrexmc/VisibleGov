@@ -1121,7 +1121,7 @@ test('VOTE_TEXT_BY_ID: vote_id 3 accepts BOTH evidenced live forms ("NV") and th
       { people_id: 2, vote_id: 3, vote_text: form },
     ] };
     const out = reconcileLegiscanTallies(rc);
-    assert.equal(out.counts.not_voting, 1, 'form "' + form + '" must reconcile');
+    assert.equal(out.tallies.not_voting, 1, 'form "' + form + '" must reconcile');
   }
   const bad = { ...base, votes: [
     { people_id: 1, vote_id: 1, vote_text: 'Yea' },
