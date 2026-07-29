@@ -321,6 +321,41 @@ function summarizePrimaryCastPositions(castRows) {
   return counts;
 }
 
+// PRIMARY_RESULT_AGGREGATE_PATTERN / parsePrimaryResultAggregate / isPrimaryCastDataComparable —
+// FIX (CRITICAL 3, final-review-findings.md, 2026-07-29 final whole-branch review). Primary tallies
+// were derived SOLELY from stored vote_casts, but a zero- or partially-cast primary row is a
+// designed routine state, not an anomaly: mo-house's two-phase ingestion writes the `votes` row
+// from the bill XML immediately while its casts arrive later from a separately-polled roll-call PDF
+// (listPendingRollCallPdfs's own definition of "pending" is exactly this gap); mo-senate's
+// roster-gating and dropped unresolved-surname casts create the same undercounted shape. Comparing
+// an undercounted castRows summary against LegiScan's own COMPLETE printed tally would manufacture
+// a false hard (yea/nay) contradiction and quarantine an already-reconciled LegiScan vote for
+// nothing but the primary pipeline's own backlog.
+//
+// CONTROLLER AMENDMENT (final-review-findings.md, Finding 3): mo-house-xml.js's buildMoVoteRows
+// prints the vote's own complete aggregate as `result: "<yea>-<nay>"` at vote-creation time,
+// independent of whether casts have landed yet — prefer it for the hard comparison once available.
+// mo-senate-web (src/cli/ingest-mo-senate.js) stores result:null unconditionally by ruling (its
+// journal-PDF text has no equivalent aggregate line to parse); for those rows there is no aggregate
+// to fall back on, so zero casts is the only mechanically-detectable "not landed yet" signal.
+const PRIMARY_RESULT_AGGREGATE_PATTERN = /^(\d+)-(\d+)$/;
+
+function parsePrimaryResultAggregate(result) {
+  if (typeof result !== 'string') return null;
+  const m = PRIMARY_RESULT_AGGREGATE_PATTERN.exec(result.trim());
+  if (!m) return null;
+  return { yea: Number(m[1]), nay: Number(m[2]) };
+}
+
+// Never hard-quarantine (or hard-flag) on a primary row whose own cast data is incomplete relative
+// to its printed aggregate (mo-house shape — casts still short of aggregate.yea+aggregate.nay), or
+// whose aggregate is null (mo-senate shape) and casts are zero — the LITERAL two conditions the
+// controller amendment names.
+function isPrimaryCastDataComparable(aggregate, totalPrimaryCasts) {
+  if (aggregate) return totalPrimaryCasts >= (aggregate.yea + aggregate.nay);
+  return totalPrimaryCasts > 0;
+}
+
 // compareTalliesForCrossCheck — FIX ROUND 1 (controller ruling): splits mismatches into two kinds,
 // deliberately treated differently by the caller:
 //   - HARD (yea/nay): both sources define these two categories identically and they determine the
@@ -354,18 +389,72 @@ function compareTalliesForCrossCheck(legiscanTallies, primaryCounts) {
   return { hardMismatches, softMismatches };
 }
 
+// isUniqueViolation — the Postgres/PostgREST code for a unique-constraint violation, source-
+// agnostic (which index doesn't matter here, only that an insert lost a race to a matching row).
+function isUniqueViolation(error) {
+  return error?.code === '23505';
+}
+
+// findExistingReconciliationFlag / writeReconciliationFlag — FIX (IMPORTANT 6, final-review-
+// findings.md). Bare inserts with no idempotency key meant every persistent discrepancy (especially
+// a quarantined-class roll call, re-detected on every hash-unchanged re-run) inserted a fresh
+// duplicate row each time, and a human-resolved (resolved=true) row could reappear as a new
+// resolved=false duplicate on the very next run — silently negating review. CONTROLLER AMENDMENT:
+// app-level check-then-insert keyed on (vote_id, source_a, source_b, roll_call_id, reason) NOW
+// (race-safe enough for this single-process driver, same precedent already accepted for this
+// codebase's glossary-persistence idempotency check) PLUS a drafted migration 0011
+// (supabase/migrations/0011_flag_idempotency.sql, Lance applies) adding a matching DB-level unique
+// EXPRESSION index over the same two jsonb fields as a durable backstop — no new columns needed,
+// `discrepancy` has existed since migration 0010. Works correctly whether or not 0011 has landed:
+// pre-migration, the app-level check above is the only defense; post-migration, a 23505 from the
+// new index (a genuine race the app-level check missed) is caught and treated identically to
+// finding a pre-existing row, never surfaced as an error.
+async function findExistingReconciliationFlag(client, {
+  voteId, sourceA, sourceB, rollCallId, reason,
+}) {
+  const { data, error } = await client
+    .from('vote_reconciliation_flags')
+    .select('id,vote_id,source_a,source_b,discrepancy,resolved,created_at,run_id')
+    .eq('vote_id', voteId)
+    .eq('source_a', sourceA)
+    .eq('source_b', sourceB);
+  if (error) {
+    if (isMissingRelationError(error, 'vote_reconciliation_flags')) return { gated: true, existing: null };
+    throw new Error(`legiscan-votes: could not check existing vote_reconciliation_flags: ${error.message}`);
+  }
+  const existing = (data ?? []).find((row) => (
+    row?.discrepancy?.roll_call_id === rollCallId && row?.discrepancy?.reason === reason
+  )) ?? null;
+  return { gated: false, existing };
+}
+
 // writeReconciliationFlag — Draft-then-apply degradation (Global Constraints, plan doc): migration
 // 0010 (vote_reconciliation_flags) is draft-only until Lance applies it. A discrepancy detected
 // before that point is never silently dropped — it's returned with gated:true and the SAME
 // discrepancy payload, so a caller can log/report it even though it couldn't be durably recorded
-// yet; a re-run after the migration lands re-detects and this time persists it.
+// yet; a re-run after the migration lands re-detects and this time persists it. `rollCallId`/
+// `reason` (both now REQUIRED, every call site below supplies them explicitly) are the idempotency
+// key described above — stamped onto the stored `discrepancy` itself (`roll_call_id`/`reason`
+// fields) so the key is self-describing to a human reviewer too, not just an internal lookup detail.
 async function writeReconciliationFlag(client, {
-  voteId, sourceB, discrepancy, runId,
+  voteId, sourceB, discrepancy, runId, rollCallId, reason,
 }) {
+  const keyedDiscrepancy = { ...discrepancy, roll_call_id: rollCallId, reason };
+
+  const lookup = await findExistingReconciliationFlag(client, {
+    voteId, sourceA: 'legiscan', sourceB, rollCallId, reason,
+  });
+  if (lookup.existing) {
+    // IDEMPOTENT RE-RUN: the identical discrepancy (same vote, same LegiScan roll call, same
+    // classification) was already durably recorded by a prior run — including if a human has since
+    // resolved it (resolved:true is returned untouched, never reset by this re-detection).
+    return { ...lookup.existing, deduped: true };
+  }
+
   const { data, error } = await client
     .from('vote_reconciliation_flags')
     .insert({
-      vote_id: voteId, source_a: 'legiscan', source_b: sourceB, discrepancy, run_id: runId ?? null,
+      vote_id: voteId, source_a: 'legiscan', source_b: sourceB, discrepancy: keyedDiscrepancy, run_id: runId ?? null,
     })
     .select()
     .single();
@@ -377,8 +466,17 @@ async function writeReconciliationFlag(client, {
           + '(supabase/migrations/0010_legiscan_identity_and_ledger.sql) not yet applied; the '
           + 'discrepancy below was detected but could not be durably recorded. Never silently '
           + 'dropped — re-run after Lance applies the migration to re-detect and persist it.',
-        discrepancy,
+        discrepancy: keyedDiscrepancy,
       };
+    }
+    if (isUniqueViolation(error)) {
+      // Migration 0011's own unique index caught a duplicate the app-level check above missed (a
+      // genuine race) — re-select and return the row that won rather than surfacing a duplicate-key
+      // error to the caller.
+      const recheck = await findExistingReconciliationFlag(client, {
+        voteId, sourceA: 'legiscan', sourceB, rollCallId, reason,
+      });
+      if (recheck.existing) return { ...recheck.existing, deduped: true };
     }
     throw new Error(`legiscan-votes: could not write vote_reconciliation_flags row: ${error.message}`);
   }
@@ -445,7 +543,7 @@ async function writeReconciliationFlag(client, {
 export async function crossCheckAgainstPrimarySource(client, billId, legiscanTallies, siblingTallies = []) {
   const { data, error } = await client
     .from('votes')
-    .select('id,vote_date,chamber,source_key,jurisdiction_id')
+    .select('id,vote_date,chamber,source_key,jurisdiction_id,result')
     .eq('bill_id', billId)
     .eq('jurisdiction_id', 'mo-legislature')
     .eq('chamber', legiscanTallies.chamber);
@@ -470,11 +568,45 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     const primaryCounts = summarizePrimaryCastPositions(castRows ?? []);
 
     if (siblingTallies.length === 0) {
-      // The ordinary case (one primary-source vote per bill/chamber/date, AND no other LegiScan
-      // roll call in this dataset shares the tuple either) — original semantics, unchanged: a 1:1
-      // correspondence is directly assertable without needing tally disambiguation, so quarantine
-      // on a hard mismatch is safe here in a way it is NOT once siblings exist (see below).
-      const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
+      // FIX (CRITICAL 3, IMPORTANT 5 — final-review-findings.md, 2026-07-29 final whole-branch
+      // review). This is "Branch B": exactly one primary-source candidate AND exactly one LegiScan
+      // roll call sharing the tuple, with no siblings on either side to disambiguate against.
+      //
+      // CRITICAL 3 first: a candidate whose own cast data is incomplete relative to its printed
+      // `result` aggregate (mo-house shape), or whose aggregate is null and casts are zero
+      // (mo-senate shape), is NOT COMPARABLE — see isPrimaryCastDataComparable's own comment.
+      // Comparing against an undercounted castRows summary would manufacture a false contradiction
+      // out of the primary pipeline's own backlog, so this is checked BEFORE any hard/soft
+      // comparison runs at all: skip the comparison, store + soft-flag for human visibility, never
+      // hard-quarantine (or hard-flag) on it.
+      const primaryAggregate = parsePrimaryResultAggregate(primaryVote.result);
+      const totalPrimaryCasts = (castRows ?? []).length;
+      if (!isPrimaryCastDataComparable(primaryAggregate, totalPrimaryCasts)) {
+        const discrepancy = {
+          legiscan_tallies: legiscanTallies.tallies,
+          source_b_result: primaryVote.result ?? null,
+          source_b_cast_count: totalPrimaryCasts,
+          source_b_tallies: primaryCounts,
+          source_b_vote_id: primaryVote.id,
+          source_b_source_key: primaryVote.source_key,
+          quarantine: false,
+        };
+        const flag = await writeReconciliationFlag(client, {
+          voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: 'primary_cast_data_not_comparable',
+        });
+        return {
+          checked: true, matched: false, flag, quarantine: false, reason: 'primary_cast_data_not_comparable',
+        };
+      }
+
+      // Comparable: prefer the primary row's own printed result aggregate for the HARD (yea/nay)
+      // comparison when present (complete regardless of the two-phase cast backlog above) — the
+      // SOFT bucket has no aggregate equivalent and still comes from castRows, which comparability
+      // just established are sufficient.
+      const hardCompareCounts = primaryAggregate
+        ? { ...primaryCounts, yea: primaryAggregate.yea, nay: primaryAggregate.nay }
+        : primaryCounts;
+      const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, hardCompareCounts);
 
       if (hardMismatches.length === 0 && softMismatches.length === 0) {
         return {
@@ -482,16 +614,24 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
         };
       }
 
-      // FIX ROUND 1: quarantine iff a HARD (yea/nay) mismatch exists — a soft (bucket-only)
-      // mismatch flags but stores (accounting difference, not necessarily a contradiction; see
-      // PRESENT_CATEGORY_CAVEAT and compareTalliesForCrossCheck's own comment). The caveat is
-      // attached only when the soft bucket is actually part of what's being flagged — a pure
-      // yea/nay divergence isn't explained by a category-vocabulary quirk, so attaching the caveat
-      // there would misleadingly soften a REAL divergence instead of clarifying an accounting one.
-      const quarantine = hardMismatches.length > 0;
+      // IMPORTANT 5 ("align branch B with C/D semantics"): a hard (yea/nay) mismatch here rests
+      // ONLY on two-sided tuple-singleton-ness — exactly one primary candidate, exactly one
+      // LegiScan roll call sharing the tuple — never on any tally-based corroboration the way
+      // branches C/D's own selection mechanism provides. With real LegiScan-side whole-vote gaps
+      // (combined-vehicle roll calls, Task 7 research) and primary-side counted-skip partial days
+      // both proven real, each side can independently hold ONE but a DIFFERENT real vote for this
+      // tuple, coincidentally sharing (bill, chamber, date) — quarantining here would delete/
+      // withhold a possibly-CORRECT vote on unverified correspondence. Never quarantine on
+      // singleton-ness alone: store + flag instead (non-correspondence recorded for human review,
+      // exactly like branches C/D's own zero-/ambiguous-match outcomes below). Quarantine is
+      // reserved for a corroborated correspondence — which, by construction, can never itself
+      // coincide with a hard mismatch (branches C/D only ever reach their own hard/soft comparison
+      // AFTER selecting a candidate BY tally equality, so hardMismatches there is always empty).
+      const quarantine = false;
       const discrepancy = {
         source_a_tallies: legiscanTallies.tallies,
-        source_b_tallies: primaryCounts,
+        source_b_tallies: hardCompareCounts,
+        source_b_result: primaryVote.result ?? null,
         source_b_vote_id: primaryVote.id,
         source_b_source_key: primaryVote.source_key,
         hard_mismatches: hardMismatches,
@@ -499,8 +639,9 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
         quarantine,
       };
       if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
+      const reason = hardMismatches.length > 0 ? 'hard_mismatch' : 'soft_mismatch';
       const flag = await writeReconciliationFlag(client, {
-        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason,
       });
       return {
         checked: true, matched: false, flag, quarantine,
@@ -525,7 +666,6 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
       // uncontradicted by anything specific), flagged for human review. Never quarantined — there
       // is nothing specific being contradicted, only an absence of correspondence.
       const discrepancy = {
-        reason: 'no_tally_corresponding_primary',
         legiscan_tallies: legiscanTallies.tallies,
         source_b_tallies: primaryCounts,
         source_b_vote_id: primaryVote.id,
@@ -534,7 +674,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
         quarantine: false,
       };
       const flag = await writeReconciliationFlag(client, {
-        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: 'no_tally_corresponding_primary',
       });
       return {
         checked: true, matched: false, flag, quarantine: false,
@@ -551,7 +691,6 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
         ...matchingSiblings.map((s) => ({ roll_call_id: s.rollCallId, tallies: s.tallies })),
       ];
       const discrepancy = {
-        reason: 'ambiguous_tally_match',
         legiscan_tallies: legiscanTallies.tallies,
         source_b_tallies: primaryCounts,
         source_b_vote_id: primaryVote.id,
@@ -560,7 +699,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
         quarantine: false,
       };
       const flag = await writeReconciliationFlag(client, {
-        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: 'ambiguous_tally_match',
       });
       return {
         checked: true, matched: false, flag, quarantine: false,
@@ -608,7 +747,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     };
     if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
     const flag = await writeReconciliationFlag(client, {
-      voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+      voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: hardMismatches.length > 0 ? 'hard_mismatch' : 'soft_mismatch',
     });
     return {
       checked: true, matched: false, flag, quarantine,
@@ -692,7 +831,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     };
     if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
     const flag = await writeReconciliationFlag(client, {
-      voteId: selectedCandidate.id, sourceB: primarySourceLabel(selectedCandidate.source_key), discrepancy, runId: legiscanTallies.runId,
+      voteId: selectedCandidate.id, sourceB: primarySourceLabel(selectedCandidate.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: hardMismatches.length > 0 ? 'hard_mismatch' : 'soft_mismatch',
     });
     return {
       checked: true, matched: false, flag, quarantine,
@@ -707,7 +846,6 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     // the primary source and LegiScan disagree SOMEWHERE among this day's votes even though the
     // exact pairing can't be established mechanically.
     const discrepancy = {
-      reason: 'no_tally_corresponding_primary',
       legiscan_tallies: legiscanTallies.tallies,
       candidates: candidateTallies.map(({ candidate, counts }) => ({
         source_key: candidate.source_key, vote_id: candidate.id, tallies: counts,
@@ -715,7 +853,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
       quarantine: false,
     };
     const flag = await writeReconciliationFlag(client, {
-      voteId: candidates[0].id, sourceB: primarySourceLabel(candidates[0].source_key), discrepancy, runId: legiscanTallies.runId,
+      voteId: candidates[0].id, sourceB: primarySourceLabel(candidates[0].source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: 'no_tally_corresponding_primary',
     });
     return {
       checked: true, matched: false, flag, quarantine: false,
@@ -728,7 +866,6 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
   // the tally, it's WHICH row corresponds that's unresolved — so this stores (uncontradicted) and
   // flags the matching subset for human review.
   const discrepancy = {
-    reason: 'ambiguous_tally_match',
     legiscan_tallies: legiscanTallies.tallies,
     matching_candidates: tallyMatches.map(({ candidate, counts }) => ({
       source_key: candidate.source_key, vote_id: candidate.id, tallies: counts,
@@ -736,7 +873,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     quarantine: false,
   };
   const flag = await writeReconciliationFlag(client, {
-    voteId: tallyMatches[0].candidate.id, sourceB: primarySourceLabel(tallyMatches[0].candidate.source_key), discrepancy, runId: legiscanTallies.runId,
+    voteId: tallyMatches[0].candidate.id, sourceB: primarySourceLabel(tallyMatches[0].candidate.source_key), discrepancy, runId: legiscanTallies.runId, rollCallId: legiscanTallies.rollCallId, reason: 'ambiguous_tally_match',
   });
   return {
     checked: true, matched: false, flag, quarantine: false,

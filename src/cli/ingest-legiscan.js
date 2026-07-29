@@ -353,6 +353,11 @@ function classifyCrossCheckFlagReason(discrepancy) {
   const reason = discrepancy?.reason;
   if (reason === 'no_tally_corresponding_primary') return 'no_tally_corresponding_primary';
   if (reason === 'ambiguous_tally_match') return 'ambiguous_tally_match';
+  // FIX (CRITICAL 3, final-review-findings.md): a primary candidate whose own cast data is not yet
+  // comparable (zero/partial casts relative to its printed aggregate) is its own distinct,
+  // explicitly-counted bucket — never lumped into "other" (a defensive catch-all that should stay
+  // empty in practice) or misread as a real hard/soft mismatch (it is neither; no comparison ran).
+  if (reason === 'primary_cast_data_not_comparable') return 'primary_cast_data_not_comparable';
   if (Array.isArray(discrepancy?.hard_mismatches)) {
     return discrepancy.hard_mismatches.length > 0 ? 'hard_mismatch' : 'soft_mismatch';
   }
@@ -383,10 +388,42 @@ function groupReconciledRollCallsByTuple(reconciled) {
   return groups;
 }
 
-async function ingestLegiscanRollCalls(client, runId, {
-  rollCalls, legiscanSessionId, billRecordByLegiscanBillId, legislatorIdByPeopleId,
-}) {
-  const result = {
+// retractLegiscanVoteIfStored — FIX (CRITICAL 2, final-review-findings.md, 2026-07-29 final
+// whole-branch review). Quarantine was insert-time-only: in the standard backfill-first ordering, a
+// primary journal row landing LATER with contradicting tallies was only detected on the NEXT
+// LegiScan re-run, where the quarantine branch just `continue`d past insertIfAbsent — the already-
+// published contradicted vote and all its casts stayed anon-readable forever, nothing ever marked
+// or deleted them. This closes that: whenever crossCheckFn reports quarantine:true, look up the
+// LegiScan vote by its own source_key and retract it if it already exists (a fresh quarantine, with
+// nothing stored yet, is a no-op lookup — the common case; an already-published row is now actually
+// removed).
+//
+// CONTROLLER AMENDMENT (Finding 2): delete casts then vote (FK order), source_key-prefix-guarded to
+// legiscan- rows ONLY, flag row + retractedVotes count retained — this is the codebase's ONE
+// sanctioned delete (every other write path here is additive/upsert-only, PLAYBOOK_DELTA lesson 5)
+// — commented as such, never a precedent for a delete anywhere else in this repo.
+export async function retractLegiscanVoteIfStored(client, sourceKey) {
+  if (!sourceKey.startsWith('legiscan-')) {
+    throw new Error(
+      `retractLegiscanVoteIfStored: refusing to touch a non-legiscan source_key "${sourceKey}" — `
+        + 'this is the one sanctioned delete in this codebase and it must never reach a '
+        + 'primary-source row',
+    );
+  }
+  const { data: existing, error: selErr } = await client.from('votes').select('id')
+    .eq('source_key', sourceKey).maybeSingle();
+  if (selErr) throw new Error(`ingest-legiscan: retraction lookup failed for ${sourceKey}: ${selErr.message}`);
+  if (!existing) return { retracted: false, voteId: null };
+
+  const { error: castsDelErr } = await client.from('vote_casts').delete().eq('vote_id', existing.id);
+  if (castsDelErr) throw new Error(`ingest-legiscan: retraction cast delete failed for ${sourceKey}: ${castsDelErr.message}`);
+  const { error: voteDelErr } = await client.from('votes').delete().eq('id', existing.id);
+  if (voteDelErr) throw new Error(`ingest-legiscan: retraction vote delete failed for ${sourceKey}: ${voteDelErr.message}`);
+  return { retracted: true, voteId: existing.id };
+}
+
+function emptyRollCallResult() {
+  return {
     votes: 0,
     votesByChamber: { house: 0, senate: 0 },
     casts: 0,
@@ -397,24 +434,48 @@ async function ingestLegiscanRollCalls(client, runId, {
       tally_unique_match: 0,
       no_tally_corresponding_primary: 0,
       ambiguous_tally_match: 0,
+      primary_cast_data_not_comparable: 0,
       hard_mismatch: 0,
       soft_mismatch: 0,
       other: 0,
     },
     quarantinedVotes: 0,
     quarantinedRollCalls: [],
+    retractedVotes: 0,
+    retractedRollCalls: [],
     unresolvedCasts: { count: 0, sample: [] },
     voteId3SpotVerify: [],
   };
+}
 
-  // Phase 1: reconcile every roll call (internal gate (a)) and resolve its bill row — gathers
-  // exactly the pool a same-tuple grouping (phase 2) needs, and exactly the pool phase 3's
-  // cross-check loop iterates. checkVoteId3Sighting runs unconditionally, even for a roll call
-  // that goes on to fail reconciliation — a printed vote_id 3 is real source data regardless of
-  // whether the REST of that roll call's own numbers happen to reconcile.
-  const reconciled = [];
-  for (const rollCall of rollCalls) {
-    checkVoteId3Sighting(rollCall, result.voteId3SpotVerify);
+async function ingestLegiscanRollCalls(client, runId, {
+  allRollCalls, rollCallsToProcess, legiscanSessionId, billRecordByLegiscanBillId, legislatorIdByPeopleId,
+  crossCheckFn = crossCheckAgainstPrimarySource,
+}) {
+  const result = emptyRollCallResult();
+
+  // FIX (IMPORTANT 4, final-review-findings.md): --limit (or a reconcile-failing sibling) must
+  // never truncate the SIBLING-TALLY POOL crossCheckAgainstPrimarySource's own tuple-disambiguation
+  // depends on — only which roll calls this run actually processes/stores. Reconciling was
+  // previously scoped to the (possibly --limit-sliced) `rollCalls` argument alone, so a roll call
+  // whose true-corresponding same-tuple sibling was sliced out saw siblingTallies=[] and fell into
+  // Branch B (singleton/singleton) against a primary row it never actually corresponded to —
+  // repro-confirmed on the real 1608 fixture (--limit 3 fabricated a "119 vs 36 / 23 vs 92"
+  // contradiction for 774312 against a primary row that actually matches sibling 774313, sliced out
+  // of the 3). Phase 1 below reconciles the FULL `allRollCalls` (always the complete parsed
+  // dataset, regardless of --limit) so Phase 2's tuple grouping has complete sibling knowledge;
+  // reconciliationFailures/voteId3SpotVerify/Phase 3's cross-check+store still only reflect the
+  // `rollCallsToProcess` subset — --limit continues to govern what THIS RUN touches/reports on,
+  // only the grouping INPUT widens.
+  const toProcessIds = new Set(rollCallsToProcess.map((rc) => rc.roll_call_id));
+  const reconciled = []; // every roll call in the FULL dataset that reconciles — the grouping pool
+  const reconciledToProcess = []; // the subset actually cross-checked/stored this run
+  for (const rollCall of allRollCalls) {
+    const isSelected = toProcessIds.has(rollCall.roll_call_id);
+    // checkVoteId3Sighting runs unconditionally for a selected roll call, even one that goes on to
+    // fail reconciliation — a printed vote_id 3 is real source data regardless of whether the REST
+    // of that roll call's own numbers happen to reconcile.
+    if (isSelected) checkVoteId3Sighting(rollCall, result.voteId3SpotVerify);
 
     let legiscanTallies;
     try {
@@ -423,9 +484,13 @@ async function ingestLegiscanRollCalls(client, runId, {
       if (err instanceof LegiscanRollCallReconcileError || err instanceof VoteIdMapError) {
         // Internal gate (a) failure — skipped, never stored, same convention as every prior parser
         // in this repo (mo-rollcall-pdf.js's parseMoRollCall, mo-senate-journal-pdf.js's
-        // parseJournalVotes).
-        result.reconciliationFailures += 1;
-        result.reconciliationFailureDetails.push({ rollCallId: rollCall.roll_call_id, message: err.message });
+        // parseJournalVotes). Not part of the sibling-grouping pool either (no reliable tallies
+        // exist to compare against) — only counted as a failure when this run was actually going to
+        // process it.
+        if (isSelected) {
+          result.reconciliationFailures += 1;
+          result.reconciliationFailureDetails.push({ rollCallId: rollCall.roll_call_id, message: err.message });
+        }
         continue;
       }
       throw err;
@@ -437,30 +502,34 @@ async function ingestLegiscanRollCalls(client, runId, {
       // Never observed in either real fixture (every roll call's bill_id is one of the dataset's
       // own bills[]) — a real data-shape surprise if it ever happens, counted honestly rather than
       // silently skipped or crashing the whole run.
-      result.reconciliationFailures += 1;
-      result.reconciliationFailureDetails.push({
-        rollCallId: rollCall.roll_call_id, message: `no bill record for legiscan bill_id=${legiscanTallies.legiscanBillId}`,
-      });
+      if (isSelected) {
+        result.reconciliationFailures += 1;
+        result.reconciliationFailureDetails.push({
+          rollCallId: rollCall.roll_call_id, message: `no bill record for legiscan bill_id=${legiscanTallies.legiscanBillId}`,
+        });
+      }
       continue;
     }
 
-    reconciled.push({ rollCall, legiscanTallies, billEntry });
+    const entry = { rollCall, legiscanTallies, billEntry };
+    reconciled.push(entry);
+    if (isSelected) reconciledToProcess.push(entry);
   }
 
-  // Phase 2: group by (bill, chamber, date) tuple — the same correspondence key
-  // crossCheckAgainstPrimarySource itself matches on.
+  // Phase 2: group by (bill, chamber, date) tuple over the FULL reconciled pool (Finding 4) — the
+  // same correspondence key crossCheckAgainstPrimarySource itself matches on.
   const tupleGroups = groupReconciledRollCallsByTuple(reconciled);
 
-  // Phase 3: cross-check + store, one roll call at a time. Sequential — same precedent as
-  // ensureLegiscanBillRows/ensureLegiscanPeople; a roll call's own cross-check + insert path is
-  // itself several round trips, not parallelizable against the shared per-run counters above
-  // without real risk of double-counting.
-  for (const { rollCall, legiscanTallies, billEntry } of reconciled) {
+  // Phase 3: cross-check + store, one roll call at a time, over the --limit-selected subset only.
+  // Sequential — same precedent as ensureLegiscanBillRows/ensureLegiscanPeople; a roll call's own
+  // cross-check + insert path is itself several round trips, not parallelizable against the shared
+  // per-run counters above without real risk of double-counting.
+  for (const { rollCall, legiscanTallies, billEntry } of reconciledToProcess) {
     const tupleKey = buildSameTupleKey(billEntry.rowId, legiscanTallies.chamber, legiscanTallies.date);
     const siblingTallies = tupleGroups.get(tupleKey).filter((s) => s.rollCallId !== legiscanTallies.rollCallId);
 
     // eslint-disable-next-line no-await-in-loop
-    const crossCheck = await crossCheckAgainstPrimarySource(client, billEntry.rowId, legiscanTallies, siblingTallies);
+    const crossCheck = await crossCheckFn(client, billEntry.rowId, legiscanTallies, siblingTallies);
     if (crossCheck.flag) {
       result.crossCheckFlags.total += 1;
       result.crossCheckFlags[classifyCrossCheckFlagReason(crossCheck.flag.discrepancy)] += 1;
@@ -471,9 +540,21 @@ async function ingestLegiscanRollCalls(client, runId, {
     if (crossCheck.quarantine) {
       // CONTROLLER RULING 1: crossCheckAgainstPrimarySource already ran (and already wrote its own
       // flag row, above) BEFORE this point — no insertIfAbsent('votes', ...) call happens on this
-      // branch, ever. Quarantined = never stored, only counted.
+      // branch, ever, on a fresh detection. FIX (CRITICAL 2): a re-run against an ALREADY-STORED
+      // LegiScan vote (a prior run stored it before the contradicting primary row existed) must
+      // actively retract it — quarantined only truthfully means "never stored" once this confirms
+      // the row is actually absent.
+      const sourceKey = buildLegiscanVoteSourceKey(legiscanSessionId, legiscanTallies.rollCallId);
+      // eslint-disable-next-line no-await-in-loop
+      const retraction = await retractLegiscanVoteIfStored(client, sourceKey);
       result.quarantinedVotes += 1;
-      result.quarantinedRollCalls.push({ rollCallId: rollCall.roll_call_id, billId: billEntry.rowId });
+      result.quarantinedRollCalls.push({
+        rollCallId: rollCall.roll_call_id, billId: billEntry.rowId, retracted: retraction.retracted,
+      });
+      if (retraction.retracted) {
+        result.retractedVotes += 1;
+        result.retractedRollCalls.push({ rollCallId: rollCall.roll_call_id, billId: billEntry.rowId });
+      }
       continue;
     }
 
@@ -533,7 +614,7 @@ async function ingestLegiscanRollCalls(client, runId, {
 // across EVERY ingestion_runs row regardless of status (src/adapters/legiscan.js) — a run stuck at
 // status:'running' with a stale/absent detail would otherwise silently UNDERCOUNT that month's
 // real usage, the exact unsafe-direction bug this closes (T2 review finding (b)).
-async function recordQueryUsage(client, runId, detail) {
+export async function recordQueryUsage(client, runId, detail) {
   detail.queries_used += 1;
   const { error } = await client.from('ingestion_runs')
     .update({ detail: { queries_used: detail.queries_used } })
@@ -580,6 +661,33 @@ export async function resolveDatasetBytes(client, runId, legiscanSessionId, {
       );
     }
     const datasetEnvelope = JSON.parse(readFileSync(ledgerRow.local_cache_path, 'utf8'));
+
+    // FIX (IMPORTANT 7, final-review-findings.md): the cache branch previously trusted
+    // local_cache_path's CONTENTS unconditionally — a swapped/stale/corrupted file on disk (wrong
+    // session's cache reused, a leftover from a prior interrupted run, manual tampering) would
+    // silently ingest under THIS session's identity, with nothing re-verifying it matches what the
+    // ledger claims. Re-decode the cached archive and compare its own in-archive hash.md5 (Task 4's
+    // extractDatasetFiles) against the ledger row's own dataset_hash — the SAME comparison the
+    // fresh-fetch path below performs against a just-downloaded archive.
+    const cachedZipBuffer = decodeDatasetZip(datasetEnvelope.zip);
+    const cachedVerifyParse = await extractDatasetFiles(cachedZipBuffer);
+    if (cachedVerifyParse.datasetHash == null) {
+      // A hashless cached archive is the SAME loud, counted condition as the fresh path's own
+      // null-hash branch below — never silently trusted either. Not itself thrown (a genuinely
+      // hashless archive is not evidence of tampering, only evidence the re-compare couldn't run).
+      gate.hashVerification = { verified: false, reason: 'cached_archive_missing_hash_md5' };
+    } else if (cachedVerifyParse.datasetHash !== ledgerRow.dataset_hash) {
+      throw new DatasetHashMismatchError(
+        `ingest-legiscan: cached dataset at ${ledgerRow.local_cache_path} has its own hash.md5 `
+          + `(${cachedVerifyParse.datasetHash}) which does not match the legiscan_datasets ledger's `
+          + `recorded dataset_hash (${ledgerRow.dataset_hash}) for session ${legiscanSessionId} — a `
+          + 'swapped or corrupted local cache file is never trusted silently',
+        { legiscanSessionId, expected: ledgerRow.dataset_hash, actual: cachedVerifyParse.datasetHash },
+      );
+    } else {
+      gate.hashVerification = { verified: true };
+    }
+
     return { datasetEnvelope, gate };
   }
 
@@ -593,13 +701,21 @@ export async function resolveDatasetBytes(client, runId, legiscanSessionId, {
   // comment) — the dataset is not parsed or persisted on this path.
   const zipBuffer = decodeDatasetZip(datasetEnvelope.zip);
   const verifyParse = await extractDatasetFiles(zipBuffer);
-  if (verifyParse.datasetHash != null && verifyParse.datasetHash !== entry.dataset_hash) {
+  if (verifyParse.datasetHash == null) {
+    // FIX (IMPORTANT 7): previously `verifyParse.datasetHash != null && ...` silently SKIPPED the
+    // mandated re-compare whenever the freshly-fetched archive had no hash.md5 at all — the dataset
+    // still got cached and ledgered as if verified, manufacturing an unverified future cache hit.
+    // Now a loud, counted condition on the gate result instead (never thrown on its own).
+    gate.hashVerification = { verified: false, reason: 'fetched_archive_missing_hash_md5' };
+  } else if (verifyParse.datasetHash !== entry.dataset_hash) {
     throw new DatasetHashMismatchError(
       `ingest-legiscan: fetched dataset's own hash.md5 (${verifyParse.datasetHash}) does not match the `
         + `getDatasetList dataset_hash (${entry.dataset_hash}) that justified this fetch for session `
         + `${legiscanSessionId} — dataset not parsed or persisted`,
       { legiscanSessionId, expected: entry.dataset_hash, actual: verifyParse.datasetHash },
     );
+  } else {
+    gate.hashVerification = { verified: true };
   }
 
   mkdirSync(cacheDir, { recursive: true });
@@ -631,6 +747,14 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
     getDatasetFn = getDataset,
     apiKey = process.env.LEGISCAN_API_KEY,
     cacheDir = LEGISCAN_DATASET_CACHE_DIR,
+    // crossCheckFn — injectable purely for testability (mirrors getDatasetListFn/getDatasetFn's own
+    // convention): real runs always use the real crossCheckAgainstPrimarySource. After Findings 3
+    // and 5 (final-review-findings.md), crossCheckAgainstPrimarySource cannot itself produce
+    // quarantine:true from any of its own branches anymore (see legiscan-votes.js's Branch B
+    // comment) — this seam lets a test exercise retractLegiscanVoteIfStored's real re-run behavior
+    // (an ALREADY-STORED vote getting retracted, no manual wipe) without needing to fabricate that
+    // scenario through crossCheckAgainstPrimarySource's own now-narrower contract.
+    crossCheckFn = crossCheckAgainstPrimarySource,
   } = deps;
 
   const detail = { queries_used: 0 };
@@ -676,31 +800,14 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
     : parsed.rollCalls;
 
   const rollCallResult = sessionResult.gated
-    ? {
-      votes: 0,
-      votesByChamber: { house: 0, senate: 0 },
-      casts: 0,
-      reconciliationFailures: 0,
-      reconciliationFailureDetails: [],
-      crossCheckFlags: {
-        total: 0,
-        tally_unique_match: 0,
-        no_tally_corresponding_primary: 0,
-        ambiguous_tally_match: 0,
-        hard_mismatch: 0,
-        soft_mismatch: 0,
-        other: 0,
-      },
-      quarantinedVotes: 0,
-      quarantinedRollCalls: [],
-      unresolvedCasts: { count: 0, sample: [] },
-      voteId3SpotVerify: [],
-    }
+    ? emptyRollCallResult()
     : await ingestLegiscanRollCalls(client, runId, {
-      rollCalls: rollCallsToProcess,
+      allRollCalls: parsed.rollCalls,
+      rollCallsToProcess,
       legiscanSessionId: datasetEnvelope.session_id,
       billRecordByLegiscanBillId: billEnsure.billRecordByLegiscanBillId,
       legislatorIdByPeopleId: peopleEnsure.legislatorIdByPeopleId,
+      crossCheckFn,
     });
 
   // Brief step 6's literal required shape, PLUS Ruling 7's "must surface distinctly" additions
@@ -718,6 +825,8 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
     queriesUsed: detail.queries_used,
     quarantinedVotes: rollCallResult.quarantinedVotes,
     quarantinedRollCalls: rollCallResult.quarantinedRollCalls,
+    retractedVotes: rollCallResult.retractedVotes,
+    retractedRollCalls: rollCallResult.retractedRollCalls,
     unresolvedCasts: rollCallResult.unresolvedCasts,
     votesByChamber: rollCallResult.votesByChamber,
     voteId3SpotVerify: rollCallResult.voteId3SpotVerify,
@@ -797,6 +906,37 @@ export async function assertRunUnderBudget(client, { source = SOURCE, plannedQue
   return { usage, plannedQueries, capPerMonth: cap };
 }
 
+// ---- closeRun payload helpers (CRITICAL 1, final-review-findings.md) ----
+//
+// closeRun (src/lib/db.js) REPLACES detail jsonb wholesale — relied on repo-wide (every CLI driver
+// in this codebase passes closeRun its own complete detail object; changing closeRun to MERGE
+// instead would silently change behavior for every one of them, a much larger blast radius than
+// this bug needs). The actual defect: recordQueryUsage's write-ahead persists
+// detail.queries_used (SNAKE_CASE, what getMonthlyQueryUsage reads) during the run, but main()'s own
+// closeRun call on both success (`{...result.counts, attribution}`) and failure (`{error}`) never
+// included that key at all — result.counts carries `queriesUsed` (CAMELCASE, a different field
+// entirely) — so closeRun's final wholesale replace silently erased the ledger back to 0 on every
+// completed run, undercounting getMonthlyQueryUsage forever (the unsafe direction; Ruling 3 requires
+// "crash must overcount, never undercount"). FIX: main() carries queries_used forward into BOTH
+// close payloads, extracted here as its own functions so this exact composition (recordQueryUsage ->
+// closeRun -> getMonthlyQueryUsage) is directly unit-testable, same "extract for testability without
+// needing process.argv/getClient()" precedent as assertRunUnderBudget above.
+export function buildSuccessCloseDetail(counts) {
+  return { ...counts, attribution: ATTRIBUTION, queries_used: counts.queriesUsed };
+}
+
+export async function buildFailureCloseDetail(client, runId, err) {
+  // Best-effort re-read of whatever the write-ahead path already persisted — survives even a
+  // runLegiscanIngest throw, since recordQueryUsage's own write happens BEFORE the live call it
+  // counts, not after. A re-read failure here must never mask the ORIGINAL error being closed out.
+  let queriesUsedSoFar = 0;
+  try {
+    const { data: runRow } = await client.from('ingestion_runs').select('detail').eq('id', runId).maybeSingle();
+    queriesUsedSoFar = Number(runRow?.detail?.queries_used) || 0;
+  } catch { /* best-effort only — the original err below is what matters */ }
+  return { error: String(err), queries_used: queriesUsedSoFar };
+}
+
 // ---- main ----
 
 async function main() {
@@ -857,13 +997,13 @@ async function main() {
     const result = await runLegiscanIngest(client, runId, args);
 
     const status = (result.counts.reconciliationFailures === 0 && result.counts.parseFailures === 0) ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, { ...result.counts, attribution: ATTRIBUTION });
+    await closeRun(client, runId, status, buildSuccessCloseDetail(result.counts));
     console.log(JSON.stringify({
       mode: 'live', run_id: runId, status, source: SOURCE, counts: result.counts,
     }, null, 2));
     if (status !== 'succeeded') process.exitCode = 2;
   } catch (err) {
-    await closeRun(client, runId, 'failed', { error: String(err) });
+    await closeRun(client, runId, 'failed', await buildFailureCloseDetail(client, runId, err));
     throw err;
   }
 }

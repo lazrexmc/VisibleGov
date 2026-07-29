@@ -12,10 +12,15 @@ import {
   isLegiscanRegularSession, buildLegiscanSpecialSessionIdentifier,
   ensureLegiscanSessionRow, AmbiguousLegiscanSessionMatchError, LegiscanSessionIdentityConflictError,
   runLegiscanIngest, resolveDatasetBytes, assertRunUnderBudget, dryRunReportFromDb,
-  planFromParsedDataset,
+  planFromParsedDataset, retractLegiscanVoteIfStored, recordQueryUsage,
+  buildSuccessCloseDetail, buildFailureCloseDetail,
 } from '../src/cli/ingest-legiscan.js';
-import { QueryBudgetExceededError, DatasetHashMismatchError } from '../src/adapters/legiscan.js';
+import {
+  QueryBudgetExceededError, DatasetHashMismatchError, getMonthlyQueryUsage, ATTRIBUTION,
+} from '../src/adapters/legiscan.js';
 import { decodeDatasetZip, extractDatasetFiles } from '../src/adapters/legiscan-dataset.js';
+import { crossCheckAgainstPrimarySource } from '../src/adapters/legiscan-votes.js';
+import { closeRun } from '../src/lib/db.js';
 
 // Task 9 (docs/superpowers/plans/2026-07-29-legiscan-bulk-adapter.md) — the driver that composes
 // Tasks 2/4/5/6/7 into the full dataset-bulk backfill pipeline. Real fixtures throughout (no
@@ -162,6 +167,18 @@ function makeFakeLegiscanClient(seed = {}) {
           writeLog.push({ table, op: 'upsert', rows, opts: upsertOpts });
           return Promise.resolve({ error: null });
         },
+        // CRITICAL 2 (final-review-findings.md) — retractLegiscanVoteIfStored's own delete calls.
+        // In-place splice (not reassignment) so any earlier `tables.votes` reference a test already
+        // holds stays live and reflects the deletion, same convention this file's own manual-wipe
+        // steps already use elsewhere.
+        delete: () => ({
+          eq: async (col, val) => {
+            const remaining = tables[table].filter((r) => r[col] !== val);
+            tables[table].splice(0, tables[table].length, ...remaining);
+            writeLog.push({ table, op: 'delete', col, val });
+            return { error: null };
+          },
+        }),
       };
     },
   };
@@ -514,6 +531,161 @@ test('resolveDatasetBytes: CONTROLLER RULING 3 — write-ahead query accounting 
   });
 });
 
+// ---- CRITICAL 1 fix (final-review-findings.md): the monthly query-budget ledger must survive
+// closeRun's own wholesale detail-jsonb replace — recordQueryUsage's write-ahead persists
+// detail.queries_used (snake_case) DURING the run, but closeRun REPLACES the whole detail object at
+// the end; main() must carry queries_used forward into BOTH the success and failure close payloads
+// or getMonthlyQueryUsage silently reads 0 for every completed run forever. --------------------------
+
+test('CRITICAL 1 — close-then-read round trip: recordQueryUsage -> closeRun (via buildSuccessCloseDetail) -> getMonthlyQueryUsage reflects the REAL usage, not 0', async () => {
+  const { client, tables } = makeFakeLegiscanClient();
+  tables.ingestion_runs.push({
+    id: 'run-budget', source: 'legiscan', status: 'running', detail: {}, started_at: new Date().toISOString(),
+  });
+  const detail = { queries_used: 0 };
+  await recordQueryUsage(client, 'run-budget', detail);
+  await recordQueryUsage(client, 'run-budget', detail);
+  assert.equal(detail.queries_used, 2, 'sanity: the write-ahead path itself accumulated 2');
+
+  // This is main()'s own fixed success-path call shape: buildSuccessCloseDetail(result.counts).
+  const fakeCounts = { queriesUsed: detail.queries_used, votes: 8 };
+  await closeRun(client, 'run-budget', 'succeeded', buildSuccessCloseDetail(fakeCounts));
+
+  const usage = await getMonthlyQueryUsage(client, { source: 'legiscan' });
+  assert.equal(usage, 2, 'closeRun\'s wholesale detail replace must NOT erase the write-ahead-persisted queries_used count');
+});
+
+test('CRITICAL 1 — buildSuccessCloseDetail carries queries_used (snake_case) forward alongside the existing camelCase counts.queriesUsed and attribution, never replacing them', () => {
+  const detail = buildSuccessCloseDetail({ queriesUsed: 5, votes: 3 });
+  assert.equal(detail.queries_used, 5);
+  assert.equal(detail.queriesUsed, 5, 'the original camelCase field must still be present too — nothing existing is dropped');
+  assert.equal(detail.votes, 3);
+  assert.deepEqual(detail.attribution, ATTRIBUTION);
+});
+
+test('CRITICAL 1 — buildFailureCloseDetail reads back whatever the write-ahead path already persisted, even though runLegiscanIngest itself never completed (the throw happened mid-flight)', async () => {
+  const { client, tables } = makeFakeLegiscanClient();
+  tables.ingestion_runs.push({ id: 'run-budget-fail', source: 'legiscan', status: 'running', detail: {} });
+  const detail = { queries_used: 0 };
+  await recordQueryUsage(client, 'run-budget-fail', detail); // one query spent before the simulated crash
+
+  const closeDetail = await buildFailureCloseDetail(client, 'run-budget-fail', new Error('simulated mid-flight failure'));
+  assert.equal(closeDetail.queries_used, 1, 'the write-ahead persisted BEFORE the throw must survive into the failure close payload');
+  assert.match(closeDetail.error, /simulated mid-flight failure/);
+});
+
+test('CRITICAL 1 — buildFailureCloseDetail reads 0 honestly when no query was ever spent (e.g. a --dataset-file run, or a throw before the first live call)', async () => {
+  const { client, tables } = makeFakeLegiscanClient();
+  tables.ingestion_runs.push({ id: 'run-budget-zero', source: 'legiscan', status: 'running', detail: {} });
+  const closeDetail = await buildFailureCloseDetail(client, 'run-budget-zero', new Error('failed before any query'));
+  assert.equal(closeDetail.queries_used, 0);
+});
+
+test('CRITICAL 1 — full composition: recordQueryUsage -> closeRun(failed, buildFailureCloseDetail) -> getMonthlyQueryUsage still reflects usage-so-far on a FAILED run, never silently undercounted', async () => {
+  const { client, tables } = makeFakeLegiscanClient();
+  tables.ingestion_runs.push({
+    id: 'run-budget-fail-full', source: 'legiscan', status: 'running', detail: {}, started_at: new Date().toISOString(),
+  });
+  const detail = { queries_used: 0 };
+  await recordQueryUsage(client, 'run-budget-fail-full', detail); // getDatasetList query spent...
+  const err = new Error('getDataset call failed mid-run');
+  const closeDetail = await buildFailureCloseDetail(client, 'run-budget-fail-full', err); // ...then the run crashes before getDataset
+  await closeRun(client, 'run-budget-fail-full', 'failed', closeDetail);
+
+  const usage = await getMonthlyQueryUsage(client, { source: 'legiscan' });
+  assert.equal(usage, 1, 'Ruling 3 — "crash must overcount, never undercount": the one query genuinely spent before the crash must still be visible in the durable ledger');
+});
+
+// ---- IMPORTANT 7 fix (final-review-findings.md): the cache path never re-verified the dataset
+// hash, and the fresh path silently skipped its own mandated re-compare on a null in-archive hash.
+// buildMinimalDatasetZipBase64 reuses buildStoredZip (defined below in this file, module-scope
+// function declarations are hoisted) with a trivial bill/people set — content doesn't matter here,
+// only whether/what hash.md5 entry is present. -------------------------------------------------
+
+function buildMinimalDatasetZipBase64({ hashValue } = {}) {
+  const entries = [
+    { name: 'MO/99900/bill/HB1.json', data: Buffer.from(JSON.stringify({ bill: { bill_id: 1, bill_number: 'HB1', title: 't', status: 1, url: 'https://legiscan.com/x', votes: [] } })) },
+    { name: 'MO/99900/people/1.json', data: Buffer.from(JSON.stringify({ person: { people_id: 1, name: 'A One', first_name: 'A', last_name: 'One', role: 'Rep', district: 'HD-001', party: 'R' } })) },
+  ];
+  if (hashValue !== undefined) entries.push({ name: 'MO/99900/hash.md5', data: Buffer.from(hashValue) });
+  return buildStoredZip(entries).toString('base64');
+}
+
+test('resolveDatasetBytes: IMPORTANT 7 fix — the CACHE branch re-verifies the cached archive\'s own hash.md5 against the ledger\'s dataset_hash; a swapped/stale local cache file throws DatasetHashMismatchError, never trusted silently', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const cachePath = join(dir, 'cached-swapped.json');
+    // The FILE on disk actually contains an archive whose own in-archive hash is 'hash-B' — a
+    // stale/swapped cache from a DIFFERENT session/fetch than what the ledger row claims.
+    writeFileSync(cachePath, JSON.stringify({ session_id: 1608, zip: buildMinimalDatasetZipBase64({ hashValue: 'hash-B' }) }));
+    const { client } = makeFakeLegiscanClient({
+      legiscan_datasets: [{
+        legiscan_session_id: 1608, dataset_hash: 'hash-A', local_cache_path: cachePath, fetched_at: 'earlier', run_id: 'run-0',
+      }],
+    });
+    // getDatasetList reports 'hash-A' too, matching the LEDGER's own claim -> shouldFetch:false, cache branch taken.
+    const getDatasetListFn = async () => [{ session_id: 1608, dataset_hash: 'hash-A', access_key: 'ak-1608' }];
+    const getDatasetFn = async () => { throw new Error('must not fetch live on a hash-unchanged gate'); };
+    const detail = { queries_used: 0 };
+    await assert.rejects(
+      () => resolveDatasetBytes(client, 'run-1', 1608, {
+        getDatasetListFn, getDatasetFn, apiKey: 'k', cacheDir: dir, detail,
+      }),
+      (err) => {
+        assert.ok(err instanceof DatasetHashMismatchError);
+        assert.equal(err.expected, 'hash-A');
+        assert.equal(err.actual, 'hash-B');
+        return true;
+      },
+    );
+  });
+});
+
+test('resolveDatasetBytes: IMPORTANT 7 fix — the CACHE branch on a hashless cached archive is a loud, counted condition (gate.hashVerification), never silently trusted, and does not throw', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const cachePath = join(dir, 'cached-nohash.json');
+    writeFileSync(cachePath, JSON.stringify({ session_id: 1608, zip: buildMinimalDatasetZipBase64({ hashValue: undefined }) }));
+    const { client } = makeFakeLegiscanClient({
+      legiscan_datasets: [{
+        legiscan_session_id: 1608, dataset_hash: 'hash-X', local_cache_path: cachePath, fetched_at: 'earlier', run_id: 'run-0',
+      }],
+    });
+    const getDatasetListFn = async () => [{ session_id: 1608, dataset_hash: 'hash-X', access_key: 'ak-1608' }];
+    const getDatasetFn = async () => { throw new Error('must not fetch live on a hash-unchanged gate'); };
+    const detail = { queries_used: 0 };
+    const result = await resolveDatasetBytes(client, 'run-1', 1608, {
+      getDatasetListFn, getDatasetFn, apiKey: 'k', cacheDir: dir, detail,
+    });
+    assert.deepEqual(result.gate.hashVerification, { verified: false, reason: 'cached_archive_missing_hash_md5' });
+  });
+});
+
+test('resolveDatasetBytes: IMPORTANT 7 fix — the FRESH-fetch branch on a hashless archive is likewise a loud, counted condition (never silently skipped), and the dataset is still cached + ledgered', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client, tables } = makeFakeLegiscanClient();
+    const getDatasetListFn = async () => [{ session_id: 1608, dataset_hash: 'hash-Y', access_key: 'ak-1608' }];
+    const getDatasetFn = async () => ({ session_id: 1608, zip: buildMinimalDatasetZipBase64({ hashValue: undefined }) });
+    const detail = { queries_used: 0 };
+    const result = await resolveDatasetBytes(client, 'run-1', 1608, {
+      getDatasetListFn, getDatasetFn, apiKey: 'k', cacheDir: dir, detail,
+    });
+    assert.deepEqual(result.gate.hashVerification, { verified: false, reason: 'fetched_archive_missing_hash_md5' });
+    assert.equal(tables.legiscan_datasets.length, 1, 'the dataset is still cached + ledgered even though the re-compare could not run');
+  });
+});
+
+test('resolveDatasetBytes: IMPORTANT 7 fix — the FRESH-fetch branch on a matching hash reports verified:true (regression guard on the existing happy path)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeLegiscanClient();
+    const getDatasetListFn = async () => [{ session_id: 1608, dataset_hash: mo2018Special2Dataset.dataset_hash, access_key: 'ak-1608' }];
+    const getDatasetFn = async () => mo2018Special2Dataset;
+    const detail = { queries_used: 0 };
+    const result = await resolveDatasetBytes(client, 'run-1', 1608, {
+      getDatasetListFn, getDatasetFn, apiKey: 'k', cacheDir: dir, detail,
+    });
+    assert.deepEqual(result.gate.hashVerification, { verified: true });
+  });
+});
+
 // ---- runLegiscanIngest: end-to-end via --dataset-file, BOTH real fixtures (CONTROLLER RULING 11) ----
 
 test('runLegiscanIngest: session 1579 (ZERO votes) end-to-end — real numbers, zero live queries, zero quarantines', async () => {
@@ -585,28 +757,78 @@ test('runLegiscanIngest: --limit caps the number of roll calls processed, withou
   assert.deepEqual(result.counts.people.created, 189, 'people ensure is unaffected by --limit');
 });
 
-// ---- CONTROLLER RULING 1: quarantine ordering, proven at the DRIVER composition level (not just
-// inside legiscan-votes.js's own unit tests) — a hard (yea) mismatch against a pre-existing
-// primary-source vote must mean the LegiScan vote/casts are NEVER written, while every OTHER real
-// roll call in the SAME run still writes normally. ----------------------------------------------
+// ---- IMPORTANT 4 fix (final-review-findings.md): --limit must never truncate the SIBLING-TALLY
+// POOL crossCheckAgainstPrimarySource's own tuple disambiguation depends on. Real dataset roll-call
+// order (verified by reading the actual 1608 fixture through the real decode pipeline): 774311,
+// 774412, 774312, 774313, 774314, 774315, 774316, 774411 — so `--limit 3` selects EXACTLY
+// [774311, 774412, 774312], excluding 774313-774316 entirely even though they are 774312's real
+// same-tuple (HB3, house, 2018-09-12) siblings. This is the LITERAL repro final-review-findings.md
+// cites: seeding a primary row with 774313's TRUE tallies (36-92, not 774312's own 119-23) and
+// running --limit 3, the pre-fix code saw 774312 as the tuple's LONE candidate (774313 sliced away)
+// and compared it directly, fabricating a "119 vs 36 / 23 vs 92" contradiction. ------------------
 
-test('runLegiscanIngest: CONTROLLER RULING 1 — a hard tally mismatch against an existing primary-source vote quarantines THAT roll call only; the other 7 real roll calls still store normally', async () => {
+test('runLegiscanIngest: IMPORTANT 4 fix — a primary row matching a --limit-SLICED-OUT sibling (774313) must never be misattributed as a contradiction of the roll call that IS processed (774312); a full run over identical state agrees', async () => {
   const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
-  tables.ingestion_runs.push({ id: 'run-quarantine', source: 'legiscan', status: 'running', detail: {} });
+  tables.ingestion_runs.push({ id: 'run-limit-sibling', source: 'legiscan', status: 'running', detail: {} });
+
+  await runLegiscanIngest(client, 'run-limit-sibling', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const hb3BillRow = tables.bills.find((b) => b.identifier === 'HB 3');
+  assert.ok(hb3BillRow);
+
+  const primaryVoteId = 'primary-hb3-house-matches-774313';
+  tables.votes.push({
+    id: primaryVoteId, bill_id: hb3BillRow.id, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+  });
+  for (let i = 0; i < 36; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'yea' }); // 774313's real yea
+  for (let i = 0; i < 92; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'nay' }); // 774313's real nay
+  for (let i = 0; i < 28; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'absent' }); // 774313's real absent
+
+  tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+  tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+
+  const limitedResult = await runLegiscanIngest(client, 'run-limit-sibling', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: 3 });
+  assert.equal(limitedResult.counts.rollCallsProcessed, 3);
+  assert.equal(limitedResult.counts.quarantinedVotes, 0, '774312 must never be quarantined against a primary row that actually corresponds to a SLICED-OUT sibling');
+  assert.equal(limitedResult.counts.crossCheckFlags.hard_mismatch, 0, 'no fabricated hard-mismatch flag either — 774312 must resolve as honestly uncorresponded (774313, the true match, is simply outside this --limit window)');
+  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774312'), true, '774312 must still store');
+
+  // Full run over identical primary-seeded state: 774313 is now ALSO processed and is the one that
+  // genuinely verifies against the primary row — 774312 still correctly resolves as uncorresponded.
+  tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+  tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+  const fullResult = await runLegiscanIngest(client, 'run-limit-sibling', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  assert.equal(fullResult.counts.quarantinedVotes, 0);
+  assert.equal(fullResult.counts.crossCheckFlags.tally_unique_match, 1, '774313 verifies cleanly against the primary row in the full run');
+  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774312'), true);
+  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774313'), true);
+});
+
+// ---- IMPORTANT 5 fix (final-review-findings.md), proven at the DRIVER composition level (not just
+// inside legiscan-votes.js's own unit tests): a hard (yea) mismatch against a pre-existing
+// primary-source vote, with no siblings on either side to corroborate correspondence, no longer
+// quarantines at all — it STORES + FLAGS (singleton-ness alone is never sufficient corroboration),
+// while every OTHER real roll call in the SAME run still writes normally. This test SUPERSEDES the
+// pre-final-review version (which asserted quarantine:true here and only passed because it manually
+// wiped tables.votes/tables.vote_casts between passes — final-review-findings.md Critical 2's own
+// citation of this exact test/line range). ----------------------------------------------
+
+test('runLegiscanIngest: IMPORTANT 5 fix — a hard tally mismatch against an existing primary-source vote, with no siblings, STORES + FLAGS that roll call (never quarantines); the other 7 real roll calls still store normally', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-hardmismatch', source: 'legiscan', status: 'running', detail: {} });
 
   // Roll call 774411 (HB3, SENATE, 2018-09-14 — real tallies yea=28/nay=1/absent=4/total=33, per
   // legiscan-votes.test.js's own EXPECTED_TALLIES) is deliberately chosen over the more obvious
   // 774312: HB3 has FIVE house roll calls sharing the exact same (bill, chamber, date) tuple
   // (774312-774316, all house/2018-09-12 — the real same-day-multi-roll-call fixture Task 6's
-  // review found) — seeding one primary-source row for THAT tuple would make every one of those 5
-  // LegiScan roll calls see the same single candidate and get compared against it, quarantining
-  // more than the one under test. 774411 is the ONLY roll call for (HB3, senate, 2018-09-14), so
-  // seeding one primary-source row for it isolates the effect to exactly this one roll call.
+  // review found) — seeding one primary-source row for THAT tuple would put 774312 through a
+  // DIFFERENT branch (siblings present) than the one under test here. 774411 is the ONLY roll call
+  // for (HB3, senate, 2018-09-14), so seeding one primary-source row for it isolates the effect to
+  // exactly this one roll call, on the singleton/singleton (Branch B) path.
 
   // Phase 1: run once against an empty primary source to learn the real (fake) bill row id —
   // insertIfAbsent/additivePatch make a second pass fully idempotent, exactly how a resumed real
   // run would behave anyway.
-  await runLegiscanIngest(client, 'run-quarantine', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  await runLegiscanIngest(client, 'run-hardmismatch', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
   const hb3BillRow = tables.bills.find((b) => b.identifier === 'HB 3');
   assert.ok(hb3BillRow);
 
@@ -619,22 +841,111 @@ test('runLegiscanIngest: CONTROLLER RULING 1 — a hard tally mismatch against a
   for (let i = 0; i < 4; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'absent' }); // bucket matches too — ONLY yea disagrees
 
   // Reset whatever LegiScan itself wrote on pass 1, and re-run — proving the SAME pipeline that
-  // just stored 8 votes cleanly now quarantines exactly one of them once a contradicting
-  // primary-source row exists for it.
+  // just stored 8 votes cleanly now flags exactly one of them once a contradicting primary-source
+  // row exists for it, WITHOUT withholding it.
   tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
   tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
 
-  const result = await runLegiscanIngest(client, 'run-quarantine', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const result = await runLegiscanIngest(client, 'run-hardmismatch', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+
+  assert.equal(result.counts.quarantinedVotes, 0, 'IMPORTANT 5 — singleton correspondence alone is never sufficient corroboration to quarantine');
+  assert.equal(result.counts.votes, 8, 'ALL 8 real roll calls store, including 774411 — a hard mismatch here is recorded, not withheld');
+  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774411'), true, '774411 stores despite the contradicting primary row — non-correspondence is flagged, not asserted as a contradiction requiring withholding');
+  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774312'), true, 'the SAME-DAY house roll calls sharing HB3 are untouched');
+  assert.equal(result.counts.crossCheckFlags.total, 1);
+  assert.equal(result.counts.crossCheckFlags.hard_mismatch, 1);
+  assert.equal(tables.vote_reconciliation_flags.length, 1);
+  assert.equal(tables.vote_reconciliation_flags[0].discrepancy.quarantine, false);
+  assert.equal(tables.vote_reconciliation_flags[0].discrepancy.roll_call_id, 774411);
+});
+
+// ---- CRITICAL 2 fix (final-review-findings.md): quarantine retraction — an ALREADY-STORED LegiScan
+// vote must be actively retracted (casts then vote deleted) when a later run's cross-check reports
+// quarantine:true for it, WITHOUT any manual wipe step between runs. Findings 3+5 mean
+// crossCheckAgainstPrimarySource can no longer itself produce quarantine:true from real
+// correspondence evidence (see legiscan-votes.js's Branch B comment) — this test uses the
+// crossCheckFn injection seam (added specifically for this purpose, mirroring getDatasetListFn/
+// getDatasetFn's own existing convention) to force quarantine:true for exactly ONE already-stored
+// roll call while every other roll call still runs through the REAL crossCheckAgainstPrimarySource
+// unmodified, proving the retraction is scoped correctly and the rest of a real run is unaffected. --
+
+test('runLegiscanIngest: CRITICAL 2 fix — a LegiScan vote already stored by a PRIOR run is RETRACTED (casts then vote deleted) when a later run\'s cross-check reports quarantine:true for it, with NO manual wipe step between runs', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-retract-1', source: 'legiscan', status: 'running', detail: {} });
+
+  // Pass 1: no primary rows exist yet — all 8 real roll calls store normally, including 774411.
+  await runLegiscanIngest(client, 'run-retract-1', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const v774411Before = tables.votes.find((v) => v.source_key === 'legiscan-1608-rollcall-774411');
+  assert.ok(v774411Before, 'sanity: 774411 is stored after pass 1');
+  const castsBefore = tables.vote_casts.filter((c) => c.vote_id === v774411Before.id).length;
+  assert.ok(castsBefore > 0, 'sanity: 774411 has casts stored after pass 1');
+
+  // Pass 2 — NO manual wipe of tables.votes/tables.vote_casts (the exact gap Critical 2 closes). A
+  // fake crossCheckFn simulates a contradicting cross-check outcome for 774411 ONLY; every other
+  // roll call runs through the REAL crossCheckAgainstPrimarySource, unmodified.
+  tables.ingestion_runs.push({ id: 'run-retract-2', source: 'legiscan', status: 'running', detail: {} });
+  const fakeCrossCheckFn = async (c, billId, legiscanTallies, siblingTallies) => {
+    if (legiscanTallies.rollCallId === 774411) {
+      return {
+        checked: true,
+        matched: false,
+        flag: { id: 'fake-flag', discrepancy: { hard_mismatches: ['yea: legiscan 28 vs primary 1'] } },
+        quarantine: true,
+      };
+    }
+    return crossCheckAgainstPrimarySource(c, billId, legiscanTallies, siblingTallies);
+  };
+  const result = await runLegiscanIngest(
+    client,
+    'run-retract-2',
+    { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null },
+    { crossCheckFn: fakeCrossCheckFn },
+  );
 
   assert.equal(result.counts.quarantinedVotes, 1);
-  assert.deepEqual(result.counts.quarantinedRollCalls.map((q) => q.rollCallId), [774411]);
-  assert.equal(result.counts.votes, 7, 'the other 7 real roll calls still store normally in the SAME run');
-  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774411'), false, 'the quarantined LegiScan vote is NEVER written');
-  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774312'), true, 'the SAME-DAY house roll calls sharing HB3 are untouched — never collateral-quarantined');
-  assert.equal(tables.vote_casts.some((c) => c.vote_id && tables.votes.find((v) => v.id === c.vote_id)?.source_key === 'legiscan-1608-rollcall-774411'), false, 'no casts for the quarantined vote either');
-  assert.equal(result.counts.crossCheckFlags.total, 1);
-  assert.equal(tables.vote_reconciliation_flags.length, 1);
-  assert.equal(tables.vote_reconciliation_flags[0].discrepancy.quarantine, true);
+  assert.equal(result.counts.retractedVotes, 1, 'the row was ALREADY stored from pass 1 — this run must ACTIVELY retract it, not just count a no-op quarantine');
+  assert.deepEqual(result.counts.retractedRollCalls.map((r) => r.rollCallId), [774411]);
+  assert.deepEqual(result.counts.quarantinedRollCalls.map((q) => ({ rollCallId: q.rollCallId, retracted: q.retracted })), [{ rollCallId: 774411, retracted: true }]);
+  assert.equal(tables.votes.some((v) => v.source_key === 'legiscan-1608-rollcall-774411'), false, 'the previously-published contradicted vote must be GONE — never anon-readable after retraction');
+  assert.equal(tables.vote_casts.some((c) => c.vote_id === v774411Before.id), false, 'its casts must be gone too (FK order: casts deleted before the vote)');
+  // Every OTHER real roll call from pass 1 remains untouched.
+  for (const rollCallId of [774311, 774312, 774313, 774314, 774315, 774316, 774412]) {
+    assert.equal(tables.votes.some((v) => v.source_key === `legiscan-1608-rollcall-${rollCallId}`), true, `roll call ${rollCallId} must remain stored`);
+  }
+});
+
+test('retractLegiscanVoteIfStored: deletes casts then the vote (FK order), for an existing legiscan-* row, and leaves everything else untouched', async () => {
+  const { client, tables } = makeFakeLegiscanClient({
+    votes: [
+      { id: 'v1', source_key: 'legiscan-1608-rollcall-774411' },
+      { id: 'v2', source_key: 'legiscan-1608-rollcall-774312' },
+    ],
+    vote_casts: [
+      { id: 'c1', vote_id: 'v1', position: 'yea' },
+      { id: 'c2', vote_id: 'v1', position: 'nay' },
+      { id: 'c3', vote_id: 'v2', position: 'yea' },
+    ],
+  });
+  const result = await retractLegiscanVoteIfStored(client, 'legiscan-1608-rollcall-774411');
+  assert.deepEqual(result, { retracted: true, voteId: 'v1' });
+  assert.equal(tables.votes.some((v) => v.id === 'v1'), false);
+  assert.equal(tables.votes.some((v) => v.id === 'v2'), true, 'the OTHER vote is untouched');
+  assert.equal(tables.vote_casts.some((c) => c.vote_id === 'v1'), false);
+  assert.equal(tables.vote_casts.some((c) => c.vote_id === 'v2'), true);
+});
+
+test('retractLegiscanVoteIfStored: a source_key with no existing row is a no-op, never an error', async () => {
+  const { client } = makeFakeLegiscanClient();
+  const result = await retractLegiscanVoteIfStored(client, 'legiscan-1608-rollcall-999999');
+  assert.deepEqual(result, { retracted: false, voteId: null });
+});
+
+test('retractLegiscanVoteIfStored: refuses to touch a non-legiscan- source_key — this is the one sanctioned delete in this codebase and it must never reach a primary-source row', async () => {
+  const { client } = makeFakeLegiscanClient();
+  await assert.rejects(
+    () => retractLegiscanVoteIfStored(client, 'mo-house-xml-HB3-1'),
+    /refusing to touch a non-legiscan source_key/,
+  );
 });
 
 // ---- FIX ROUND (review finding, disclosed): the test above deliberately picked roll call 774411
