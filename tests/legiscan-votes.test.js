@@ -241,6 +241,45 @@ test('reconcileLegiscanTallies: a reconciling roll call is unaffected by cast OR
   assert.deepEqual(result.tallies, EXPECTED_TALLIES[774313].tallies);
 });
 
+// FIX ROUND 2, MINOR 1: a runtime vote_id<->vote_text consistency check per record, locking the
+// same guarantee the corpus-level test above already proves empirically across 1163 real casts.
+test('reconcileLegiscanTallies (FIX ROUND 2, MINOR 1): a cast whose printed vote_text disagrees with its own vote_id throws VoteIdMapError naming both values', () => {
+  const real = findRc(774312);
+  // real.votes[0] is { people_id: 7523, vote_id: 1, vote_text: "Yea" } — mutate ONLY the printed
+  // text, leaving vote_id untouched, so this is a pure vote_id/vote_text disagreement, not an
+  // unrecognized-vote_id case (already covered by the test above).
+  assert.equal(real.votes[0].vote_id, 1);
+  assert.equal(real.votes[0].vote_text, 'Yea');
+  const mutated = {
+    ...real,
+    votes: [{ ...real.votes[0], vote_text: 'Nay' }, ...real.votes.slice(1)],
+  };
+  assert.throws(() => reconcileLegiscanTallies(mutated), (err) => {
+    assert.ok(err instanceof VoteIdMapError);
+    assert.equal(err.rollCallId, 774312);
+    assert.equal(err.voteId, 1);
+    assert.equal(err.peopleId, 7523);
+    assert.equal(err.voteText, 'Nay');
+    assert.equal(err.expectedVoteText, 'Yea');
+    assert.match(err.message, /vote_id\/vote_text disagree/);
+    return true;
+  });
+});
+
+test('reconcileLegiscanTallies (FIX ROUND 2, MINOR 1): absent/empty vote_text is never checked — no crash, no false positive, since some payload shapes may omit the field', () => {
+  const real = findRc(774312);
+  const withoutVoteText = {
+    ...real,
+    votes: [{ people_id: real.votes[0].people_id, vote_id: real.votes[0].vote_id }, ...real.votes.slice(1)],
+  };
+  const withEmptyVoteText = {
+    ...real,
+    votes: [{ ...real.votes[0], vote_text: '' }, ...real.votes.slice(1)],
+  };
+  assert.doesNotThrow(() => reconcileLegiscanTallies(withoutVoteText));
+  assert.doesNotThrow(() => reconcileLegiscanTallies(withEmptyVoteText));
+});
+
 // ---- buildLegiscanVoteCasts (CONTROLLER RULING 3: honest unresolved count + sample, never guessed) ----
 
 test('buildLegiscanVoteCasts: resolved casts get vote_id/legislator_id/position/run_id rows via the people_id map', () => {
@@ -522,27 +561,102 @@ test('crossCheckAgainstPrimarySource: the Present-category caveat in practice �
 
 // ---- ambiguous cross-reference: internally reconciled + uncontradicted -> stores, flagged ----
 
-test('crossCheckAgainstPrimarySource: ambiguous match (more than one primary-source vote row for the same bill/chamber/date) -> flags row written with an ambiguity reason, matched:false, quarantine:false (stores — internally reconciled, uncontradicted by any specific candidate), NEVER guesses which one is right', async () => {
-  const { client, flags } = makeFakeVotesDb({
-    voteRows: [
-      {
-        id: 'primary-a', bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
-      },
-      {
-        id: 'primary-b', bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-2',
-      },
-    ],
-  });
+// ---- FIX ROUND 2: same-day multi-roll-call disambiguation (review finding — the plan's own brief
+// text wrongly assumed "at most one primary-source vote per real roll call"; the reviewer traced
+// this to the real HB 3 fixture's own pattern: 5 separate House roll calls, all on 2018-09-12) ----
+//
+// The REAL 5 HB 3 house roll calls' true tallies (774312-774316, all house, all 2018-09-12) —
+// mirrored here as 5 primary-source candidate rows, exactly the shape a real mo-house-xml driver
+// run would have produced for the same day.
+const HB3_HOUSE_TALLIES = [
+  {
+    ordinal: 1, yea: 119, nay: 23, absent: 14,
+  }, // 774312 (real)
+  {
+    ordinal: 2, yea: 36, nay: 92, absent: 28,
+  }, // 774313 (real)
+  {
+    ordinal: 3, yea: 33, nay: 103, absent: 20,
+  }, // 774314 (real)
+  {
+    ordinal: 4, yea: 41, nay: 100, absent: 15,
+  }, // 774315 (real)
+  {
+    ordinal: 5, yea: 96, nay: 38, absent: 22,
+  }, // 774316 (real)
+];
+
+function buildHb3HouseCandidates(talliesList) {
+  const voteRows = talliesList.map((t) => ({
+    id: `primary-hb3-${t.ordinal}`, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: `mo-house-xml-HB3-${t.ordinal}`,
+  }));
+  const castRows = talliesList.flatMap((t) => [
+    ...castRowsOfPosition(`primary-hb3-${t.ordinal}`, 'yea', t.yea),
+    ...castRowsOfPosition(`primary-hb3-${t.ordinal}`, 'nay', t.nay),
+    ...castRowsOfPosition(`primary-hb3-${t.ordinal}`, 'absent', t.absent),
+  ]);
+  return { voteRows, castRows };
+}
+
+test('crossCheckAgainstPrimarySource: the REAL HB 3 same-day pattern (5 real House roll calls, all 2018-09-12) — LegiScan 774312 tally-disambiguates uniquely against its own true match among the 5 -> tally_unique_match, matched:true, no flag', async () => {
+  const { voteRows, castRows } = buildHb3HouseCandidates(HB3_HOUSE_TALLIES);
+  const { client, flags } = makeFakeVotesDb({ voteRows, castRows });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, true);
+  assert.equal(result.quarantine, false);
+  assert.equal(result.flag, null);
+  assert.equal(result.reason, 'tally_unique_match');
+  assert.equal(flags.length, 0, 'exact-match verification passing writes no flag');
+});
+
+test('crossCheckAgainstPrimarySource: a doctored ZERO-tally-match case among the 5 same-day HB 3 candidates -> no assertable 1:1 correspondence, so quarantine:false — stores, flagged "no_tally_corresponding_primary" listing every candidate', async () => {
+  const { voteRows, castRows } = buildHb3HouseCandidates(HB3_HOUSE_TALLIES);
+  const { client, flags } = makeFakeVotesDb({ voteRows, castRows });
+  // Doctored LegiScan tallies that match NONE of the 5 real candidates' own (yea, nay) pairs
+  // ((119,23),(36,92),(33,103),(41,100),(96,38)).
+  const legiscanTalliesNoMatch = {
+    ...legiscanTallies774312,
+    tallies: {
+      yea: 200, nay: 1, not_voting: 0, absent: 155, total: 356,
+    },
+  };
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTalliesNoMatch);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false);
+  assert.equal(result.quarantine, false, 'no assertable 1:1 correspondence -> never quarantine, even though something on this day genuinely disagrees');
+  assert.equal(flags.length, 1);
+  assert.equal(flags[0].discrepancy.reason, 'no_tally_corresponding_primary');
+  assert.equal(flags[0].discrepancy.quarantine, false);
+  assert.equal(flags[0].discrepancy.candidates.length, 5, 'every same-day candidate is listed for human review, not just one');
+  assert.deepEqual(
+    flags[0].discrepancy.candidates.map((c) => c.source_key).sort(),
+    ['mo-house-xml-HB3-1', 'mo-house-xml-HB3-2', 'mo-house-xml-HB3-3', 'mo-house-xml-HB3-4', 'mo-house-xml-HB3-5'],
+  );
+});
+
+test('crossCheckAgainstPrimarySource: a doctored TWO-IDENTICAL-tallies case among the same-day HB 3 candidates -> genuinely ambiguous which row corresponds -> stores, flagged "ambiguous_tally_match" with the matching subset listed', async () => {
+  // 774313's own candidate row is doctored to share 774312's real (119, 23) tally exactly — two
+  // same-day candidates now both match LegiScan's 774312 tallies, and picking between them would
+  // be a guess.
+  const doctoredTallies = HB3_HOUSE_TALLIES.map((t, i) => (
+    i === 1 ? {
+      ordinal: t.ordinal, yea: 119, nay: 23, absent: 14,
+    } : t
+  ));
+  const { voteRows, castRows } = buildHb3HouseCandidates(doctoredTallies);
+  const { client, flags } = makeFakeVotesDb({ voteRows, castRows });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
   assert.equal(result.checked, true);
   assert.equal(result.matched, false);
-  assert.equal(result.quarantine, false);
+  assert.equal(result.quarantine, false, 'ambiguity is never grounds to quarantine — every match AGREES on the tally, it\'s which row corresponds that\'s unresolved');
   assert.equal(flags.length, 1);
-  assert.equal(flags[0].source_b, 'ambiguous');
-  assert.equal(flags[0].discrepancy.reason, 'ambiguous_cross_reference');
-  assert.equal(flags[0].discrepancy.quarantine, false);
-  assert.deepEqual(flags[0].discrepancy.candidate_source_keys.sort(), ['mo-house-xml-HB3-1', 'mo-house-xml-HB3-2']);
-  assert.ok(['primary-a', 'primary-b'].includes(flags[0].vote_id), 'the flag anchors to one of the ambiguous candidates (never a LegiScan votes.id, which the FK constraint requires to already exist)');
+  assert.equal(flags[0].discrepancy.reason, 'ambiguous_tally_match');
+  assert.equal(flags[0].discrepancy.matching_candidates.length, 2);
+  assert.deepEqual(
+    flags[0].discrepancy.matching_candidates.map((c) => c.source_key).sort(),
+    ['mo-house-xml-HB3-1', 'mo-house-xml-HB3-2'],
+  );
 });
 
 test('crossCheckAgainstPrimarySource: a vote row on a DIFFERENT date is not a candidate at all (checked:false) — date matching is exact-day, not "close enough"', async () => {
