@@ -449,3 +449,29 @@ noun entirely, not just a singular/plural variant. This matches the archive's ow
 an expected, self-documented mismatch, not a surprise, but still a real trap for code that assumes
 directory name == top-level JSON key (as `people/` -> `person` already proved is NOT a safe
 assumption in this dataset format).
+
+## Task 7 of the LegiScan bulk adapter plan (2026-07-29): substitute-vehicle attribution investigation
+
+**1 live query** (of a &le;3 budget; findings + full analysis in
+`docs/research/2026-07-29-legiscan-substitute-vehicles.md`, this doc's sibling):
+
+1. `getBill`: `https://api.legiscan.com/?key=REDACTED&op=getBill&id=1061416` (200 OK) — SB921's
+   `bill_id`, already known from the held `mo-2018-masterlist.json` (entry 2067), no list
+   re-query. Saved as `legiscan/mo-2018-SB921.json` (new fixture this task), same `{status, bill}`
+   envelope shape as `mo-2018-SB894.json`. Grepped clean of key material before committing.
+
+**Result: SB921's `votes: []` (empty) and `sasts: []` (empty)**, and its `history` array stops at
+the 2018-02-20 "Bill Combined w/(SCS SBs 894 & 921)" event — LegiScan never updated SB921's record
+again after that. Combined with SB894's own already-held `votes[]` (only the one House roll call,
+747209) and `sasts: []`, this settles the open question flagged above: **the combined vehicle's
+real Senate roll call (`SS for SCS for SBs 894 & 921`, verified via the real
+`src/adapters/mo-senate-journal-pdf.js` parser against `2018-day37-journal-onder-era.pdf` — a real,
+individually-named 31-0 vote, NOT a voice vote) is attributed to NEITHER sibling bill's LegiScan
+record.** LegiScan simply has no Senate roll call for this bill in its data at all — a genuine
+LegiScan coverage gap, not an attribution-elsewhere case. The 2nd/3rd budgeted queries
+(`getRollCall` follow-up) were never spent — there was no roll call id to fetch once SB921's
+`votes[]` came back empty. Full evidence, the `sasts`/`ls_bill_vote` schema analysis (from the
+already-held `legiscan-current.tar.gz`), and the Task 9 attribution-rule recommendation (ship
+single-bill-primary attribution, no join table — already precedented by `ingest-mo-senate.js`'s
+own `bill_refs[0]`-as-primary pattern) live in
+`docs/research/2026-07-29-legiscan-substitute-vehicles.md`.

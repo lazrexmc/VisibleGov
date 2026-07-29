@@ -1,0 +1,150 @@
+{
+  "status": "OK",
+  "bill": {
+    "bill_id": 1061416,
+    "change_hash": "b4a760e31092ed0d065060ef2860bf1d",
+    "session_id": 1530,
+    "session": {
+      "session_id": 1530,
+      "state_id": 25,
+      "year_start": 2018,
+      "year_end": 2018,
+      "prefile": 0,
+      "sine_die": 1,
+      "prior": 1,
+      "special": 0,
+      "session_tag": "Regular Session",
+      "session_title": "2018 Regular Session",
+      "session_name": "2018 Regular Session"
+    },
+    "url": "https://legiscan.com/MO/bill/SB921/2018",
+    "state_link": "https://www.senate.mo.gov/18info/BTS_Web/Error.aspx",
+    "completed": 0,
+    "status": 1,
+    "status_date": "1969-12-31",
+    "progress": [
+      {
+        "date": "1969-12-31",
+        "event": 1
+      }
+    ],
+    "state": "MO",
+    "state_id": 25,
+    "bill_number": "SB921",
+    "bill_type": "B",
+    "bill_type_id": "1",
+    "body": "S",
+    "body_id": 60,
+    "current_body": "S",
+    "current_body_id": 60,
+    "title": "Creates certain provisions relating to elementary and secondary education",
+    "description": "Creates certain provisions relating to elementary and secondary education",
+    "pending_committee_id": 0,
+    "committee": [],
+    "referrals": [
+      {
+        "date": "2018-01-25",
+        "committee_id": 3494,
+        "chamber": "S",
+        "chamber_id": 60,
+        "name": "Economic Development"
+      }
+    ],
+    "history": [
+      {
+        "date": "2018-01-17",
+        "action": "S First Read--SB 921-Rizzo",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-01-25",
+        "action": "Second Read and Referred S Economic Development Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 1
+      },
+      {
+        "date": "2018-02-06",
+        "action": "Hearing Conducted S Economic Development Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-02-20",
+        "action": "Bill Combined w/(SCS SBs 894 & 921)",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      }
+    ],
+    "sponsors": [
+      {
+        "people_id": 12974,
+        "person_hash": "2fbplpqt",
+        "party_id": "1",
+        "state_id": 25,
+        "party": "D",
+        "role_id": 2,
+        "role": "Sen",
+        "name": "John Rizzo",
+        "first_name": "John",
+        "middle_name": "Joseph",
+        "last_name": "Rizzo",
+        "suffix": "",
+        "nickname": "",
+        "district": "SD-011",
+        "ftm_eid": 4327888,
+        "votesmart_id": 39418,
+        "opensecrets_id": "",
+        "knowwho_pid": 293211,
+        "ballotpedia": "John_Rizzo_(Missouri)",
+        "bioguide_id": "",
+        "sponsor_type_id": 1,
+        "sponsor_order": 1,
+        "committee_sponsor": 0,
+        "committee_id": 0,
+        "state_federal": 0,
+        "bio": []
+      }
+    ],
+    "sasts": [],
+    "subjects": [],
+    "texts": [
+      {
+        "doc_id": 1690330,
+        "date": "2018-01-17",
+        "type": "Introduced",
+        "type_id": 1,
+        "mime": "application/pdf",
+        "mime_id": 2,
+        "url": "https://legiscan.com/MO/text/SB921/id/1690330",
+        "state_link": "https://www.senate.mo.gov/18info/pdf-bill/intro/SB921.pdf",
+        "text_size": 183013,
+        "text_hash": "65255a4fddb15f3fffe2b41d42bfb140",
+        "alt_bill_text": 0,
+        "alt_mime": "",
+        "alt_mime_id": 0,
+        "alt_state_link": "",
+        "alt_text_size": 0,
+        "alt_text_hash": ""
+      }
+    ],
+    "votes": [],
+    "amendments": [],
+    "supplements": [],
+    "calendar": [
+      {
+        "type_id": 1,
+        "event_hash": "dd66e942",
+        "type": "Hearing",
+        "date": "2018-02-06",
+        "time": "12:00",
+        "location": "Senate Lounge",
+        "description": "Economic Development Hearing"
+      }
+    ]
+  }
+}
