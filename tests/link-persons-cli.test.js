@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError,
+  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch,
 } from '../src/lib/person-identity.js';
 import {
   parseArgs,
@@ -48,6 +48,20 @@ test('reorderCommaName: "Last, First Middle" -> "First Middle Last", preserving 
 
 test('reorderCommaName: no comma -> unchanged', () => {
   assert.equal(reorderCommaName('Bob Onder'), 'Bob Onder');
+});
+
+// IMPORTANT fix round 1: the original two-way comma split corrupted a real bioguide suffix name
+// shape ('Family, Given, Suffix' — three comma-separated segments), dragging the suffix into the
+// middle of the printed name ('John J., Jr. Duncan'). Fixed to split on every comma: segment 0 =
+// family, segment 1 = given, any remaining segments = suffixes re-appended after the family name.
+
+test('reorderCommaName: IMPORTANT fix round 1 — a three-segment bioguide suffix name ("Duncan, John J., Jr.") reorders to "John J. Duncan, Jr.", never dragging the suffix into the middle', () => {
+  assert.equal(reorderCommaName('Duncan, John J., Jr.'), 'John J. Duncan, Jr.');
+});
+
+test('reorderCommaName: the plain two-segment case is unaffected by the fix (regression)', () => {
+  assert.equal(reorderCommaName('Onder, Robert F.'), 'Robert F. Onder');
+  assert.equal(reorderCommaName('Smith, Jane'), 'Jane Smith');
 });
 
 // ---- pickDisplayName: mechanical, highest-authority-source-wins (Global Constraints) ----
@@ -289,6 +303,140 @@ test('clusterLegislators: a hard contradiction bridged through a third, evidence
   assert.equal(result.flagged.length, 1);
   assert.equal(result.flagged[0].reason, 'internal_contradiction');
   assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-bridge-30', 'leg-bridge-40', 'leg-bridge-nodata']);
+});
+
+// ---- fullNameVariantMatch (CRITICAL fix round 1's own gate) ----
+
+test('fullNameVariantMatch: exact same printed name matches', () => {
+  assert.equal(fullNameVariantMatch('Robert Jones', 'Robert Jones'), true);
+});
+
+test('fullNameVariantMatch: different given names on the same surname do NOT match', () => {
+  assert.equal(fullNameVariantMatch('Robert Jones', 'David Jones'), false);
+});
+
+test('fullNameVariantMatch: a suffix printed on only ONE side does not block a match — omission is not a disqualifying signal', () => {
+  assert.equal(fullNameVariantMatch('John Duncan', 'John Duncan Jr.'), true);
+});
+
+test('fullNameVariantMatch: BOTH sides printing the SAME suffix still matches', () => {
+  assert.equal(fullNameVariantMatch('John Duncan Jr.', 'John Duncan Jr.'), true);
+});
+
+test('fullNameVariantMatch: BOTH sides printing a DIFFERENT suffix is a disqualifying signal — the live worked example', () => {
+  assert.equal(fullNameVariantMatch('John Duncan Jr.', 'John Duncan Sr.'), false);
+});
+
+// ---- CRITICAL fix round 1: a same-seat evidence pair that can only claim "cannot rule out
+// overlap" because a date is simply MISSING (not because it's genuinely known to overlap) must not
+// default to 'compatible' unless the two rows' own printed full names actually agree. Execution-
+// proven finding: MO `terms` dates are null almost everywhere live and every column-derived
+// evidence entry is null-dated by construction, so the OLD rule silently auto-linked a same-seat,
+// different-person (district-successor-shaped) pair on nothing but a missing date. ----
+
+test('clusterLegislators CRITICAL fix: same surname, same seat, BOTH dateless, DIFFERENT given names -> flagged, never silently auto-linked (smith-sr/smith-jr repro)', () => {
+  const mkSmith = (id, fullName) => ({
+    id,
+    full_name: fullName,
+    surname: 'Smith',
+    bioguide_id: null,
+    openstates_id: null,
+    mo_house_id: null,
+    mo_senate_id: '11',
+    legiscan_people_id: null,
+    evidence: [{
+      source: 'mo_senate_id', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '11', start_date: null, end_date: null,
+    }],
+  });
+  const rows = [mkSmith('leg-smith-sr', 'Robert Smith'), mkSmith('leg-smith-jr', 'David Smith')];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0, 'the OLD rule would have auto-linked this — surname-only + dateless is no longer enough');
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'ambiguous_era');
+  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-smith-jr', 'leg-smith-sr']);
+});
+
+test('clusterLegislators CRITICAL fix: one side dated, other dateless, same seat, DIFFERENT given names -> flagged (jones-sr/jones-jr repro)', () => {
+  const rows = [
+    {
+      id: 'leg-jones-sr',
+      full_name: 'Robert Jones',
+      surname: 'Jones',
+      bioguide_id: null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: null,
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '14', start_date: '2001-01-01', end_date: '2009-12-31',
+      }],
+    },
+    {
+      id: 'leg-jones-jr',
+      full_name: 'David Jones',
+      surname: 'Jones',
+      bioguide_id: null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: null,
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '14', start_date: null, end_date: null,
+      }],
+    },
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'ambiguous_era');
+});
+
+test('clusterLegislators CRITICAL fix: the ACCEPTED RESIDUAL — same seat, BOTH dateless, IDENTICAL full name -> still compatible (auto-links); documented in the module comment above evidencePairStatus as mechanically indistinguishable from a re-elected same person until term dates are backfilled', () => {
+  const mkJones = (id) => ({
+    id,
+    full_name: 'Robert Jones',
+    surname: 'Jones',
+    bioguide_id: null,
+    openstates_id: null,
+    mo_house_id: null,
+    mo_senate_id: null,
+    legiscan_people_id: null,
+    evidence: [{
+      source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '14', start_date: null, end_date: null,
+    }],
+  });
+  const result = clusterLegislators([mkJones('leg-jones-a'), mkJones('leg-jones-b')]);
+  assert.equal(result.flagged.length, 0);
+  assert.equal(result.clusters.length, 1);
+  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), ['leg-jones-a', 'leg-jones-b']);
+});
+
+test('clusterLegislators CRITICAL fix: printed suffix mismatch ("John Duncan Jr." vs "John Duncan Sr."), same seat, both dateless -> ambiguous, never treated as the same person', () => {
+  const mkDuncan = (id, fullName) => ({
+    id,
+    full_name: fullName,
+    surname: 'Duncan',
+    bioguide_id: null,
+    openstates_id: null,
+    mo_house_id: null,
+    mo_senate_id: null,
+    legiscan_people_id: null,
+    evidence: [{
+      source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '20', start_date: null, end_date: null,
+    }],
+  });
+  const rows = [mkDuncan('leg-duncan-jr', 'John Duncan Jr.'), mkDuncan('leg-duncan-sr', 'John Duncan Sr.')];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'ambiguous_era');
+});
+
+test('clusterLegislators CRITICAL fix regression: the real four-Onder rows STILL auto-link as one cluster — every pair is vacuous (at least one side has zero evidence entries at all), so the same-seat name-variant gate never engages for them', () => {
+  const result = clusterLegislators(onderRows());
+  assert.equal(result.clusters.length, 1);
+  assert.equal(result.flagged.length, 0);
+  assert.equal(result.clusters[0].memberIds.length, 4);
 });
 
 test('clusterLegislators: a unique surname with no evidence at all is a plain singleton', () => {

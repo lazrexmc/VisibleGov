@@ -212,8 +212,10 @@ const MISSING_COLUMN_NOTE = 'legislators.legiscan_people_id column not found —
 
 // legiscanSurname — MINOR 1 fix (round 2, promoted by review): a brand-new `legislators` row
 // created on the no_candidate/ambiguous paths never populated `surname`, unlike
-// ensureRosterIdentities' own inserts (src/cli/ingest-mo-senate.js) — a future surname-based
-// resolver (e.g. resolveMoSenator's own shape) would be blind to LegiScan-originated rows.
+// ensureRosterIdentities' own inserts (src/cli/ingest-mo-senate.js) — a surname-based resolver
+// would be blind to LegiScan-originated rows. That resolver now exists (src/lib/person-identity.js's
+// surnameKey, Task 1 of the identity-merge plan — live-verified: the real legiscan-sourced Onder
+// row carries surname='Onder', populated by exactly this function) and depends on it.
 // RULING: populate it from the SOURCE's own printed `last_name` field (verified present on every
 // real fixture person record — Onder/Libla/Fitzwater all carry it verbatim), NEVER derived by
 // splitting `full_name` — this project has been burned twice already by a surname reconstructed

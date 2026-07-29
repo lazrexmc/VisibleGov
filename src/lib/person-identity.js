@@ -136,19 +136,38 @@ export function matchLegislator(candidate, existingRows) {
 // cluster pass cannot and does not depend on it). The SAME live read also turned up three REAL,
 // unrelated US Senators surnamed Brown (Sherrod/OH, Hank/CO, Scott P./MA) with real, differing
 // `terms` districts — exactly the shape the district-contradiction rule below must keep apart.
+//
+// ACCEPTED RESIDUAL (fix round 1, execution-proven CRITICAL finding — the 5th appearance of this
+// project's cross-era class, after src/cli/ingest-mo-senate.js's district-reuse bug and migration
+// 0009's fix): a same-seat pair that can't be dated on either side no longer auto-links on a bare
+// "cannot rule out overlap" default — it now also requires the two rows' own printed full names to
+// match (see fullNameVariantMatch below) before treating that as 'compatible' rather than
+// 'ambiguous'. The one case this STILL cannot mechanically distinguish: a genuine dynastic
+// succession (Jr./Sr.) at the exact same seat, printed with the EXACT same full name and no
+// suffix, with no dates recorded by any source that reached either row — `namesMatch` is
+// (correctly, per its own contract) true either way, so this residual case still auto-links. The
+// durable fix is term-date backfill (Task 3+); until then, Lance's review-tab unlink (Task 2) is
+// the correction path. This is strictly a NARROWING of the old false-'compatible' surface, never a
+// widening of it.
 // ============================================================================================
 
 // surnameKey — the cluster pass's candidate-pairing key. Prefers the `surname` column when
-// populated (only MO-driver rows carry it today, migration 0006); otherwise derives it
-// structurally from the row's OWN printed full_name — the reordered form's LAST token
-// (normalizePersonName already turns 'Onder, Robert F.' into 'robert f onder', so its last token
-// is 'onder', the same as 'Bob Onder' -> 'bob onder' -> 'onder'). This is deliberately NOT the
-// same guarded-against move as legiscan-identity.js's legiscanSurname comment (never split a full
-// name to WRITE a `surname` column value — that overwrote real data with a guess, twice). Nothing
-// is written here; a coincidentally-wrong derived key only ever costs a MISSED pairing (two rows
-// that share no key never get compared at all) — never a wrong merge, because a shared key is
-// only step one of the pairing predicate below, still gated by chamber/district/era compatibility
-// and the asymmetric-cost doctrine throughout. Empty/unparseable input yields '' (never guessed).
+// populated (MO-driver rows via migration 0006, AND legiscan-identity.js's own legiscanSurname —
+// live-verified: the real legiscan-sourced Onder row carries surname='Onder' too; only the
+// bioguide/openstates drivers leave it null); otherwise derives it structurally from the row's OWN
+// printed full_name — the reordered form's LAST token (normalizePersonName already turns 'Onder,
+// Robert F.' into 'robert f onder', so its last token is 'onder', the same as 'Bob Onder' ->
+// 'bob onder' -> 'onder'). This is deliberately NOT the same guarded-against move as legiscan-
+// identity.js's legiscanSurname comment (never split a full name to WRITE a `surname` column
+// value — that overwrote real data with a guess, twice). Nothing is written here; a
+// coincidentally-wrong derived key only ever costs a MISSED pairing (two rows that share no key
+// never get compared at all) — never a wrong merge on its own, because a shared key is only step
+// one of the pairing predicate below, still gated by chamber/district/era compatibility and the
+// asymmetric-cost doctrine throughout. Empty/unparseable input yields '' (never guessed). NOTE:
+// because this key is structural (not a verified given-name match), the pool of same-key
+// candidates it admits can be broad — the same-seat/dateless gate in evidencePairStatus below is
+// what actually keeps a same-surname, different-person pairing from silently auto-linking; the
+// key alone is deliberately permissive.
 function lastToken(normalized) {
   const parts = normalized.split(' ').filter(Boolean);
   return parts.length ? parts[parts.length - 1] : '';
@@ -160,10 +179,41 @@ export function surnameKey(row) {
   return lastToken(normalizePersonName(row?.full_name ?? ''));
 }
 
+// fullNameVariantMatch — CRITICAL fix round 1. The one signal strong enough to license
+// 'compatible' when a same-seat evidence pair can't otherwise rule out non-overlap (see
+// evidencePairStatus below): do the two rows' own printed full_name values actually match, once
+// reordered/folded the SAME way normalizePersonName already does everywhere else in this module?
+// A printed name SUFFIX (Jr./Sr./II/III/IV/V) is treated specially: it is stripped before the base
+// comparison (a source that omits a suffix another source prints must not be penalized — omission
+// is not evidence of a different person), but if BOTH sides print a RECOGNIZED suffix and those
+// suffixes DIFFER, that is treated as a positive disqualifying signal (a real, printed clue that
+// these are two different people in the same family line at the same seat), never a match — the
+// live worked example: 'John Duncan Jr.' vs 'John Duncan Sr.'.
+const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
+
+function splitNameSuffix(normalized) {
+  const parts = normalized.split(' ').filter(Boolean);
+  if (parts.length > 1 && NAME_SUFFIXES.has(parts[parts.length - 1])) {
+    return { base: parts.slice(0, -1).join(' '), suffix: parts[parts.length - 1] };
+  }
+  return { base: normalized, suffix: null };
+}
+
+export function fullNameVariantMatch(fullNameA, fullNameB) {
+  const { base: baseA, suffix: suffixA } = splitNameSuffix(normalizePersonName(fullNameA));
+  const { base: baseB, suffix: suffixB } = splitNameSuffix(normalizePersonName(fullNameB));
+  if (baseA === '' || baseA !== baseB) return false;
+  if (suffixA && suffixB && suffixA !== suffixB) return false;
+  return true;
+}
+
 // evidencePairStatus — the per-evidence-entry-pair verdict feeding rowPairStatus below.
 // `a`/`b`: { jurisdiction_id, chamber, district, start_date, end_date } (the SAME evidence-entry
 // shape link-persons.js's buildEvidenceRows produces from `terms` rows AND per-source identity
 // columns — both count, per the plan's own words, "terms rows and identity columns both count").
+// `namesMatch`: fullNameVariantMatch(rowA.full_name, rowB.full_name), computed once per ROW pair
+// by the caller (clusterLegislators) and threaded through every evidence-entry comparison for that
+// pair.
 //
 // - Different jurisdiction_id, or different chamber: NOT comparable evidence for THIS pair — a
 //   federal Senate seat and a MO Senate seat share the word "senate" but are different jobs, and a
@@ -176,21 +226,45 @@ export function surnameKey(row) {
 //   un-era-qualified, two recorded seat-holders with no evidence they're the same person moving
 //   between them). 'contradiction' — this is the Brown/Brown-style guard: three real, unrelated US
 //   Senators surnamed Brown, live-verified, are kept apart by exactly this rule (OH vs CO vs MA).
-// - Same jurisdiction_id AND chamber, districts match (or either/both unknown): check era via the
-//   SAME eraOverlaps this module already uses for matchLegislator. Provably non-overlapping ->
-//   'ambiguous' (same seat, different but non-touching windows — could be the same person
-//   re-elected after a gap, or an unrelated same-named successor; never guessed either way).
-//   Otherwise (overlapping, or either side's era is unknown/unbounded) -> 'compatible'.
-function evidencePairStatus(a, b) {
+// - Same jurisdiction_id AND chamber, districts match (or either/both unknown) — same SEAT:
+//     * eraOverlaps says the two windows are PROVABLY non-overlapping (both sides concrete enough
+//       to rule overlap out) -> 'ambiguous', unconditionally (same seat, non-touching windows —
+//       could be a re-elected same person or an unrelated same-named successor; never guessed).
+//     * eraOverlaps says they overlap (or can't rule it out) AND both sides carry real dates (not
+//       merely absent ones) -> 'compatible' — genuine, concrete corroboration, no further gate.
+//     * eraOverlaps says they overlap ONLY because at least one side has NO dates recorded at all
+//       (start_date and end_date both null) -> CRITICAL fix round 1 (execution-proven, the 5th
+//       appearance of this project's cross-era class — src/cli/ingest-mo-senate.js's own Critical
+//       bug, migration 0009's district-reuse fix, and now this): "cannot rule out overlap" because
+//       a date is simply MISSING is NOT evidence the two rows are the same person — MO `terms`
+//       dates are null almost everywhere live, and every column-derived evidence entry
+//       (mo_senate_id/mo_house_id) is null-dated by construction, so this branch is common, not an
+//       edge case. 'compatible' ONLY IF `namesMatch` is also true (the two rows' own printed full
+//       names, suffix-aware, actually agree) — otherwise 'ambiguous', never silently linked.
+//       ACCEPTED RESIDUAL (documented, not silently assumed): a true dynastic succession at the
+//       SAME seat with the SAME full name and NO dates recorded anywhere (a Jr./Sr. pair whose
+//       suffix was stripped or never printed by every source that reached this row) is mechanically
+//       indistinguishable from one person re-elected — `namesMatch` is true either way, so this
+//       still auto-links. The durable cure is term-date backfill; until then, a Lance unlink
+//       (Task 2's review tab) is the correction path. Never worse than the OLD behavior (which
+//       linked this AND every non-matching-name case); strictly narrows the false-'compatible'
+//       surface — it never widens it.
+function evidencePairStatus(a, b, namesMatch) {
   if (a.jurisdiction_id !== b.jurisdiction_id || a.chamber !== b.chamber) return 'compatible';
   const distA = a.district == null ? null : String(a.district).trim();
   const distB = b.district == null ? null : String(b.district).trim();
   if (distA != null && distB != null && distA !== distB) return 'contradiction';
+
   const overlaps = eraOverlaps(
     { start_date: a.start_date, end_date: a.end_date },
     { start: b.start_date, end: b.end_date },
   );
-  return overlaps ? 'compatible' : 'ambiguous';
+  if (!overlaps) return 'ambiguous';
+
+  const aDateless = a.start_date == null && a.end_date == null;
+  const bDateless = b.start_date == null && b.end_date == null;
+  if (!aDateless && !bDateless) return 'compatible'; // both sides concretely dated -> real corroboration
+  return namesMatch ? 'compatible' : 'ambiguous'; // the critical fix's gate
 }
 
 // rowPairStatus — combines EVERY evidence entry on row A against EVERY evidence entry on row B
@@ -198,13 +272,17 @@ function evidencePairStatus(a, b) {
 // A single 'contradiction' anywhere wins outright (a hard fact beats an absence of one); otherwise
 // any 'ambiguous' anywhere wins over the rest; two rows with NO shared comparable evidence at all
 // (e.g. the three Onder rows that carry zero terms/column evidence whatsoever) fall through both
-// loops and land on 'compatible' — vacuously, honestly: nothing contradicts, nothing corroborates,
-// same as eraOverlaps' own "cannot rule out" treatment of an unbounded/unknown side.
-function rowPairStatus(evidenceA, evidenceB) {
+// loops and land on 'compatible' — vacuously, honestly: nothing contradicts, nothing corroborates.
+// This vacuous (zero-evidence-either-side) path is DELIBERATELY untouched by the critical fix's
+// name-variant gate above — that gate only fires once a genuine same-seat evidence PAIR exists to
+// compare; a refined ruling (round 1) confirmed a blanket "any unresolved pair needs a name match"
+// rule would flood the review queue with legitimate cross-source clusters like the real four-Onder
+// rows, three of which carry no chamber/district evidence at all and would otherwise never pair.
+function rowPairStatus(evidenceA, evidenceB, namesMatch) {
   let sawAmbiguous = false;
   for (const a of evidenceA ?? []) {
     for (const b of evidenceB ?? []) {
-      const status = evidencePairStatus(a, b);
+      const status = evidencePairStatus(a, b, namesMatch);
       if (status === 'contradiction') return 'contradiction';
       if (status === 'ambiguous') sawAmbiguous = true;
     }
@@ -289,7 +367,8 @@ export function clusterLegislators(rows) {
     const pairStatus = (i, j) => {
       const cacheKey = i < j ? `${i}|${j}` : `${j}|${i}`;
       if (statusCache.has(cacheKey)) return statusCache.get(cacheKey);
-      const status = rowPairStatus(list[i].evidence, list[j].evidence);
+      const namesMatch = fullNameVariantMatch(list[i].full_name, list[j].full_name);
+      const status = rowPairStatus(list[i].evidence, list[j].evidence, namesMatch);
       statusCache.set(cacheKey, status);
       return status;
     };
@@ -358,13 +437,22 @@ export function clusterLegislators(rows) {
 // display_name must preserve the source's own casing and punctuation verbatim (e.g. 'Robert F.'
 // keeps its period), so this reorders only, never folds. A name with no comma passes through
 // unchanged (every non-bioguide source in this codebase already prints 'First Last').
+//
+// IMPORTANT fix round 1: the original two-way split (first comma only) corrupted a real bioguide
+// suffix name — 'Duncan, John J., Jr.' (family, given, suffix — THREE comma-separated segments)
+// produced 'John J., Jr. Duncan', dragging the suffix into the middle of the printed name. Fixed
+// to split on EVERY comma: segment 0 is the family name, segment 1 is the given name(s), and any
+// further segments are suffixes, re-appended AFTER the family name with their own comma (the
+// conventional printed form) — 'John J. Duncan, Jr.'. The plain two-segment case (segment 0 =
+// family, segment 1 = given, no suffix segment) is unaffected: 'Onder, Robert F.' -> still exactly
+// 'Robert F. Onder'.
 export function reorderCommaName(name) {
   const s = String(name ?? '').trim();
-  const commaIdx = s.indexOf(',');
-  if (commaIdx === -1) return s;
-  const last = s.slice(0, commaIdx).trim();
-  const first = s.slice(commaIdx + 1).trim();
-  return `${first} ${last}`;
+  const segments = s.split(',').map((seg) => seg.trim()).filter((seg) => seg !== '');
+  if (segments.length <= 1) return s; // no comma (or nothing but stray commas) -> unchanged
+  const [family, given, ...suffixes] = segments;
+  const reordered = `${given} ${family}`;
+  return suffixes.length ? `${reordered}, ${suffixes.join(', ')}` : reordered;
 }
 
 export class NoDisplayNameSourceError extends Error {
