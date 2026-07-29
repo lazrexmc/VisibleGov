@@ -1,0 +1,559 @@
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  VOTE_ID_MAP,
+  VoteIdMapError,
+  UnrecognizedLegiscanChamberError,
+  LegiscanRollCallReconcileError,
+  mapLegiscanChamber,
+  buildLegiscanVoteSourceKey,
+  reconcileLegiscanTallies,
+  buildLegiscanVoteCasts,
+  crossCheckAgainstPrimarySource,
+  PRIMARY_SOURCE_KEY_PREFIXES,
+  PRESENT_CATEGORY_CAVEAT,
+} from '../src/adapters/legiscan-votes.js';
+import { decodeDatasetZip, extractDatasetFiles } from '../src/adapters/legiscan-dataset.js';
+
+// Task 6 (docs/superpowers/plans/2026-07-29-legiscan-bulk-adapter.md) — votes + casts ingestion.
+// Test bed per CONTROLLER RULING 5 (task-6-brief.md, binding): the 8 REAL roll calls in
+// dataset-2018-1608, loaded through the SAME decode pipeline Tasks 4/5's own tests use (not a
+// parallel raw-JSON read) so this file exercises the identical real payload every other adapter
+// test in this plan does. The standalone real roll-call-747209 fixture (task-6-brief.md's own
+// illustrative example, captured separately via a live getRollCall call, NOT part of dataset-2018-
+// 1608) is ALSO real data and used as supplementary coverage below — never a substitute for the 8
+// dataset roll calls, which remain the primary, controller-ruled test bed.
+const FIXDIR = 'tests/fixtures/research/legiscan';
+const envelope1608 = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-dataset-1608.json`, 'utf8'));
+const dataset1608 = await extractDatasetFiles(decodeDatasetZip(envelope1608.dataset.zip));
+const rollCalls = dataset1608.rollCalls;
+assert.equal(rollCalls.length, 8, 'sanity: the fixture test bed must be exactly the 8 real roll calls');
+
+const rc747209 = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-rollcall-747209.json`, 'utf8')).roll_call;
+
+function findRc(rollCallId) {
+  const rc = rollCalls.find((r) => r.roll_call_id === rollCallId);
+  assert.ok(rc, `fixture must contain roll call ${rollCallId}`);
+  return rc;
+}
+
+// ---- VOTE_ID_MAP: the empirically-derived mapping (CONTROLLER RULING 1) ----
+
+test('VOTE_ID_MAP: covers 1/2/3/4 exactly, matching the schema-mysql.sql ls_vote citation (docs/research/2026-07-27-mo-data-sources.md Q2)', () => {
+  assert.deepEqual(VOTE_ID_MAP, {
+    1: 'yea', 2: 'nay', 3: 'not_voting', 4: 'absent',
+  });
+});
+
+// CONTROLLER RULING 1, literal: "assert vote_id<->vote_text consistency across all 8 real roll
+// calls" — derived from vote_text, not trusted from a recalled doc. This checks EVERY cast in
+// EVERY one of the 8 real roll calls (6*156 + 2*33 = 1002 casts) PLUS the standalone 747209
+// fixture (161 more casts, 1163 total) and proves vote_id 1 always prints "Yea", 2 always "Nay", 4
+// always "Absent" — zero exceptions. vote_id 3 has NO example anywhere in this repo's real
+// captured LegiScan data — noted, not fabricated (see the module's own header comment).
+test('vote_id <-> vote_text consistency: 1=Yea, 2=Nay, 4=Absent hold with ZERO exceptions across all 1163 real casts (8 dataset roll calls + roll-call-747209); vote_id 3 has no real-fixture example anywhere', () => {
+  const expectedText = { 1: 'Yea', 2: 'Nay', 4: 'Absent' };
+  const observedVoteIds = new Set();
+  let totalCasts = 0;
+  for (const rc of [...rollCalls, rc747209]) {
+    for (const v of rc.votes) {
+      totalCasts += 1;
+      observedVoteIds.add(v.vote_id);
+      assert.equal(
+        v.vote_text,
+        expectedText[v.vote_id],
+        `roll call ${rc.roll_call_id}, people_id ${v.people_id}: vote_id ${v.vote_id} printed vote_text "${v.vote_text}", expected "${expectedText[v.vote_id]}"`,
+      );
+    }
+  }
+  assert.equal(totalCasts, 1002 + 161, 'sanity: exact total cast count across all 9 real roll-call payloads checked');
+  assert.deepEqual([...observedVoteIds].sort(), [1, 2, 4], 'only vote_id 1/2/4 appear anywhere in the real fixtures — 3 is never observed');
+});
+
+test('VoteIdMapError is exported and named correctly (never silently defaults to "other")', () => {
+  const err = new VoteIdMapError('test', { voteId: 5 });
+  assert.equal(err.name, 'VoteIdMapError');
+  assert.equal(err.voteId, 5);
+});
+
+// ---- mapLegiscanChamber ----
+
+test('mapLegiscanChamber: "H" -> house, "S" -> senate (verified-exhaustive against all 8 real roll calls: 6 H, 2 S)', () => {
+  assert.equal(mapLegiscanChamber('H'), 'house');
+  assert.equal(mapLegiscanChamber('S'), 'senate');
+  const hCount = rollCalls.filter((rc) => rc.chamber === 'H').length;
+  const sCount = rollCalls.filter((rc) => rc.chamber === 'S').length;
+  assert.equal(hCount, 6);
+  assert.equal(sCount, 2);
+});
+
+test('mapLegiscanChamber: an unrecognized chamber code throws UnrecognizedLegiscanChamberError, never guessed', () => {
+  assert.throws(() => mapLegiscanChamber('J'), UnrecognizedLegiscanChamberError);
+});
+
+// ---- buildLegiscanVoteSourceKey (CONTROLLER RULING 2, binding — 2-argument scheme) ----
+
+test('buildLegiscanVoteSourceKey(1608, 774312) -> "legiscan-1608-rollcall-774312"', () => {
+  assert.equal(buildLegiscanVoteSourceKey(1608, 774312), 'legiscan-1608-rollcall-774312');
+});
+
+test('buildLegiscanVoteSourceKey: collision-safe by construction — never matches the mo-senate-web-* or mo-house-xml-* prefixes, for every real roll_call_id in the fixture', () => {
+  for (const rc of rollCalls) {
+    const key = buildLegiscanVoteSourceKey(1608, rc.roll_call_id);
+    assert.doesNotMatch(key, /^mo-senate-web-/);
+    assert.doesNotMatch(key, /^mo-house-xml-/);
+    assert.match(key, /^legiscan-1608-rollcall-\d+$/);
+  }
+});
+
+test('PRIMARY_SOURCE_KEY_PREFIXES: the REAL prefixes verified from the live driver code (mo-house-xml.js/ingest-mo-senate.js), not the plan\'s own guessed "mo-senate-journal-pdf-"', () => {
+  assert.deepEqual(PRIMARY_SOURCE_KEY_PREFIXES, ['mo-house-xml-', 'mo-senate-web-']);
+});
+
+// ---- reconcileLegiscanTallies: the internal gate, against all 8 REAL roll calls ----
+
+const EXPECTED_TALLIES = {
+  774311: {
+    legiscanBillId: 1126109, chamber: 'house', date: '2018-09-12', tallies: {
+      yea: 141, nay: 1, not_voting: 0, absent: 14, total: 156,
+    },
+  },
+  774312: {
+    legiscanBillId: 1126108, chamber: 'house', date: '2018-09-12', tallies: {
+      yea: 119, nay: 23, not_voting: 0, absent: 14, total: 156,
+    },
+  },
+  774313: {
+    legiscanBillId: 1126108, chamber: 'house', date: '2018-09-12', tallies: {
+      yea: 36, nay: 92, not_voting: 0, absent: 28, total: 156,
+    },
+  },
+  774314: {
+    legiscanBillId: 1126108, chamber: 'house', date: '2018-09-12', tallies: {
+      yea: 33, nay: 103, not_voting: 0, absent: 20, total: 156,
+    },
+  },
+  774315: {
+    legiscanBillId: 1126108, chamber: 'house', date: '2018-09-12', tallies: {
+      yea: 41, nay: 100, not_voting: 0, absent: 15, total: 156,
+    },
+  },
+  774316: {
+    legiscanBillId: 1126108, chamber: 'house', date: '2018-09-12', tallies: {
+      yea: 96, nay: 38, not_voting: 0, absent: 22, total: 156,
+    },
+  },
+  774411: {
+    legiscanBillId: 1126108, chamber: 'senate', date: '2018-09-14', tallies: {
+      yea: 28, nay: 1, not_voting: 0, absent: 4, total: 33,
+    },
+  },
+  774412: {
+    legiscanBillId: 1126109, chamber: 'senate', date: '2018-09-14', tallies: {
+      yea: 29, nay: 0, not_voting: 0, absent: 4, total: 33,
+    },
+  },
+};
+
+test('reconcileLegiscanTallies: passes on all 8 REAL roll calls, exact printed totals (no fabricated numbers)', () => {
+  assert.equal(Object.keys(EXPECTED_TALLIES).length, 8);
+  for (const rc of rollCalls) {
+    const expected = EXPECTED_TALLIES[rc.roll_call_id];
+    assert.ok(expected, `unexpected roll_call_id ${rc.roll_call_id} in fixture`);
+    const result = reconcileLegiscanTallies(rc);
+    assert.equal(result.rollCallId, rc.roll_call_id);
+    assert.equal(result.legiscanBillId, expected.legiscanBillId);
+    assert.equal(result.chamber, expected.chamber);
+    assert.equal(result.date, expected.date);
+    assert.deepEqual(result.tallies, expected.tallies);
+    assert.equal(result.casts.length, expected.tallies.total);
+  }
+});
+
+test('reconcileLegiscanTallies: passes on the standalone real roll-call-747209 fixture (yea=121, nay=19, nv=0, absent=21, total=161 — 161 individual casts)', () => {
+  const result = reconcileLegiscanTallies(rc747209);
+  assert.equal(result.rollCallId, 747209);
+  assert.equal(result.legiscanBillId, 1050440);
+  assert.equal(result.chamber, 'house');
+  assert.deepEqual(result.tallies, {
+    yea: 121, nay: 19, not_voting: 0, absent: 21, total: 161,
+  });
+  assert.equal(result.casts.length, 161);
+});
+
+test('reconcileLegiscanTallies: question/date carried through verbatim from the roll call\'s own printed fields', () => {
+  const rc = findRc(774312);
+  const result = reconcileLegiscanTallies(rc);
+  assert.equal(result.question, 'House: HB 3  HBs FOR THIRD READING');
+  assert.equal(result.date, '2018-09-12');
+});
+
+// ---- reconcileLegiscanTallies: the integrity gate (mutation tests, never edit the real fixture data) ----
+
+test('reconcileLegiscanTallies throws LegiscanRollCallReconcileError when a Yea cast is dropped from a real roll call (never silently stored)', () => {
+  const real = findRc(774312); // real: yea=119, nay=23, absent=14, total=156
+  const yeaIdx = real.votes.findIndex((v) => v.vote_id === 1);
+  const mutated = { ...real, votes: [...real.votes.slice(0, yeaIdx), ...real.votes.slice(yeaIdx + 1)] };
+  assert.throws(() => reconcileLegiscanTallies(mutated), (err) => {
+    assert.ok(err instanceof LegiscanRollCallReconcileError);
+    assert.equal(err.name, 'LegiscanRollCallReconcileError');
+    assert.equal(err.rollCallId, 774312);
+    assert.equal(err.tallies.yea, 119);
+    assert.equal(err.counted.yea, 118);
+    assert.ok(err.mismatches.some((m) => m.startsWith('yea:')));
+    assert.ok(err.mismatches.some((m) => m.startsWith('total:')));
+    assert.equal(err.castCount, 155);
+    return true;
+  });
+});
+
+test('reconcileLegiscanTallies throws when ONLY the printed total disagrees (every position count still reconciles individually) — proves total is checked, not just implied', () => {
+  const real = findRc(774411); // real: total=33
+  const mutated = { ...real, total: 34 };
+  assert.throws(() => reconcileLegiscanTallies(mutated), (err) => {
+    assert.ok(err instanceof LegiscanRollCallReconcileError);
+    assert.deepEqual(err.mismatches, ['total: parsed 33 vs printed 34']);
+    return true;
+  });
+});
+
+test('reconcileLegiscanTallies throws VoteIdMapError (never a silent "other") on a synthetic unrecognized vote_id 5', () => {
+  const real = findRc(774312);
+  const mutated = {
+    ...real,
+    votes: [{ people_id: 999999, vote_id: 5, vote_text: 'Excused' }, ...real.votes.slice(1)],
+  };
+  assert.throws(() => reconcileLegiscanTallies(mutated), (err) => {
+    assert.ok(err instanceof VoteIdMapError);
+    assert.equal(err.name, 'VoteIdMapError');
+    assert.equal(err.voteId, 5);
+    assert.equal(err.peopleId, 999999);
+    assert.equal(err.rollCallId, 774312);
+    return true;
+  });
+});
+
+test('reconcileLegiscanTallies: a reconciling roll call is unaffected by cast ORDER (mutation sanity — the gate is on counts, not position)', () => {
+  const real = findRc(774313);
+  const shuffled = { ...real, votes: [...real.votes].reverse() };
+  const result = reconcileLegiscanTallies(shuffled);
+  assert.deepEqual(result.tallies, EXPECTED_TALLIES[774313].tallies);
+});
+
+// ---- buildLegiscanVoteCasts (CONTROLLER RULING 3: honest unresolved count + sample, never guessed) ----
+
+test('buildLegiscanVoteCasts: resolved casts get vote_id/legislator_id/position/run_id rows via the people_id map', () => {
+  const casts = [
+    { people_id: 1, position: 'yea' },
+    { people_id: 2, position: 'nay' },
+  ];
+  const map = new Map([[1, 'leg-1'], [2, 'leg-2']]);
+  const result = buildLegiscanVoteCasts({
+    voteId: 'vote-1', runId: 'run-1', casts, legislatorIdByPeopleId: map,
+  });
+  assert.deepEqual(result.casts, [
+    {
+      vote_id: 'vote-1', legislator_id: 'leg-1', position: 'yea', run_id: 'run-1',
+    },
+    {
+      vote_id: 'vote-1', legislator_id: 'leg-2', position: 'nay', run_id: 'run-1',
+    },
+  ]);
+  assert.deepEqual(result.unresolved, { count: 0, sample: [] });
+});
+
+test('buildLegiscanVoteCasts: an unmapped people_id is an unresolved cast — honest count + sample, never guessed, never dropped', () => {
+  const casts = [
+    { people_id: 1, position: 'yea' },
+    { people_id: 999, position: 'nay' }, // not in the map
+  ];
+  const map = new Map([[1, 'leg-1']]);
+  const result = buildLegiscanVoteCasts({
+    voteId: 'vote-1', runId: 'run-1', casts, legislatorIdByPeopleId: map,
+  });
+  assert.equal(result.casts.length, 1);
+  assert.deepEqual(result.unresolved, { count: 1, sample: [{ people_id: 999, position: 'nay' }] });
+});
+
+test('buildLegiscanVoteCasts: unresolved sample caps at 10 even when far more are unresolved (matches ingest-mo-senate.js\'s own slicing convention)', () => {
+  const casts = Array.from({ length: 15 }, (_, i) => ({ people_id: i, position: 'yea' }));
+  const result = buildLegiscanVoteCasts({
+    voteId: 'vote-1', runId: 'run-1', casts, legislatorIdByPeopleId: new Map(),
+  });
+  assert.equal(result.casts.length, 0);
+  assert.equal(result.unresolved.count, 15);
+  assert.equal(result.unresolved.sample.length, 10);
+});
+
+test('buildLegiscanVoteCasts: real roll call 774312\'s 156 casts, end to end — a partial identity map resolves some, honestly leaves the rest unresolved', () => {
+  const { casts } = reconcileLegiscanTallies(findRc(774312));
+  const map = new Map(casts.slice(0, 100).map((c) => [c.people_id, `leg-${c.people_id}`]));
+  const result = buildLegiscanVoteCasts({
+    voteId: 'vote-774312', runId: 'run-1', casts, legislatorIdByPeopleId: map,
+  });
+  assert.equal(result.casts.length, 100);
+  assert.equal(result.unresolved.count, 56);
+  assert.ok(result.casts.every((c) => c.vote_id === 'vote-774312'));
+});
+
+// ---- crossCheckAgainstPrimarySource: fake Supabase-shaped client (no network, no live DB) ----
+//
+// Same chainable-builder-of-plain-objects convention as tests/legiscan-identity.test.js's
+// makeFakeDb: enough of the real supabase-js query-builder shape to drive the actual call chains,
+// nothing more.
+function makeFakeVotesDb({ voteRows = [], castRows = [], missingFlagsTable = false } = {}) {
+  const votes = [...voteRows];
+  const voteCasts = [...castRows];
+  const flags = [];
+  let flagCounter = 0;
+  const client = {
+    from(table) {
+      if (table === 'votes') {
+        return {
+          select: () => {
+            const buildQuery = (filters) => ({
+              eq: (c, v) => buildQuery([...filters, [c, v]]),
+              then: (resolve, reject) => {
+                try {
+                  const matched = votes.filter((r) => filters.every(([c, v]) => r[c] === v));
+                  resolve({ data: matched.map((r) => ({ ...r })), error: null });
+                } catch (err) {
+                  reject(err);
+                }
+              },
+            });
+            return buildQuery([]);
+          },
+        };
+      }
+      if (table === 'vote_casts') {
+        return {
+          select: () => ({
+            eq: async (c, v) => ({ data: voteCasts.filter((r) => r[c] === v).map((r) => ({ ...r })), error: null }),
+          }),
+        };
+      }
+      if (table === 'vote_reconciliation_flags') {
+        return {
+          insert: (row) => ({
+            select: () => ({
+              single: async () => {
+                if (missingFlagsTable) {
+                  return {
+                    data: null,
+                    error: { code: 'PGRST205', message: "Could not find the table 'public.vote_reconciliation_flags' in the schema cache" },
+                  };
+                }
+                flagCounter += 1;
+                const inserted = {
+                  id: `flag-${flagCounter}`, resolved: false, created_at: 'test-time', ...row,
+                };
+                flags.push(inserted);
+                return { data: inserted, error: null };
+              },
+            }),
+          }),
+        };
+      }
+      throw new Error(`makeFakeVotesDb: unexpected table "${table}"`);
+    },
+  };
+  return {
+    client, votes, voteCasts, flags,
+  };
+}
+
+function castRowsOfPosition(voteId, position, count) {
+  return Array.from({ length: count }, () => ({ vote_id: voteId, position }));
+}
+
+// Real reconciled LegiScan tallies for roll call 774312 (house, 2018-09-12, HB 3): yea=119, nay=23,
+// absent=14, not_voting=0. Reused across several tests below as the "LegiScan side" of a
+// cross-check, with a `voteId`/`runId` attached per this function's documented contract.
+const legiscanTallies774312 = { ...reconcileLegiscanTallies(findRc(774312)), voteId: 'legiscan-vote-774312', runId: 'run-9' };
+
+test('crossCheckAgainstPrimarySource: no existing primary-source vote for this bill/chamber/date -> checked:false, matched:null, no flag (opportunistic, not blocking)', async () => {
+  const { client, flags } = makeFakeVotesDb({ voteRows: [] });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.deepEqual(result, { checked: false, matched: null, flag: null });
+  assert.equal(flags.length, 0);
+});
+
+test('crossCheckAgainstPrimarySource: matching tallies -> matched:true, no flag row written', async () => {
+  const primaryVoteId = 'primary-vote-1';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119),
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14), // House PDF has no not_voting category
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, true);
+  assert.equal(result.flag, null);
+  assert.equal(flags.length, 0);
+});
+
+test('crossCheckAgainstPrimarySource: disagreeing tallies -> a vote_reconciliation_flags row is written, matched:false, LegiScan vote itself is untouched (its own internal gate already passed — this function never deletes/mutates the votes/vote_casts tables it queries)', async () => {
+  const primaryVoteId = 'primary-vote-2';
+  const { client, votes, voteCasts, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119),
+      ...castRowsOfPosition(primaryVoteId, 'nay', 20), // real LegiScan nay is 23 -> mismatch
+      ...castRowsOfPosition(primaryVoteId, 'absent', 17),
+    ],
+  });
+  const votesBefore = votes.length;
+  const castsBefore = voteCasts.length;
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false);
+  assert.ok(result.flag, 'a flag row must be returned');
+  assert.equal(flags.length, 1);
+  assert.equal(flags[0].vote_id, 'legiscan-vote-774312');
+  assert.equal(flags[0].source_a, 'legiscan');
+  assert.equal(flags[0].source_b, 'mo-house-xml');
+  assert.equal(flags[0].run_id, 'run-9');
+  assert.ok(flags[0].discrepancy.mismatches.some((m) => m.startsWith('nay:')));
+  // KNOWN CAVEAT must be recorded in the flag row itself, not just a bare mismatch (task-6-brief.md,
+  // explicit) — a human reviewer must never be misled by a raw number difference alone.
+  assert.equal(flags[0].discrepancy.caveat, PRESENT_CATEGORY_CAVEAT);
+  // nothing about the LegiScan-source votes/vote_casts rows was touched — this function only reads
+  // `votes`/`vote_casts` (for the PRIMARY-source row) and inserts into `vote_reconciliation_flags`.
+  assert.equal(votes.length, votesBefore);
+  assert.equal(voteCasts.length, castsBefore);
+});
+
+test('crossCheckAgainstPrimarySource: the Present-category caveat in practice — a MO House primary vote whose "present" casts have no LegiScan analog produces a real non-yea/non-nay mismatch, and the caveat explains WHY rather than leaving a bare number difference', async () => {
+  const primaryVoteId = 'primary-vote-present';
+  // yea/nay both agree with LegiScan exactly (119/23 — the two unambiguous categories). The
+  // primary source additionally records 8 genuine "Present" casts (no LegiScan vote_id maps to
+  // this) plus 10 Absent — 18 total in the combined non-yea/non-nay bucket, vs LegiScan's own
+  // not_voting(0)+absent(14)=14. A bare "18 vs 14" number alone could misread as 4 people LegiScan
+  // simply missed; the caveat clarifies the more likely explanation is the category vocabulary
+  // gap itself (real "Present" casts LegiScan's ls_vote schema has no code for).
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119),
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'present', 8), // a genuine Present category, no LegiScan analog
+      ...castRowsOfPosition(primaryVoteId, 'absent', 10),
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.matched, false);
+  assert.equal(flags.length, 1);
+  assert.ok(flags[0].discrepancy.mismatches.some((m) => m.startsWith('non-yea/non-nay:')));
+  assert.ok(!flags[0].discrepancy.mismatches.some((m) => m.startsWith('yea:') || m.startsWith('nay:')), 'yea/nay themselves agree exactly — only the combined bucket disagrees, precisely the caveat\'s scenario');
+  assert.equal(flags[0].discrepancy.caveat, PRESENT_CATEGORY_CAVEAT);
+});
+
+test('crossCheckAgainstPrimarySource: ambiguous match (more than one primary-source vote row for the same bill/chamber/date) -> flags row written with an ambiguity reason, matched:false, NEVER guesses which one is right', async () => {
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [
+      {
+        id: 'primary-a', bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+      },
+      {
+        id: 'primary-b', bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-2',
+      },
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false);
+  assert.equal(flags.length, 1);
+  assert.equal(flags[0].source_b, 'ambiguous');
+  assert.equal(flags[0].discrepancy.reason, 'ambiguous_primary_source_match');
+  assert.deepEqual(flags[0].discrepancy.candidate_source_keys.sort(), ['mo-house-xml-HB3-1', 'mo-house-xml-HB3-2']);
+});
+
+test('crossCheckAgainstPrimarySource: a vote row on a DIFFERENT date is not a candidate at all (checked:false) — date matching is exact-day, not "close enough"', async () => {
+  const { client } = makeFakeVotesDb({
+    voteRows: [{
+      id: 'primary-x', bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-13', source_key: 'mo-house-xml-HB3-1',
+    }],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.deepEqual(result, { checked: false, matched: null, flag: null });
+});
+
+test('crossCheckAgainstPrimarySource: a vote row that is NOT primary-source (e.g. another legiscan-* row) is never treated as a cross-check candidate', async () => {
+  const { client } = makeFakeVotesDb({
+    voteRows: [{
+      id: 'legiscan-other', bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'legiscan-1608-rollcall-999999',
+    }],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.deepEqual(result, { checked: false, matched: null, flag: null });
+});
+
+test('crossCheckAgainstPrimarySource: mo-senate-web primary source is recognized too (not just mo-house-xml) — matching tallies, matched:true', async () => {
+  const primaryVoteId = 'primary-senate-1';
+  const legiscanTallies774411 = { ...reconcileLegiscanTallies(findRc(774411)), voteId: 'legiscan-vote-774411' };
+  const { client } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'senate', vote_date: '2018-09-14', source_key: 'mo-senate-web-2018-RDay-vote1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 28),
+      ...castRowsOfPosition(primaryVoteId, 'nay', 1),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 4), // MO Senate journal has no not_voting either (absentWithLeave -> absent)
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774411);
+  assert.equal(result.matched, true);
+});
+
+test('crossCheckAgainstPrimarySource: migration 0010 not applied (vote_reconciliation_flags relation missing) degrades gracefully — gated:true, discrepancy preserved, NEVER thrown', async () => {
+  const primaryVoteId = 'primary-vote-3';
+  const { client } = makeFakeVotesDb({
+    missingFlagsTable: true,
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 1), // wildly different from real 119 -> forces a mismatch
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false);
+  assert.equal(result.flag.gated, true);
+  assert.match(result.flag.note, /migration 0010/);
+  assert.ok(result.flag.discrepancy, 'the detected discrepancy is preserved even though it could not be durably recorded');
+});
+
+test('crossCheckAgainstPrimarySource: a votes-table lookup error (unrelated to the missing-table gate) throws, never silently returns checked:false', async () => {
+  const client = {
+    from(table) {
+      if (table === 'votes') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: async () => ({ data: null, error: { message: 'connection reset' } }),
+              }),
+            }),
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    },
+  };
+  await assert.rejects(
+    () => crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312),
+    /connection reset/,
+  );
+});
