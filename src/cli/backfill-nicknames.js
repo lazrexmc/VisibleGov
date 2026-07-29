@@ -3,6 +3,7 @@ import {
   getClient, openRun, closeRun, additivePatch, isMissingColumnError,
 } from '../lib/db.js';
 import { decodeDatasetZip, extractDatasetFiles } from '../adapters/legiscan-dataset.js';
+import { normalizePersonName } from '../lib/person-identity.js';
 
 // backfill-nicknames — nickname amendment
 // (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry, controller ruling on fix
@@ -55,10 +56,16 @@ export function parseArgs(argv) {
 // cachePath naming convention, but this function does not depend on it — any *.json file present is
 // treated as a candidate). An absent cache dir (the sweep never ran, or ran somewhere else) is
 // honestly reported as zero files found, never a crash and never a reason to reach for the network.
+// MINOR (fix round 1, reviewer-caught): sorted lexicographically before returning — readdirSync's
+// own ordering is filesystem-dependent, not guaranteed across OS/runs, and multi-session nickname
+// precedence (additivePatch's fills-null-only semantics mean the FIRST session processed for a
+// given legiscan_people_id wins) must be deterministic run-to-run, not an accident of directory
+// iteration order.
 export function listCachedDatasetFiles(cacheDir = CACHE_DIR) {
   if (!existsSync(cacheDir)) return [];
   return readdirSync(cacheDir)
     .filter((name) => name.endsWith('.json'))
+    .sort()
     .map((name) => `${cacheDir}/${name}`);
 }
 
@@ -66,13 +73,19 @@ export function listCachedDatasetFiles(cacheDir = CACHE_DIR) {
 // attempt: a non-empty, source-printed nickname that actually DIFFERS from first_name (LegiScan
 // prints some records with nickname === first_name, e.g. nickname:"Robert" on first_name:"Robert" —
 // carries zero new identity information, filtered out here so peopleSeen/withNickname stay
-// meaningful rather than padded with no-op entries).
+// meaningful rather than padded with no-op entries). MINOR (fix round 1, reviewer-caught): the
+// redundancy comparison is normalized (person-identity.js's own normalizePersonName — case/
+// whitespace/punctuation folding, the SAME conservative fold used everywhere else in this
+// codebase's identity matching) rather than a raw string compare, so e.g. nickname:"BOB"/
+// first_name:"Bob" (a real-world casing quirk, not a genuine alternate name) is also correctly
+// treated as redundant, not a false new-information nickname. The nickname VALUE persisted is
+// still the source's own verbatim string (`nickname`, unchanged) — only the comparison is folded.
 export function extractNicknamePeople(parsedPeople) {
   const out = [];
   for (const person of parsedPeople ?? []) {
     const nickname = String(person?.nickname ?? '').trim();
     const firstName = String(person?.first_name ?? '').trim();
-    if (nickname && nickname !== firstName) {
+    if (nickname && normalizePersonName(nickname) !== normalizePersonName(firstName)) {
       out.push({ peopleId: person.people_id, nickname });
     }
   }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence,
+  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence, nameSetEdgeBasis,
 } from '../src/lib/person-identity.js';
 import {
   parseArgs,
@@ -169,37 +169,33 @@ test('clusterLegislators FIX ROUND 2: the real four-Onder rows form TWO clean 2-
   assert.equal(bioguideEvidence.surnameKeyUsed, 'onder');
 });
 
-// ---- nickname amendment (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry):
-// migration 0013 persists LegiScan's own source-printed person.nickname onto legislators.nickname;
-// clusterLegislators now consumes it as an additional exact-match given-name variant. Regression-
-// locks BOTH behaviors: withOUT a persisted nickname, the real four-Onder rows still split into the
-// current two 2-member clusters (fix round 2's own correct, safe outcome — the test above); WITH
-// the real source-printed nickname ('Bob' on the legiscan row, verified live: people_id 16351)
-// persisted, all four rows now form ONE clean cluster, since legiscan's own printed pair (given
-// 'robert', nickname 'bob') bridges the 'Robert'-form pair (bioguide+legiscan) to the 'Bob'-form
-// pair (mo_senate+openstates) within the SAME surname-gated group — without ever becoming a
-// cross-surname nickname table (buildGivenNicknameEquivalence is scoped to this one surname group). ----
+// ---- nickname amendment (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry;
+// FIX ROUND 1, controller-reviewed CRITICAL finding, execution-proven): migration 0013 persists
+// LegiScan's own source-printed person.nickname onto legislators.nickname; clusterLegislators now
+// consumes it as an additional exact-match given-name variant via PAIRWISE PRINTED-NAME-SET
+// INTERSECTION (nameSetEdgeBasis in src/lib/person-identity.js) — NEVER a union-find/transitive
+// token equivalence (fix round 0's implementation fabricated equivalences no source printed —
+// robert~bob + robert~rob would have wrongly implied bob~rob; caught by review before any live
+// run). ----
 
-test('clusterLegislators NICKNAME AMENDMENT: the real four-Onder rows, WITH nickname "Bob" persisted on the legiscan row, form ONE clean 4-member cluster (never flagged) — the class fix', () => {
+test('clusterLegislators NICKNAME AMENDMENT: the real four-Onder rows, WITH nickname "Bob" persisted on the legiscan row, form ONE FLAGGED group (never silently auto-clustered) — legiscan bridges bioguide directly (residual identical name) AND openstates/mosenate directly (direct nickname edge), but bioguide never shares a printed token with openstates/mosenate THEMSELVES, so the pre-existing exhaustive-pairwise-recheck safety net (same mechanism as the "John Duncan" suffix-omission bridge) correctly surfaces this for Lance\'s review rather than trusting an unproven gap', () => {
   const rows = onderRows();
   const legiscanRow = rows.find((r) => r.id === 'leg-onder-legiscan');
   legiscanRow.nickname = 'Bob'; // source-printed, verified real: LegiScan people_id 16351
   const result = clusterLegislators(rows);
-  assert.equal(result.clusters.length, 1);
-  assert.equal(result.flagged.length, 0);
-  assert.equal(result.singletons.length, 0);
-  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), [
+  assert.equal(result.clusters.length, 0, 'never a clean auto-cluster — bioguide has no direct printed-name overlap with openstates/mosenate');
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'internal_no_name_variant');
+  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), [
     'leg-onder-bioguide', 'leg-onder-legiscan', 'leg-onder-mosenate', 'leg-onder-openstates',
   ]);
-  // The nickname rides into the cluster's own evidence snapshot (buildMemberEvidence) — visible to
-  // auditClusterCoherence and to a future review-tab rendering, never silently dropped.
-  const legiscanEvidence = result.clusters[0].evidence.find((e) => e.legislatorId === 'leg-onder-legiscan');
+  assert.equal(result.singletons.length, 0);
+  // The nickname still rides into the flagged group's own evidence snapshot (buildMemberEvidence)
+  // — visible to a future review-tab rendering as the concrete bridging evidence, never dropped.
+  const legiscanEvidence = result.flagged[0].evidence.find((e) => e.legislatorId === 'leg-onder-legiscan');
   assert.equal(legiscanEvidence.nickname, 'Bob');
-  const bioguideEvidence = result.clusters[0].evidence.find((e) => e.legislatorId === 'leg-onder-bioguide');
+  const bioguideEvidence = result.flagged[0].evidence.find((e) => e.legislatorId === 'leg-onder-bioguide');
   assert.equal(bioguideEvidence.nickname, null, 'a member with no persisted nickname carries null, never guessed');
-  // auditClusterCoherence independently re-verifies the SAME nickname bridge from the cluster's own
-  // evidence snapshot alone (not by re-trusting clusterLegislators' verdict).
-  assert.deepEqual(auditClusterCoherence(result.clusters), { ok: true, violations: [] });
 });
 
 test('clusterLegislators NICKNAME AMENDMENT: withOUT a persisted nickname anywhere, the real four-Onder rows still split into the current two 2-member clusters (regression — unchanged from fix round 2)', () => {
@@ -213,24 +209,101 @@ test('clusterLegislators NICKNAME AMENDMENT: withOUT a persisted nickname anywhe
   ].sort());
 });
 
+// The POSITIVE case: a nickname DOES produce a clean, immediate auto-cluster when it directly
+// bridges every pair in a 2-member group (the simplest fully-pairwise-satisfied shape) — proving
+// the mechanism actually works, not just that it correctly declines to over-reach.
+test('clusterLegislators NICKNAME AMENDMENT: a nickname directly bridging a 2-row group (every pair pairwise-matches) forms ONE clean cluster — a real "direct_name" edge, auditClusterCoherence confirms it is NOT a residual-only cluster', () => {
+  const rows = [
+    {
+      id: 'leg-onder-legiscan2', full_name: 'Robert Onder', nickname: 'Bob', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 16351, evidence: [],
+    },
+    {
+      id: 'leg-onder-bareBob', full_name: 'Bob Onder', nickname: null, surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: '2', legiscan_people_id: null, evidence: [],
+    },
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 1);
+  assert.equal(result.flagged.length, 0);
+  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), ['leg-onder-bareBob', 'leg-onder-legiscan2']);
+  const audit = auditClusterCoherence(result.clusters);
+  assert.deepEqual(audit, {
+    ok: true,
+    violations: [],
+    clusterEdgeBasis: [{ clusterKey: result.clusters[0].key, direct_name_edges: 1, residual_identical_name_edges: 0 }],
+    residualOnlyClusters: [],
+  });
+});
+
 test('clusterLegislators NICKNAME AMENDMENT: a nickname is scoped to its OWN surname group, never a global cross-surname nickname table — an unrelated "Bob Smith"/"Robert Smith" pair is unaffected by Onder\'s own nickname evidence appearing in the SAME clusterLegislators call', () => {
-  const rows = onderRows();
-  const legiscanRow = rows.find((r) => r.id === 'leg-onder-legiscan');
-  legiscanRow.nickname = 'Bob';
-  rows.push(
+  const rows = [
+    {
+      id: 'leg-onder-legiscan2', full_name: 'Robert Onder', nickname: 'Bob', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 16351, evidence: [],
+    },
+    {
+      id: 'leg-onder-bareBob', full_name: 'Bob Onder', nickname: null, surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: '2', legiscan_people_id: null, evidence: [],
+    },
     {
       id: 'leg-smith-robert', full_name: 'Robert Smith', surname: 'Smith', bioguide_id: 'bg-smith-r', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, nickname: null, evidence: [],
     },
     {
       id: 'leg-smith-bob', full_name: 'Bob Smith', surname: 'Smith', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 9001, nickname: null, evidence: [],
     },
-  );
+  ];
   const result = clusterLegislators(rows);
-  assert.equal(result.clusters.length, 1, 'only the nickname-bridged Onder cluster forms');
-  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), [
-    'leg-onder-bioguide', 'leg-onder-legiscan', 'leg-onder-mosenate', 'leg-onder-openstates',
-  ]);
+  assert.equal(result.clusters.length, 1, 'only the directly nickname-bridged Onder pair forms');
+  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), ['leg-onder-bareBob', 'leg-onder-legiscan2']);
   assert.deepEqual(result.singletons.slice().sort(), ['leg-smith-bob', 'leg-smith-robert'], 'Robert Smith/Bob Smith stay two singletons — no cross-surname nickname bridging');
+});
+
+// ---- FIX ROUND 1 CRITICAL repro, reviewer's exact scenarios encoded verbatim (semantics a/b/c) ----
+
+function mkJonesHub(id, fullName, nickname) {
+  return {
+    id, full_name: fullName, nickname, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, evidence: [],
+  };
+}
+
+test('clusterLegislators NICKNAME AMENDMENT FIX ROUND 1 (a): two identical-full-name hubs ("Robert Jones") each printing a DIFFERENT nickname (Bob / Rob) — bare-Bob connects to hub1 (sourced direct_name edge), the two hubs connect via the pre-existing identical-name residual, bare-Rob connects to hub2 (sourced direct_name edge) — the component still forms (all 4 land in one group via real, chained edges), but bob<->rob have NO direct edge, so the exhaustive-pairwise-recheck correctly FLAGS the whole group rather than auto-clustering it (this is exactly the shape the CRITICAL union-find bug would have wrongly auto-linked, by fabricating a direct bob==rob equivalence no source ever printed)', () => {
+  const rows = [
+    mkJonesHub('leg-hub1', 'Robert Jones', 'Bob'),
+    mkJonesHub('leg-hub2', 'Robert Jones', 'Rob'),
+    mkJonesHub('leg-barebob', 'Bob Jones', null),
+    mkJonesHub('leg-barerob', 'Rob Jones', null),
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0, 'the old union-find bug would have produced ONE clean cluster here — the fix must not');
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'internal_no_name_variant');
+  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-barebob', 'leg-barerob', 'leg-hub1', 'leg-hub2']);
+  assert.equal(result.singletons.length, 0);
+});
+
+test('clusterLegislators NICKNAME AMENDMENT FIX ROUND 1 (b): the discriminating case — hubs with DIFFERENT given names ("Robert Jones"/nickname Bob vs "Roberto Jones"/nickname Rob) — no identical-name edge between the hubs, and their printed name-sets {robert,bob}/{roberto,rob} do not intersect, so the component SPLITS into two independent, clean 2-member clusters instead of one flagged group', () => {
+  const rows = [
+    mkJonesHub('leg-hub1', 'Robert Jones', 'Bob'),
+    mkJonesHub('leg-hub2', 'Roberto Jones', 'Rob'),
+    mkJonesHub('leg-barebob', 'Bob Jones', null),
+    mkJonesHub('leg-barerob', 'Rob Jones', null),
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.flagged.length, 0);
+  assert.equal(result.clusters.length, 2);
+  const memberSets = result.clusters.map((c) => c.memberIds.slice().sort());
+  assert.deepEqual(memberSets.sort(), [
+    ['leg-barebob', 'leg-hub1'].sort(),
+    ['leg-barerob', 'leg-hub2'].sort(),
+  ].sort());
+});
+
+test('clusterLegislators NICKNAME AMENDMENT FIX ROUND 1 (c): a plain "Bob"-given row and a plain "Rob"-given row, NO hubs at all — no shared printed token anywhere, so they never connect (two singletons, not even flagged)', () => {
+  const rows = [
+    mkJonesHub('leg-barebob', 'Bob Jones', null),
+    mkJonesHub('leg-barerob', 'Rob Jones', null),
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 0);
+  assert.deepEqual(result.singletons.slice().sort(), ['leg-barebob', 'leg-barerob']);
 });
 
 test('clusterLegislators: pickDisplayName on the bioguide+legiscan Onder cluster yields "Robert F. Onder" / bioguide — end-to-end of the worked example', () => {
@@ -617,6 +690,30 @@ test('fullNameVariantMatch: still never bridges an actual nickname — "Bob Onde
   assert.equal(fullNameVariantMatch('Bob Onder', 'Robert Onder'), false);
 });
 
+// ---- nameSetEdgeBasis (nickname amendment FIX ROUND 1's own gate — pairwise printed-name-set
+// intersection, NO union-find over tokens, NO cross-row token equivalence, ever) ----
+
+test('nameSetEdgeBasis: identical plain given names (no nicknames involved at all) -> residual_identical_name, the pre-existing accepted residual', () => {
+  assert.equal(nameSetEdgeBasis({ full_name: 'Robert Jones' }, { full_name: 'Robert Jones' }), 'residual_identical_name');
+});
+
+test('nameSetEdgeBasis: a row\'s own printed nickname bridging the OTHER row\'s plain given name -> direct_name', () => {
+  assert.equal(nameSetEdgeBasis({ full_name: 'Robert Onder', nickname: 'Bob' }, { full_name: 'Bob Onder' }), 'direct_name');
+  assert.equal(nameSetEdgeBasis({ full_name: 'Bob Onder' }, { full_name: 'Robert Onder', nickname: 'Bob' }), 'direct_name', 'symmetric regardless of argument order');
+});
+
+test('nameSetEdgeBasis: two DIFFERENT nicknames sharing only a coincidental identical-given hub on EACH side individually -> null when compared to EACH OTHER directly (the exact CRITICAL bug: no fabricated bob<->rob equivalence)', () => {
+  assert.equal(nameSetEdgeBasis({ full_name: 'Bob Jones' }, { full_name: 'Rob Jones' }), null);
+});
+
+test('nameSetEdgeBasis: no shared printed token at all -> null', () => {
+  assert.equal(nameSetEdgeBasis({ full_name: 'Robert Jones' }, { full_name: 'Roberto Jones', nickname: 'Rob' }), null);
+});
+
+test('nameSetEdgeBasis: a row\'s nickname equal to its OWN given name contributes nothing new (set collapses), still residual_identical_name against a matching plain row', () => {
+  assert.equal(nameSetEdgeBasis({ full_name: 'Robert Jones', nickname: 'Robert' }, { full_name: 'Robert Jones' }), 'residual_identical_name');
+});
+
 // ---- CRITICAL fix round 1: a same-seat evidence pair that can only claim "cannot rule out
 // overlap" because a date is simply MISSING (not because it's genuinely known to overlap) must not
 // default to 'compatible' unless the two rows' own printed full names actually agree. Execution-
@@ -737,17 +834,25 @@ test('clusterLegislators: empty input returns three empty buckets', () => {
 
 // ---- auditClusterCoherence (fix round 2's third, permanent, non-destructive layer) ----
 
-test('auditClusterCoherence: clusterLegislators\' own output always passes (structural guarantee) — the real Onder clusters, Brown singletons, and dynasty flags all together', () => {
+test('auditClusterCoherence: clusterLegislators\' own output always passes (structural guarantee) — the real Onder clusters, Brown singletons, and dynasty flags all together; without any persisted nickname, both auto-clusters are (correctly) residual-only, since the pre-existing identical-full-name residual is the only reason either pair matched', () => {
   const onder = clusterLegislators(onderRows());
-  assert.deepEqual(auditClusterCoherence(onder.clusters), { ok: true, violations: [] });
+  const audit = auditClusterCoherence(onder.clusters);
+  assert.equal(audit.ok, true);
+  assert.deepEqual(audit.violations, []);
+  assert.equal(audit.clusterEdgeBasis.length, 2);
+  assert.ok(audit.clusterEdgeBasis.every((c) => c.direct_name_edges === 0 && c.residual_identical_name_edges === 1));
+  assert.equal(audit.residualOnlyClusters.length, 2, 'FIX ROUND 1 (AUDIT INDEPENDENCE): both clusters are visibly marked residual-only — visibility, not a new gate, since ok stays true');
 });
 
-test('auditClusterCoherence: an empty cluster list passes trivially', () => {
-  assert.deepEqual(auditClusterCoherence([]), { ok: true, violations: [] });
-  assert.deepEqual(auditClusterCoherence(undefined), { ok: true, violations: [] });
+test('auditClusterCoherence: an empty cluster list passes trivially, with empty edge-basis reporting', () => {
+  const empty = {
+    ok: true, violations: [], clusterEdgeBasis: [], residualOnlyClusters: [],
+  };
+  assert.deepEqual(auditClusterCoherence([]), empty);
+  assert.deepEqual(auditClusterCoherence(undefined), empty);
 });
 
-test('auditClusterCoherence: catches a HAND-BUILT cluster (bypassing clusterLegislators entirely) whose members do not share a full-name variant — this is the exact shape that must never reach a live run', () => {
+test('auditClusterCoherence: catches a HAND-BUILT cluster (bypassing clusterLegislators entirely) whose members do not share a full-name variant — this is the exact shape that must never reach a live run; zero edge-basis counted for a violating pair', () => {
   const badCluster = {
     key: 'bad:1,2',
     memberIds: ['1', '2'],
@@ -761,6 +866,26 @@ test('auditClusterCoherence: catches a HAND-BUILT cluster (bypassing clusterLegi
   assert.equal(result.violations.length, 1);
   assert.equal(result.violations[0].clusterKey, 'bad:1,2');
   assert.deepEqual([result.violations[0].legislatorIdA, result.violations[0].legislatorIdB].sort(), ['1', '2']);
+  assert.deepEqual(result.clusterEdgeBasis, [{ clusterKey: 'bad:1,2', direct_name_edges: 0, residual_identical_name_edges: 0 }]);
+  assert.deepEqual(result.residualOnlyClusters, [], 'a purely violating (non-matching) pair is not "residual-only" — it is not held together at all');
+});
+
+test('auditClusterCoherence: FIX ROUND 1 AUDIT INDEPENDENCE — a hand-built cluster whose ONLY connection is a source-printed nickname (never trusting clusterLegislators\' own verdict) is classified direct_name, not residual, and correctly NOT residual-only', () => {
+  const goodCluster = {
+    key: 'onder-nick:1,2',
+    memberIds: ['1', '2'],
+    evidence: [
+      { legislatorId: '1', fullName: 'Robert Onder', nickname: 'Bob' },
+      { legislatorId: '2', fullName: 'Bob Onder', nickname: null },
+    ],
+  };
+  const result = auditClusterCoherence([goodCluster]);
+  assert.deepEqual(result, {
+    ok: true,
+    violations: [],
+    clusterEdgeBasis: [{ clusterKey: 'onder-nick:1,2', direct_name_edges: 1, residual_identical_name_edges: 0 }],
+    residualOnlyClusters: [],
+  });
 });
 
 // ---- CLI: parseArgs ----
@@ -1069,7 +1194,8 @@ test('runLink: --dry-run performs ZERO write calls (no insert/update anywhere in
   });
   assert.equal(report.clusters.length, 2);
   assert.deepEqual(report.clusters.map((c) => c.memberIds.length).sort(), [2, 2]);
-  assert.deepEqual(report.coherenceAudit, { ok: true, violations: [] }, 'permanent dry-run audit line: every proposed cluster is name-coherent');
+  assert.equal(report.coherenceAudit.ok, true, 'permanent dry-run audit line: every proposed cluster is name-coherent');
+  assert.deepEqual(report.coherenceAudit.violations, []);
 
   const writeOps = client.calls.filter((c) => c.op === 'insert' || c.op === 'update');
   assert.deepEqual(writeOps, [], 'zero writes reachable from dry-run — writeAutoCluster/writeIdentityFlag are never called');
@@ -1110,7 +1236,8 @@ test('runLink: live mode writes the TWO auto clusters (persons/person_links/legi
   });
   assert.equal(report.flaggedWritten, 1);
   assert.equal(report.flaggedDeduped, 0);
-  assert.deepEqual(report.coherenceAudit, { ok: true, violations: [] });
+  assert.equal(report.coherenceAudit.ok, true);
+  assert.deepEqual(report.coherenceAudit.violations, []);
 
   assert.equal(client.state.persons.length, 2);
   assert.equal(client.state.person_links.length, 4);

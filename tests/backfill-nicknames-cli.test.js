@@ -56,6 +56,19 @@ test('listCachedDatasetFiles: a missing cache dir returns zero files honestly, n
   assert.deepEqual(listCachedDatasetFiles('.superpowers/artifacts/does-not-exist-nickname-backfill'), []);
 });
 
+test('listCachedDatasetFiles: MINOR (fix round 1) — the result is sorted lexicographically, independent of directory-entry order, so multi-session nickname precedence (first-processed-wins under additivePatch) is deterministic run-to-run', async () => {
+  await withScratchDirAsync(async (dir) => {
+    // Written deliberately out of order — readdirSync's own ordering is filesystem-dependent and
+    // must never be relied on directly.
+    writeFileSync(join(dir, '2216-zzz.json'), '{}');
+    writeFileSync(join(dir, '71-aaa.json'), '{}');
+    writeFileSync(join(dir, '1608-mmm.json'), '{}');
+    const files = listCachedDatasetFiles(dir);
+    const names = files.map((f) => f.slice(dir.length + 1));
+    assert.deepEqual(names, ['1608-mmm.json', '2216-zzz.json', '71-aaa.json'], 'plain lexicographic sort, matching Array.prototype.sort default');
+  });
+});
+
 test('listCachedDatasetFiles: an empty real directory returns zero files; non-.json entries are ignored', async () => {
   await withScratchDirAsync(async (dir) => {
     writeFileSync(join(dir, 'README.md'), 'not a dataset');
@@ -80,6 +93,19 @@ test('extractNicknamePeople: includes a person whose nickname differs from first
 test('extractNicknamePeople: excludes a person whose nickname equals first_name (zero new information)', () => {
   const out = extractNicknamePeople([{ people_id: 1, first_name: 'Robert', nickname: 'Robert' }]);
   assert.deepEqual(out, []);
+});
+
+test('extractNicknamePeople: MINOR (fix round 1) — the redundancy check is normalized (case/whitespace/punctuation-folded), so a casing-only quirk like nickname:"BOB" on first_name:"Bob" is also correctly excluded as redundant, not treated as a genuine alternate name', () => {
+  const out = extractNicknamePeople([
+    { people_id: 1, first_name: 'Bob', nickname: 'BOB' },
+    { people_id: 2, first_name: ' Robert ', nickname: 'robert' },
+  ]);
+  assert.deepEqual(out, []);
+});
+
+test('extractNicknamePeople: the redundancy check is normalized for comparison ONLY — the persisted nickname value is still the source\'s own verbatim casing/punctuation, never folded', () => {
+  const out = extractNicknamePeople([{ people_id: 16351, first_name: 'Robert', nickname: 'Bob' }]);
+  assert.deepEqual(out, [{ peopleId: 16351, nickname: 'Bob' }]);
 });
 
 test('extractNicknamePeople: excludes a person with no nickname (absent, empty, or whitespace-only)', () => {

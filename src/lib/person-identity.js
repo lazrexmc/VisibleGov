@@ -179,6 +179,25 @@ export function matchLegislator(candidate, existingRows) {
 // that exact shape still auto-links. The durable fix is term-date backfill (Task 3+); until then,
 // Lance's review-tab unlink (Task 2) is the correction path. Both fix rounds are strict NARROWINGS
 // of the false-'compatible' surface — neither ever widens it.
+//
+// RESIDUAL WIDENING (IMPORTANT, nickname amendment fix round 1 — reviewer-mandated disclosure,
+// beside this SAME accepted residual, not a new one): the identical-full-name residual above does
+// NOT itself depend on nicknames at all (it only ever compares two rows' plain printed given
+// names) — but a nickname-sourced `direct_name` edge (see nameSetEdgeBasis further below) can now
+// connect a component that previously would never have been assembled at all, or would have stayed
+// smaller/disconnected. Once nickname bridging pulls MORE rows into the SAME connected component,
+// the exhaustive pairwise recheck evaluates every pair inside that now-larger group — INCLUDING any
+// identical-full-name pair that happens to land inside it, which still auto-matches via the
+// residual above regardless of whether the nickname evidence said anything about THAT specific
+// pair. Concretely: a real, DISTINCT person sharing an identical full name with a cluster member,
+// in a jurisdiction/seat with no comparable evidence to contradict it, can still merge silently —
+// this was already possible pre-amendment (the residual predates nicknames entirely), but nickname
+// reach widens the SET of groups where it can fire, by making more rows co-members of one component
+// in the first place. This is not gated (the residual itself remains an accepted, documented trade-
+// off, not a bug) — auditClusterCoherence's `residualOnlyClusters`/`clusterEdgeBasis` output (below)
+// is the operator's window into it: a cluster whose connectivity traces back to residual edges is
+// visibly flagged as such in every dry-run report, so Lance can specifically scrutinize a residual-
+// heavy cluster before trusting it, rather than this widening being invisible.
 // ============================================================================================
 
 // surnameKey — the cluster pass's candidate-pairing key. Prefers the `surname` column when
@@ -238,14 +257,14 @@ function splitGivenFamilySuffix(normalized) {
 
 // namesMatchStructural — the shared given+family+suffix comparison both fullNameVariantMatch
 // (below, strict given equality, unchanged public behavior) and the nickname-aware cluster-pass
-// path (rowNameVariantMatch, further below) reduce to. `givenEquals` is the ONLY thing that
-// differs between the two: a plain `===` for fullNameVariantMatch, or a nickname-derived
-// equivalence lookup for the cluster pass. Extracting this common core means the nickname
-// amendment changes zero behavior for fullNameVariantMatch's own (extensively tested) string-only
-// contract.
-function namesMatchStructural(a, b, givenEquals) {
+// path (rowNameVariantMatch, further below) reduce to. `givenMatches` is the ONLY thing that
+// differs between the two: a plain `a.given === b.given` for fullNameVariantMatch, or the pairwise
+// printed-name-set check (nameSetEdgeBasis) for the cluster pass. Extracting this common core means
+// the nickname amendment changes zero behavior for fullNameVariantMatch's own (extensively tested)
+// string-only contract.
+function namesMatchStructural(a, b, givenMatches) {
   if (!a.given || !a.family || a.family !== b.family) return false;
-  if (!givenEquals(a.given, b.given)) return false;
+  if (!givenMatches) return false;
   if (a.suffix && b.suffix && a.suffix !== b.suffix) return false;
   return true;
 }
@@ -253,73 +272,88 @@ function namesMatchStructural(a, b, givenEquals) {
 export function fullNameVariantMatch(fullNameA, fullNameB) {
   const a = splitGivenFamilySuffix(normalizePersonName(fullNameA));
   const b = splitGivenFamilySuffix(normalizePersonName(fullNameB));
-  return namesMatchStructural(a, b, (x, y) => x === y);
+  return namesMatchStructural(a, b, a.given === b.given);
 }
 
-// ---- nickname amendment (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry) ----
+// ---- nickname amendment (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry;
+// FIX ROUND 1, controller-reviewed CRITICAL finding, execution-proven) ----
 //
 // Migration 0013 persists LegiScan's own source-printed `person.nickname` field onto
 // `legislators.nickname` (backfilled by src/cli/backfill-nicknames.js). This section is the ONLY
 // place clusterLegislators' matching predicate consults it — everything above (fullNameVariantMatch
 // itself, matchLegislator, buildNameVariantSet) is UNCHANGED, so every pre-existing caller/test
-// keeps its exact prior behavior when no row carries a nickname (the overwhelmingly common case
-// today: backfill hasn't run live yet).
+// keeps its exact prior behavior when no row carries a nickname.
 //
-// buildGivenNicknameEquivalence — a union-find over NORMALIZED GIVEN-NAME TOKENS (not row indices),
-// built fresh from one candidate GROUP at a time (clusterLegislators already scopes its comparisons
-// to one surnameKey group; buildMemberEvidence's nickname field lets auditClusterCoherence
-// independently rebuild the identical index from just a cluster's own members). Deliberately
-// GROUP-scoped, never global: unioning happens only from a row's OWN printed (given, nickname) pair
-// (mirrors legiscan-identity.js's buildLegiscanNameVariants — source-printed, per-person, never an
-// invented cross-surname nickname table), but ONE row's assertion ("Robert" is printed elsewhere as
-// "Bob" for THIS person) is then honored for every OTHER row already in the same surname-gated
-// group — this is what "fixes the whole class" (progress.md's own words): every source's own row
-// for the SAME real person can bridge through the ONE row that happens to carry the nickname,
-// without ever letting an unrelated "Robert Smith"/"Bob Smith" pair (different surname group,
-// nothing in common) bridge off of Onder's nickname.
-function buildGivenNicknameEquivalence(rows) {
-  const parent = new Map();
-  const find = (token) => {
-    if (!parent.has(token)) parent.set(token, token);
-    let root = token;
-    while (parent.get(root) !== root) root = parent.get(root);
-    parent.set(token, root); // path compression
-    return root;
-  };
-  const union = (x, y) => {
-    const rx = find(x);
-    const ry = find(y);
-    if (rx !== ry) parent.set(rx, ry);
-  };
-  for (const row of rows ?? []) {
-    const given = splitGivenFamilySuffix(normalizePersonName(row?.full_name ?? '')).given;
-    const nickname = normalizePersonName(row?.nickname ?? '');
-    if (given && nickname && given !== nickname) union(given, nickname);
-  }
-  return { sameGiven: (x, y) => x === y || find(x) === find(y) };
+// FIX ROUND 1 (CRITICAL, reviewer-caught, execution-proven): the original implementation here was a
+// union-find over NORMALIZED GIVEN-NAME TOKENS, shared across an entire surname group. That
+// fabricates equivalences NO SOURCE ever printed: if row X prints (given 'robert', nickname 'bob')
+// and, separately, row Y prints (given 'robert', nickname 'rob') — two DIFFERENT rows, each with
+// its OWN, independently real nickname — the union-find's shared pivot token 'robert' transitively
+// welds 'bob' and 'rob' into the SAME equivalence class, even though no row anywhere ever printed
+// that Bob and Rob are the same name. auditClusterCoherence's own "independent" re-check rebuilt
+// this exact same flawed structure from the cluster's evidence, so it was not actually independent
+// for this failure class — it would have rubber-stamped the fabrication.
+//
+// RULING (unambiguous, binding): NO union-find over tokens, NO cross-row token equivalence, EVER.
+// Replaced with PAIRWISE PRINTED-NAME-SET INTERSECTION — each row's name-set is {its own normalized
+// given, its own normalized nickname if present} (buildRowNameSet below), fixed data about THAT ROW
+// alone, never merged with another row's set. Two rows' given-parts "match" iff (a) their PLAIN
+// given names are literally identical (residual_identical_name — the PRE-EXISTING, nickname-
+// unrelated accepted residual documented above evidencePairStatus/fullNameVariantMatch, still
+// present with zero nickname data anywhere), OR (b) their OWN two printed name-sets share a token
+// that is NOT simply both plain givens agreeing (direct_name — this edge exists ONLY because at
+// least one side's SOURCE-PRINTED nickname supplied the shared token). See nameSetEdgeBasis.
+//
+// Consequence, honestly worked through (encoded in tests/link-persons-cli.test.js): a BRIDGING row
+// that itself prints two name forms (e.g. LegiScan's own 'Robert Onder' row with nickname 'Bob')
+// creates real, sourced, DIRECT edges to whichever OTHER rows print either 'Robert' or 'Bob' — but
+// two rows on OPPOSITE ends of that bridge, which never share a token with EACH OTHER directly
+// (e.g. a row that only ever prints 'Robert', compared to a row that only ever prints 'Bob', with
+// no nickname on either), still do NOT pairwise-match each other. clusterLegislators' PRE-EXISTING
+// exhaustive-pairwise-recheck safety net (unchanged by this fix — see its own comment above) then
+// correctly FLAGS such a group ('internal_no_name_variant') rather than auto-clustering it, exactly
+// as it already does for the "John Duncan" suffix-omission bridge — this is the SAME mechanism,
+// just reached via a nickname bridge instead of a suffix-omission one, and it is the SAFE, honest
+// outcome: real bridging evidence surfaced for Lance's review, never silently trusted across a gap
+// neither end's own printed data actually closes.
+//
+// buildRowNameSet — a row's OWN printed given-name-level tokens only.
+function buildRowNameSet(row) {
+  const set = new Set();
+  const given = splitGivenFamilySuffix(normalizePersonName(row?.full_name ?? '')).given;
+  if (given) set.add(given);
+  const nickname = normalizePersonName(row?.nickname ?? '');
+  if (nickname) set.add(nickname);
+  return set;
 }
 
-// rowNameVariantMatch — like fullNameVariantMatch, but given-token equality is delegated to an
-// optional equivalence index (buildGivenNicknameEquivalence above); with no index (or an index that
-// saw no nicknames in its group), this is byte-for-byte identical to fullNameVariantMatch(rowA.
-// full_name, rowB.full_name) — the "withOUT nickname -> the current two-cluster split" regression
-// this amendment must not disturb.
-function rowNameVariantMatch(rowA, rowB, equivalence) {
+// nameSetEdgeBasis — classifies HOW (or whether) two rows' given-name-level printed data connects.
+// `parsedA`/`parsedB` are the caller's already-computed splitGivenFamilySuffix(normalizePersonName(
+// full_name)) results (avoids re-parsing full_name a third time when the caller — rowNameVariantMatch
+// or auditClusterCoherence — already has them). Returns 'residual_identical_name' |
+// 'direct_name' | null (no shared token at all). Exported for auditClusterCoherence's own
+// independent, per-cluster edge-basis tally (below) and for direct unit testing.
+export function nameSetEdgeBasis(rowA, rowB, parsedA, parsedB) {
+  const a = parsedA ?? splitGivenFamilySuffix(normalizePersonName(rowA?.full_name ?? ''));
+  const b = parsedB ?? splitGivenFamilySuffix(normalizePersonName(rowB?.full_name ?? ''));
+  if (a.given && b.given && a.given === b.given) return 'residual_identical_name';
+  const setB = buildRowNameSet(rowB);
+  for (const token of buildRowNameSet(rowA)) {
+    if (setB.has(token)) return 'direct_name';
+  }
+  return null;
+}
+
+// rowNameVariantMatch — like fullNameVariantMatch, but the given-part check is nameSetEdgeBasis
+// (pairwise printed-name-set intersection) instead of plain given-string equality. With no
+// nickname on either row, buildRowNameSet(row) = {given} for both sides, so this collapses to
+// EXACTLY fullNameVariantMatch(rowA.full_name, rowB.full_name)'s own residual_identical_name path —
+// the "withOUT nickname -> the current two-cluster split" regression this amendment must not
+// disturb.
+function rowNameVariantMatch(rowA, rowB) {
   const a = splitGivenFamilySuffix(normalizePersonName(rowA?.full_name ?? ''));
   const b = splitGivenFamilySuffix(normalizePersonName(rowB?.full_name ?? ''));
-  const givenEquals = equivalence ? equivalence.sameGiven : (x, y) => x === y;
-  return namesMatchStructural(a, b, givenEquals);
-}
-
-// buildGivenNicknameEquivalenceFromEvidence — auditClusterCoherence's own independent re-derivation
-// (see that function below): rebuilds the SAME equivalence shape from a cluster's own `evidence`
-// entries (camelCase fullName/nickname, buildMemberEvidence's own output shape) rather than raw
-// `rows` (snake_case full_name/nickname) — a thin field-name adapter over the same core builder, not
-// a second implementation.
-function buildGivenNicknameEquivalenceFromEvidence(members) {
-  return buildGivenNicknameEquivalence(
-    (members ?? []).map((m) => ({ full_name: m.fullName, nickname: m.nickname })),
-  );
+  return namesMatchStructural(a, b, nameSetEdgeBasis(rowA, rowB, a, b) != null);
 }
 
 // seatEvidencePairStatus — the per-evidence-entry-pair verdict feeding rowSeatStatus below. PURELY
@@ -396,15 +430,10 @@ function rowSeatStatus(evidenceA, evidenceB) {
 //     seat verdict passes through as-is: 'ambiguous' stays 'ambiguous' (e.g. the same-name,
 //     provably-non-overlapping-era case), 'compatible' stays 'compatible' (real corroboration or
 //     the accepted dateless-same-name residual, both fix round 1's own examples).
-//
-// `equivalence` (nickname amendment, optional): a buildGivenNicknameEquivalence index scoped to
-// the SAME candidate group this pair was drawn from — rowNameVariantMatch falls back to plain
-// fullNameVariantMatch-equivalent behavior when omitted or when the group has no nicknames at all,
-// so every pre-amendment call site/test is unaffected.
-function finalPairStatus(rowA, rowB, equivalence) {
+function finalPairStatus(rowA, rowB) {
   const seat = rowSeatStatus(rowA.evidence, rowB.evidence);
   if (seat === 'contradiction') return 'contradiction';
-  const namesMatch = rowNameVariantMatch(rowA, rowB, equivalence);
+  const namesMatch = rowNameVariantMatch(rowA, rowB);
   if (seat === 'no-evidence') return namesMatch ? 'compatible' : 'no-pair';
   if (!namesMatch) return 'ambiguous';
   return seat;
@@ -492,19 +521,11 @@ export function clusterLegislators(rows) {
       if (ra !== rb) parent.set(ra, rb);
     };
 
-    // Nickname amendment: the given-name equivalence is built ONCE per surname group, from every
-    // row in the group (not just the pair being compared) — this is what lets a nickname printed
-    // on ONE row (e.g. legiscan's 'Bob' on an otherwise 'Robert Onder' row) bridge every OTHER
-    // row in the SAME surname-gated group, not just that one row's own direct pairs. Trivial
-    // (no unions) when no row in the group carries a nickname, so this changes nothing for every
-    // pre-amendment group.
-    const equivalence = buildGivenNicknameEquivalence(idxs.map((i) => list[i]));
-
     const statusCache = new Map();
     const pairStatus = (i, j) => {
       const cacheKey = i < j ? `${i}|${j}` : `${j}|${i}`;
       if (statusCache.has(cacheKey)) return statusCache.get(cacheKey);
-      const status = finalPairStatus(list[i], list[j], equivalence);
+      const status = finalPairStatus(list[i], list[j]);
       statusCache.set(cacheKey, status);
       return status;
     };
@@ -577,31 +598,45 @@ export function clusterLegislators(rows) {
 // independent, mechanical re-verification that EVERY member pair of EVERY proposed cluster shares
 // a full-name (or nickname) variant, computed directly off clusterLegislators' own output (each
 // cluster's `evidence` entries already carry `fullName`/`nickname` per member — see
-// buildMemberEvidence above), not by re-deriving anything from the original `rows`. Nickname
-// amendment: rebuilds its OWN given-name equivalence per cluster, from that same cluster's own
-// evidence snapshot (buildGivenNicknameEquivalenceFromEvidence) — a genuine independent
-// recomputation from the raw fullName/nickname facts, not a re-trust of clusterLegislators'
-// verdict, so this still catches a hand-built bad cluster exactly as before (nickname absent on
-// every member of a hand-built fixture -> trivial equivalence -> falls back to plain
-// fullNameVariantMatch behavior). By construction this should ALWAYS report ok:true for
-// clusterLegislators' own output (a clean 'compatible' verdict is only ever reachable when every
-// pair's names — including any nickname bridge — already matched) — its value is as a visible,
-// permanent line in the CLI's dry-run report: the human operator sees this pass BEFORE any live
-// run, and a future regression in the clustering logic would show up here even if the primary
-// logic's own guarantee silently broke.
+// buildMemberEvidence above), not by re-deriving anything from the original `rows`, and not by
+// re-trusting clusterLegislators' own verdict — this recomputes rowNameVariantMatch/
+// nameSetEdgeBasis directly from the raw fullName/nickname facts stored on the evidence snapshot
+// (FIX ROUND 1: genuinely independent for the nickname class too, now that matching is pure
+// pairwise printed-name-set intersection with no group-level state to accidentally re-trust — the
+// original union-find version rebuilt the SAME flawed equivalence here, which made this layer NOT
+// actually independent of the bug it was supposed to catch). By construction this should ALWAYS
+// report ok:true for clusterLegislators' own output — its value is as a visible, permanent line in
+// the CLI's dry-run report: the human operator sees this pass BEFORE any live run, and a future
+// regression in the clustering logic would show up here even if the primary logic's own guarantee
+// silently broke.
+//
+// FIX ROUND 1 addition (AUDIT INDEPENDENCE, reviewer-mandated — visibility, NOT a new gate): each
+// passing cluster's matching pairs are also classified by nameSetEdgeBasis and tallied into
+// `clusterEdgeBasis` ({ clusterKey, direct_name_edges, residual_identical_name_edges }) — so the
+// operator can SEE, per cluster, how much of its connectivity rests on a source-printed nickname
+// bridge (direct_name) versus the pre-existing, nickname-unrelated identical-full-name residual
+// (residual_identical_name — see the ACCEPTED RESIDUAL comment above evidencePairStatus: this
+// residual is not new, and this amendment gives it MORE reach since a nickname bridge can now
+// connect rows that would otherwise never have been compared at all — see the ACCEPTED RESIDUAL
+// note further above for the full "residual widening" implication). `residualOnlyClusters` lists
+// the clusterKey of every cluster held together ENTIRELY by residual edges (zero direct_name_edges)
+// — a real, mechanically-derived signal for the review tooling to surface distinctly, not a new
+// pass/fail condition (a residual-only cluster is still `ok:true` if every pair matched).
 export function auditClusterCoherence(clusters) {
   const violations = [];
+  const clusterEdgeBasis = [];
+  const residualOnlyClusters = [];
   for (const cluster of clusters ?? []) {
     const members = cluster.evidence ?? [];
-    const equivalence = buildGivenNicknameEquivalenceFromEvidence(members);
+    let directNameEdges = 0;
+    let residualIdenticalNameEdges = 0;
     for (let a = 0; a < members.length; a += 1) {
       for (let b = a + 1; b < members.length; b += 1) {
-        const match = rowNameVariantMatch(
-          { full_name: members[a].fullName },
-          { full_name: members[b].fullName },
-          equivalence,
-        );
-        if (!match) {
+        const rowA = { full_name: members[a].fullName, nickname: members[a].nickname };
+        const rowB = { full_name: members[b].fullName, nickname: members[b].nickname };
+        const parsedA = splitGivenFamilySuffix(normalizePersonName(rowA.full_name));
+        const parsedB = splitGivenFamilySuffix(normalizePersonName(rowB.full_name));
+        if (!namesMatchStructural(parsedA, parsedB, nameSetEdgeBasis(rowA, rowB, parsedA, parsedB) != null)) {
           violations.push({
             clusterKey: cluster.key,
             legislatorIdA: members[a].legislatorId,
@@ -609,11 +644,23 @@ export function auditClusterCoherence(clusters) {
             fullNameA: members[a].fullName,
             fullNameB: members[b].fullName,
           });
+          continue;
         }
+        const basis = nameSetEdgeBasis(rowA, rowB, parsedA, parsedB);
+        if (basis === 'direct_name') directNameEdges += 1;
+        else if (basis === 'residual_identical_name') residualIdenticalNameEdges += 1;
       }
     }
+    clusterEdgeBasis.push({
+      clusterKey: cluster.key,
+      direct_name_edges: directNameEdges,
+      residual_identical_name_edges: residualIdenticalNameEdges,
+    });
+    if (directNameEdges === 0 && residualIdenticalNameEdges > 0) residualOnlyClusters.push(cluster.key);
   }
-  return { ok: violations.length === 0, violations };
+  return {
+    ok: violations.length === 0, violations, clusterEdgeBasis, residualOnlyClusters,
+  };
 }
 
 // ---- display_name precedence (mechanical, never invented — Global Constraints) ----
