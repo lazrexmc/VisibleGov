@@ -218,3 +218,12 @@ it is. Revisit this section before shipping any summarization or scoring logic.
     1000-row cap, which THIS repo had already documented hitting live in another file). The
     repo's own recorded lessons don't transfer through un-reviewed code paths; reviewers are
     how they transfer.
+13. **A shared surname is not evidence of identity — and matching predicates in plans must be
+    stated as necessary conditions, not slash-alternatives.** An identity-clustering plan said
+    pairs form "on surname/name-variant equality"; the implementation read the slash as OR, and
+    a live run merged Stuart with James Symington (father and son) before the post-run
+    spot-check caught it. Two lessons: (a) the full-name(+variant) match is a NECESSARY
+    condition for any automated identity link, everywhere, forever; (b) when a plan states a
+    matching rule, write MUST/NEVER conditions, not compact alternates a reader can interpret
+    permissively. The post-run spot-check protocol (sample and eyeball N groupings before
+    declaring success) is what contained it — keep it mandatory for any bulk-linking run.
