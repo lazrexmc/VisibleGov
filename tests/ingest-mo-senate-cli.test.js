@@ -9,7 +9,7 @@ import { parseJournalIndex } from '../src/adapters/mo-senate-web.js';
 import { extractJournalText, parseJournalVotes, resolveMoSenator } from '../src/adapters/mo-senate-journal-pdf.js';
 import {
   parseMoSenateArgs, journalPdfBasename, buildVoteSourceKey, buildVoteRow, buildCastTokens,
-  pickRosterSource, buildJournalIndexUrl, shouldRefetch,
+  pickRosterSource, buildJournalIndexUrl, shouldRefetch, effectiveMaxAge,
   MO_SENATE_ROSTER_MAX_AGE_MS, MO_SENATE_INDEX_MAX_AGE_MS,
   readDayFailureArtifact, writeDayFailureArtifact, excludeQuarantinedDays, JOURNAL_DAY_MAX_FAILED_ATTEMPTS,
   hasDoneMarker, writeDoneMarker,
@@ -1173,4 +1173,15 @@ test('sanity: extractJournalText + parseJournalVotes on the real Day 37 fixture 
 test('sanity: resolveMoSenator resolves Onder (district 2) against a roster row shaped {legislator_id,surname,mo_senate_id}', () => {
   const roster = [{ legislator_id: 'leg-onder', surname: 'Onder', mo_senate_id: '2' }];
   assert.equal(resolveMoSenator({ surname: 'Onder', district: null }, roster), 'leg-onder');
+});
+
+test('effectiveMaxAge: closed years never expire, current year keeps its TTL', () => {
+  assert.equal(effectiveMaxAge(2018, 60_000, 2026), Infinity);
+  assert.equal(effectiveMaxAge(2025, 60_000, 2026), Infinity);
+  assert.equal(effectiveMaxAge(2026, 60_000, 2026), 60_000);
+  assert.equal(effectiveMaxAge('2018', 60_000, 2026), Infinity);
+  // Infinity max-age with an existing cache timestamp must mean "never refetch"
+  assert.equal(shouldRefetch(new Date(0).toISOString(), Infinity), false);
+  // but NO cache at all must still fetch, even for a closed year
+  assert.equal(shouldRefetch(null, Infinity), true);
 });

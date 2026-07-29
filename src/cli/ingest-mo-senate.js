@@ -491,6 +491,14 @@ export async function ensureRosterIdentities(client, runId, members) {
   };
 }
 
+// A CLOSED year's documents are immutable: its journal index and roster can never change, so an
+// existing cache never expires for year < the current calendar year. Without this, half of every
+// cadence loop's 30-minute slots were burned re-fetching a 2018 index that cannot differ (observed
+// live 2026-07-28: slots alternated day-PDF / journal-index, doubling the backfill wall-clock).
+export function effectiveMaxAge(year, maxAgeMs, currentCalendarYear = new Date().getFullYear()) {
+  return Number(year) < currentCalendarYear ? Infinity : maxAgeMs;
+}
+
 // fetchLive/dir are injectable purely for testability (a fake fetcher + scratch cache dir), same
 // convention as enforceDurableCooldown's injectable sleep — never touches the real network or the
 // real gitignored artifacts dir in a test.
@@ -499,7 +507,7 @@ export async function ensureRosterForRun(client, runId, year, {
 } = {}) {
   const cacheKey = String(year);
   const cache = readCache(dir, cacheKey);
-  if (shouldRefetch(cache?.fetched_at ?? null, maxAgeMs)) {
+  if (shouldRefetch(cache?.fetched_at ?? null, effectiveMaxAge(year, maxAgeMs))) {
     const source = pickRosterSource(year);
     const { members, vacancies } = await fetchLive(source);
     writeCache(dir, cacheKey, {
@@ -520,7 +528,7 @@ export async function ensureIndexForRun(year, {
 } = {}) {
   const cacheKey = String(year);
   const cache = readCache(dir, cacheKey);
-  if (shouldRefetch(cache?.fetched_at ?? null, maxAgeMs)) {
+  if (shouldRefetch(cache?.fetched_at ?? null, effectiveMaxAge(year, maxAgeMs))) {
     const html = await senateWeb.fetchJournalIndex(buildJournalIndexUrl(year));
     const rows = senateWeb.parseJournalIndex(html);
     writeCache(dir, cacheKey, { rows });
