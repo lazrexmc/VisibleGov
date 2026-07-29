@@ -11,11 +11,25 @@ import { isMissingRelationError } from '../lib/db.js';
 //       numbers (no primary-source comparison yet).
 //   (b) CROSS-SOURCE — crossCheckAgainstPrimarySource: where a primary-source tally (mo-house-xml
 //       or mo-senate-web — see PRIMARY_SOURCE_KEY_PREFIXES below) already exists for the same real
-//       vote, compare; a disagreement is durably flagged (vote_reconciliation_flags, migration
-//       0010) and returned as matched:false, but the LegiScan vote is NOT quarantined (its own
-//       internal gate already passed) — never silently resolved either way. No primary-source
-//       counterpart is NOT a failure (checked:false) — LegiScan covers far more sessions than the
-//       primary parsers have reached; that's the whole point of this backfill.
+//       vote, compare. FIX ROUND 1 (controller ruling — refines, not restores, the original
+//       "flag but never quarantine" design this task first shipped): a disagreement is ALWAYS
+//       durably flagged (vote_reconciliation_flags, migration 0010), but whether the LegiScan vote
+//       itself is stored now depends on WHAT disagrees, per the returned `quarantine` boolean:
+//         - yea or nay differs -> REAL divergence (both sources define these identically, and they
+//           determine the vote's outcome/attribution stakes) -> flags row + `quarantine:true` — the
+//           LegiScan vote/casts must NOT be stored (`votes`/`vote_casts` are anon-readable;
+//           possibly-contradicted data must never be publicly reachable — "never store what you
+//           can't reconcile", the same rule reconcileLegiscanTallies already enforces internally).
+//         - only the combined present/not_voting/absent bucket differs (yea/nay both agree) ->
+//           `quarantine:false`, vote STORES anyway — this is an accounting difference between two
+//           sources' own category vocabularies (the Present-category caveat below), not a
+//           contradiction of the vote's actual outcome.
+//         - more than one primary-source candidate matches (ambiguous) -> the LegiScan vote is
+//           internally reconciled and uncontradicted by anything specific -> flags row
+//           (`reason: 'ambiguous_cross_reference'`) + `quarantine:false`, vote stores.
+//       No primary-source counterpart at all -> `checked:false`, `quarantine:false` (unchanged) —
+//       LegiScan covers far more sessions than the primary parsers have reached; absence of a
+//       counterpart is the whole point of this backfill, never treated as a failure.
 //
 // VOTE_ID_MAP — per docs/research/2026-07-27-mo-data-sources.md Q2 (VERIFIED-BY-PAYLOAD against
 // LegiScan's own schema-mysql.sql, `ls_vote` lookup table: 1=Yea, 2=Nay, 3=Not Voting, 4=Absent).
@@ -178,18 +192,22 @@ export function reconcileLegiscanTallies(rollCall) {
 // stale doc — per project convention).
 export const PRIMARY_SOURCE_KEY_PREFIXES = ['mo-house-xml-', 'mo-senate-web-'];
 
-// KNOWN CAVEAT (task-6-brief.md, explicit): LegiScan's own ls_vote schema has NO distinct
-// "Present" vote_id (only Yea/Nay/NV/Absent) while MO House's own roll-call PDFs DO print a
-// distinct "Present" category (mo-rollcall-pdf.js's POSITION_MAP: Y/N/P/@). A genuine Present cast
-// on the primary-source side therefore has no LegiScan analog at all — it can only ever show up as
-// a disagreement in the combined non-yea/non-nay bucket (see compareTalliesForCrossCheck below),
-// which is NOT necessarily a real data error. Recorded verbatim in every discrepancy flag this
+// KNOWN CAVEAT (task-6-brief.md, explicit; promoted to a STRUCTURAL rule by FIX ROUND 1): LegiScan's
+// own ls_vote schema has NO distinct "Present" vote_id (only Yea/Nay/NV/Absent) while MO House's own
+// roll-call PDFs DO print a distinct "Present" category (mo-rollcall-pdf.js's POSITION_MAP:
+// Y/N/P/@). A genuine Present cast on the primary-source side therefore has no LegiScan analog at
+// all — it can only ever show up as a disagreement in the combined non-yea/non-nay bucket (see
+// compareTalliesForCrossCheck below), which is a source-vocabulary ACCOUNTING difference, not a
+// contradiction of the vote's actual outcome — this is exactly why FIX ROUND 1 folds
+// present/not_voting/absent into one bucket (soft mismatch, store-with-flag) while comparing
+// yea/nay strictly (hard mismatch, quarantine). Recorded verbatim in every bucket-mismatch flag this
 // function writes so a human reviewer is never misled by a bare mismatch number.
 export const PRESENT_CATEGORY_CAVEAT = 'LegiScan\'s ls_vote schema has no distinct "Present" vote_id '
   + '(only Yea/Nay/NotVoting/Absent) while MO House\'s own roll-call PDFs print a distinct "Present" '
-  + 'category (Y/N/P/@). A disagreement in the combined non-yea/non-nay bucket below may reflect '
-  + 'that category difference rather than a genuine data error — check for Present casts on the '
-  + 'primary-source side before treating this as a real discrepancy.';
+  + 'category (Y/N/P/@). A disagreement in the combined non-yea/non-nay bucket below is an '
+  + 'accounting difference between the two sources\' own category vocabularies, not a contradiction '
+  + 'of the vote\'s actual outcome — check for Present casts on the primary-source side before '
+  + 'treating this as anything more than that.';
 
 function sameCalendarDate(a, b) {
   if (a == null || b == null) return false;
@@ -207,28 +225,37 @@ function summarizePrimaryCastPositions(castRows) {
   return counts;
 }
 
-// compareTalliesForCrossCheck — yea/nay are compared category-for-category (both sources map these
-// unambiguously, no caveat needed). Everything else is compared only as a COMBINED "non-yea/non-nay"
-// bucket (LegiScan not_voting+absent vs primary present+absent+not_voting+other) BECAUSE of the
-// Present-category caveat above — comparing sub-buckets 1:1 would manufacture false mismatches out
-// of a real category-vocabulary difference, not an actual data disagreement.
+// compareTalliesForCrossCheck — FIX ROUND 1 (controller ruling): splits mismatches into two kinds,
+// deliberately treated differently by the caller:
+//   - HARD (yea/nay): both sources define these two categories identically and they determine the
+//     vote's outcome/attribution — a difference here is a REAL divergence, never explained away by
+//     a category-vocabulary quirk. Compared category-for-category, no caveat attached.
+//   - SOFT (the combined "non-yea/non-nay" bucket: LegiScan not_voting+absent vs primary
+//     present+absent+not_voting+other): folded into ONE combined value rather than compared
+//     sub-bucket-by-sub-bucket, precisely BECAUSE of the Present-category caveat (comparing
+//     present/absent/not_voting 1:1 would manufacture false mismatches out of a real
+//     category-vocabulary difference between the two sources, not an actual data disagreement) — an
+//     accounting difference, not a contradiction (see PRESENT_CATEGORY_CAVEAT above).
 function compareTalliesForCrossCheck(legiscanTallies, primaryCounts) {
-  const legiscanNonVote = legiscanTallies.tallies.not_voting + legiscanTallies.tallies.absent;
-  const primaryNonVote = primaryCounts.present + primaryCounts.absent + primaryCounts.not_voting + primaryCounts.other;
-  const mismatches = [];
+  const hardMismatches = [];
   if (legiscanTallies.tallies.yea !== primaryCounts.yea) {
-    mismatches.push(`yea: legiscan ${legiscanTallies.tallies.yea} vs primary ${primaryCounts.yea}`);
+    hardMismatches.push(`yea: legiscan ${legiscanTallies.tallies.yea} vs primary ${primaryCounts.yea}`);
   }
   if (legiscanTallies.tallies.nay !== primaryCounts.nay) {
-    mismatches.push(`nay: legiscan ${legiscanTallies.tallies.nay} vs primary ${primaryCounts.nay}`);
+    hardMismatches.push(`nay: legiscan ${legiscanTallies.tallies.nay} vs primary ${primaryCounts.nay}`);
   }
+
+  const softMismatches = [];
+  const legiscanNonVote = legiscanTallies.tallies.not_voting + legiscanTallies.tallies.absent;
+  const primaryNonVote = primaryCounts.present + primaryCounts.absent + primaryCounts.not_voting + primaryCounts.other;
   if (legiscanNonVote !== primaryNonVote) {
-    mismatches.push(
-      `non-yea/non-nay: legiscan not_voting+absent=${legiscanNonVote} vs primary `
+    softMismatches.push(
+      `non-yea/non-nay bucket: legiscan not_voting+absent=${legiscanNonVote} vs primary `
         + `present+absent+not_voting+other=${primaryNonVote}`,
     );
   }
-  return mismatches;
+
+  return { hardMismatches, softMismatches };
 }
 
 // writeReconciliationFlag — Draft-then-apply degradation (Global Constraints, plan doc): migration
@@ -262,17 +289,25 @@ async function writeReconciliationFlag(client, {
   return data;
 }
 
-// crossCheckAgainstPrimarySource(client, billId, legiscanTallies) -> { checked, matched, flag }.
-// `billId` is OUR canonical bills.id (uuid) — already resolved by the caller (Task 9's driver) via
-// LegiScan's own numeric bill_id -> Task 4's parsed bill record -> normalizeBillIdentifier ->
-// `bills` row (CONTROLLER RULING 4 — read normalizeMoBillIdentifier/normalizeBillIdentifier,
-// never re-implemented here). `legiscanTallies` is reconcileLegiscanTallies' return value, PLUS a
-// `voteId` field (the already-inserted LegiScan `votes.id`) the caller must attach before calling
-// this function — reconcileLegiscanTallies is pure and never touches the DB, so it cannot know the
-// DB-generated id; by the time this cross-check runs (per the plan's Task 9 flow: reconcile ->
-// insertIfAbsent('votes',...) -> crossCheckAgainstPrimarySource -> per-cast insert), the LegiScan
-// vote row already exists. An optional `legiscanTallies.runId` rides into the flag row the same way
-// every other table's provenance column does.
+// crossCheckAgainstPrimarySource(client, billId, legiscanTallies) -> { checked, matched, flag,
+// quarantine }. `billId` is OUR canonical bills.id (uuid) — already resolved by the caller (Task
+// 9's driver) via LegiScan's own numeric bill_id -> Task 4's parsed bill record ->
+// normalizeBillIdentifier -> `bills` row (CONTROLLER RULING 4 — read normalizeMoBillIdentifier/
+// normalizeBillIdentifier, never re-implemented here). `legiscanTallies` is reconcileLegiscanTallies'
+// return value; an optional `legiscanTallies.runId` rides into any flag row the same way every
+// other table's provenance column does.
+//
+// FIX ROUND 1 (controller ruling — the contract SIMPLIFIED here, not just extended): every flag row
+// this function writes attaches to the PRIMARY-SOURCE vote's own id (already-known from the lookup
+// below), NOT a LegiScan `votes.id`. This is deliberate, not incidental: `quarantine:true` means the
+// LegiScan vote is NEVER stored at all, so it can never have a `votes.id` for
+// `vote_reconciliation_flags.vote_id` (not null) to reference — attaching to the primary-source
+// row (which by construction always exists, being the very thing being compared against) is the
+// only choice that works in every branch, including quarantine. This ALSO means the caller no
+// longer needs to insert the LegiScan vote before calling this function (the original design's
+// `legiscanTallies.voteId` pre-attachment requirement is gone) — this function is meant to run
+// BEFORE the driver decides whether to call insertIfAbsent('votes', ...) at all, so it can act as
+// the actual store/quarantine gate, not an after-the-fact audit of an already-stored row.
 //
 // Matching (CONTROLLER RULING 2): by (jurisdiction, chamber, date, bill identifier) — exact match
 // only, ambiguity -> flags row, never guessed. jurisdiction_id/chamber/bill_id are pushed down as
@@ -301,23 +336,32 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     && sameCalendarDate(row.vote_date, legiscanTallies.date)
   ));
 
-  if (candidates.length === 0) return { checked: false, matched: null, flag: null };
+  if (candidates.length === 0) return {
+    checked: false, matched: null, flag: null, quarantine: false,
+  };
 
   if (candidates.length > 1) {
     // Ambiguity -> flags row, never guessed (CONTROLLER RULING 2, literal): more than one
     // primary-source vote row matches the same (jurisdiction, chamber, date, bill) tuple — this
-    // should never happen for a real single roll call, but if it does, picking one arbitrarily
-    // would be exactly the kind of silent guess this project's fail-loud convention forbids.
+    // should never happen for a real single roll call, but if it does, picking one arbitrarily as
+    // THE correct comparison target would be exactly the kind of silent guess this project's
+    // fail-loud convention forbids. FIX ROUND 1: the LegiScan vote itself is internally reconciled
+    // (gate (a) already passed) and not CONTRADICTED by any specific candidate — quarantine:false,
+    // it stores; the ambiguity is durably flagged for human review instead. The flag row attaches
+    // to the first candidate found (an anchor point only, not an endorsement — every candidate's
+    // source_key is listed in the discrepancy payload so a reviewer sees all of them, not just one).
     const discrepancy = {
-      reason: 'ambiguous_primary_source_match',
+      reason: 'ambiguous_cross_reference',
       legiscan_tallies: legiscanTallies.tallies,
       candidate_source_keys: candidates.map((c) => c.source_key),
-      caveat: PRESENT_CATEGORY_CAVEAT,
+      quarantine: false,
     };
     const flag = await writeReconciliationFlag(client, {
-      voteId: legiscanTallies.voteId, sourceB: 'ambiguous', discrepancy, runId: legiscanTallies.runId,
+      voteId: candidates[0].id, sourceB: 'ambiguous', discrepancy, runId: legiscanTallies.runId,
     });
-    return { checked: true, matched: false, flag };
+    return {
+      checked: true, matched: false, flag, quarantine: false,
+    };
   }
 
   const primaryVote = candidates[0];
@@ -328,10 +372,21 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
   if (castErr) throw new Error(`legiscan-votes cross-check cast lookup failed: ${castErr.message}`);
 
   const primaryCounts = summarizePrimaryCastPositions(castRows ?? []);
-  const mismatches = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
+  const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
 
-  if (mismatches.length === 0) return { checked: true, matched: true, flag: null };
+  if (hardMismatches.length === 0 && softMismatches.length === 0) {
+    return {
+      checked: true, matched: true, flag: null, quarantine: false,
+    };
+  }
 
+  // FIX ROUND 1: quarantine iff a HARD (yea/nay) mismatch exists — a soft (bucket-only) mismatch
+  // flags but stores (accounting difference, not contradiction; see PRESENT_CATEGORY_CAVEAT and
+  // compareTalliesForCrossCheck's own comment). The caveat is attached only when the soft bucket is
+  // actually part of what's being flagged — a pure yea/nay divergence isn't explained by a
+  // category-vocabulary quirk, so attaching the caveat there would misleadingly soften a REAL
+  // divergence instead of clarifying an accounting one.
+  const quarantine = hardMismatches.length > 0;
   const matchedPrefix = PRIMARY_SOURCE_KEY_PREFIXES.find((prefix) => primaryVote.source_key.startsWith(prefix));
   const sourceB = matchedPrefix ? matchedPrefix.replace(/-$/, '') : 'unknown-primary-source';
   const discrepancy = {
@@ -339,13 +394,17 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     source_b_tallies: primaryCounts,
     source_b_vote_id: primaryVote.id,
     source_b_source_key: primaryVote.source_key,
-    mismatches,
-    caveat: PRESENT_CATEGORY_CAVEAT,
+    hard_mismatches: hardMismatches,
+    soft_mismatches: softMismatches,
+    quarantine,
   };
+  if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
   const flag = await writeReconciliationFlag(client, {
-    voteId: legiscanTallies.voteId, sourceB, discrepancy, runId: legiscanTallies.runId,
+    voteId: primaryVote.id, sourceB, discrepancy, runId: legiscanTallies.runId,
   });
-  return { checked: true, matched: false, flag };
+  return {
+    checked: true, matched: false, flag, quarantine,
+  };
 }
 
 // ---- cast resolution (CONTROLLER RULING 3) ----

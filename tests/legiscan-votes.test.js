@@ -370,17 +370,22 @@ function castRowsOfPosition(voteId, position, count) {
 
 // Real reconciled LegiScan tallies for roll call 774312 (house, 2018-09-12, HB 3): yea=119, nay=23,
 // absent=14, not_voting=0. Reused across several tests below as the "LegiScan side" of a
-// cross-check, with a `voteId`/`runId` attached per this function's documented contract.
-const legiscanTallies774312 = { ...reconcileLegiscanTallies(findRc(774312)), voteId: 'legiscan-vote-774312', runId: 'run-9' };
+// cross-check. FIX ROUND 1: no `voteId`/`runId` pre-attachment needed on the happy-path shape
+// anymore (flag rows attach to the PRIMARY-source vote's id, discovered from the lookup itself) —
+// `runId` is still optional pure provenance, attached only where a test cares to check it rides
+// through to the flag row.
+const legiscanTallies774312 = reconcileLegiscanTallies(findRc(774312));
 
-test('crossCheckAgainstPrimarySource: no existing primary-source vote for this bill/chamber/date -> checked:false, matched:null, no flag (opportunistic, not blocking)', async () => {
+test('crossCheckAgainstPrimarySource: no existing primary-source vote for this bill/chamber/date -> checked:false, matched:null, quarantine:false, no flag (opportunistic, not blocking)', async () => {
   const { client, flags } = makeFakeVotesDb({ voteRows: [] });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
-  assert.deepEqual(result, { checked: false, matched: null, flag: null });
+  assert.deepEqual(result, {
+    checked: false, matched: null, flag: null, quarantine: false,
+  });
   assert.equal(flags.length, 0);
 });
 
-test('crossCheckAgainstPrimarySource: matching tallies -> matched:true, no flag row written', async () => {
+test('crossCheckAgainstPrimarySource: matching tallies -> matched:true, quarantine:false, no flag row written', async () => {
   const primaryVoteId = 'primary-vote-1';
   const { client, flags } = makeFakeVotesDb({
     voteRows: [{
@@ -395,51 +400,104 @@ test('crossCheckAgainstPrimarySource: matching tallies -> matched:true, no flag 
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
   assert.equal(result.checked, true);
   assert.equal(result.matched, true);
+  assert.equal(result.quarantine, false);
   assert.equal(result.flag, null);
   assert.equal(flags.length, 0);
 });
 
-test('crossCheckAgainstPrimarySource: disagreeing tallies -> a vote_reconciliation_flags row is written, matched:false, LegiScan vote itself is untouched (its own internal gate already passed — this function never deletes/mutates the votes/vote_casts tables it queries)', async () => {
-  const primaryVoteId = 'primary-vote-2';
+// ---- FIX ROUND 1: yea/nay mismatches are REAL divergence -> quarantine (never stored) ----
+
+test('crossCheckAgainstPrimarySource: a YEA mismatch (nay/bucket both agree) -> QUARANTINED (quarantine:true) + flagged; the flag attaches to the PRIMARY-source vote\'s own id, not a LegiScan vote_id (none is ever inserted for a quarantined vote)', async () => {
+  const primaryVoteId = 'primary-vote-yea-mismatch';
   const { client, votes, voteCasts, flags } = makeFakeVotesDb({
     voteRows: [{
       id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
     }],
     castRows: [
-      ...castRowsOfPosition(primaryVoteId, 'yea', 119),
-      ...castRowsOfPosition(primaryVoteId, 'nay', 20), // real LegiScan nay is 23 -> mismatch
-      ...castRowsOfPosition(primaryVoteId, 'absent', 17),
+      ...castRowsOfPosition(primaryVoteId, 'yea', 115), // real LegiScan yea is 119 -> hard mismatch
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23), // matches
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14), // bucket(14) matches legiscan's not_voting(0)+absent(14)=14 exactly - ONLY yea disagrees
     ],
   });
   const votesBefore = votes.length;
   const castsBefore = voteCasts.length;
-  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  const legiscanTalliesWithRun = { ...legiscanTallies774312, runId: 'run-9' };
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTalliesWithRun);
   assert.equal(result.checked, true);
   assert.equal(result.matched, false);
-  assert.ok(result.flag, 'a flag row must be returned');
+  assert.equal(result.quarantine, true, 'a yea mismatch must quarantine — the vote is never stored');
+  assert.ok(result.flag);
   assert.equal(flags.length, 1);
-  assert.equal(flags[0].vote_id, 'legiscan-vote-774312');
+  assert.equal(flags[0].vote_id, primaryVoteId, 'the flag attaches to the PRIMARY-source vote, which is guaranteed to already exist — never a LegiScan votes.id, which does not exist for a quarantined vote');
   assert.equal(flags[0].source_a, 'legiscan');
   assert.equal(flags[0].source_b, 'mo-house-xml');
   assert.equal(flags[0].run_id, 'run-9');
-  assert.ok(flags[0].discrepancy.mismatches.some((m) => m.startsWith('nay:')));
-  // KNOWN CAVEAT must be recorded in the flag row itself, not just a bare mismatch (task-6-brief.md,
-  // explicit) — a human reviewer must never be misled by a raw number difference alone.
-  assert.equal(flags[0].discrepancy.caveat, PRESENT_CATEGORY_CAVEAT);
-  // nothing about the LegiScan-source votes/vote_casts rows was touched — this function only reads
-  // `votes`/`vote_casts` (for the PRIMARY-source row) and inserts into `vote_reconciliation_flags`.
+  assert.deepEqual(flags[0].discrepancy.hard_mismatches, ['yea: legiscan 119 vs primary 115']);
+  assert.equal(flags[0].discrepancy.quarantine, true);
+  assert.equal(flags[0].discrepancy.caveat, undefined, 'the Present-category caveat does not explain a real yea mismatch — it must not be attached here');
+  // Nothing was written into `votes`/`vote_casts` at all — this function never inserts a row into
+  // either table itself (that decision belongs to the DRIVER, which must consult `quarantine`
+  // BEFORE ever calling insertIfAbsent('votes', ...) for the LegiScan side); the fake DB's own
+  // votes/vote_casts arrays (which stand in for "what's publicly, anon-readably stored") are
+  // asserted unchanged, proving nothing LegiScan-sourced is reachable through this fake in the
+  // quarantine case, exactly as the real driver must guarantee.
   assert.equal(votes.length, votesBefore);
   assert.equal(voteCasts.length, castsBefore);
 });
 
-test('crossCheckAgainstPrimarySource: the Present-category caveat in practice — a MO House primary vote whose "present" casts have no LegiScan analog produces a real non-yea/non-nay mismatch, and the caveat explains WHY rather than leaving a bare number difference', async () => {
+test('crossCheckAgainstPrimarySource: a NAY mismatch (yea/bucket both agree) -> QUARANTINED (quarantine:true) + flagged, same treatment as a yea mismatch', async () => {
+  const primaryVoteId = 'primary-vote-nay-mismatch';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119), // matches
+      ...castRowsOfPosition(primaryVoteId, 'nay', 25), // real LegiScan nay is 23 -> hard mismatch
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14), // bucket(14) matches legiscan's not_voting(0)+absent(14)=14 exactly - ONLY nay disagrees
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.matched, false);
+  assert.equal(result.quarantine, true, 'a nay mismatch must quarantine — the vote is never stored');
+  assert.equal(flags.length, 1);
+  assert.equal(flags[0].vote_id, primaryVoteId);
+  assert.deepEqual(flags[0].discrepancy.hard_mismatches, ['nay: legiscan 23 vs primary 25']);
+  assert.deepEqual(flags[0].discrepancy.soft_mismatches, []);
+  assert.equal(flags[0].discrepancy.caveat, undefined, 'no soft/bucket mismatch here — the caveat must not be attached to an unrelated hard mismatch');
+});
+
+test('crossCheckAgainstPrimarySource: a mismatch touching BOTH a hard (yea) AND the soft bucket still quarantines (any hard mismatch quarantines, regardless of what else also differs) — and the caveat IS attached since the bucket genuinely is part of what disagrees', async () => {
+  const primaryVoteId = 'primary-vote-mixed-mismatch';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 110), // hard mismatch (real 119)
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'present', 5),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 18), // 110+23+5+18=156, bucket(5+18=23) != legiscan(0+14=14) -> also soft
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.quarantine, true);
+  assert.equal(flags[0].discrepancy.hard_mismatches.length, 1);
+  assert.equal(flags[0].discrepancy.soft_mismatches.length, 1);
+  assert.equal(flags[0].discrepancy.caveat, PRESENT_CATEGORY_CAVEAT, 'the bucket IS part of the real disagreement here, so the caveat correctly explains that piece even though the vote is ALSO quarantined for the hard mismatch');
+});
+
+// ---- FIX ROUND 1: a bucket-ONLY (soft) mismatch flags but stores — accounting difference, not contradiction ----
+
+test('crossCheckAgainstPrimarySource: the Present-category caveat in practice — yea/nay agree exactly, only the combined non-yea/non-nay bucket disagrees -> flagged but NOT quarantined (stores), caveat attached', async () => {
   const primaryVoteId = 'primary-vote-present';
-  // yea/nay both agree with LegiScan exactly (119/23 — the two unambiguous categories). The
-  // primary source additionally records 8 genuine "Present" casts (no LegiScan vote_id maps to
-  // this) plus 10 Absent — 18 total in the combined non-yea/non-nay bucket, vs LegiScan's own
-  // not_voting(0)+absent(14)=14. A bare "18 vs 14" number alone could misread as 4 people LegiScan
-  // simply missed; the caveat clarifies the more likely explanation is the category vocabulary
-  // gap itself (real "Present" casts LegiScan's ls_vote schema has no code for).
+  // yea/nay both agree with LegiScan exactly (119/23 — the two unambiguous, strictly-compared
+  // categories). The primary source additionally records 8 genuine "Present" casts (no LegiScan
+  // vote_id maps to this) plus 10 Absent — 18 total in the combined non-yea/non-nay bucket, vs
+  // LegiScan's own not_voting(0)+absent(14)=14. A bare "18 vs 14" number alone could misread as 4
+  // people LegiScan simply missed; the caveat clarifies the more likely explanation is the
+  // category-vocabulary gap itself (real "Present" casts LegiScan's ls_vote schema has no code
+  // for) — an accounting difference, not a contradiction, so the vote stores despite the flag.
   const { client, flags } = makeFakeVotesDb({
     voteRows: [{
       id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
@@ -453,13 +511,18 @@ test('crossCheckAgainstPrimarySource: the Present-category caveat in practice �
   });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
   assert.equal(result.matched, false);
+  assert.equal(result.quarantine, false, 'a bucket-only mismatch must NOT quarantine — the vote stores');
   assert.equal(flags.length, 1);
-  assert.ok(flags[0].discrepancy.mismatches.some((m) => m.startsWith('non-yea/non-nay:')));
-  assert.ok(!flags[0].discrepancy.mismatches.some((m) => m.startsWith('yea:') || m.startsWith('nay:')), 'yea/nay themselves agree exactly — only the combined bucket disagrees, precisely the caveat\'s scenario');
+  assert.equal(flags[0].vote_id, primaryVoteId);
+  assert.deepEqual(flags[0].discrepancy.hard_mismatches, [], 'yea/nay themselves agree exactly — only the combined bucket disagrees, precisely the caveat\'s scenario');
+  assert.ok(flags[0].discrepancy.soft_mismatches.some((m) => m.startsWith('non-yea/non-nay bucket:')));
+  assert.equal(flags[0].discrepancy.quarantine, false);
   assert.equal(flags[0].discrepancy.caveat, PRESENT_CATEGORY_CAVEAT);
 });
 
-test('crossCheckAgainstPrimarySource: ambiguous match (more than one primary-source vote row for the same bill/chamber/date) -> flags row written with an ambiguity reason, matched:false, NEVER guesses which one is right', async () => {
+// ---- ambiguous cross-reference: internally reconciled + uncontradicted -> stores, flagged ----
+
+test('crossCheckAgainstPrimarySource: ambiguous match (more than one primary-source vote row for the same bill/chamber/date) -> flags row written with an ambiguity reason, matched:false, quarantine:false (stores — internally reconciled, uncontradicted by any specific candidate), NEVER guesses which one is right', async () => {
   const { client, flags } = makeFakeVotesDb({
     voteRows: [
       {
@@ -473,10 +536,13 @@ test('crossCheckAgainstPrimarySource: ambiguous match (more than one primary-sou
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
   assert.equal(result.checked, true);
   assert.equal(result.matched, false);
+  assert.equal(result.quarantine, false);
   assert.equal(flags.length, 1);
   assert.equal(flags[0].source_b, 'ambiguous');
-  assert.equal(flags[0].discrepancy.reason, 'ambiguous_primary_source_match');
+  assert.equal(flags[0].discrepancy.reason, 'ambiguous_cross_reference');
+  assert.equal(flags[0].discrepancy.quarantine, false);
   assert.deepEqual(flags[0].discrepancy.candidate_source_keys.sort(), ['mo-house-xml-HB3-1', 'mo-house-xml-HB3-2']);
+  assert.ok(['primary-a', 'primary-b'].includes(flags[0].vote_id), 'the flag anchors to one of the ambiguous candidates (never a LegiScan votes.id, which the FK constraint requires to already exist)');
 });
 
 test('crossCheckAgainstPrimarySource: a vote row on a DIFFERENT date is not a candidate at all (checked:false) — date matching is exact-day, not "close enough"', async () => {
@@ -486,7 +552,9 @@ test('crossCheckAgainstPrimarySource: a vote row on a DIFFERENT date is not a ca
     }],
   });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
-  assert.deepEqual(result, { checked: false, matched: null, flag: null });
+  assert.deepEqual(result, {
+    checked: false, matched: null, flag: null, quarantine: false,
+  });
 });
 
 test('crossCheckAgainstPrimarySource: a vote row that is NOT primary-source (e.g. another legiscan-* row) is never treated as a cross-check candidate', async () => {
@@ -496,12 +564,14 @@ test('crossCheckAgainstPrimarySource: a vote row that is NOT primary-source (e.g
     }],
   });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
-  assert.deepEqual(result, { checked: false, matched: null, flag: null });
+  assert.deepEqual(result, {
+    checked: false, matched: null, flag: null, quarantine: false,
+  });
 });
 
-test('crossCheckAgainstPrimarySource: mo-senate-web primary source is recognized too (not just mo-house-xml) — matching tallies, matched:true', async () => {
+test('crossCheckAgainstPrimarySource: mo-senate-web primary source is recognized too (not just mo-house-xml) — matching tallies, matched:true, quarantine:false', async () => {
   const primaryVoteId = 'primary-senate-1';
-  const legiscanTallies774411 = { ...reconcileLegiscanTallies(findRc(774411)), voteId: 'legiscan-vote-774411' };
+  const legiscanTallies774411 = reconcileLegiscanTallies(findRc(774411));
   const { client } = makeFakeVotesDb({
     voteRows: [{
       id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'senate', vote_date: '2018-09-14', source_key: 'mo-senate-web-2018-RDay-vote1',
@@ -514,9 +584,10 @@ test('crossCheckAgainstPrimarySource: mo-senate-web primary source is recognized
   });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774411);
   assert.equal(result.matched, true);
+  assert.equal(result.quarantine, false);
 });
 
-test('crossCheckAgainstPrimarySource: migration 0010 not applied (vote_reconciliation_flags relation missing) degrades gracefully — gated:true, discrepancy preserved, NEVER thrown', async () => {
+test('crossCheckAgainstPrimarySource: migration 0010 not applied (vote_reconciliation_flags relation missing) degrades gracefully — gated:true, discrepancy preserved, quarantine STILL reported correctly, NEVER thrown', async () => {
   const primaryVoteId = 'primary-vote-3';
   const { client } = makeFakeVotesDb({
     missingFlagsTable: true,
@@ -524,12 +595,13 @@ test('crossCheckAgainstPrimarySource: migration 0010 not applied (vote_reconcili
       id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
     }],
     castRows: [
-      ...castRowsOfPosition(primaryVoteId, 'yea', 1), // wildly different from real 119 -> forces a mismatch
+      ...castRowsOfPosition(primaryVoteId, 'yea', 1), // wildly different from real 119 -> a hard (yea) mismatch
     ],
   });
   const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
   assert.equal(result.checked, true);
   assert.equal(result.matched, false);
+  assert.equal(result.quarantine, true, 'the quarantine DECISION is independent of whether the flag could be durably recorded — a gated flags table must never silently let a contradicted vote through');
   assert.equal(result.flag.gated, true);
   assert.match(result.flag.note, /migration 0010/);
   assert.ok(result.flag.discrepancy, 'the detected discrepancy is preserved even though it could not be durably recorded');
