@@ -575,11 +575,49 @@ export async function ensureIndexForRun(year, {
 
 // ---- per-day processing (task-5-brief.md steps 5-7) ----
 
+// Final-review findings 4/5 (IMPORTANT): a whole-day failure that happens BEFORE any vote could be
+// parsed — a dead/unreachable journal URL (SourceFetchError) or extractJournalText throwing on a
+// corrupt/unparseable PDF — used to either report failures:0 (a fetch failure was invisible to
+// main()'s counts.failures, so a bad day looked like a clean 'succeeded' run — finding 4) or, for
+// an extraction throw, propagate straight out of processJournalDay uncaught, crashing the whole
+// invocation with no day-level artifact ever written — so the SAME day sat at the front of the FIFO
+// worklist forever, retried and crashing on every single subsequent invocation (finding 5). FIX:
+// route BOTH failure classes through the exact same day-level attempts/quarantine artifact
+// mechanism (writeDayFailureArtifact) a parse failure already uses — after
+// JOURNAL_DAY_MAX_FAILED_ATTEMPTS attempts the day quarantines exactly like a parsing failure would,
+// and `failures: 1` folds honestly into main()'s totalFailures (never silently invisible). The
+// `attribution` field is always populated (even though this day produced zero votes) so main()'s
+// aggregation loop can read `result.attribution.motion` unconditionally, on every return path, with
+// nothing left to crash on (finding 4's TypeError).
+function buildDayFailureResult(dayRow, category, step, err, dir) {
+  const syntheticFailure = { ordinal: null, category, message: err.message };
+  writeDayFailureArtifact(dayRow.pdf_basename, dayRow.journal_url, [syntheticFailure], dir);
+  return {
+    pdf_basename: dayRow.pdf_basename,
+    mode: 'failed',
+    votes_parsed: 0,
+    votes_written: 0,
+    failures: 1,
+    failureDetails: [syntheticFailure],
+    attribution: { motion: 0, preceding_taken_up: 0 },
+    fetchFailure: category === 'fetch' ? { step, message: err.message } : undefined,
+    extractionFailure: category === 'extraction' ? { step, message: err.message } : undefined,
+  };
+}
+
 // rosterState: { gated: bool, roster: [...] } — the resolution roster loaded once per run (or
 // empty/ignored when gated). Casts for an unresolved surname are counted, never guessed
 // (CONTROLLER RULING 6); when the roster itself is gated, every vote's casts on this day are
 // queued into a single per-day gate artifact instead (task-5-brief.md step 6).
-export async function processJournalDay(client, runId, year, sessionRow, dayRow, args, rosterState, dir = JOURNAL_ARTIFACT_DIR) {
+//
+// fetchPdf is injectable (default senateWeb.fetchSenateJournalPdf) purely for testability — same
+// convention as ensureRosterForRun's fetchLive — so a fetch-failure day can be exercised without a
+// live network call, mirroring how --journal-pdf-file already lets an extraction-failure day be
+// exercised with a real (deliberately corrupt) local file instead of a live fetch.
+export async function processJournalDay(
+  client, runId, year, sessionRow, dayRow, args, rosterState, dir = JOURNAL_ARTIFACT_DIR,
+  { fetchPdf = senateWeb.fetchSenateJournalPdf } = {},
+) {
   let pdfBuffer;
   let mode;
   try {
@@ -588,20 +626,27 @@ export async function processJournalDay(client, runId, year, sessionRow, dayRow,
       mode = 'fixture';
       console.error(`[${new Date().toISOString()}] read journal PDF for ${dayRow.pdf_basename} from local fixture (not a live request): ${args.journalPdfFile}`);
     } else {
-      const arrayBuffer = await senateWeb.fetchSenateJournalPdf(dayRow.journal_url);
+      const arrayBuffer = await fetchPdf(dayRow.journal_url);
       pdfBuffer = Buffer.from(arrayBuffer);
       mode = 'live';
       console.error(`[${new Date().toISOString()}] fetched journal PDF for ${dayRow.pdf_basename} (live)`);
     }
   } catch (err) {
     if (!(err instanceof SourceFetchError)) throw err;
-    return {
-      pdf_basename: dayRow.pdf_basename, mode: 'failed', votes_parsed: 0, votes_written: 0, failures: 0,
-      fetchFailure: { step: `journal pdf ${dayRow.pdf_basename}`, message: err.message },
-    };
+    return buildDayFailureResult(dayRow, 'fetch', `journal pdf ${dayRow.pdf_basename}`, err, dir);
   }
 
-  const text = await journalPdf.extractJournalText(pdfBuffer);
+  let text;
+  try {
+    text = await journalPdf.extractJournalText(pdfBuffer);
+  } catch (err) {
+    // A dead/unreachable link is already caught above; this is specifically "we got bytes back but
+    // they don't parse as a valid journal PDF" (pdfjs-dist throwing on a corrupt/malformed file, or
+    // any other per-document extraction problem) — a per-document data issue, not a systemic driver
+    // bug, so it is recoverable at the day level exactly like a parse failure is.
+    return buildDayFailureResult(dayRow, 'extraction', `extract ${dayRow.pdf_basename}`, err, dir);
+  }
+
   const { votes, failures } = journalPdf.parseJournalVotes(text);
 
   const attribution = { motion: 0, preceding_taken_up: 0 };
@@ -1014,9 +1059,20 @@ async function main() {
       });
       dayResults.push(result);
       totalVotes += result.votes_written;
+      // Finding 4: `failures` now honestly includes a whole-day fetch/extraction failure (folded
+      // in by buildDayFailureResult as failures:1), not just per-vote-block parse failures — a
+      // fetch failure used to report failures:0 and vanish from this total entirely, letting a run
+      // that failed to even fetch a day's PDF report status:'succeeded'.
       totalFailures += result.failures;
-      attribution.motion += result.attribution.motion ?? 0;
-      attribution.preceding_taken_up += result.attribution.preceding_taken_up ?? 0;
+      // Finding 4: guard aggregation — every processJournalDay return path now always carries an
+      // `attribution` object (buildDayFailureResult populates a zeroed one), but this fallback is
+      // kept as a second, defensive layer rather than relying solely on that contract: the ORIGINAL
+      // bug was exactly this unconditional `result.attribution.motion` dereference crashing with a
+      // TypeError on the old fetch-failure return shape (which had no `attribution` key at all),
+      // masking the real error and dropping the rest of this run's detail.
+      const resultAttribution = result.attribution ?? { motion: 0, preceding_taken_up: 0 };
+      attribution.motion += resultAttribution.motion ?? 0;
+      attribution.preceding_taken_up += resultAttribution.preceding_taken_up ?? 0;
       if (result.casts) {
         totalCastsResolved += result.casts.resolved;
         totalCastsUnresolved += result.casts.unresolved;

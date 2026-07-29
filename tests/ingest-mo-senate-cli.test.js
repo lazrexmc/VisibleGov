@@ -19,6 +19,7 @@ import {
   ensureRosterForRun, ensureIndexForRun,
   processJournalDay, replayJournalArtifacts, dryRunReport,
 } from '../src/cli/ingest-mo-senate.js';
+import { SourceFetchError } from '../src/lib/errors.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-senate';
 const day37Pdf = readFileSync(`${FIXTURES}/2018-day37-journal-onder-era.pdf`);
@@ -898,6 +899,88 @@ test('processJournalDay: real Day 39 fixture (2026) end-to-end — the attributi
   const robertsCastOnEc = tables.vote_casts.find((c) => c.legislator_id === 'leg-roberts' && c.vote_id === ecVote.id);
   assert.ok(robertsCastOnEc, 'Roberts (absent-with-leave on every block, incl. the EC block) must resolve and be cast — proves casts are not dropped on the preceding_taken_up path');
   assert.equal(robertsCastOnEc.position, 'absent');
+});
+
+// ---- findings 4/5 (IMPORTANT): a whole-day fetch/extraction failure must be counted honestly
+// (never invisible in main()'s aggregation) and must route through the SAME day-level attempts/
+// quarantine artifact mechanism a parse failure already uses (never wedge the FIFO worklist at one
+// day forever). ----
+
+test('processJournalDay: a fetch failure (SourceFetchError) is folded into the day-level failure/quarantine artifact, not left uncounted (finding 4) or unquarantined (finding 5)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeDb();
+    const sessionRow = { id: 'sess-2018' };
+    const dayRow = { journal_url: 'https://www.senate.mo.gov/18info/Journals/RDayDead.pdf', journal_date: '2018-01-01', pdf_basename: 'RDayDead' };
+    const fetchPdf = async () => {
+      throw new SourceFetchError('404 dead link', { source: 'mo-senate-web', url: dayRow.journal_url, status: 404 });
+    };
+
+    const result = await processJournalDay(client, 'run-1', 2018, sessionRow, dayRow, {}, { gated: false, roster: [] }, dir, { fetchPdf });
+
+    assert.equal(result.mode, 'failed');
+    // Finding 4: a fetch failure used to report failures:0, invisible to main()'s totalFailures —
+    // now it counts as 1 (this whole day did not succeed), so a run that hit this never reports
+    // status:'succeeded' by accident.
+    assert.equal(result.failures, 1);
+    assert.deepEqual(result.attribution, { motion: 0, preceding_taken_up: 0 }, 'attribution is always present — this is exactly the shape main() unconditionally reads result.attribution.motion from (finding 4\'s TypeError)');
+    assert.ok(result.fetchFailure);
+    assert.match(result.fetchFailure.message, /404 dead link/);
+    assert.equal(result.extractionFailure, undefined);
+
+    assert.equal(hasDoneMarker('RDayDead', dir), false, 'a failed day is never marked done — it must stay in the worklist to be retried');
+    const artifact = readDayFailureArtifact('RDayDead', dir);
+    assert.ok(artifact, 'finding 5: a fetch failure routes through the SAME quarantine artifact mechanism a parse failure already uses');
+    assert.equal(artifact.attempts, 1);
+    assert.equal(artifact.failures[0].category, 'fetch');
+  });
+});
+
+test('processJournalDay: extractJournalText throwing on a corrupt/unparseable PDF is folded into the day-level failure/quarantine artifact instead of crashing the run (finding 5)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeDb();
+    const corruptPdfPath = join(dir, 'corrupt.pdf');
+    writeFileSync(corruptPdfPath, 'this is not a real PDF file — no %PDF- header at all');
+    const sessionRow = { id: 'sess-2018' };
+    const dayRow = { journal_url: 'https://www.senate.mo.gov/18info/Journals/RDayCorrupt.pdf', journal_date: '2018-01-01', pdf_basename: 'RDayCorrupt' };
+    const args = { journalPdfFile: corruptPdfPath };
+
+    const result = await processJournalDay(client, 'run-1', 2018, sessionRow, dayRow, args, { gated: false, roster: [] }, dir);
+
+    assert.equal(result.mode, 'failed');
+    assert.equal(result.failures, 1);
+    assert.deepEqual(result.attribution, { motion: 0, preceding_taken_up: 0 });
+    assert.ok(result.extractionFailure, 'the PDF read (readFileSync) succeeded — this must be reported as an EXTRACTION failure, not a fetch failure');
+    assert.equal(result.fetchFailure, undefined);
+
+    assert.equal(hasDoneMarker('RDayCorrupt', dir), false);
+    const artifact = readDayFailureArtifact('RDayCorrupt', dir);
+    assert.ok(artifact);
+    assert.equal(artifact.failures[0].category, 'extraction');
+  });
+});
+
+test('processJournalDay: repeated extraction failures on the SAME day reach the quarantine cap and stop being re-selected — the FIFO-wedge finding 5 named is actually closed end-to-end', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeDb();
+    const corruptPdfPath = join(dir, 'corrupt.pdf');
+    writeFileSync(corruptPdfPath, 'still not a PDF');
+    const sessionRow = { id: 'sess-2018' };
+    const dayRow = { journal_url: 'https://www.senate.mo.gov/18info/Journals/RDayCorrupt.pdf', journal_date: '2018-01-01', pdf_basename: 'RDayCorrupt' };
+    const args = { journalPdfFile: corruptPdfPath };
+
+    for (let i = 0; i < JOURNAL_DAY_MAX_FAILED_ATTEMPTS; i += 1) {
+      // Deliberately sequential (not Promise.all): each retry's attempts count depends on the
+      // artifact the PRIOR retry just wrote.
+      const result = await processJournalDay(client, 'run-1', 2018, sessionRow, dayRow, args, { gated: false, roster: [] }, dir);
+      assert.equal(result.mode, 'failed');
+    }
+
+    const indexRows = [{ day_label: 'Day 1', journal_url: dayRow.journal_url, journal_date: dayRow.journal_date }];
+    const { days, skippedQuarantined, skippedQuarantinedKeys } = selectJournalDayWorklist(indexRows, { limit: 5 }, dir);
+    assert.equal(days.length, 0, 'the day must no longer be selected — this is the exact "wedges the FIFO worklist forever" gap finding 5 closes');
+    assert.equal(skippedQuarantined, 1);
+    assert.deepEqual(skippedQuarantinedKeys, ['RDayCorrupt']);
+  });
 });
 
 test('processJournalDay: roster-gated branch — writes a per-day gate artifact instead of vote_casts rows', async () => {
