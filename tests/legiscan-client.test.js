@@ -118,14 +118,16 @@ test('redactUrl redacts the LegiScan key= query param (first param, as this adap
   assert.ok(!redacted.includes('SUPERSECRET123'));
 });
 
-test('redactUrl redacts key= on a getDataset-shaped URL that ALSO carries access_key= — the '
-  + 'account API key is redacted; access_key (a per-dataset token from getDatasetList, not the '
-  + 'account credential) is left intact, an accepted/verified boundary matching the Global '
-  + 'Constraints\' "reused as-is, zero changes" design for redactUrl', () => {
+test('redactUrl redacts BOTH key= and access_key= on a getDataset-shaped URL — the account API '
+  + 'key AND the per-dataset access_key (a real credential-shaped token from getDatasetList, '
+  + 'threaded through by this adapter\'s own getDataset call) are both secrets and must both be '
+  + 'redacted (Task 3 ruling 2: this was a real gap in the prior `(?:api_?key|key)` pattern, which '
+  + 'did not match `access_key=` by construction — closed in src/lib/http.js before any live call)', () => {
   const url = 'https://api.legiscan.com/?key=SUPERSECRET123&op=getDataset&id=1608&access_key=DatasetTicketABC';
   const redacted = redactUrl(url);
-  assert.equal(redacted, 'https://api.legiscan.com/?key=REDACTED&op=getDataset&id=1608&access_key=DatasetTicketABC');
+  assert.equal(redacted, 'https://api.legiscan.com/?key=REDACTED&op=getDataset&id=1608&access_key=REDACTED');
   assert.ok(!redacted.includes('SUPERSECRET123'));
+  assert.ok(!redacted.includes('DatasetTicketABC'));
 });
 
 test('redactUrl redacts key= on a getBill-shaped URL regardless of trailing params', () => {

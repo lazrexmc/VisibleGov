@@ -45,6 +45,22 @@ test('redactUrl replaces api_key values and leaves other params intact', () => {
   );
 });
 
+test('redactUrl also redacts access_key= (LegiScan\'s per-dataset token from getDatasetList, '
+  + 'threaded through getDataset calls) — added 2026-07-28, Task 3 of the LegiScan bulk adapter '
+  + 'plan, closing a real gap: the prior pattern only matched a `key`/`api_key` name directly '
+  + 'preceded by `?`/`&`, so `access_key=` (preceded by `_`, not `?`/`&`, right before "key") '
+  + 'slipped through untouched', () => {
+  assert.equal(
+    redactUrl('https://api.legiscan.com/?key=SECRET1&op=getDataset&id=1608&access_key=SECRET2'),
+    'https://api.legiscan.com/?key=REDACTED&op=getDataset&id=1608&access_key=REDACTED',
+  );
+  // access_key alone (no key= present) still redacts, and other params survive untouched
+  assert.equal(
+    redactUrl('https://x/y?access_key=abc123&other=1'),
+    'https://x/y?access_key=REDACTED&other=1',
+  );
+});
+
 test('redactUrl passes through URLs with no query unchanged', () => {
   assert.equal(redactUrl('https://clerk.house.gov/evs/2025/roll358.xml'), 'https://clerk.house.gov/evs/2025/roll358.xml');
   assert.equal(redactUrl('https://x/y?format=json&limit=250'), 'https://x/y?format=json&limit=250');
