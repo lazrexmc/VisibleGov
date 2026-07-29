@@ -79,14 +79,16 @@ export const VOTE_ID_MAP = {
   1: 'yea', 2: 'nay', 3: 'not_voting', 4: 'absent',
 };
 
-// VOTE_TEXT_BY_ID — the English label LegiScan's own `vote_text` field prints for each `vote_id`,
-// verified against the same 1163-cast corpus VOTE_ID_MAP itself was derived from (kept as ONE
-// shared constant, not two independently-hand-maintained copies, so the corpus-level test and
-// reconcileLegiscanTallies' own runtime check below can never silently drift apart). vote_id 3's
-// label ('Not Voting') carries the same unconfirmed-by-real-payload caveat as VOTE_ID_MAP's own
-// entry for it.
+// VOTE_TEXT_BY_ID — the accepted `vote_text` labels LegiScan prints for each `vote_id`, per-id
+// SETS (verified against the 1163-cast fixture corpus for 1/2/4, which print only the long
+// forms). vote_id 3 was fixture-unconfirmed until the first live 31-session sweep (2026-07-29),
+// where every real payload printed the ABBREVIATION 'NV' — not the 'Not Voting' long form in
+// LegiScan's own schema-mysql.sql lookup table — and the strict-equality version of this check
+// refused all 1,817 such roll calls (correct fail-loud behavior on first contact; see
+// ingestion_runs detail for that sweep). Both evidenced forms are accepted; any OTHER live
+// variant still fails loud, exactly as 'NV' did.
 export const VOTE_TEXT_BY_ID = {
-  1: 'Yea', 2: 'Nay', 3: 'Not Voting', 4: 'Absent',
+  1: ['Yea'], 2: ['Nay'], 3: ['Not Voting', 'NV'], 4: ['Absent'],
 };
 
 export class VoteIdMapError extends Error {
@@ -186,10 +188,10 @@ export function reconcileLegiscanTallies(rollCall) {
     const voteText = v.vote_text;
     if (voteText != null && String(voteText).trim() !== '') {
       const expectedVoteText = VOTE_TEXT_BY_ID[v.vote_id];
-      if (voteText !== expectedVoteText) {
+      if (!expectedVoteText.includes(voteText)) {
         throw new VoteIdMapError(
           `legiscan-votes: roll call ${rollCallId}: vote_id ${v.vote_id} printed vote_text `
-            + `"${voteText}", expected "${expectedVoteText}" (people_id=${v.people_id}) — `
+            + `"${voteText}", expected one of ${JSON.stringify(expectedVoteText)} (people_id=${v.people_id}) — `
             + 'vote_id/vote_text disagree, never silently trusted',
           {
             rollCallId, voteId: v.vote_id, peopleId: v.people_id, voteText, expectedVoteText,

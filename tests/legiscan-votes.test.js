@@ -260,7 +260,7 @@ test('reconcileLegiscanTallies (FIX ROUND 2, MINOR 1): a cast whose printed vote
     assert.equal(err.voteId, 1);
     assert.equal(err.peopleId, 7523);
     assert.equal(err.voteText, 'Nay');
-    assert.equal(err.expectedVoteText, 'Yea');
+    assert.deepEqual(err.expectedVoteText, ['Yea']);
     assert.match(err.message, /vote_id\/vote_text disagree/);
     return true;
   });
@@ -1108,4 +1108,24 @@ test('crossCheckAgainstPrimarySource: siblingTallies defaulting to [] still take
   assert.equal(result.matched, false);
   assert.equal(flags.length, 1);
   assert.deepEqual(flags[0].discrepancy.hard_mismatches, ['yea: legiscan 119 vs primary 115']);
+});
+
+test('VOTE_TEXT_BY_ID: vote_id 3 accepts BOTH evidenced live forms ("NV") and the schema long form ("Not Voting")', () => {
+  // First live sweep (2026-07-29): every real vote_id-3 cast printed "NV", not schema-mysql.sql's
+  // "Not Voting" — 1,817 roll calls correctly refused by the strict-equality version of the check.
+  // Both evidenced forms now pass; any OTHER live variant must still throw.
+  const base = { roll_call_id: 1, bill_id: 1, yea: 1, nay: 0, nv: 1, absent: 0, total: 2, chamber: 'S', date: '2018-01-01', desc: 'x' };
+  for (const form of ['NV', 'Not Voting']) {
+    const rc = { ...base, votes: [
+      { people_id: 1, vote_id: 1, vote_text: 'Yea' },
+      { people_id: 2, vote_id: 3, vote_text: form },
+    ] };
+    const out = reconcileLegiscanTallies(rc);
+    assert.equal(out.counts.not_voting, 1, 'form "' + form + '" must reconcile');
+  }
+  const bad = { ...base, votes: [
+    { people_id: 1, vote_id: 1, vote_text: 'Yea' },
+    { people_id: 2, vote_id: 3, vote_text: 'N.V.' },
+  ] };
+  assert.throws(() => reconcileLegiscanTallies(bad), (e) => e.name === 'VoteIdMapError');
 });
