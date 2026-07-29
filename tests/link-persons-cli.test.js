@@ -169,6 +169,70 @@ test('clusterLegislators FIX ROUND 2: the real four-Onder rows form TWO clean 2-
   assert.equal(bioguideEvidence.surnameKeyUsed, 'onder');
 });
 
+// ---- nickname amendment (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry):
+// migration 0013 persists LegiScan's own source-printed person.nickname onto legislators.nickname;
+// clusterLegislators now consumes it as an additional exact-match given-name variant. Regression-
+// locks BOTH behaviors: withOUT a persisted nickname, the real four-Onder rows still split into the
+// current two 2-member clusters (fix round 2's own correct, safe outcome — the test above); WITH
+// the real source-printed nickname ('Bob' on the legiscan row, verified live: people_id 16351)
+// persisted, all four rows now form ONE clean cluster, since legiscan's own printed pair (given
+// 'robert', nickname 'bob') bridges the 'Robert'-form pair (bioguide+legiscan) to the 'Bob'-form
+// pair (mo_senate+openstates) within the SAME surname-gated group — without ever becoming a
+// cross-surname nickname table (buildGivenNicknameEquivalence is scoped to this one surname group). ----
+
+test('clusterLegislators NICKNAME AMENDMENT: the real four-Onder rows, WITH nickname "Bob" persisted on the legiscan row, form ONE clean 4-member cluster (never flagged) — the class fix', () => {
+  const rows = onderRows();
+  const legiscanRow = rows.find((r) => r.id === 'leg-onder-legiscan');
+  legiscanRow.nickname = 'Bob'; // source-printed, verified real: LegiScan people_id 16351
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 1);
+  assert.equal(result.flagged.length, 0);
+  assert.equal(result.singletons.length, 0);
+  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), [
+    'leg-onder-bioguide', 'leg-onder-legiscan', 'leg-onder-mosenate', 'leg-onder-openstates',
+  ]);
+  // The nickname rides into the cluster's own evidence snapshot (buildMemberEvidence) — visible to
+  // auditClusterCoherence and to a future review-tab rendering, never silently dropped.
+  const legiscanEvidence = result.clusters[0].evidence.find((e) => e.legislatorId === 'leg-onder-legiscan');
+  assert.equal(legiscanEvidence.nickname, 'Bob');
+  const bioguideEvidence = result.clusters[0].evidence.find((e) => e.legislatorId === 'leg-onder-bioguide');
+  assert.equal(bioguideEvidence.nickname, null, 'a member with no persisted nickname carries null, never guessed');
+  // auditClusterCoherence independently re-verifies the SAME nickname bridge from the cluster's own
+  // evidence snapshot alone (not by re-trusting clusterLegislators' verdict).
+  assert.deepEqual(auditClusterCoherence(result.clusters), { ok: true, violations: [] });
+});
+
+test('clusterLegislators NICKNAME AMENDMENT: withOUT a persisted nickname anywhere, the real four-Onder rows still split into the current two 2-member clusters (regression — unchanged from fix round 2)', () => {
+  const result = clusterLegislators(onderRows());
+  assert.equal(result.clusters.length, 2);
+  assert.equal(result.flagged.length, 0);
+  const memberSets = result.clusters.map((c) => c.memberIds.slice().sort());
+  assert.deepEqual(memberSets.sort(), [
+    ['leg-onder-bioguide', 'leg-onder-legiscan'].sort(),
+    ['leg-onder-mosenate', 'leg-onder-openstates'].sort(),
+  ].sort());
+});
+
+test('clusterLegislators NICKNAME AMENDMENT: a nickname is scoped to its OWN surname group, never a global cross-surname nickname table — an unrelated "Bob Smith"/"Robert Smith" pair is unaffected by Onder\'s own nickname evidence appearing in the SAME clusterLegislators call', () => {
+  const rows = onderRows();
+  const legiscanRow = rows.find((r) => r.id === 'leg-onder-legiscan');
+  legiscanRow.nickname = 'Bob';
+  rows.push(
+    {
+      id: 'leg-smith-robert', full_name: 'Robert Smith', surname: 'Smith', bioguide_id: 'bg-smith-r', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, nickname: null, evidence: [],
+    },
+    {
+      id: 'leg-smith-bob', full_name: 'Bob Smith', surname: 'Smith', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 9001, nickname: null, evidence: [],
+    },
+  );
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 1, 'only the nickname-bridged Onder cluster forms');
+  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), [
+    'leg-onder-bioguide', 'leg-onder-legiscan', 'leg-onder-mosenate', 'leg-onder-openstates',
+  ]);
+  assert.deepEqual(result.singletons.slice().sort(), ['leg-smith-bob', 'leg-smith-robert'], 'Robert Smith/Bob Smith stay two singletons — no cross-surname nickname bridging');
+});
+
 test('clusterLegislators: pickDisplayName on the bioguide+legiscan Onder cluster yields "Robert F. Onder" / bioguide — end-to-end of the worked example', () => {
   const rows = onderRows();
   const result = clusterLegislators(rows);
