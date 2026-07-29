@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch,
+  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence,
 } from '../src/lib/person-identity.js';
 import {
   parseArgs,
@@ -11,6 +11,7 @@ import {
   writeIdentityFlag,
   runLink,
   PersonLinkConflictError,
+  ClusterNameVariantViolationError,
 } from '../src/cli/link-persons.js';
 
 // Task 1 (docs/superpowers/plans/2026-07-29-identity-merge.md) — cluster pass + linker CLI.
@@ -135,28 +136,55 @@ function onderRows() {
   ];
 }
 
-test('clusterLegislators: the real four-Onder rows form ONE cluster, all 4 members, nothing flagged/singleton', () => {
+// FIX ROUND 2: the real four-Onder rows no longer form ONE cluster. Round 1's design let the
+// bioguide/openstates/legiscan rows join mo_senate's real evidence purely vacuously (zero
+// comparable evidence on 3 of the 4 sides), with no name check at all — exactly the gap the live
+// run's Symington/Adams/Walker wrong-merges exposed. Under the corrected, unconditional
+// full-name-variant gate: 'Bob Onder' (openstates) === 'Bob Onder' (mo_senate) literally, so THAT
+// pair still clusters; 'Onder, Robert F.' (bioguide) matches 'Robert Onder' (legiscan) on
+// given+family ('robert'+'onder', the middle initial 'F.' is deliberately not part of the match
+// key), so THAT pair also clusters — but 'Bob' never equals 'Robert' (CONTROLLER RULING 3: no
+// nickname table, verified repeatedly in tests/legiscan-identity.test.js), so nothing connects the
+// two pairs to each other. Result: two clean, SAFE 2-member clusters, never one wrongly-bridged
+// 4-member cluster, and never a false flag either — this is the honest, correct outcome for what
+// the persisted data actually supports without inventing a nickname lookup. (A future ingestion
+// change that persists a source-printed nickname, the way legiscan-identity.js's own per-record
+// resolution already does, could reunite these two — out of scope for the cluster pass itself.)
+test('clusterLegislators FIX ROUND 2: the real four-Onder rows form TWO clean 2-member clusters (Bob/Bob via literal match, Robert/Robert via given+family), never one falsely-bridged cluster and never a flag', () => {
   const result = clusterLegislators(onderRows());
-  assert.equal(result.clusters.length, 1);
+  assert.equal(result.clusters.length, 2);
   assert.equal(result.flagged.length, 0);
   assert.equal(result.singletons.length, 0);
-  assert.deepEqual(result.clusters[0].memberIds.slice().sort(), [
-    'leg-onder-bioguide', 'leg-onder-legiscan', 'leg-onder-mosenate', 'leg-onder-openstates',
-  ]);
-  // evidence carries the matched facts verbatim, one entry per member, source keys included
-  assert.equal(result.clusters[0].evidence.length, 4);
-  const bioguideEvidence = result.clusters[0].evidence.find((e) => e.legislatorId === 'leg-onder-bioguide');
+  const memberSets = result.clusters.map((c) => c.memberIds.slice().sort());
+  assert.deepEqual(memberSets.sort(), [
+    ['leg-onder-bioguide', 'leg-onder-legiscan'].sort(),
+    ['leg-onder-mosenate', 'leg-onder-openstates'].sort(),
+  ].sort());
+  const bobCluster = result.clusters.find((c) => c.memberIds.includes('leg-onder-mosenate'));
+  const bioguideEvidence = bobCluster == null
+    ? null
+    : result.clusters.find((c) => c.memberIds.includes('leg-onder-bioguide')).evidence.find((e) => e.legislatorId === 'leg-onder-bioguide');
   assert.equal(bioguideEvidence.fullName, 'Onder, Robert F.');
   assert.equal(bioguideEvidence.sourceKeys.bioguide_id, 'O000177');
   assert.equal(bioguideEvidence.surnameKeyUsed, 'onder');
 });
 
-test('clusterLegislators: pickDisplayName on the auto-clustered Onder members yields "Robert F. Onder" / bioguide — end-to-end of the worked example', () => {
+test('clusterLegislators: pickDisplayName on the bioguide+legiscan Onder cluster yields "Robert F. Onder" / bioguide — end-to-end of the worked example', () => {
   const rows = onderRows();
   const result = clusterLegislators(rows);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const memberRows = result.clusters[0].memberIds.map((id) => byId.get(id));
+  const bioguideCluster = result.clusters.find((c) => c.memberIds.includes('leg-onder-bioguide'));
+  const memberRows = bioguideCluster.memberIds.map((id) => byId.get(id));
   assert.deepEqual(pickDisplayName(memberRows), { display_name: 'Robert F. Onder', display_name_source: 'bioguide' });
+});
+
+test('clusterLegislators: pickDisplayName on the mo_senate+openstates Onder cluster yields "Bob Onder" / mo_senate (no bioguide member in THIS cluster)', () => {
+  const rows = onderRows();
+  const result = clusterLegislators(rows);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const bobCluster = result.clusters.find((c) => c.memberIds.includes('leg-onder-mosenate'));
+  const memberRows = bobCluster.memberIds.map((id) => byId.get(id));
+  assert.deepEqual(pickDisplayName(memberRows), { display_name: 'Bob Onder', display_name_source: 'mo_senate' });
 });
 
 test('clusterLegislators: Brown(16) and Brown(26) — same surname, real differing districts — are two singletons, NEVER clustered or even flagged', () => {
@@ -229,6 +257,98 @@ test('clusterLegislators: real three-Brown US Senate case (Sherrod/OH, Hank/CO, 
   assert.equal(result.singletons.length, 3);
 });
 
+// ---- FIX ROUND 2 (CRITICAL, execution-proven): the three REAL wrong merges the live run
+// produced, caught by the plan's own post-run spot-check, full rollback executed. Round 1's gate
+// only covered same-seat evidence pairs; a pair with NO comparable seat evidence at all (different
+// chamber, different jurisdiction, or evidence-free) skipped straight to a vacuous 'compatible'
+// verdict without ever checking names. All three shapes below are now regression tests: never
+// clustered, never silently linked. ----
+
+test('clusterLegislators FIX ROUND 2 (live wrong-merge #1): "Symington, Stuart" (Senate) and "Symington, James W." (House) — father/son, real DATED terms evidence on BOTH sides, but different chamber so never comparable — stay two singletons, never auto-linked', () => {
+  const rows = [
+    {
+      id: 'leg-symington-stuart',
+      full_name: 'Symington, Stuart',
+      surname: null,
+      bioguide_id: 'bg-symington-stuart',
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: null,
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'MO', start_date: '1953-01-01', end_date: '1976-12-31',
+      }],
+    },
+    {
+      id: 'leg-symington-james',
+      full_name: 'Symington, James W.',
+      surname: null,
+      bioguide_id: 'bg-symington-james',
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: null,
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'terms', jurisdiction_id: 'us-congress', chamber: 'house', district: '2', start_date: '1969-01-01', end_date: '1977-01-01',
+      }],
+    },
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 0, 'different chamber = no comparable evidence at all, and the given names (Stuart/James) do not match -> no-pair, not even a flag');
+  assert.deepEqual(result.singletons.slice().sort(), ['leg-symington-james', 'leg-symington-stuart']);
+});
+
+test('clusterLegislators FIX ROUND 2 (live wrong-merge #2): "Brock Adams" and "Joe Adams" — different jurisdiction, so their evidence is never comparable — stay two singletons', () => {
+  const rows = [
+    {
+      id: 'leg-adams-brock',
+      full_name: 'Brock Adams',
+      surname: 'Adams',
+      bioguide_id: null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: null,
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'terms', jurisdiction_id: 'us-congress', chamber: 'house', district: '7', start_date: '1965-01-01', end_date: '1977-01-01',
+      }],
+    },
+    {
+      id: 'leg-adams-joe',
+      full_name: 'Joe Adams',
+      surname: 'Adams',
+      bioguide_id: null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: '7',
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'mo_house_id', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '7', start_date: null, end_date: null,
+      }],
+    },
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 0);
+  assert.deepEqual(result.singletons.slice().sort(), ['leg-adams-brock', 'leg-adams-joe']);
+});
+
+test('clusterLegislators FIX ROUND 2 (live wrong-merge #3): "Cora Walker" and "Nathan Walker" — both entirely evidence-free, surname only — stay two singletons, never linked on a bare surname collision', () => {
+  const rows = [
+    {
+      id: 'leg-walker-cora', full_name: 'Cora Walker', surname: 'Walker', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 501, evidence: [],
+    },
+    {
+      id: 'leg-walker-nathan', full_name: 'Nathan Walker', surname: 'Walker', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 502, evidence: [],
+    },
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 0);
+  assert.deepEqual(result.singletons.slice().sort(), ['leg-walker-cora', 'leg-walker-nathan']);
+});
+
 test('clusterLegislators: same name, same seat, non-overlapping eras -> flagged, never auto-linked (could be a re-elected same person or an unrelated same-named successor — never guessed)', () => {
   const rows = [
     {
@@ -266,7 +386,15 @@ test('clusterLegislators: same name, same seat, non-overlapping eras -> flagged,
   assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-smith-early', 'leg-smith-later']);
 });
 
-test('clusterLegislators: a hard contradiction bridged through a third, evidence-free same-surname row must still flag, never silently auto-link the contradictory pair (the transitive-bridge safety net)', () => {
+// FIX ROUND 2: with DIFFERENT given names (Pat/Sam/Alex), the old "evidence-free row bridges
+// vacuously regardless of name" gap is exactly what's closed — leg-bridge-nodata ('Alex Bridge')
+// no longer connects to EITHER of the other two (no comparable evidence + no full-name-variant
+// match = 'no-pair', never an edge), so leg-bridge-30 and leg-bridge-40 (which directly
+// 'contradiction' each other on district) never even get a chance to be bridged. All three land as
+// separate singletons — this is itself the regression proof that the live Symington/Adams/Walker
+// shape (same surname, different given names, at least one evidence-free) can no longer produce
+// ANY pairing at all, let alone a false cluster or an unhelpful flag.
+test('clusterLegislators FIX ROUND 2: different given names sharing a surname never bridge, even via an evidence-free third row — three singletons, not a flag (the Symington/Adams/Walker shape)', () => {
   const rows = [
     {
       id: 'leg-bridge-30',
@@ -299,10 +427,89 @@ test('clusterLegislators: a hard contradiction bridged through a third, evidence
     },
   ];
   const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 0, 'FIX ROUND 2: no edges at all form between different given names, so there is nothing left to bridge or flag');
+  assert.deepEqual(result.singletons.slice().sort(), ['leg-bridge-30', 'leg-bridge-40', 'leg-bridge-nodata']);
+});
+
+// The transitive-bridge safety net is STILL necessary post-fix — it's just harder to trigger now,
+// requiring the bridging row to genuinely share a full-name variant with BOTH contradicting ends.
+// Same full name on all three ('Pat Bridge' x3): leg-pbridge-30/leg-pbridge-40 directly
+// 'contradiction' (real, differing districts) and never union with each other, but
+// leg-pbridge-nodata (zero evidence, SAME name) unions with EACH of them individually
+// ('no-evidence' + namesMatch=true -> 'compatible'), transitively bridging all three into one
+// connected component. The full pairwise re-scan must still catch the internal contradiction and
+// flag the whole group, never trust the union-find edges alone.
+test('clusterLegislators: the transitive-bridge safety net still fires post-fix when the bridging row genuinely shares the SAME full name as both contradicting ends', () => {
+  const rows = [
+    {
+      id: 'leg-pbridge-30',
+      full_name: 'Pat Bridge',
+      surname: 'Bridge',
+      bioguide_id: null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: '30',
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'mo_senate_id', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '30', start_date: null, end_date: null,
+      }],
+    },
+    {
+      id: 'leg-pbridge-40',
+      full_name: 'Pat Bridge',
+      surname: 'Bridge',
+      bioguide_id: null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: '40',
+      legiscan_people_id: null,
+      evidence: [{
+        source: 'mo_senate_id', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '40', start_date: null, end_date: null,
+      }],
+    },
+    {
+      id: 'leg-pbridge-nodata', full_name: 'Pat Bridge', surname: 'Bridge', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, evidence: [],
+    },
+  ];
+  const result = clusterLegislators(rows);
   assert.equal(result.clusters.length, 0, 'never a clean auto-cluster when a real district contradiction exists anywhere inside the group');
   assert.equal(result.flagged.length, 1);
   assert.equal(result.flagged[0].reason, 'internal_contradiction');
-  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-bridge-30', 'leg-bridge-40', 'leg-bridge-nodata']);
+  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-pbridge-30', 'leg-pbridge-40', 'leg-pbridge-nodata']);
+});
+
+// A DIFFERENT residual bridging risk fix round 1's suffix-omission tolerance creates: 'no-pair' is
+// not (and cannot safely be made) transitive the way exact equality is. 'John Duncan' (no suffix)
+// matches BOTH 'John Duncan Jr.' and 'John Duncan Sr.' individually (an omitted suffix never
+// blocks a match), even though Jr. and Sr. do NOT match each other directly (their suffixes
+// disagree) — so a no-suffix same-base row can still bridge two suffix-disqualified rows into one
+// component. The safety net's full pairwise re-scan catches this too: internal_no_name_variant
+// (fix round 2's new reason), never a silent auto-cluster.
+test('clusterLegislators: the safety net also catches a suffix-omission bridge — "John Duncan" (no suffix, evidence-free) connects to BOTH "...Jr." and "...Sr." individually (omission tolerated), but Jr. and Sr. never match each other directly (no-pair, both evidence-free)', () => {
+  const mkDuncan = (id, fullName) => ({
+    id,
+    full_name: fullName,
+    surname: 'Duncan',
+    bioguide_id: null,
+    openstates_id: null,
+    mo_house_id: null,
+    mo_senate_id: null,
+    legiscan_people_id: null,
+    evidence: [], // evidence-free on all three: the "surname collision, nothing else" shape —
+    // this is what makes Jr<->Sr directly 'no-pair' (no evidence AND suffixes disagree), rather
+    // than 'ambiguous' via shared real seat evidence.
+  });
+  const rows = [
+    mkDuncan('leg-duncan-jr2', 'John Duncan Jr.'),
+    mkDuncan('leg-duncan-sr2', 'John Duncan Sr.'),
+    mkDuncan('leg-duncan-plain', 'John Duncan'),
+  ];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0);
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'internal_no_name_variant');
+  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-duncan-jr2', 'leg-duncan-plain', 'leg-duncan-sr2']);
 });
 
 // ---- fullNameVariantMatch (CRITICAL fix round 1's own gate) ----
@@ -325,6 +532,25 @@ test('fullNameVariantMatch: BOTH sides printing the SAME suffix still matches', 
 
 test('fullNameVariantMatch: BOTH sides printing a DIFFERENT suffix is a disqualifying signal — the live worked example', () => {
   assert.equal(fullNameVariantMatch('John Duncan Jr.', 'John Duncan Sr.'), false);
+});
+
+// FIX ROUND 2: the match key is "given+family" (the ruling's own words) — a middle name/initial is
+// deliberately NOT part of it, a structural extraction of the row's own printed parts (first token
+// = given, last non-suffix token = family), never an invented equivalence. This is what still lets
+// the real bioguide Onder row ('Onder, Robert F.' -> reordered 'Robert F. Onder') match the real
+// legiscan Onder row ('Robert Onder') post-fix, while still NEVER bridging 'Bob' to 'Robert' (no
+// nickname table, CONTROLLER RULING 3 stands).
+
+test('fullNameVariantMatch: FIX ROUND 2 — a middle name/initial is ignored (given+family only): "Onder, Robert F." (reordered "Robert F. Onder") matches "Robert Onder"', () => {
+  assert.equal(fullNameVariantMatch('Onder, Robert F.', 'Robert Onder'), true);
+});
+
+test('fullNameVariantMatch: a middle name difference alone does not block a match either (still given+family only)', () => {
+  assert.equal(fullNameVariantMatch('John Quincy Adams', 'John Adams'), true);
+});
+
+test('fullNameVariantMatch: still never bridges an actual nickname — "Bob Onder" and "Robert Onder" remain DIFFERENT given names, no nickname table', () => {
+  assert.equal(fullNameVariantMatch('Bob Onder', 'Robert Onder'), false);
 });
 
 // ---- CRITICAL fix round 1: a same-seat evidence pair that can only claim "cannot rule out
@@ -432,13 +658,6 @@ test('clusterLegislators CRITICAL fix: printed suffix mismatch ("John Duncan Jr.
   assert.equal(result.flagged[0].reason, 'ambiguous_era');
 });
 
-test('clusterLegislators CRITICAL fix regression: the real four-Onder rows STILL auto-link as one cluster — every pair is vacuous (at least one side has zero evidence entries at all), so the same-seat name-variant gate never engages for them', () => {
-  const result = clusterLegislators(onderRows());
-  assert.equal(result.clusters.length, 1);
-  assert.equal(result.flagged.length, 0);
-  assert.equal(result.clusters[0].memberIds.length, 4);
-});
-
 test('clusterLegislators: a unique surname with no evidence at all is a plain singleton', () => {
   const result = clusterLegislators([{
     id: 'leg-unique', full_name: 'Zaphod Beeblebrox', surname: null, bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 1, evidence: [],
@@ -450,6 +669,34 @@ test('clusterLegislators: a unique surname with no evidence at all is a plain si
 
 test('clusterLegislators: empty input returns three empty buckets', () => {
   assert.deepEqual(clusterLegislators([]), { clusters: [], flagged: [], singletons: [] });
+});
+
+// ---- auditClusterCoherence (fix round 2's third, permanent, non-destructive layer) ----
+
+test('auditClusterCoherence: clusterLegislators\' own output always passes (structural guarantee) — the real Onder clusters, Brown singletons, and dynasty flags all together', () => {
+  const onder = clusterLegislators(onderRows());
+  assert.deepEqual(auditClusterCoherence(onder.clusters), { ok: true, violations: [] });
+});
+
+test('auditClusterCoherence: an empty cluster list passes trivially', () => {
+  assert.deepEqual(auditClusterCoherence([]), { ok: true, violations: [] });
+  assert.deepEqual(auditClusterCoherence(undefined), { ok: true, violations: [] });
+});
+
+test('auditClusterCoherence: catches a HAND-BUILT cluster (bypassing clusterLegislators entirely) whose members do not share a full-name variant — this is the exact shape that must never reach a live run', () => {
+  const badCluster = {
+    key: 'bad:1,2',
+    memberIds: ['1', '2'],
+    evidence: [
+      { legislatorId: '1', fullName: 'Stuart Symington' },
+      { legislatorId: '2', fullName: 'James W. Symington' },
+    ],
+  };
+  const result = auditClusterCoherence([badCluster]);
+  assert.equal(result.ok, false);
+  assert.equal(result.violations.length, 1);
+  assert.equal(result.violations[0].clusterKey, 'bad:1,2');
+  assert.deepEqual([result.violations[0].legislatorIdA, result.violations[0].legislatorIdB].sort(), ['1', '2']);
 });
 
 // ---- CLI: parseArgs ----
@@ -616,6 +863,40 @@ function makeFakeClient({
 // ---- writeAutoCluster ----
 
 test('writeAutoCluster: writes one persons row (display-name precedence), additivePatch person_id + one person_links row PER member', async () => {
+  // FIX ROUND 2: bioguide+legiscan, not bioguide+mo_senate — 'Onder, Robert F.' and 'Robert Onder'
+  // share a full-name variant (given='robert', family='onder'); 'Bob Onder' (mo_senate) does not
+  // (see the dedicated ClusterNameVariantViolationError test below for that case).
+  const rowsById = new Map([
+    ['leg-onder-bioguide', {
+      id: 'leg-onder-bioguide', full_name: 'Onder, Robert F.', bioguide_id: 'O000177', mo_senate_id: null, mo_house_id: null, legiscan_people_id: null, openstates_id: null, person_id: null,
+    }],
+    ['leg-onder-legiscan', {
+      id: 'leg-onder-legiscan', full_name: 'Robert Onder', bioguide_id: null, mo_senate_id: null, mo_house_id: null, legiscan_people_id: 16351, openstates_id: null, person_id: null,
+    }],
+  ]);
+  const cluster = {
+    key: 'onder:leg-onder-bioguide,leg-onder-legiscan',
+    memberIds: ['leg-onder-bioguide', 'leg-onder-legiscan'],
+    evidence: [{ legislatorId: 'leg-onder-bioguide', fullName: 'Onder, Robert F.' }, { legislatorId: 'leg-onder-legiscan', fullName: 'Robert Onder' }],
+  };
+  const client = makeFakeClient({ legislatorRows: [...rowsById.values()] });
+  const result = await writeAutoCluster(client, 'run-1', cluster, rowsById);
+  assert.equal(client.state.persons.length, 1);
+  assert.deepEqual(client.state.persons[0], { id: result.personId, display_name: 'Robert F. Onder', display_name_source: 'bioguide' });
+  assert.equal(client.state.person_links.length, 2);
+  const linkForLegiscan = client.state.person_links.find((l) => l.legislator_id === 'leg-onder-legiscan');
+  assert.equal(linkForLegiscan.person_id, result.personId);
+  assert.equal(linkForLegiscan.decided_by, 'auto');
+  assert.equal(linkForLegiscan.run_id, 'run-1');
+  assert.deepEqual(linkForLegiscan.evidence, { legislatorId: 'leg-onder-legiscan', fullName: 'Robert Onder' });
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-bioguide').person_id, result.personId);
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-legiscan').person_id, result.personId);
+});
+
+// ---- writeAutoCluster BELT (fix round 2): the structural invariant, enforced a SECOND time,
+// independent of clusterLegislators' own guarantee ----
+
+test('writeAutoCluster FIX ROUND 2 BELT: a cluster pairing members that do NOT share a full-name variant throws ClusterNameVariantViolationError, writes NOTHING (no person, no links, no patch)', async () => {
   const rowsById = new Map([
     ['leg-onder-bioguide', {
       id: 'leg-onder-bioguide', full_name: 'Onder, Robert F.', bioguide_id: 'O000177', mo_senate_id: null, mo_house_id: null, legiscan_people_id: null, openstates_id: null, person_id: null,
@@ -624,23 +905,21 @@ test('writeAutoCluster: writes one persons row (display-name precedence), additi
       id: 'leg-onder-mosenate', full_name: 'Bob Onder', bioguide_id: null, mo_senate_id: '2', mo_house_id: null, legiscan_people_id: null, openstates_id: null, person_id: null,
     }],
   ]);
+  // A cluster shaped like this should never come out of clusterLegislators (that's the whole
+  // point of the fix) — this test proves the BELT holds even if it somehow did: a hand-built
+  // cluster object bypassing the matcher entirely, exactly the "future bug in the matcher"
+  // scenario the BELT's own doc comment names.
   const cluster = {
     key: 'onder:leg-onder-bioguide,leg-onder-mosenate',
     memberIds: ['leg-onder-bioguide', 'leg-onder-mosenate'],
     evidence: [{ legislatorId: 'leg-onder-bioguide', fullName: 'Onder, Robert F.' }, { legislatorId: 'leg-onder-mosenate', fullName: 'Bob Onder' }],
   };
   const client = makeFakeClient({ legislatorRows: [...rowsById.values()] });
-  const result = await writeAutoCluster(client, 'run-1', cluster, rowsById);
-  assert.equal(client.state.persons.length, 1);
-  assert.deepEqual(client.state.persons[0], { id: result.personId, display_name: 'Robert F. Onder', display_name_source: 'bioguide' });
-  assert.equal(client.state.person_links.length, 2);
-  const linkForMoSenate = client.state.person_links.find((l) => l.legislator_id === 'leg-onder-mosenate');
-  assert.equal(linkForMoSenate.person_id, result.personId);
-  assert.equal(linkForMoSenate.decided_by, 'auto');
-  assert.equal(linkForMoSenate.run_id, 'run-1');
-  assert.deepEqual(linkForMoSenate.evidence, { legislatorId: 'leg-onder-mosenate', fullName: 'Bob Onder' });
-  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-bioguide').person_id, result.personId);
-  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-mosenate').person_id, result.personId);
+  await assert.rejects(() => writeAutoCluster(client, 'run-1', cluster, rowsById), ClusterNameVariantViolationError);
+  assert.equal(client.state.persons.length, 0, 'no person row created');
+  assert.equal(client.state.person_links.length, 0, 'no link rows created');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-bioguide').person_id, null, 'no patch applied');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-mosenate').person_id, null, 'no patch applied');
 });
 
 test('writeAutoCluster: a member that already carries a DIFFERENT person_id throws PersonLinkConflictError BEFORE any write for the cluster happens (no orphaned person, no partial links)', async () => {
@@ -707,7 +986,7 @@ test('writeIdentityFlag: a 23505 race on insert (app-level check missed a concur
 
 // ---- runLink: the orchestration seam — dry-run zero-write, live writes + honest counts ----
 
-test('runLink: --dry-run performs ZERO write calls (no insert/update anywhere in the call log), returns the full proposed clustering + honest counts', async () => {
+test('runLink: --dry-run performs ZERO write calls (no insert/update anywhere in the call log), returns the full proposed clustering + honest counts + a passing coherence audit', async () => {
   const legislatorRows = [
     ...onderRows().map(({ evidence: _e, ...r }) => ({ ...r, person_id: null })),
     { id: 'leg-already', full_name: 'Already Linked', surname: 'Linked', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 42, person_id: 'person-prior' },
@@ -719,11 +998,14 @@ test('runLink: --dry-run performs ZERO write calls (no insert/update anywhere in
   const report = await runLink(client, { dryRun: true });
 
   assert.equal(report.mode, 'dry-run');
+  // FIX ROUND 2: the four-Onder rows now form TWO 2-member clusters (see the dedicated
+  // clusterLegislators test above for why) — not one 4-member cluster.
   assert.deepEqual(report.counts, {
-    clusters: 1, personsCreated: 0, linked: 0, flagged: 0, alreadyLinked: 1, singletons: 0,
+    clusters: 2, personsCreated: 0, linked: 0, flagged: 0, alreadyLinked: 1, singletons: 0,
   });
-  assert.equal(report.clusters.length, 1);
-  assert.equal(report.clusters[0].memberIds.length, 4);
+  assert.equal(report.clusters.length, 2);
+  assert.deepEqual(report.clusters.map((c) => c.memberIds.length).sort(), [2, 2]);
+  assert.deepEqual(report.coherenceAudit, { ok: true, violations: [] }, 'permanent dry-run audit line: every proposed cluster is name-coherent');
 
   const writeOps = client.calls.filter((c) => c.op === 'insert' || c.op === 'update');
   assert.deepEqual(writeOps, [], 'zero writes reachable from dry-run — writeAutoCluster/writeIdentityFlag are never called');
@@ -733,7 +1015,7 @@ test('runLink: --dry-run performs ZERO write calls (no insert/update anywhere in
   assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-bioguide').person_id, null, 'unwritten');
 });
 
-test('runLink: live mode writes the auto cluster (persons/person_links/legislators.person_id) and the flagged group (identity_flags), with honest counts including alreadyLinked', async () => {
+test('runLink: live mode writes the TWO auto clusters (persons/person_links/legislators.person_id) and the flagged group (identity_flags), with honest counts including alreadyLinked, and a passing coherence audit', async () => {
   const legislatorRows = [
     ...onderRows().map(({ evidence: _e, ...r }) => ({ ...r, person_id: null })),
     {
@@ -760,19 +1042,26 @@ test('runLink: live mode writes the auto cluster (persons/person_links/legislato
 
   assert.equal(report.mode, 'live');
   assert.deepEqual(report.counts, {
-    clusters: 1, personsCreated: 1, linked: 4, flagged: 1, alreadyLinked: 1, singletons: 0,
+    clusters: 2, personsCreated: 2, linked: 4, flagged: 1, alreadyLinked: 1, singletons: 0,
   });
   assert.equal(report.flaggedWritten, 1);
   assert.equal(report.flaggedDeduped, 0);
+  assert.deepEqual(report.coherenceAudit, { ok: true, violations: [] });
 
-  assert.equal(client.state.persons.length, 1);
+  assert.equal(client.state.persons.length, 2);
   assert.equal(client.state.person_links.length, 4);
   assert.equal(client.state.identity_flags.length, 1);
   assert.deepEqual(client.state.identity_flags[0].candidate_legislator_ids.slice().sort(), ['leg-smith-early', 'leg-smith-later']);
   assert.equal(client.state.legislators.find((l) => l.id === 'leg-already').person_id, 'person-prior', 'already-linked row untouched');
-  for (const id of ['leg-onder-bioguide', 'leg-onder-openstates', 'leg-onder-mosenate', 'leg-onder-legiscan']) {
-    assert.equal(client.state.legislators.find((l) => l.id === id).person_id, client.state.persons[0].id);
-  }
+  // bioguide+legiscan share one person; mo_senate+openstates share a DIFFERENT person
+  const bioguidePersonId = client.state.legislators.find((l) => l.id === 'leg-onder-bioguide').person_id;
+  const legiscanPersonId = client.state.legislators.find((l) => l.id === 'leg-onder-legiscan').person_id;
+  const mosenatePersonId = client.state.legislators.find((l) => l.id === 'leg-onder-mosenate').person_id;
+  const openstatesPersonId = client.state.legislators.find((l) => l.id === 'leg-onder-openstates').person_id;
+  assert.ok(bioguidePersonId, 'bioguide row was linked');
+  assert.equal(bioguidePersonId, legiscanPersonId, 'bioguide and legiscan share a person');
+  assert.equal(mosenatePersonId, openstatesPersonId, 'mo_senate and openstates share a person');
+  assert.notEqual(bioguidePersonId, mosenatePersonId, 'the two Onder clusters are DIFFERENT persons — never wrongly bridged');
   assert.equal(client.state.legislators.find((l) => l.id === 'leg-smith-early').person_id, null, 'flagged rows are never linked');
 });
 
@@ -783,11 +1072,11 @@ test('runLink: a re-run after a live run is idempotent — already-linked rows a
   }];
   const client = makeFakeClient({ legislatorRows, termRows });
   await runLink(client, { dryRun: false, runId: 'run-1' });
-  assert.equal(client.state.persons.length, 1);
+  assert.equal(client.state.persons.length, 2, 'two clusters (bioguide+legiscan, mo_senate+openstates) -> two persons');
 
   const second = await runLink(client, { dryRun: false, runId: 'run-2' });
   assert.deepEqual(second.counts, {
     clusters: 0, personsCreated: 0, linked: 0, flagged: 0, alreadyLinked: 4, singletons: 0,
   });
-  assert.equal(client.state.persons.length, 1, 'no duplicate person created on re-run');
+  assert.equal(client.state.persons.length, 2, 'no duplicate person created on re-run');
 });

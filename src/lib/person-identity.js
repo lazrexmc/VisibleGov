@@ -137,18 +137,36 @@ export function matchLegislator(candidate, existingRows) {
 // unrelated US Senators surnamed Brown (Sherrod/OH, Hank/CO, Scott P./MA) with real, differing
 // `terms` districts — exactly the shape the district-contradiction rule below must keep apart.
 //
-// ACCEPTED RESIDUAL (fix round 1, execution-proven CRITICAL finding — the 5th appearance of this
-// project's cross-era class, after src/cli/ingest-mo-senate.js's district-reuse bug and migration
-// 0009's fix): a same-seat pair that can't be dated on either side no longer auto-links on a bare
-// "cannot rule out overlap" default — it now also requires the two rows' own printed full names to
-// match (see fullNameVariantMatch below) before treating that as 'compatible' rather than
-// 'ambiguous'. The one case this STILL cannot mechanically distinguish: a genuine dynastic
-// succession (Jr./Sr.) at the exact same seat, printed with the EXACT same full name and no
-// suffix, with no dates recorded by any source that reached either row — `namesMatch` is
-// (correctly, per its own contract) true either way, so this residual case still auto-links. The
-// durable fix is term-date backfill (Task 3+); until then, Lance's review-tab unlink (Task 2) is
-// the correction path. This is strictly a NARROWING of the old false-'compatible' surface, never a
-// widening of it.
+// FIX ROUND 2 (CRITICAL, execution-proven against the live run — a real wrong-merge, not a
+// theoretical one): round 1's name-variant gate only applied to the "same-seat, can't rule out
+// overlap because a date is missing" branch — a pair with NO comparable seat evidence at all
+// (different chamber, different jurisdiction, or one/both sides evidence-free entirely) skipped
+// straight to a vacuous 'compatible' verdict WITHOUT ever checking names. The live run this gap
+// let through: 'Symington, Stuart' (Senate) + 'Symington, James W.' (House — father/son, real
+// dated `terms` evidence on both sides, but different CHAMBER so never compared); 'Brock Adams' +
+// 'Joe Adams' (different jurisdiction); 'Cora Walker' + 'Nathan Walker' (evidence-free on both
+// sides). All three: same derived surnameKey, completely different given names, silently
+// auto-linked on nothing but a shared surname. RULING (unambiguous form): a full-name-variant
+// match (given+family — see fullNameVariantMatch below) is now a NECESSARY condition for ANY
+// auto-cluster pair, unconditionally — regardless of chamber, jurisdiction, era, or whether
+// comparable evidence exists at all. A pair that shares ONLY a surname (no full-name-variant
+// match) never auto-links: if real seat evidence exists between them (same jurisdiction+chamber,
+// whatever the district/era verdict), that's still enough of an affirmative signal to warrant
+// Lance's review -> flagged; if there's truly nothing but the surname, the rows simply don't pair
+// at all (no edge — a bare surname collision is not evidence of shared identity, and flagging
+// every one would drown the review queue). See finalPairStatus below for the exact mechanics; this
+// is enforced a SECOND time, structurally, by writeAutoCluster in src/cli/link-persons.js (throws
+// ClusterNameVariantViolationError before writing anything if the invariant is ever violated) and
+// audited a THIRD time, non-destructively, by auditClusterCoherence for every dry-run report.
+//
+// ACCEPTED RESIDUAL (unchanged from fix round 1, still real, still documented rather than silently
+// assumed): a same-seat pair that can't be dated on either side, printed with the SAME full name
+// (given+family) and no suffix (or a suffix stripped/never printed by every source that reached
+// either row), is mechanically indistinguishable from one re-elected person — `fullNameVariantMatch`
+// is (correctly, per its own contract) true either way, so a genuine dynastic Jr./Sr. succession in
+// that exact shape still auto-links. The durable fix is term-date backfill (Task 3+); until then,
+// Lance's review-tab unlink (Task 2) is the correction path. Both fix rounds are strict NARROWINGS
+// of the false-'compatible' surface — neither ever widens it.
 // ============================================================================================
 
 // surnameKey — the cluster pass's candidate-pairing key. Prefers the `surname` column when
@@ -163,11 +181,11 @@ export function matchLegislator(candidate, existingRows) {
 // coincidentally-wrong derived key only ever costs a MISSED pairing (two rows that share no key
 // never get compared at all) — never a wrong merge on its own, because a shared key is only step
 // one of the pairing predicate below, still gated by chamber/district/era compatibility and the
-// asymmetric-cost doctrine throughout. Empty/unparseable input yields '' (never guessed). NOTE:
-// because this key is structural (not a verified given-name match), the pool of same-key
-// candidates it admits can be broad — the same-seat/dateless gate in evidencePairStatus below is
-// what actually keeps a same-surname, different-person pairing from silently auto-linking; the
-// key alone is deliberately permissive.
+// asymmetric-cost doctrine throughout. Empty/unparseable input yields '' (never guessed). NOTE
+// (fix round 2): because this key is structural (not a verified given-name match), the pool of
+// same-key candidates it admits can be broad — surnameKey alone is deliberately permissive; it is
+// finalPairStatus's unconditional full-name-variant requirement (below) that actually keeps a
+// same-surname, different-person pairing from ever auto-linking, not this key.
 function lastToken(normalized) {
   const parts = normalized.split(' ').filter(Boolean);
   return parts.length ? parts[parts.length - 1] : '';
@@ -179,115 +197,122 @@ export function surnameKey(row) {
   return lastToken(normalizePersonName(row?.full_name ?? ''));
 }
 
-// fullNameVariantMatch — CRITICAL fix round 1. The one signal strong enough to license
-// 'compatible' when a same-seat evidence pair can't otherwise rule out non-overlap (see
-// evidencePairStatus below): do the two rows' own printed full_name values actually match, once
-// reordered/folded the SAME way normalizePersonName already does everywhere else in this module?
-// A printed name SUFFIX (Jr./Sr./II/III/IV/V) is treated specially: it is stripped before the base
-// comparison (a source that omits a suffix another source prints must not be penalized — omission
-// is not evidence of a different person), but if BOTH sides print a RECOGNIZED suffix and those
-// suffixes DIFFER, that is treated as a positive disqualifying signal (a real, printed clue that
-// these are two different people in the same family line at the same seat), never a match — the
-// live worked example: 'John Duncan Jr.' vs 'John Duncan Sr.'.
+// fullNameVariantMatch — the SINGLE gate finalPairStatus (below) applies unconditionally to every
+// candidate pair, per fix round 2's ruling. Compares GIVEN name (first token) + FAMILY name (last
+// non-suffix token) of each side's normalizePersonName-folded, comma-reordered full_name — a
+// middle name or initial is deliberately NOT part of the match key ("given+family", the ruling's
+// own words): 'Onder, Robert F.' (bioguide; reorders to 'robert f onder') and 'Robert Onder'
+// (legiscan) share given='robert'/family='onder' despite the middle initial, and this is a
+// structural reorder/extraction of the row's OWN printed parts, never an invented equivalence — it
+// does NOT bridge 'Bob'/'Robert' (still zero nickname table, CONTROLLER RULING 3 stands: those
+// remain two DIFFERENT given names, verified in tests/legiscan-identity.test.js). A printed name
+// SUFFIX (Jr./Sr./II/III/IV/V) is handled specially: stripped before comparison (an omitted suffix
+// on one side must not block a match — omission isn't evidence of a different person), but if BOTH
+// sides print a RECOGNIZED suffix and they DIFFER, that's a positive disqualifying signal (a real,
+// printed clue these are two different people in the same family line) — the live worked example:
+// 'John Duncan Jr.' vs 'John Duncan Sr.'.
 const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
 
-function splitNameSuffix(normalized) {
-  const parts = normalized.split(' ').filter(Boolean);
+function splitGivenFamilySuffix(normalized) {
+  let parts = normalized.split(' ').filter(Boolean);
+  let suffix = null;
   if (parts.length > 1 && NAME_SUFFIXES.has(parts[parts.length - 1])) {
-    return { base: parts.slice(0, -1).join(' '), suffix: parts[parts.length - 1] };
+    suffix = parts[parts.length - 1];
+    parts = parts.slice(0, -1);
   }
-  return { base: normalized, suffix: null };
+  if (parts.length === 0) return { given: '', family: '', suffix };
+  return { given: parts[0], family: parts[parts.length - 1], suffix };
 }
 
 export function fullNameVariantMatch(fullNameA, fullNameB) {
-  const { base: baseA, suffix: suffixA } = splitNameSuffix(normalizePersonName(fullNameA));
-  const { base: baseB, suffix: suffixB } = splitNameSuffix(normalizePersonName(fullNameB));
-  if (baseA === '' || baseA !== baseB) return false;
-  if (suffixA && suffixB && suffixA !== suffixB) return false;
+  const a = splitGivenFamilySuffix(normalizePersonName(fullNameA));
+  const b = splitGivenFamilySuffix(normalizePersonName(fullNameB));
+  if (!a.given || !a.family || a.given !== b.given || a.family !== b.family) return false;
+  if (a.suffix && b.suffix && a.suffix !== b.suffix) return false;
   return true;
 }
 
-// evidencePairStatus — the per-evidence-entry-pair verdict feeding rowPairStatus below.
-// `a`/`b`: { jurisdiction_id, chamber, district, start_date, end_date } (the SAME evidence-entry
-// shape link-persons.js's buildEvidenceRows produces from `terms` rows AND per-source identity
-// columns — both count, per the plan's own words, "terms rows and identity columns both count").
-// `namesMatch`: fullNameVariantMatch(rowA.full_name, rowB.full_name), computed once per ROW pair
-// by the caller (clusterLegislators) and threaded through every evidence-entry comparison for that
-// pair.
+// seatEvidencePairStatus — the per-evidence-entry-pair verdict feeding rowSeatStatus below. PURELY
+// evidence-based (no names involved at all — fix round 2 moved every name check out to
+// finalPairStatus, a single unconditional outer gate, rather than an inner exception threaded
+// through this function). `a`/`b`: { jurisdiction_id, chamber, district, start_date, end_date }
+// (the same evidence-entry shape link-persons.js's buildEvidenceRows produces from `terms` rows
+// AND per-source identity columns — both count).
 //
-// - Different jurisdiction_id, or different chamber: NOT comparable evidence for THIS pair — a
-//   federal Senate seat and a MO Senate seat share the word "senate" but are different jobs, and a
-//   MO House seat and a MO Senate seat are a normal CAREER move, never a contradiction by
-//   themselves (the plan's explicit ruling: "federal-vs-state chamber difference is NOT a
-//   contradiction, it's a career"; extended here, deliberately, to a state House<->Senate move for
-//   the identical reason). 'compatible' (vacuously — nothing here rules anything out).
+// - Different jurisdiction_id, or different chamber: these two evidence entries are simply NOT
+//   comparable — a federal Senate seat and a MO Senate seat share the word "senate" but are
+//   different jobs; a MO House seat and a MO Senate seat are a normal CAREER move. 'no-evidence'
+//   (fix round 2: this used to fold into 'compatible' here, which is exactly the gap that let
+//   'Symington, Stuart' (Senate) auto-link to 'Symington, James W.' (House) on the live run — a
+//   DIFFERENT-chamber pair is not affirmative identity evidence, it's an absence of comparable
+//   evidence, and must be classified that way so finalPairStatus can require a name match).
 // - Same jurisdiction_id AND chamber, both sides print a CONCRETE district, and the districts
-//   differ: a hard, structural fact — two real, recorded seats for the same job at once (or,
-//   un-era-qualified, two recorded seat-holders with no evidence they're the same person moving
-//   between them). 'contradiction' — this is the Brown/Brown-style guard: three real, unrelated US
-//   Senators surnamed Brown, live-verified, are kept apart by exactly this rule (OH vs CO vs MA).
+//   differ: a hard, structural fact. 'contradiction' — the Brown/Brown-style guard: three real,
+//   unrelated US Senators surnamed Brown, live-verified, are kept apart by exactly this rule.
 // - Same jurisdiction_id AND chamber, districts match (or either/both unknown) — same SEAT:
-//     * eraOverlaps says the two windows are PROVABLY non-overlapping (both sides concrete enough
-//       to rule overlap out) -> 'ambiguous', unconditionally (same seat, non-touching windows —
-//       could be a re-elected same person or an unrelated same-named successor; never guessed).
-//     * eraOverlaps says they overlap (or can't rule it out) AND both sides carry real dates (not
-//       merely absent ones) -> 'compatible' — genuine, concrete corroboration, no further gate.
-//     * eraOverlaps says they overlap ONLY because at least one side has NO dates recorded at all
-//       (start_date and end_date both null) -> CRITICAL fix round 1 (execution-proven, the 5th
-//       appearance of this project's cross-era class — src/cli/ingest-mo-senate.js's own Critical
-//       bug, migration 0009's district-reuse fix, and now this): "cannot rule out overlap" because
-//       a date is simply MISSING is NOT evidence the two rows are the same person — MO `terms`
-//       dates are null almost everywhere live, and every column-derived evidence entry
-//       (mo_senate_id/mo_house_id) is null-dated by construction, so this branch is common, not an
-//       edge case. 'compatible' ONLY IF `namesMatch` is also true (the two rows' own printed full
-//       names, suffix-aware, actually agree) — otherwise 'ambiguous', never silently linked.
-//       ACCEPTED RESIDUAL (documented, not silently assumed): a true dynastic succession at the
-//       SAME seat with the SAME full name and NO dates recorded anywhere (a Jr./Sr. pair whose
-//       suffix was stripped or never printed by every source that reached this row) is mechanically
-//       indistinguishable from one person re-elected — `namesMatch` is true either way, so this
-//       still auto-links. The durable cure is term-date backfill; until then, a Lance unlink
-//       (Task 2's review tab) is the correction path. Never worse than the OLD behavior (which
-//       linked this AND every non-matching-name case); strictly narrows the false-'compatible'
-//       surface — it never widens it.
-function evidencePairStatus(a, b, namesMatch) {
-  if (a.jurisdiction_id !== b.jurisdiction_id || a.chamber !== b.chamber) return 'compatible';
+//   eraOverlaps provably non-overlapping -> 'ambiguous'; overlapping, or can't rule it out (dates
+//   missing on one/both sides) -> 'compatible'. Whether a 'compatible' verdict here actually
+//   licenses an auto-link now depends ENTIRELY on finalPairStatus's unconditional name check below
+//   — this function no longer knows or cares about names.
+function seatEvidencePairStatus(a, b) {
+  if (a.jurisdiction_id !== b.jurisdiction_id || a.chamber !== b.chamber) return 'no-evidence';
   const distA = a.district == null ? null : String(a.district).trim();
   const distB = b.district == null ? null : String(b.district).trim();
   if (distA != null && distB != null && distA !== distB) return 'contradiction';
-
   const overlaps = eraOverlaps(
     { start_date: a.start_date, end_date: a.end_date },
     { start: b.start_date, end: b.end_date },
   );
-  if (!overlaps) return 'ambiguous';
-
-  const aDateless = a.start_date == null && a.end_date == null;
-  const bDateless = b.start_date == null && b.end_date == null;
-  if (!aDateless && !bDateless) return 'compatible'; // both sides concretely dated -> real corroboration
-  return namesMatch ? 'compatible' : 'ambiguous'; // the critical fix's gate
+  return overlaps ? 'compatible' : 'ambiguous';
 }
 
-// rowPairStatus — combines EVERY evidence entry on row A against EVERY evidence entry on row B
-// (a small cross product — each row carries at most a handful of terms/column-derived entries).
-// A single 'contradiction' anywhere wins outright (a hard fact beats an absence of one); otherwise
-// any 'ambiguous' anywhere wins over the rest; two rows with NO shared comparable evidence at all
-// (e.g. the three Onder rows that carry zero terms/column evidence whatsoever) fall through both
-// loops and land on 'compatible' — vacuously, honestly: nothing contradicts, nothing corroborates.
-// This vacuous (zero-evidence-either-side) path is DELIBERATELY untouched by the critical fix's
-// name-variant gate above — that gate only fires once a genuine same-seat evidence PAIR exists to
-// compare; a refined ruling (round 1) confirmed a blanket "any unresolved pair needs a name match"
-// rule would flood the review queue with legitimate cross-source clusters like the real four-Onder
-// rows, three of which carry no chamber/district evidence at all and would otherwise never pair.
-function rowPairStatus(evidenceA, evidenceB, namesMatch) {
+// rowSeatStatus — combines EVERY evidence entry on row A against EVERY evidence entry on row B (a
+// small cross product). A single 'contradiction' anywhere wins outright; otherwise any 'ambiguous'
+// anywhere wins over 'compatible'; if NOTHING beyond 'no-evidence' was ever found across the whole
+// cross product (e.g. two rows that are each entirely evidence-free, or whose evidence never
+// shares a comparable jurisdiction+chamber), the overall verdict is honestly 'no-evidence' — never
+// silently upgraded to 'compatible' (fix round 2's core correction).
+function rowSeatStatus(evidenceA, evidenceB) {
   let sawAmbiguous = false;
+  let sawComparable = false;
   for (const a of evidenceA ?? []) {
     for (const b of evidenceB ?? []) {
-      const status = evidencePairStatus(a, b, namesMatch);
+      const status = seatEvidencePairStatus(a, b);
       if (status === 'contradiction') return 'contradiction';
+      if (status !== 'no-evidence') sawComparable = true;
       if (status === 'ambiguous') sawAmbiguous = true;
     }
   }
+  if (!sawComparable) return 'no-evidence';
   return sawAmbiguous ? 'ambiguous' : 'compatible';
+}
+
+// finalPairStatus — fix round 2's unconditional gate, the ONE place a full-name-variant match is
+// required. Returns 'contradiction' | 'no-pair' | 'ambiguous' | 'compatible'.
+//   - seat evidence hard-contradicts -> 'contradiction', UNCONDITIONALLY (a recorded, concrete
+//     fact beats a name match too — two different concrete seats can't be reconciled just because
+//     the names happen to agree).
+//   - no comparable seat evidence at all ('no-evidence'): a name match is the ONLY thing that can
+//     license pairing here — 'compatible' if fullNameVariantMatch, else 'no-pair' (the rows simply
+//     don't pair; a bare surname collision with nothing else is not evidence of shared identity —
+//     this is the exact fix for the live Symington/Adams/Walker wrong-merges: none of those three
+//     pairs share a full-name variant, so none of them ever pair now).
+//   - real comparable seat evidence exists ('ambiguous' or 'compatible' from rowSeatStatus): if
+//     names DON'T match, this is downgraded to 'ambiguous' regardless — affirmative shared-identity
+//     evidence with disagreeing names is exactly the shape that belongs in front of Lance, never
+//     silently linked (this is what keeps the 9 live dynasty pairs — Bayh, Chafee, Humphrey,
+//     Graham, all same-seat/dateless/different-given-names — correctly flagged, unchanged from fix
+//     round 1's outcome for them, just reached via this now-unified gate). If names DO match, the
+//     seat verdict passes through as-is: 'ambiguous' stays 'ambiguous' (e.g. the same-name,
+//     provably-non-overlapping-era case), 'compatible' stays 'compatible' (real corroboration or
+//     the accepted dateless-same-name residual, both fix round 1's own examples).
+function finalPairStatus(rowA, rowB) {
+  const seat = rowSeatStatus(rowA.evidence, rowB.evidence);
+  if (seat === 'contradiction') return 'contradiction';
+  const namesMatch = fullNameVariantMatch(rowA.full_name, rowB.full_name);
+  if (seat === 'no-evidence') return namesMatch ? 'compatible' : 'no-pair';
+  if (!namesMatch) return 'ambiguous';
+  return seat;
 }
 
 const SOURCE_KEY_COLUMNS = ['bioguide_id', 'openstates_id', 'mo_house_id', 'mo_senate_id', 'legiscan_people_id'];
@@ -317,18 +342,22 @@ function buildMemberEvidence(row, nameKeyValue) {
 // DB-shape translation, same division of labor as findCandidateLegislatorRows/matchLegislator).
 //
 // Algorithm: group by surnameKey (candidate pairing's first, broad gate — two rows with different
-// keys are never compared at all, per Task 1's cluster rule). Within a group of 2+, union rows
-// whose rowPairStatus is NOT 'contradiction' (a hard district conflict is the one thing that can
-// keep two same-surname rows from ever joining the same component — this is what actually keeps
-// Brown(16) and Brown(26) apart as two singletons, not a flag: no edge is ever drawn between them).
-// Each resulting connected component is then RE-CHECKED, exhaustively, over every internal pair
-// (not just the union-find edges) — a component can only be reached via a third, evidence-free
-// bridging row (e.g. a row with zero terms/column evidence pairing vacuously with both ends of a
-// real contradiction), and that transitive path must never silently launder a real contradiction
-// into an auto-link. Any internal contradiction -> flagged ('internal_contradiction'); else any
-// internal 'ambiguous' (the same-name/same-seat/non-overlapping-era case) -> flagged
-// ('ambiguous_era'); else -> a clean auto cluster. Singleton components (including every row whose
-// surnameKey is unique in the whole input) land in `singletons`.
+// keys are never compared at all). Within a group of 2+, union rows whose finalPairStatus is
+// neither 'contradiction' nor 'no-pair' (fix round 2: 'no-pair' — no comparable seat evidence AND
+// no full-name-variant match — now blocks an edge exactly like a hard contradiction does; this is
+// what keeps Brown(16)/Brown(26) apart as before, AND now ALSO keeps a bare surname collision like
+// Symington/Adams/Walker from ever pairing at all). Each resulting connected component is then
+// RE-CHECKED, exhaustively, over every internal pair (not just the union-find edges) — a component
+// can only be reached via a third, bridging row whose OWN full-name-variant happens to match one
+// side but not the other (e.g. a no-suffix 'John Duncan' bridging 'John Duncan Jr.' and 'John
+// Duncan Sr.', which do not match each other directly), and that transitive path must never
+// silently launder a real contradiction or a real no-pair verdict into an auto-link. Any internal
+// 'contradiction' -> flagged 'internal_contradiction'; else any internal 'no-pair' -> flagged
+// 'internal_no_name_variant'; else any internal 'ambiguous' -> flagged 'ambiguous_era'; else -> a
+// clean auto cluster (structurally guaranteed, by this construction, that every member pair shares
+// a full-name variant — see auditClusterCoherence below, which verifies exactly this independently
+// for every dry-run report). Singleton components (including every row whose surnameKey is unique
+// in the whole input) land in `singletons`.
 export function clusterLegislators(rows) {
   const list = rows ?? [];
   const groups = new Map();
@@ -367,15 +396,15 @@ export function clusterLegislators(rows) {
     const pairStatus = (i, j) => {
       const cacheKey = i < j ? `${i}|${j}` : `${j}|${i}`;
       if (statusCache.has(cacheKey)) return statusCache.get(cacheKey);
-      const namesMatch = fullNameVariantMatch(list[i].full_name, list[j].full_name);
-      const status = rowPairStatus(list[i].evidence, list[j].evidence, namesMatch);
+      const status = finalPairStatus(list[i], list[j]);
       statusCache.set(cacheKey, status);
       return status;
     };
 
     for (let a = 0; a < idxs.length; a += 1) {
       for (let b = a + 1; b < idxs.length; b += 1) {
-        if (pairStatus(idxs[a], idxs[b]) !== 'contradiction') union(idxs[a], idxs[b]);
+        const status = pairStatus(idxs[a], idxs[b]);
+        if (status !== 'contradiction' && status !== 'no-pair') union(idxs[a], idxs[b]);
       }
     }
 
@@ -394,11 +423,13 @@ export function clusterLegislators(rows) {
       }
 
       let hasContradiction = false;
+      let hasNoPair = false;
       let hasAmbiguous = false;
       for (let a = 0; a < members.length; a += 1) {
         for (let b = a + 1; b < members.length; b += 1) {
           const status = pairStatus(members[a], members[b]);
           if (status === 'contradiction') hasContradiction = true;
+          else if (status === 'no-pair') hasNoPair = true;
           else if (status === 'ambiguous') hasAmbiguous = true;
         }
       }
@@ -411,6 +442,10 @@ export function clusterLegislators(rows) {
       if (hasContradiction) {
         flagged.push({
           clusterKey: key, candidateIds: memberIds, evidence, reason: 'internal_contradiction',
+        });
+      } else if (hasNoPair) {
+        flagged.push({
+          clusterKey: key, candidateIds: memberIds, evidence, reason: 'internal_no_name_variant',
         });
       } else if (hasAmbiguous) {
         flagged.push({
@@ -427,6 +462,37 @@ export function clusterLegislators(rows) {
   });
 
   return { clusters, flagged, singletons };
+}
+
+// auditClusterCoherence — fix round 2's THIRD, non-destructive layer (after finalPairStatus's own
+// construction, and writeAutoCluster's structural throw in src/cli/link-persons.js): an
+// independent, mechanical re-verification that EVERY member pair of EVERY proposed cluster shares
+// a full-name variant, computed directly off clusterLegislators' own output (each cluster's
+// `evidence` entries already carry `fullName` per member — see buildMemberEvidence above), not by
+// re-deriving anything. By construction this should ALWAYS report ok:true for clusterLegislators'
+// own output (a clean 'compatible' verdict is only ever reachable when every pair's names already
+// matched) — its value is as a visible, permanent line in the CLI's dry-run report: the human
+// operator sees this pass BEFORE any live run, and a future regression in the clustering logic
+// would show up here even if the primary logic's own guarantee silently broke.
+export function auditClusterCoherence(clusters) {
+  const violations = [];
+  for (const cluster of clusters ?? []) {
+    const members = cluster.evidence ?? [];
+    for (let a = 0; a < members.length; a += 1) {
+      for (let b = a + 1; b < members.length; b += 1) {
+        if (!fullNameVariantMatch(members[a].fullName, members[b].fullName)) {
+          violations.push({
+            clusterKey: cluster.key,
+            legislatorIdA: members[a].legislatorId,
+            legislatorIdB: members[b].legislatorId,
+            fullNameA: members[a].fullName,
+            fullNameB: members[b].fullName,
+          });
+        }
+      }
+    }
+  }
+  return { ok: violations.length === 0, violations };
 }
 
 // ---- display_name precedence (mechanical, never invented — Global Constraints) ----

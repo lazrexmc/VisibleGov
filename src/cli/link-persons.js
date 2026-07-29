@@ -1,7 +1,9 @@
 import {
   getClient, openRun, closeRun, selectAll, additivePatch,
 } from '../lib/db.js';
-import { clusterLegislators, pickDisplayName } from '../lib/person-identity.js';
+import {
+  clusterLegislators, pickDisplayName, fullNameVariantMatch, auditClusterCoherence,
+} from '../lib/person-identity.js';
 
 // link-persons — Task 1 of docs/superpowers/plans/2026-07-29-identity-merge.md. Loads every
 // `legislators` row + every `terms` row (selectAll — the 1000-row lesson; legislators is at 1,576
@@ -127,13 +129,31 @@ export class PersonLinkConflictError extends Error {
   }
 }
 
+// ClusterNameVariantViolationError — fix round 2's BELT: the review-server link path (Task 2)
+// already requires Lance's own judgment before it writes anything, so it is exempt by design; the
+// AUTO path (this file) is the one place a bug could silently write a wrong merge, so it is the
+// one place this invariant is enforced STRUCTURALLY, not just behaviorally. clusterLegislators'
+// own construction should make this unreachable (a clean 'compatible' cluster is only ever
+// produced when every internal pair's names already matched — see finalPairStatus/
+// auditClusterCoherence in src/lib/person-identity.js) — this is the second, independent layer:
+// even if a future bug in the matcher ever produced a cluster that violates the invariant,
+// writeAutoCluster refuses to write it rather than trusting the caller.
+export class ClusterNameVariantViolationError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'ClusterNameVariantViolationError';
+    Object.assign(this, meta);
+  }
+}
+
 // ---- writes ----
 
 // writeAutoCluster — persons insert (display-name precedence) + additivePatch person_id + one
-// person_links row PER member, in that order, for one unambiguous cluster. Every member's
-// person_id is validated null FIRST (before any write for this cluster happens at all) — a single
-// conflicting member aborts the whole cluster cleanly, before a person row (or any link) for it
-// was ever created, rather than leaving a partially-linked person behind. `memberRowsById`: a
+// person_links row PER member, in that order, for one unambiguous cluster. Two validations run
+// FIRST, before any write for this cluster happens at all — a single violation of either aborts
+// the whole cluster cleanly, never a partially-linked person: (1) every member's person_id is
+// null (PersonLinkConflictError otherwise); (2) fix round 2's BELT — every PAIR of members shares
+// a full-name variant (ClusterNameVariantViolationError otherwise). `memberRowsById`: a
 // Map(legislator_id -> the SAME row objects buildEvidenceRows produced) — the caller's snapshot,
 // looked up by id so pickDisplayName and the per-member writes share one source of truth.
 export async function writeAutoCluster(client, runId, cluster, memberRowsById) {
@@ -145,6 +165,23 @@ export async function writeAutoCluster(client, runId, cluster, memberRowsById) {
           + `cluster ${cluster.key} (a non-null person_id is never overwritten)`,
         { legislatorId: row.id, existingPersonId: row.person_id, clusterKey: cluster.key },
       );
+    }
+  }
+
+  for (let a = 0; a < memberRows.length; a += 1) {
+    for (let b = a + 1; b < memberRows.length; b += 1) {
+      if (!fullNameVariantMatch(memberRows[a].full_name, memberRows[b].full_name)) {
+        throw new ClusterNameVariantViolationError(
+          `cluster ${cluster.key} pairs legislator_id=${memberRows[a].id} `
+            + `("${memberRows[a].full_name}") with legislator_id=${memberRows[b].id} `
+            + `("${memberRows[b].full_name}") — no full-name-variant match between them; refusing `
+            + 'to write (the structural invariant every auto-cluster member pair must satisfy, '
+            + 'fix round 2)',
+          {
+            clusterKey: cluster.key, legislatorIdA: memberRows[a].id, legislatorIdB: memberRows[b].id,
+          },
+        );
+      }
     }
   }
 
@@ -224,13 +261,19 @@ export async function writeIdentityFlag(client, runId, flag) {
 // proposed clustering + honest counts; ZERO writes are even reachable from this branch (writeAutoCluster/
 // writeIdentityFlag are never called). Live mode performs the writes and returns the same honest
 // counts shape the plan's Global Constraints specify verbatim: {clusters, personsCreated, linked,
-// flagged, alreadyLinked, singletons}.
+// flagged, alreadyLinked, singletons}. `coherenceAudit` (fix round 2): auditClusterCoherence run
+// over the proposed clusters, on EVERY call (dry-run and live alike) — the permanent, visible
+// mechanical double-check that every proposed cluster's member pairs share a full-name variant,
+// independent of writeAutoCluster's own structural throw. Computed BEFORE any write, so a live run
+// with coherenceAudit.ok === false would still hit writeAutoCluster's per-cluster throw on the
+// offending cluster specifically — this audit is reported for every cluster at once, up front.
 export async function runLink(client, { dryRun = false, runId = null } = {}) {
   const legislatorRows = await loadLegislators(client);
   const termRows = await loadTerms(client);
   const { unlinked, alreadyLinked } = partitionByLinkStatus(legislatorRows);
   const evidenceRows = buildEvidenceRows(unlinked, termRows);
   const { clusters, flagged, singletons } = clusterLegislators(evidenceRows);
+  const coherenceAudit = auditClusterCoherence(clusters);
 
   const counts = {
     clusters: clusters.length,
@@ -243,7 +286,7 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
 
   if (dryRun) {
     return {
-      mode: 'dry-run', counts, clusters, flagged, singletons,
+      mode: 'dry-run', counts, clusters, flagged, singletons, coherenceAudit,
     };
   }
 
@@ -265,7 +308,7 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
   }
 
   return {
-    mode: 'live', counts, flaggedWritten, flaggedDeduped,
+    mode: 'live', counts, flaggedWritten, flaggedDeduped, coherenceAudit,
   };
 }
 
@@ -282,13 +325,21 @@ async function main() {
 
   if (args.dryRun) {
     const report = await runLink(client, { dryRun: true });
+    // Fix round 2: coherenceAudit is a PERMANENT part of the dry-run report — the operator sees
+    // this mechanical "every proposed cluster's members share a full-name variant" re-check before
+    // any live run is ever considered, independent of the clustering logic's own guarantee.
     console.log(JSON.stringify({
       mode: 'dry-run',
       counts: report.counts,
+      coherenceAudit: report.coherenceAudit,
       clusters: report.clusters.map((c) => ({ key: c.key, memberIds: c.memberIds })),
       flagged: report.flagged.map((f) => ({ clusterKey: f.clusterKey, candidateIds: f.candidateIds, reason: f.reason })),
       singletons: report.singletons,
     }, null, 2));
+    if (!report.coherenceAudit.ok) {
+      console.error('COHERENCE AUDIT FAILED — see coherenceAudit.violations above. Do not run live.');
+      process.exitCode = 2;
+    }
     return;
   }
 
@@ -299,7 +350,7 @@ async function main() {
       counts: report.counts, flaggedWritten: report.flaggedWritten, flaggedDeduped: report.flaggedDeduped,
     });
     console.log(JSON.stringify({
-      mode: 'live', run_id: runId, ...report.counts, flaggedWritten: report.flaggedWritten, flaggedDeduped: report.flaggedDeduped,
+      mode: 'live', run_id: runId, ...report.counts, flaggedWritten: report.flaggedWritten, flaggedDeduped: report.flaggedDeduped, coherenceAudit: report.coherenceAudit,
     }, null, 2));
   } catch (err) {
     await closeRun(client, runId, 'failed', { error: String(err) });
