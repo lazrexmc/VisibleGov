@@ -78,7 +78,15 @@ export class QueryBudgetExceededError extends Error {
 // Pull API query string per the manual: key first, then op, then operation-specific PARAMS, in
 // that order — matches every Pull API Template example in the manual verbatim. undefined/null/''
 // param values are omitted (LegiScan's own optional params, e.g. getSessionList's `state`).
+// Fail-fast on a missing API key (Task 9 review item (c), T2 review round): building a URL with
+// no `key=` value would still "succeed" syntactically and only fail much later as an opaque
+// LegiScan-side auth error off a bare fetch — this catches the real, common misconfiguration
+// (LEGISCAN_API_KEY unset in .env) at the one place both the operation name and the caller's
+// intent are still in scope, before any network call is attempted.
 function buildUrl(op, params, key) {
+  if (!key) {
+    throw new LegiScanApiError(`legiscan buildUrl(${op}): missing API key — LEGISCAN_API_KEY is not set`, { op });
+  }
   const usp = new URLSearchParams();
   usp.set('key', key);
   usp.set('op', op);
@@ -161,8 +169,21 @@ export async function getRollCall(rollCallId, { key, limiter = legiscanLimiter }
 // re-compared against ledgerRow here because the caller's own query is what scopes ledgerRow to
 // this session in the first place (a single-row lookup by the legiscan_datasets primary key,
 // migration 0010) — there is nothing left to cross-check at this pure layer.
+// Task 9 review item (c): a one-line defensive assert, sessionId vs ledgerRow.legiscan_session_id
+// — the caller's own query is what SHOULD scope ledgerRow to this session (see the comment above),
+// but "should" is exactly the kind of unverified assumption that has caused real bugs elsewhere in
+// this codebase (cross-jurisdiction terms collisions, cross-era mo_senate_id reuse); a mismatched
+// row here would silently gate a fetch decision against the WRONG session's hash. Cheap to check,
+// never worth skipping.
 export function decodeDatasetHashGate(sessionId, reportedHash, ledgerRow) {
   if (!ledgerRow) return { shouldFetch: true, reason: 'never_fetched' };
+  if (ledgerRow.legiscan_session_id !== sessionId) {
+    throw new Error(
+      `decodeDatasetHashGate: ledgerRow.legiscan_session_id=${ledgerRow.legiscan_session_id} does not `
+        + `match the requested sessionId=${sessionId} — the caller scoped its own lookup incorrectly; `
+        + 'never gating a fetch decision against the wrong session\'s ledger row',
+    );
+  }
   if (ledgerRow.dataset_hash === reportedHash) return { shouldFetch: false, reason: 'hash_unchanged' };
   return { shouldFetch: true, reason: 'hash_changed' };
 }
@@ -203,9 +224,13 @@ export async function getMonthlyQueryUsage(client, { source = SOURCE, now = new 
 // plausibly exceed capPerMonth. capPerMonth is the caller's job to supply (default 5,000/month,
 // overridable via LEGISCAN_MONTHLY_QUERY_CAP per Q2 — that env-reading belongs to the CLI driver,
 // Task 9, not this pure function).
+// Minor 2 (progress.md ruling, folded into Task 9 per the controller): refuse AT the cap, not
+// only strictly past it — `>=`, not `>`. "Well under the limit" is the intent (Global Constraints
+// #2); a run that would land EXACTLY on the configured cap has zero headroom left for anything
+// else that month and should refuse the same as one that would exceed it.
 export function assertUnderBudget(usage, plannedQueries, capPerMonth) {
   const projected = usage + plannedQueries;
-  if (projected > capPerMonth) {
+  if (projected >= capPerMonth) {
     throw new QueryBudgetExceededError(
       `LegiScan monthly query budget would be exceeded: ${usage} used + ${plannedQueries} planned `
         + `= ${projected} > cap ${capPerMonth}`,

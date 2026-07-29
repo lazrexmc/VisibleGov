@@ -6,6 +6,7 @@ import {
   SOURCE, ATTRIBUTION, LEGISCAN_MIN_INTERVAL_MS, legiscanLimiter,
   LegiScanApiError, DatasetHashMismatchError, QueryBudgetExceededError,
   checkStatus, decodeDatasetHashGate, getMonthlyQueryUsage, assertUnderBudget,
+  getSessionList, getDatasetList, getDataset, getBill, getRollCall,
 } from '../src/adapters/legiscan.js';
 
 const FIXDIR = 'tests/fixtures/research/legiscan';
@@ -157,6 +158,17 @@ test('decodeDatasetHashGate: ledger row present, hash differs (a real dataset up
   assert.equal(result.reason, 'hash_changed');
 });
 
+// ---- decodeDatasetHashGate: sessionId-vs-ledgerRow defensive assert (Task 9 review item (c)) ----
+
+test('decodeDatasetHashGate: a ledgerRow whose own legiscan_session_id does NOT match the '
+  + 'requested sessionId throws — never gates a fetch decision against the wrong session\'s row', () => {
+  const wrongSessionLedgerRow = { legiscan_session_id: 9999, dataset_hash: 'abc123' };
+  assert.throws(
+    () => decodeDatasetHashGate(1530, 'abc123', wrongSessionLedgerRow),
+    /does not match the requested sessionId=1530/,
+  );
+});
+
 // ---- getMonthlyQueryUsage / assertUnderBudget — fake ingestion_runs client, UTC month boundary
 // (ruling Q5), and the selectAll-pagination proof the brief explicitly asks for ----
 
@@ -255,9 +267,8 @@ test('getMonthlyQueryUsage propagates a selectAll read error rather than swallow
 
 // ---- assertUnderBudget (pure) ----
 
-test('assertUnderBudget does not throw when usage + planned stays at or under the cap', () => {
-  assert.doesNotThrow(() => assertUnderBudget(100, 50, 150));
-  assert.doesNotThrow(() => assertUnderBudget(0, 0, 0));
+test('assertUnderBudget does not throw when usage + planned stays strictly under the cap', () => {
+  assert.doesNotThrow(() => assertUnderBudget(100, 49, 150));
 });
 
 test('assertUnderBudget throws QueryBudgetExceededError when usage + planned would exceed the cap', () => {
@@ -270,6 +281,31 @@ test('assertUnderBudget throws QueryBudgetExceededError when usage + planned wou
     assert.equal(err.projected, 5010);
     return true;
   });
+});
+
+// ---- Minor 2 (progress.md ruling, folded into Task 9): refuse AT the cap too, not only past it ----
+
+test('assertUnderBudget: minor 2 — refuses AT the cap (projected === capPerMonth), not only strictly past it', () => {
+  assert.throws(() => assertUnderBudget(100, 50, 150), QueryBudgetExceededError);
+  assert.throws(() => assertUnderBudget(0, 0, 0), QueryBudgetExceededError);
+});
+
+// ---- buildUrl missing-key fail-fast (Task 9 review item (c)) — every public fetcher builds its
+// URL (buildUrl, unexported) BEFORE ever awaiting fetchWithLimit, so a missing key throws
+// synchronously inside the async function body and the returned promise rejects before any network
+// call is attempted — safe to assert here with zero live network risk. ----
+
+test('buildUrl missing-key fail-fast: every live-call wrapper rejects with LegiScanApiError when key is falsy, before any network call is attempted', async () => {
+  await assert.rejects(() => getSessionList('MO', { key: undefined }), (err) => {
+    assert.ok(err instanceof LegiScanApiError);
+    assert.match(err.message, /missing API key/);
+    assert.equal(err.op, 'getSessionList');
+    return true;
+  });
+  await assert.rejects(() => getDatasetList('MO', { key: '' }), /missing API key/);
+  await assert.rejects(() => getDataset(1608, 'ak', { key: null }), /missing API key/);
+  await assert.rejects(() => getBill(1050440, { key: undefined }), /missing API key/);
+  await assert.rejects(() => getRollCall(747209, { key: undefined }), /missing API key/);
 });
 
 // ---- DatasetHashMismatchError (defined/exported per interface; throw site belongs to Task 9) ----

@@ -10,6 +10,7 @@
     "ingest": "node --env-file=.env src/cli/ingest.js",
     "ingest-mo-house": "node --env-file=.env src/cli/ingest-mo-house.js",
     "ingest:mo-senate": "node --env-file=.env src/cli/ingest-mo-senate.js",
+    "ingest:legiscan": "node --env-file=.env src/cli/ingest-legiscan.js",
     "summarize": "node --env-file=.env src/cli/summarize.js",
     "verify": "node --env-file=.env src/cli/verify.js",
     "extract-terms": "node --env-file=.env src/cli/extract-terms.js",
