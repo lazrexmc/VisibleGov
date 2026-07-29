@@ -409,3 +409,44 @@ Task 2's manual-derived finding is now confirmed against a real, successful live
 just the manual's text. The `access_key` value itself is NEVER present in the committed fixture
 (the `getDataset` response envelope does not echo it back) and is redacted in every logged URL per
 the fix above.
+
+## Follow-up: session 1608 (2018 2nd Extraordinary Session) — closing the vote/ coverage gap
+
+**1 more live query** (coordinator-adjudicated follow-up: the 1579 fixture's `vote/` gap flagged
+above was worth closing immediately rather than deferring). `access_key` and `dataset_hash` for
+session 1608 were already held from the single `getDatasetList` call above — **not re-queried**,
+per explicit instruction:
+
+3. `getDataset`: `https://api.legiscan.com/?key=REDACTED&op=getDataset&id=1608&access_key=REDACTED`
+   (200 OK). **Total across both capture passes: 3 of ≤4 budgeted queries, no retry ever needed.**
+
+**Result: `vote/` is non-empty this time** — 8 real roll-call files (9 bill files, 189 people
+files, 105,793 bytes total dataset). Committed as a second, parallel fixture pair (same layout
+convention as the 1579 fixture):
+- `legiscan/mo-2018-dataset-1608.json` — raw `{status, dataset}` envelope incl. Base64 `zip`
+  (141,606 bytes). `dataset_hash` = `f07c2e26578db9db7daa683cfa054190`, matches the ZIP's own
+  `hash.md5` byte-for-byte (same free cross-check as the 1579 fixture).
+- `legiscan/dataset-2018-1608/MO/2018-2018_2nd_Special_Session/` — real internal path preserved:
+  `bill/` (9 files), `people/` (189 files — this session's roll calls reference far more
+  legislators than 1579's sponsor-only set), `vote/` (8 files), `LICENSE`, `README.md`, `hash.md5`.
+  209 files total, ~366KB decoded. Grepped clean of key material before committing (same check as
+  the 1579 fixture).
+
+**In-ZIP vote payload shape** (the real gap this follow-up closes — confirms whether the in-ZIP
+wrapping matches the standalone `getRollCall` API fixture `mo-2018-rollcall-747209.json`, or
+differs the way `people/`'s singular `person` wrapper differed from its plural directory name):
+**it matches.** `vote/<ROLL_CALL_ID>.json` (e.g. `vote/774412.json`) wraps as `{"roll_call": {...}}`
+— same wrapper key, same field set, as the already-tested Task 2 fixture:
+`roll_call_id`, `bill_id`, `yea`, `nay`, `nv`, `absent`, `total`, `passed`, `chamber`, `chamber_id`,
+`date`, `desc`, and `votes[].{people_id, vote_id, vote_text}` verbatim. Sample (`774412.json`,
+33 individual casts, Senate Third Reading, 29 Yea / 0 Nay / 4 Absent):
+```json
+{"roll_call":{"roll_call_id":774412,"bill_id":1126109,"date":"2018-09-14","desc":"Senate: Third Reading","yea":29,"nay":0,"nv":0,"absent":4,"total":33,"passed":1,"chamber":"S","chamber_id":60,"votes":[{"people_id":7512,"vote_id":1,"vote_text":"Yea"}, ...]}}
+```
+**One real (documented, not hidden) naming asymmetry to note for Task 4:** the directory is named
+`vote/` (singular) but the wrapper key inside each file is `roll_call`, not `vote` — a different
+noun entirely, not just a singular/plural variant. This matches the archive's own bundled
+`README.md`, which describes `vote/` as "The JSON payload from the getRollcall API hook" — so it's
+an expected, self-documented mismatch, not a surprise, but still a real trap for code that assumes
+directory name == top-level JSON key (as `people/` -> `person` already proved is NOT a safe
+assumption in this dataset format).
