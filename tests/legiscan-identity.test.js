@@ -1,0 +1,374 @@
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  normalizePersonName,
+  chamberFromRole,
+  normalizeLegiscanDistrict,
+  findCandidateLegislatorRows,
+  resolveOrCreateLegiscanPerson,
+  LegiscanIdentityConflictError,
+  UnrecognizedLegiscanRoleError,
+} from '../src/adapters/legiscan-identity.js';
+import { matchLegislator, eraOverlaps } from '../src/lib/person-identity.js';
+import { decodeDatasetZip, extractDatasetFiles } from '../src/adapters/legiscan-dataset.js';
+
+// Task 5 (docs/superpowers/plans/2026-07-29-legiscan-bulk-adapter.md) — person identity mapping.
+// CONTROLLER RULING 4 (task-5-brief.md): "Fixture test bed: session 1608's 189 people/ records."
+// Reused directly from Task 4's own proven decode pipeline (not re-read from raw JSON files) so
+// this test file exercises the SAME real payload every other adapter test in this plan does.
+const FIXDIR = 'tests/fixtures/research/legiscan';
+const envelope1608 = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-dataset-1608.json`, 'utf8'));
+const dataset1608 = await extractDatasetFiles(decodeDatasetZip(envelope1608.dataset.zip));
+
+// SB894's real sponsors[] (task-5-brief.md's own named test people): Douglas Libla (Sen,
+// SD-025), Travis Fitzwater (Rep, HD-049).
+const sb894 = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-SB894.json`, 'utf8')).bill;
+const libla = sb894.sponsors.find((s) => s.people_id === 14996);
+const fitzwater = sb894.sponsors.find((s) => s.people_id === 17512);
+
+// ---- fake Supabase-shaped client (no network, no live DB — hard rule) ----
+//
+// Same chainable-builder-of-plain-objects convention as tests/ingest-mo-senate-cli.test.js's
+// makeFakeLegislatorsDb: enough of the real supabase-js query-builder shape to drive
+// src/adapters/legiscan-identity.js's actual call chains, nothing more. `terms` rows carry a
+// `legislator_id` FK into `legislators`, joined in-memory exactly the way
+// `.select('...,legislators(full_name)')` would resolve server-side.
+function makeFakeDb({
+  legislatorRows = [], termRows = [], missingColumn = false, termsThrows = false,
+} = {}) {
+  const legislators = [...legislatorRows];
+  const terms = [...termRows];
+  let counter = 0;
+  const missingColumnError = {
+    code: 'PGRST204',
+    message: "Could not find the 'legiscan_people_id' column of 'legislators' in the schema cache",
+  };
+  const client = {
+    from(table) {
+      if (table === 'terms') {
+        if (termsThrows) throw new Error('must not query terms on the exact-key repeat-call path — isolation is the point');
+        return {
+          select: () => ({
+            eq: (c1, v1) => ({
+              eq: async (c2, v2) => {
+                const matched = terms.filter((t) => t[c1] === v1 && t[c2] === v2);
+                const data = matched.map((t) => {
+                  const leg = legislators.find((l) => l.id === t.legislator_id);
+                  return {
+                    legislator_id: t.legislator_id,
+                    chamber: t.chamber,
+                    district: t.district,
+                    start_date: t.start_date,
+                    end_date: t.end_date,
+                    legislators: leg ? { full_name: leg.full_name } : null,
+                  };
+                });
+                return { data, error: null };
+              },
+            }),
+          }),
+        };
+      }
+      assert.equal(table, 'legislators');
+      return {
+        select: () => ({
+          eq: (c1, v1) => ({
+            maybeSingle: async () => {
+              if (missingColumn && c1 === 'legiscan_people_id') return { data: null, error: missingColumnError };
+              const found = legislators.find((l) => l[c1] === v1);
+              return { data: found ? { ...found } : null, error: null };
+            },
+            single: async () => {
+              const found = legislators.find((l) => l[c1] === v1);
+              if (!found) return { data: null, error: { message: `no row with ${c1}=${v1}` } };
+              return { data: { ...found }, error: null };
+            },
+          }),
+        }),
+        insert: (row) => ({
+          select: () => ({
+            single: async () => {
+              if (missingColumn) return { data: null, error: missingColumnError };
+              counter += 1;
+              const inserted = { id: `leg-${counter}`, legiscan_people_id: null, ...row };
+              legislators.push(inserted);
+              return { data: { id: inserted.id }, error: null };
+            },
+          }),
+        }),
+        update: (patch) => ({
+          eq: async (c1, v1) => {
+            if (missingColumn && Object.prototype.hasOwnProperty.call(patch, 'legiscan_people_id')) {
+              return { error: missingColumnError };
+            }
+            const found = legislators.find((l) => l[c1] === v1);
+            if (found) Object.assign(found, patch);
+            return { error: null };
+          },
+        }),
+      };
+    },
+  };
+  return { client, legislators, terms };
+}
+
+// ---- normalizePersonName (CONTROLLER RULING 3: conservative ONLY) ----
+
+test('normalizePersonName: case/whitespace/punctuation folding', () => {
+  assert.equal(normalizePersonName('  Douglas   Libla  '), 'douglas libla');
+  assert.equal(normalizePersonName('O\'Brien, Mary-Jane'), 'mary-jane obrien');
+  assert.equal(normalizePersonName('Travis Fitzwater'), 'travis fitzwater');
+});
+
+test('normalizePersonName: "Last, First" <-> "First Last" reordering', () => {
+  assert.equal(normalizePersonName('Onder, Robert F.'), normalizePersonName('Robert F. Onder'));
+  assert.equal(normalizePersonName('Onder, Robert F.'), 'robert f onder');
+});
+
+test('normalizePersonName: CONTROLLER RULING 3 — NO nickname table. "Bob Onder" and "Robert Onder" are DIFFERENT normalized names, by design (a miss creates a benign duplicate; a wrong merge corrupts attribution)', () => {
+  assert.notEqual(normalizePersonName('Bob Onder'), normalizePersonName('Robert Onder'));
+});
+
+// ---- chamberFromRole / normalizeLegiscanDistrict ----
+
+test('chamberFromRole: "Sen" -> senate, "Rep" -> house (verified-exhaustive against the real 189-person fixture)', () => {
+  assert.equal(chamberFromRole('Sen'), 'senate');
+  assert.equal(chamberFromRole('Rep'), 'house');
+});
+
+test('chamberFromRole: an unrecognized role throws UnrecognizedLegiscanRoleError, never silently guessed', () => {
+  assert.throws(() => chamberFromRole('Joint'), UnrecognizedLegiscanRoleError);
+});
+
+test('normalizeLegiscanDistrict: LegiScan\'s "SD-002"/"HD-049" -> the bare-number convention mo_senate_id/mo_house_id already use ("2"/"49")', () => {
+  assert.equal(normalizeLegiscanDistrict('SD-002'), '2');
+  assert.equal(normalizeLegiscanDistrict('HD-049'), '49');
+  assert.equal(normalizeLegiscanDistrict('SD-025'), '25');
+});
+
+test('normalizeLegiscanDistrict: an unrecognized shape passes through unchanged rather than guessing', () => {
+  assert.equal(normalizeLegiscanDistrict('AL'), 'AL');
+});
+
+// ---- fixture test bed: real numbers from the 189-person fixture (CONTROLLER RULING 4) ----
+
+test('fixture test bed: dataset 1608 has 189 people, every one carries a district, role is Rep(156)/Sen(33) only', () => {
+  assert.equal(dataset1608.people.length, 189);
+  const withDistrict = dataset1608.people.filter((p) => p.district && p.district.trim() !== '');
+  assert.equal(withDistrict.length, 189, 'every one of the 189 real people records has a district');
+  const roleCounts = {};
+  for (const p of dataset1608.people) roleCounts[p.role] = (roleCounts[p.role] ?? 0) + 1;
+  assert.deepEqual(roleCounts, { Rep: 156, Sen: 33 });
+});
+
+test('fixture test bed: Bob/Robert Onder (people_id 16351) IS present in the real 189-person fixture', () => {
+  const onder = dataset1608.people.find((p) => p.people_id === 16351);
+  assert.ok(onder, 'Onder must be present in dataset-2018-1608');
+  assert.deepEqual(
+    {
+      people_id: onder.people_id, name: onder.name, role: onder.role, district: onder.district, nickname: onder.nickname,
+    },
+    {
+      people_id: 16351, name: 'Robert Onder', role: 'Sen', district: 'SD-002', nickname: 'Bob',
+    },
+  );
+});
+
+// ---- matchLegislator / eraOverlaps (src/lib/person-identity.js, the reusable core) ----
+
+test('eraOverlaps: an open-ended term (end_date null) overlaps any era that has started', () => {
+  assert.equal(eraOverlaps({ start_date: '2015-01-07', end_date: null }, { start: '2018-01-01', end: '2018-12-31' }), true);
+});
+
+test('eraOverlaps: a term that ended before the era window starts does not overlap', () => {
+  assert.equal(eraOverlaps({ start_date: '2010-01-01', end_date: '2014-12-31' }, { start: '2018-01-01', end: '2018-12-31' }), false);
+});
+
+test('matchLegislator: dedupes by legislator_id — two overlapping terms rows for the SAME person is one match, not ambiguous', () => {
+  const rows = [
+    {
+      legislator_id: 'leg-1', full_name: 'Jane Smith', chamber: 'senate', district: '7', start_date: '2013-01-01', end_date: '2016-12-31',
+    },
+    {
+      legislator_id: 'leg-1', full_name: 'Jane Smith', chamber: 'senate', district: '7', start_date: '2017-01-01', end_date: null,
+    },
+  ];
+  const result = matchLegislator({
+    full_name: 'Jane Smith', chamber: 'senate', district: '7', era: { start: '2018-01-01', end: '2018-12-31' },
+  }, rows);
+  assert.equal(result.outcome, 'match');
+  assert.equal(result.matches.length, 1);
+});
+
+// ---- findCandidateLegislatorRows: era-scoped, NEVER a bare district lookup ----
+
+test('findCandidateLegislatorRows: same district, DIFFERENT chamber does not match — this is never a bare district lookup', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }],
+    termRows: [{
+      legislator_id: 'leg-1', chamber: 'house', district: '2', start_date: '2015-01-01', end_date: null,
+    }],
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate', // asking for SENATE district 2 — the fake only has a HOUSE district 2 row
+    district: '2',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 0);
+});
+
+test('findCandidateLegislatorRows: a term outside the session era window is excluded even with a matching chamber/district/name', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }],
+    termRows: [{
+      legislator_id: 'leg-1', chamber: 'senate', district: '2', start_date: '2005-01-01', end_date: '2009-12-31',
+    }],
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate',
+    district: '2',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 0);
+});
+
+// ---- resolveOrCreateLegiscanPerson: the three-outcome resolver ----
+
+test('resolveOrCreateLegiscanPerson: REAL Libla sponsor (people_id 14996, Sen, SD-025), zero candidates -> new row created, legiscan_people_id set', async () => {
+  const { client, legislators } = makeFakeDb();
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', libla, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.matched, false);
+  assert.equal(result.created, true);
+  assert.equal(result.reason, 'no_candidate');
+  assert.equal(legislators.length, 1);
+  assert.deepEqual(legislators[0], {
+    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', party: 'R', run_id: 'run-1',
+  });
+});
+
+test('resolveOrCreateLegiscanPerson: REAL Fitzwater sponsor (people_id 17512, Rep, HD-049) against exactly ONE era-overlapping candidate -> additivePatch-style attach, no new row', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-fitz', full_name: 'Travis Fitzwater', party: 'R', legiscan_people_id: null, run_id: 'seed',
+    }],
+    termRows: [{
+      legislator_id: 'leg-fitz', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
+    }],
+  });
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', fitzwater, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.matched, true);
+  assert.equal(result.created, false);
+  assert.equal(result.reason, 'single_candidate');
+  assert.equal(result.legislator_id, 'leg-fitz');
+  assert.equal(legislators.length, 1, 'no new row — the existing candidate was patched');
+  assert.equal(legislators[0].legiscan_people_id, 17512);
+});
+
+test('resolveOrCreateLegiscanPerson: 2 candidates with overlapping windows (same-surname/same-name collision within one era, the mo-senate bug\'s exact shape) -> FAIL LOUD, new row created, NEVER guesses between them', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [
+      {
+        id: 'leg-a', full_name: 'Jane Newperson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+      {
+        id: 'leg-b', full_name: 'Jane Newperson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+    ],
+    termRows: [
+      {
+        legislator_id: 'leg-a', chamber: 'senate', district: '7', start_date: '2015-01-01', end_date: null,
+      },
+      {
+        legislator_id: 'leg-b', chamber: 'senate', district: '7', start_date: '2016-01-01', end_date: null,
+      },
+    ],
+  });
+  const person = {
+    people_id: 99001, name: 'Jane Newperson', role: 'Sen', district: 'SD-007', party: null,
+  };
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.matched, false);
+  assert.equal(result.created, true);
+  assert.equal(result.reason, 'ambiguous');
+  assert.equal(result.candidateCount, 2);
+  assert.equal(legislators.length, 3, 'a NEW third row is created — neither ambiguous candidate is guessed at');
+  assert.equal(legislators.find((l) => l.id === 'leg-a').legiscan_people_id, null, 'leg-a untouched');
+  assert.equal(legislators.find((l) => l.id === 'leg-b').legiscan_people_id, null, 'leg-b untouched');
+});
+
+test('resolveOrCreateLegiscanPerson: repeat call for an already-legiscan_people_id-tagged person takes the safe unique-key path — findCandidateLegislatorRows/terms is NEVER queried (isolation is the point)', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-libla', full_name: 'Douglas Libla', party: 'R', legiscan_people_id: 14996, run_id: 'seed',
+    }],
+    termsThrows: true, // proves the fuzzy-match path is never even reached
+  });
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-2', libla, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.matched, true);
+  assert.equal(result.created, false);
+  assert.equal(result.reason, 'exact_key');
+  assert.equal(result.legislator_id, 'leg-libla');
+  assert.equal(legislators.length, 1, 'no duplicate row on a repeat call');
+});
+
+test('resolveOrCreateLegiscanPerson: a single candidate that already carries a DIFFERENT legiscan_people_id is a hard error (LegiscanIdentityConflictError), never a silent overwrite', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-fitz', full_name: 'Travis Fitzwater', party: 'R', legiscan_people_id: 55555, run_id: 'seed',
+    }],
+    termRows: [{
+      legislator_id: 'leg-fitz', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
+    }],
+  });
+  await assert.rejects(
+    () => resolveOrCreateLegiscanPerson(client, 'run-1', fitzwater, { startDate: '2018-01-01', endDate: '2018-12-31' }),
+    LegiscanIdentityConflictError,
+  );
+  assert.equal(legislators[0].legiscan_people_id, 55555, 'the existing (conflicting) value is untouched — no silent overwrite');
+});
+
+test('resolveOrCreateLegiscanPerson: missing legiscan_people_id column (migration 0010 not yet applied) is reported honestly, gated:true, never thrown', async () => {
+  const { client, legislators } = makeFakeDb({ missingColumn: true });
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', libla, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.gated, true);
+  assert.equal(result.matched, false);
+  assert.match(result.note, /migration 0010/);
+  assert.equal(legislators.length, 0, 'nothing written while gated');
+});
+
+// ---- the real Onder record: THE named worked example (task-5-brief.md CONTROLLER RULING 2) — a
+// concrete, real finding, not assumed ----
+
+test('resolveOrCreateLegiscanPerson: REAL Onder fixture record ("Robert Onder", people_id 16351) against a fake row mirroring his LIVE mo_senate shape ("Bob Onder") — a genuine no_match under CONTROLLER RULING 3\'s conservative-only normalization; a benign duplicate row is created, NOT a merge', async () => {
+  const onder = dataset1608.people.find((p) => p.people_id === 16351);
+  const { client, legislators } = makeFakeDb({
+    // Mirrors the REAL live mo_senate roster shape exactly (tests/mo-senate-web.test.js /
+    // tests/ingest-mo-senate-cli.test.js: full_name 'Bob Onder', mo_senate_id '2'; docs/research/
+    // 2026-07-28-mo-senate-sources.md: district 2, term 2015-01-07 to 2023-01-04).
+    legislatorRows: [{
+      id: 'leg-onder-live', full_name: 'Bob Onder', party: null, surname: 'Onder', mo_senate_id: '2', legiscan_people_id: null, run_id: 'seed',
+    }],
+    termRows: [{
+      legislator_id: 'leg-onder-live', chamber: 'senate', district: '2', start_date: '2015-01-07', end_date: '2023-01-04',
+    }],
+  });
+
+  // dataset-2018-1608's own real roll-call dates fall in September 2018 (e.g. vote/774312.json:
+  // "date":"2018-09-12") — squarely inside Onder's 2015-2023 term, so the era filter is NOT what
+  // produces the no_match below.
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', onder, { startDate: '2018-09-01', endDate: '2018-09-30' });
+
+  assert.equal(result.matched, false);
+  assert.equal(result.created, true);
+  assert.equal(result.reason, 'no_candidate');
+  assert.equal(legislators.length, 2, 'LegiScan\'s "Robert Onder" gets its OWN new row — a benign duplicate, per ruling 3\'s asymmetric-cost design');
+  const newRow = legislators.find((l) => l.id === result.legislator_id);
+  assert.equal(newRow.full_name, 'Robert Onder');
+  assert.equal(newRow.legiscan_people_id, 16351);
+  assert.equal(legislators.find((l) => l.id === 'leg-onder-live').legiscan_people_id, null, 'the live mo_senate row is untouched — no wrong merge');
+});
