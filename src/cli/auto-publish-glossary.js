@@ -1,4 +1,6 @@
-import { getClient, openRun, closeRun, isMissingRelationError } from '../lib/db.js';
+import {
+  getClient, openRun, closeRun, isMissingRelationError, selectAll,
+} from '../lib/db.js';
 import { nextStatus, mapNoteAction, glossVerificationBadge, latestVerificationByTerm, isPublishCompletenessViolation } from '../review/server.js';
 
 // Trust model v3 (docs/superpowers/specs/2026-07-28-trust-model-v3-design.md), mechanism 2, full
@@ -37,24 +39,42 @@ export function parseArgs(argv) {
 // ---- pure parts ----
 
 // planAutoPublish: partitions every status='draft' glossary_terms row into eligible (auto-
-// publishable) and three honest, mutually-exclusive skip buckets — mirrors gloss.js's
+// publishable) and four honest, mutually-exclusive skip buckets — mirrors gloss.js's
 // planGlossing exhaustive-partition style. Eligibility never touches a flag, an unverified item,
 // or a needs_mapping row (no resolved citation/source to stand behind) — the exact same "clean"
 // state a human reviewer would see via glossVerificationBadge, no separate/looser "auto" rule.
-export function planAutoPublish(terms, latestVerificationByTermMap) {
+//
+// Final-review finding 3 (IMPORTANT, controller ruling): a clean verification only proves the TEXT
+// the verifier actually checked was clean — not whatever gloss_md currently holds. If a review-page
+// edit (the ONLY way gloss_md changes after initial creation — see handleGlossaryDecision) landed
+// AFTER that verification ran, the clean verdict is stale relative to the current text and this
+// term must be excluded, honestly, under its own bucket — never silently auto-published on
+// unverified text. No migration for this (0007 is already applied): a timestamp comparison against
+// glossary_notes' newest 'edited' row for the term, per the ruling; content-hash binding to the
+// exact verified text can come later via a migration if wanted. latestEditNoteByTermMap defaults to
+// empty so existing callers/tests that don't care about this axis are unaffected.
+export function planAutoPublish(terms, latestVerificationByTermMap, latestEditNoteByTermMap = new Map()) {
   const eligible = [];
   const needsMapping = [];
   const noGloss = [];
   const flaggedOrUnverified = [];
+  const editedSinceVerification = [];
   for (const t of terms) {
     if (t.needs_mapping) { needsMapping.push(t); continue; }
     if (!t.gloss_md) { noGloss.push(t); continue; }
     const verification = latestVerificationByTermMap.get(t.id) ?? null;
     const badge = glossVerificationBadge(verification);
     if (badge.state !== 'clean') { flaggedOrUnverified.push(t); continue; }
+    const latestEditAt = latestEditNoteByTermMap.get(t.id) ?? null;
+    if (latestEditAt && (latestEditAt > (verification.created_at ?? ''))) {
+      editedSinceVerification.push(t);
+      continue;
+    }
     eligible.push({ term: t, verification });
   }
-  return { eligible, needsMapping, noGloss, flaggedOrUnverified };
+  return {
+    eligible, needsMapping, noGloss, flaggedOrUnverified, editedSinceVerification,
+  };
 }
 
 // Recognized, expected failure: the publish hop's DB CHECK (glossary_terms_published_complete) is
@@ -103,11 +123,16 @@ export async function loadDraftTerms(client, dryRun) {
 // Full small-table select + in-JS filter (never .in('term_id', ids) over a large candidate set) —
 // same header-overflow-avoidance pattern as the review server's handleGlossaryQueue, for the same
 // reason (see that function's own comment: 400+ ids overflowed undici's 16KB header cap).
+//
+// Final-review finding 1 (CRITICAL, live-verified): this used to be a bare, unbounded .select() —
+// past Supabase's 1000-row-per-request cap, "latest verification" was computed over an arbitrary
+// 1000-row subset, so a newer FLAGGED row could be invisible and a term with a stale/absent
+// verification in that subset could get auto-published as if it were clean. Routed through
+// selectAll (src/lib/db.js), the one shared pagination helper every full-table-ish select in this
+// codebase now uses, per the fix wave's controller ruling.
 export async function loadLatestVerifications(client, termIds, dryRun) {
   if (termIds.length === 0) return { map: new Map(), tableMissing: false };
-  const { data, error } = await client
-    .from(GLOSSARY_VERIFICATIONS_TABLE)
-    .select('term_id,overall,verdicts,model,created_at');
+  const { data, error } = await selectAll(client, GLOSSARY_VERIFICATIONS_TABLE, 'term_id,overall,verdicts,model,created_at');
   if (error) {
     if (dryRun && isMissingRelationError(error, GLOSSARY_VERIFICATIONS_TABLE)) {
       return { map: new Map(), tableMissing: true };
@@ -117,6 +142,35 @@ export async function loadLatestVerifications(client, termIds, dryRun) {
   const idSet = new Set(termIds);
   const rows = (data ?? []).filter((r) => idSet.has(r.term_id));
   return { map: latestVerificationByTerm(rows), tableMissing: false };
+}
+
+// Final-review finding 3 (IMPORTANT): auto-publish eligibility was not bound to the verified TEXT
+// — a review-page edit to gloss_md AFTER a term's latest clean verification changed the text the
+// verifier actually checked, but planAutoPublish had no way to know that and would auto-publish the
+// (now-unverified) edited text anyway. glossary_notes' own 'edited' action rows (written by
+// src/review/server.js's handleGlossaryDecision on every edit) are the durable signal — same
+// selectAll pagination convention as loadLatestVerifications above, filtered server-side to
+// action='edited' (a fixed-string filter, not an id list, so it carries none of the header-overflow
+// risk loadLatestVerifications/handleGlossaryQueue guard against). Reduces to the newest edit's
+// created_at per term_id — only the TIMESTAMP is needed by planAutoPublish's comparison, not the
+// full row, so the map holds a bare ISO string rather than mirroring latestVerificationByTerm's
+// whole-row shape.
+export async function loadLatestEditNotes(client, dryRun) {
+  const { data, error } = await selectAll(client, GLOSSARY_NOTES_TABLE, 'term_id,created_at', {
+    filter: (q) => q.eq('action', 'edited'),
+  });
+  if (error) {
+    if (dryRun && isMissingRelationError(error, GLOSSARY_NOTES_TABLE)) {
+      return { map: new Map(), tableMissing: true };
+    }
+    throw new Error(`${GLOSSARY_NOTES_TABLE} lookup failed: ${error.message}`);
+  }
+  const map = new Map();
+  for (const r of data ?? []) {
+    const existing = map.get(r.term_id);
+    if (existing === undefined || (r.created_at ?? '') > existing) map.set(r.term_id, r.created_at);
+  }
+  return { map, tableMissing: false };
 }
 
 // autoPublishOne: the two-hop transition (draft -> approved -> published) for one eligible term,
@@ -171,7 +225,11 @@ async function main() {
   const { terms, tableMissing: termsMissing } = await loadDraftTerms(client, args.dryRun);
   const { map: latestVerification, tableMissing: verMissing } =
     await loadLatestVerifications(client, terms.map((t) => t.id), args.dryRun);
-  const { eligible, needsMapping, noGloss, flaggedOrUnverified } = planAutoPublish(terms, latestVerification);
+  const { map: latestEditNote, tableMissing: notesMissing } =
+    await loadLatestEditNotes(client, args.dryRun);
+  const {
+    eligible, needsMapping, noGloss, flaggedOrUnverified, editedSinceVerification,
+  } = planAutoPublish(terms, latestVerification, latestEditNote);
 
   if (args.dryRun) {
     const out = {
@@ -182,10 +240,15 @@ async function main() {
         needsMappingSkipped: needsMapping.length,
         noGlossSkipped: noGloss.length,
         flaggedOrUnverifiedSkipped: flaggedOrUnverified.length,
+        // Finding 3: never silent — a term excluded because its gloss_md was edited AFTER its
+        // latest clean verification gets its own honest count, distinct from "never verified at
+        // all" (flaggedOrUnverifiedSkipped) and from every other skip reason.
+        editedSinceVerificationSkipped: editedSinceVerification.length,
       },
       eligible: eligible.map(({ term }) => ({ id: term.id, term: term.term })),
+      editedSinceVerification: editedSinceVerification.map((t) => ({ id: t.id, term: t.term })),
     };
-    if (termsMissing || verMissing) out.note = '(glossary_terms or glossary_verifications missing — migration 0007 not applied; treating as zero candidates)';
+    if (termsMissing || verMissing || notesMissing) out.note = '(glossary_terms, glossary_verifications, or glossary_notes missing — migration 0007 not applied; treating as zero candidates)';
     console.log(JSON.stringify(out, null, 2));
     return;
   }
@@ -207,10 +270,15 @@ async function main() {
       }
     }
 
-    const counts = { eligible: eligible.length, published, failed: failed.length };
+    const counts = {
+      eligible: eligible.length, published, failed: failed.length, editedSinceVerification: editedSinceVerification.length,
+    };
     const status = failed.length === 0 ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, { counts, failed });
-    console.log(JSON.stringify({ mode: 'live', run_id: runId, status, eligible: eligible.length, published, failed }, null, 2));
+    const editedSinceVerificationDetail = editedSinceVerification.map((t) => ({ id: t.id, term: t.term }));
+    await closeRun(client, runId, status, { counts, failed, editedSinceVerification: editedSinceVerificationDetail });
+    console.log(JSON.stringify({
+      mode: 'live', run_id: runId, status, eligible: eligible.length, published, failed, editedSinceVerification: editedSinceVerificationDetail,
+    }, null, 2));
     if (failed.length > 0) process.exitCode = 2;
   } catch (err) {
     await closeRun(client, runId, 'failed', { error: String(err) });
