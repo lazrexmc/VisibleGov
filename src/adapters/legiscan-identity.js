@@ -21,6 +21,20 @@ export { normalizePersonName };
 // in this plan's fixtures actually carries verbatim; role_id is redundant with it and not used.
 const ROLE_CHAMBER = { Sen: 'senate', Rep: 'house' };
 
+// MO_JURISDICTION_ID — CRITICAL fix (round 2, reviewer-reproduced): `terms` is a SHARED table
+// across every jurisdiction this repo ingests (us-congress AND mo-legislature use the exact same
+// table, same chamber/district vocabulary — see src/cli/ingest.js's persistUsCongress/
+// persistMoLegislature, both writing plain `terms` rows). Without a jurisdiction filter, a US
+// Congress member's `terms` row (plain numeric district, chamber 'house'/'senate' — the SAME
+// vocabulary MO uses) can collide with a LegiScan MO sponsor's chamber+district+name and get
+// treated as a real candidate: the reviewer reproduced a MO state sponsor's legiscan_people_id
+// attaching to a FEDERAL legislator row as a false 'single_candidate' match. This adapter is
+// MO-only by construction (the whole plan is MO bill/vote backfill) — hardcoded here, not passed
+// as a parameter, and NOT pushed down into person-identity.js (which stays jurisdiction-agnostic
+// per CONTROLLER RULING 1 — a future bioguide/openstates source would supply its OWN jurisdiction
+// scoping the same way, at the DB-query layer, not inside the shared matcher).
+const MO_JURISDICTION_ID = 'mo-legislature';
+
 export class UnrecognizedLegiscanRoleError extends Error {
   constructor(message, meta = {}) {
     super(message);
@@ -95,6 +109,11 @@ export function buildLegiscanNameVariants(legiscanPerson) {
 // — never a duplicate/second candidate entry for a legislator that already has terms evidence.
 // A legislator row with NEITHER a `terms` row NOR the chamber-relevant column set is never fetched
 // by either query, so it is never a candidate at all — an honest exclusion, not a silent gap.
+//
+// No jurisdiction filter needed here (unlike the `terms` query's CRITICAL fix above): mo_senate_id
+// and mo_house_id are MO-only columns by construction (migrations 0008/0005 — stamped ONLY by the
+// mo-senate/mo-house drivers), never set by us-congress or any other jurisdiction's ingestion, so
+// there is no cross-jurisdiction collision surface at this layer.
 const CHAMBER_DISTRICT_COLUMN = { senate: 'mo_senate_id', house: 'mo_house_id' };
 
 async function fetchColumnDerivedCandidates(client, chamber, district, alreadyFoundLegislatorIds) {
@@ -136,6 +155,9 @@ export async function findCandidateLegislatorRows(client, {
   const { data, error } = await client
     .from('terms')
     .select('legislator_id,chamber,district,start_date,end_date,legislators(full_name)')
+    .eq('jurisdiction_id', MO_JURISDICTION_ID) // CRITICAL fix (round 2): terms is shared across
+    // jurisdictions — without this, a same-chamber/same-district/same-name `terms` row from a
+    // DIFFERENT jurisdiction (e.g. us-congress) is indistinguishable from a real MO candidate.
     .eq('chamber', chamber)
     .eq('district', district);
   if (error) throw new Error(`legiscan-identity candidate lookup failed: ${error.message}`);
@@ -187,6 +209,21 @@ function gatedResult(note) {
 const MISSING_COLUMN_NOTE = 'legislators.legiscan_people_id column not found — migration 0010 '
   + '(supabase/migrations/0010_legiscan_identity_and_ledger.sql) not yet applied; person resolution '
   + 'skipped for this call. Never guessed — retried automatically once the migration lands.';
+
+// legiscanSurname — MINOR 1 fix (round 2, promoted by review): a brand-new `legislators` row
+// created on the no_candidate/ambiguous paths never populated `surname`, unlike
+// ensureRosterIdentities' own inserts (src/cli/ingest-mo-senate.js) — a future surname-based
+// resolver (e.g. resolveMoSenator's own shape) would be blind to LegiScan-originated rows.
+// RULING: populate it from the SOURCE's own printed `last_name` field (verified present on every
+// real fixture person record — Onder/Libla/Fitzwater all carry it verbatim), NEVER derived by
+// splitting `full_name` — this project has been burned twice already by a surname reconstructed
+// from a full-name split breaking on a multi-word first or last name (migration
+// 0006_legislators_surname.sql's own header comment documents the first occurrence). Absent on a
+// given record (falsy/empty) -> null, never guessed.
+function legiscanSurname(legiscanPerson) {
+  const lastName = String(legiscanPerson.last_name ?? '').trim();
+  return lastName || null;
+}
 
 // ---- the three-outcome resolver (CONTROLLER RULING 2, task-5-brief.md's explicit interface) ----
 //
@@ -240,7 +277,11 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
     const { data: created, error: insErr } = await client
       .from('legislators')
       .insert({
-        full_name: legiscanPerson.name, party: legiscanPerson.party ?? null, legiscan_people_id: legiscanPerson.people_id, run_id: runId,
+        full_name: legiscanPerson.name,
+        surname: legiscanSurname(legiscanPerson),
+        party: legiscanPerson.party ?? null,
+        legiscan_people_id: legiscanPerson.people_id,
+        run_id: runId,
       })
       .select('id')
       .single();
@@ -300,7 +341,11 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
   const { data: created, error: insErr } = await client
     .from('legislators')
     .insert({
-      full_name: legiscanPerson.name, party: legiscanPerson.party ?? null, legiscan_people_id: legiscanPerson.people_id, run_id: runId,
+      full_name: legiscanPerson.name,
+      surname: legiscanSurname(legiscanPerson),
+      party: legiscanPerson.party ?? null,
+      legiscan_people_id: legiscanPerson.people_id,
+      run_id: runId,
     })
     .select('id')
     .single();

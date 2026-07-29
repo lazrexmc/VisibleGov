@@ -49,27 +49,33 @@ function makeFakeDb({
     from(table) {
       if (table === 'terms') {
         if (termsThrows) throw new Error('must not query terms on the exact-key repeat-call path — isolation is the point');
-        return {
-          select: () => ({
-            eq: (c1, v1) => ({
-              eq: async (c2, v2) => {
-                const matched = terms.filter((t) => t[c1] === v1 && t[c2] === v2);
-                const data = matched.map((t) => {
-                  const leg = legislators.find((l) => l.id === t.legislator_id);
-                  return {
-                    legislator_id: t.legislator_id,
-                    chamber: t.chamber,
-                    district: t.district,
-                    start_date: t.start_date,
-                    end_date: t.end_date,
-                    legislators: leg ? { full_name: leg.full_name } : null,
-                  };
-                });
-                return { data, error: null };
-              },
-            }),
-          }),
-        };
+        // Generic thenable chain — accumulates every .eq() filter and resolves on `await`,
+        // regardless of how many .eq() calls are chained first (the real query now chains THREE:
+        // jurisdiction_id, chamber, district — CRITICAL fix round 2). Mirrors the real supabase-js
+        // query builder's own "thenable at any point after .select()" shape.
+        const buildQuery = (filters) => ({
+          eq: (col, val) => buildQuery([...filters, [col, val]]),
+          then: (resolve, reject) => {
+            try {
+              const matched = terms.filter((t) => filters.every(([c, v]) => t[c] === v));
+              const data = matched.map((t) => {
+                const leg = legislators.find((l) => l.id === t.legislator_id);
+                return {
+                  legislator_id: t.legislator_id,
+                  chamber: t.chamber,
+                  district: t.district,
+                  start_date: t.start_date,
+                  end_date: t.end_date,
+                  legislators: leg ? { full_name: leg.full_name } : null,
+                };
+              });
+              resolve({ data, error: null });
+            } catch (err) {
+              reject(err);
+            }
+          },
+        });
+        return { select: () => buildQuery([]) };
       }
       assert.equal(table, 'legislators');
       return {
@@ -217,7 +223,7 @@ test('findCandidateLegislatorRows: same district, DIFFERENT chamber does not mat
   const { client } = makeFakeDb({
     legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }],
     termRows: [{
-      legislator_id: 'leg-1', chamber: 'house', district: '2', start_date: '2015-01-01', end_date: null,
+      legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '2', start_date: '2015-01-01', end_date: null,
     }],
   });
   const candidates = await findCandidateLegislatorRows(client, {
@@ -234,7 +240,7 @@ test('findCandidateLegislatorRows: a term outside the session era window is excl
   const { client } = makeFakeDb({
     legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }],
     termRows: [{
-      legislator_id: 'leg-1', chamber: 'senate', district: '2', start_date: '2005-01-01', end_date: '2009-12-31',
+      legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: '2005-01-01', end_date: '2009-12-31',
     }],
   });
   const candidates = await findCandidateLegislatorRows(client, {
@@ -257,7 +263,7 @@ test('resolveOrCreateLegiscanPerson: REAL Libla sponsor (people_id 14996, Sen, S
   assert.equal(result.reason, 'no_candidate');
   assert.equal(legislators.length, 1);
   assert.deepEqual(legislators[0], {
-    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', party: 'R', run_id: 'run-1',
+    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', surname: 'Libla', party: 'R', run_id: 'run-1',
   });
 });
 
@@ -267,7 +273,7 @@ test('resolveOrCreateLegiscanPerson: REAL Fitzwater sponsor (people_id 17512, Re
       id: 'leg-fitz', full_name: 'Travis Fitzwater', party: 'R', legiscan_people_id: null, run_id: 'seed',
     }],
     termRows: [{
-      legislator_id: 'leg-fitz', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
+      legislator_id: 'leg-fitz', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
     }],
   });
   const result = await resolveOrCreateLegiscanPerson(client, 'run-1', fitzwater, { startDate: '2018-01-01', endDate: '2018-12-31' });
@@ -291,10 +297,10 @@ test('resolveOrCreateLegiscanPerson: 2 candidates with overlapping windows (same
     ],
     termRows: [
       {
-        legislator_id: 'leg-a', chamber: 'senate', district: '7', start_date: '2015-01-01', end_date: null,
+        legislator_id: 'leg-a', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2015-01-01', end_date: null,
       },
       {
-        legislator_id: 'leg-b', chamber: 'senate', district: '7', start_date: '2016-01-01', end_date: null,
+        legislator_id: 'leg-b', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2016-01-01', end_date: null,
       },
     ],
   });
@@ -332,7 +338,7 @@ test('resolveOrCreateLegiscanPerson: a single candidate that already carries a D
       id: 'leg-fitz', full_name: 'Travis Fitzwater', party: 'R', legiscan_people_id: 55555, run_id: 'seed',
     }],
     termRows: [{
-      legislator_id: 'leg-fitz', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
+      legislator_id: 'leg-fitz', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
     }],
   });
   await assert.rejects(
@@ -405,10 +411,10 @@ test('resolveOrCreateLegiscanPerson: a nickname variant that collides with a DIF
     ],
     termRows: [
       {
-        legislator_id: 'leg-given', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
+        legislator_id: 'leg-given', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
       },
       {
-        legislator_id: 'leg-nick', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
+        legislator_id: 'leg-nick', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
       },
     ],
   });
@@ -431,7 +437,7 @@ test('findCandidateLegislatorRows: terms-evidence path (terms row present, no ch
   const { client } = makeFakeDb({
     legislatorRows: [{ id: 'leg-1', full_name: 'Jane Smith', run_id: 'seed' }],
     termRows: [{
-      legislator_id: 'leg-1', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
+      legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
     }],
   });
   const candidates = await findCandidateLegislatorRows(client, {
@@ -469,7 +475,7 @@ test('findCandidateLegislatorRows: terms evidence is preferred, not duplicated �
       id: 'leg-1', full_name: 'Jane Smith', mo_senate_id: '4', run_id: 'seed',
     }],
     termRows: [{
-      legislator_id: 'leg-1', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
+      legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
     }],
   });
   const candidates = await findCandidateLegislatorRows(client, {
@@ -494,4 +500,118 @@ test('findCandidateLegislatorRows: the neither-case — no terms row AND no cham
     sessionEndDate: '2018-12-31',
   });
   assert.equal(candidates.length, 0);
+});
+
+// ---- CRITICAL, fix round 2 (reviewer-reproduced against the real module): `terms` is SHARED
+// across jurisdictions — a same-chamber/same-district/same-name row from a DIFFERENT jurisdiction
+// (e.g. us-congress, which writes plain `terms` rows via src/cli/ingest.js's persistUsCongress,
+// same chamber vocabulary 'house'/'senate') must never be treated as an MO candidate. The fake DB
+// now genuinely models a second jurisdiction (termRows carry their own `jurisdiction_id`, and the
+// fake's terms query filters on it exactly like the real one) — this is the structural fix the
+// review noted the OLD fake could not have caught. ----
+
+test('findCandidateLegislatorRows: a us-congress terms row sharing chamber+district+name is NEVER a candidate — the jurisdiction_id filter is real, not decorative', async () => {
+  const { client } = makeFakeDb({
+    legislatorRows: [{ id: 'leg-federal', full_name: 'Jane Smith', run_id: 'seed' }],
+    termRows: [{
+      // Same chamber, same bare-number district, same name as a hypothetical MO senate-district-4
+      // candidate — the ONLY difference is jurisdiction_id. Without the CRITICAL fix this collides.
+      legislator_id: 'leg-federal', jurisdiction_id: 'us-congress', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
+    }],
+  });
+  const candidates = await findCandidateLegislatorRows(client, {
+    fullNameNormalized: normalizePersonName('Jane Smith'),
+    chamber: 'senate',
+    district: '4',
+    sessionStartDate: '2018-01-01',
+    sessionEndDate: '2018-12-31',
+  });
+  assert.equal(candidates.length, 0, 'a federal (us-congress) terms row must never surface as an MO candidate');
+});
+
+test('resolveOrCreateLegiscanPerson: end-to-end — a MO state sponsor whose chamber+district+name coincidentally matches a FEDERAL legislator\'s terms row never attaches to it; a new MO row is created instead', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-federal', full_name: 'Jane Smith', legiscan_people_id: null, run_id: 'seed',
+    }],
+    termRows: [{
+      legislator_id: 'leg-federal', jurisdiction_id: 'us-congress', chamber: 'senate', district: '4', start_date: '2015-01-01', end_date: null,
+    }],
+  });
+  const person = {
+    people_id: 99004, name: 'Jane Smith', first_name: 'Jane', last_name: 'Smith', nickname: '', role: 'Sen', district: 'SD-004', party: null,
+  };
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.matched, false);
+  assert.equal(result.created, true);
+  assert.equal(result.reason, 'no_candidate', 'the federal row is invisible to this MO lookup — no false single_candidate match');
+  assert.equal(legislators.length, 2, 'a NEW MO row is created; the federal row is untouched');
+  assert.equal(legislators.find((l) => l.id === 'leg-federal').legiscan_people_id, null, 'the federal legislator row is never touched by a LegiScan MO resolution');
+});
+
+// ---- MINOR 1 (promoted): surname populated from the source's own printed last_name, never
+// derived by splitting full_name ----
+
+test('resolveOrCreateLegiscanPerson: a new row (no_candidate path) populates surname from the REAL fixture\'s own last_name field (Libla -> "Libla")', async () => {
+  const { client, legislators } = makeFakeDb();
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', libla, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(legislators.find((l) => l.id === result.legislator_id).surname, 'Libla');
+});
+
+test('resolveOrCreateLegiscanPerson: a new row (ambiguous path) also populates surname from last_name, never split from full_name', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [
+      {
+        id: 'leg-a', full_name: 'Jane Newperson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+      {
+        id: 'leg-b', full_name: 'Jane Newperson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+    ],
+    termRows: [
+      {
+        legislator_id: 'leg-a', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2015-01-01', end_date: null,
+      },
+      {
+        legislator_id: 'leg-b', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2016-01-01', end_date: null,
+      },
+    ],
+  });
+  const person = {
+    people_id: 99005, name: 'Jane Newperson', last_name: 'Newperson', role: 'Sen', district: 'SD-007', party: null,
+  };
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.reason, 'ambiguous');
+  assert.equal(legislators.find((l) => l.id === result.legislator_id).surname, 'Newperson');
+});
+
+test('resolveOrCreateLegiscanPerson: surname stays null when last_name is absent on the source record — never guessed by splitting full_name', async () => {
+  const { client, legislators } = makeFakeDb();
+  const person = {
+    people_id: 99006, name: 'No Lastname Field', role: 'Sen', district: 'SD-011', party: null,
+  }; // deliberately no last_name key at all
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(legislators.find((l) => l.id === result.legislator_id).surname, null);
+});
+
+// ---- MINOR 2: nickname identical to first_name — Set-dedup makes this harmless, locked here ----
+
+test('buildLegiscanNameVariants + resolveOrCreateLegiscanPerson: a nickname IDENTICAL to first_name produces a redundant-but-harmless duplicate variant — Set-dedup in matchLegislator collapses it, never a false ambiguous', async () => {
+  const person = {
+    people_id: 99007, name: 'Travis Fitzwater', first_name: 'Travis', last_name: 'Fitzwater', nickname: 'Travis', role: 'Rep', district: 'HD-049', party: 'R',
+  };
+  assert.deepEqual(buildLegiscanNameVariants(person), ['Travis Fitzwater', 'Travis Fitzwater']);
+
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [{
+      id: 'leg-fitz2', full_name: 'Travis Fitzwater', party: 'R', legiscan_people_id: null, run_id: 'seed',
+    }],
+    termRows: [{
+      legislator_id: 'leg-fitz2', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '49', start_date: '2017-01-01', end_date: null,
+    }],
+  });
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.matched, true);
+  assert.equal(result.reason, 'single_candidate', 'a duplicate variant must never read as two candidates');
+  assert.equal(legislators.length, 1);
 });
