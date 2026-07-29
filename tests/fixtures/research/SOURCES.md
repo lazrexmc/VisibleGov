@@ -319,3 +319,93 @@ Data © LegiScan, CC BY 4.0, key= param redacted by convention. Note: SB 894's L
 carries only the House roll call — the Senate's vote on the combined substitute vehicle
 ('SS for SCS for SBs 894 & 921', in our Day 37 journal fixture) presumably lives under a
 different bill record; substitute-vehicle attribution mapping is a real adapter-design task.
+
+## LegiScan dataset ZIP capture (2026-07-28, Task 3 of the LegiScan bulk adapter plan,
+`.superpowers/sdd/2026-07-29-legiscan-bulk-adapter/`)
+
+**Dependency:** `yauzl@3.4.0` added, `--save-exact` (pin-exact precedent: `pdfjs-dist`).
+DEPENDENCY APPROVED by Lance, 2026-07-28, verbatim: "yes for yauzl" (ruling 1 of the task brief) —
+Option A over Option B (hand-rolled central-directory reader), per the controller's recommendation.
+
+**Redaction gap closed first, before any live call** (ruling 2): `src/lib/http.js`'s `redactUrl`
+previously matched only a `key`/`api_key` param name directly preceded by `?`/`&` — LegiScan's
+`access_key=` query param (the per-session dataset token, distinct from the account API key)
+slipped through unredacted, verified by construction in Task 2's own test suite. Extended the
+regex to `(?:access_key|api_?key|key)`; both `tests/lib.test.js` and `tests/legiscan-client.test.js`
+now assert `access_key=` is redacted (the latter test previously asserted the OLD, gap-having
+behavior and was corrected, not just extended).
+
+**2 live queries used** (budget was ≤4; getSessionList was NOT called — today's `mo-sessions.json`
+fixture, captured earlier the same day, was reused per the brief's "likely 0 needed"). No retry
+was needed — both calls succeeded first try. Full redacted query log:
+1. `getDatasetList`: `https://api.legiscan.com/?key=REDACTED&op=getDatasetList&state=MO` (200 OK,
+   31 entries returned, one per MO session 2010-2026 — same session set as `mo-sessions.json`).
+2. `getDataset`: `https://api.legiscan.com/?key=REDACTED&op=getDataset&id=1579&access_key=REDACTED`
+   (200 OK).
+
+**Fixture choice (ruling 3):** the three 2018 MO sessions' `getDatasetList` entries were compared
+by `dataset_size`: session 1608 (2018 2nd Extraordinary) = 105,793 bytes, session 1579 (2018 1st
+Extraordinary) = **25,039 bytes (chosen — smallest)**, session 1530 (2018 Regular) = 4,061,035
+bytes. Only the smallest (1579) was fetched via `getDataset`; 1608 and 1530 were never live-
+fetched — no live queries were spent inspecting them beyond the single `getDatasetList` listing
+call. The Regular Session dataset (1530, 2,347 bills, ~4MB) is explicitly cache-only at runtime
+(gitignored), not committed — deferred to Task 10 per the plan.
+
+**Committed fixtures:**
+- `legiscan/mo-2018-dataset.json` — the full raw `getDataset` response envelope, `{status, dataset}`
+  shape (matches the `checkStatus()`-wrapped convention of every other fixture in this directory,
+  not the adapter's own already-unwrapped return value), including the still-Base64 `zip` field
+  (33,388 base64 chars). `dataset.dataset_hash` = `196f5cb2b665116489beb1da7df8f982` — this is the
+  ledger's first hash-gate entry (ruling 5), and matches the ZIP's own internal `hash.md5` file
+  byte-for-byte (see below). Grepped for `access_key`/`api_key`/`apikey` and for the literal live
+  API key value before committing — clean, nothing key-shaped survived (LegiScan's `getDataset`
+  response never echoes back either credential).
+- `legiscan/dataset-2018/` — the ZIP's decoded contents, real internal path preserved verbatim
+  (`MO/2018-2018_1st_Special_Session/...`), not flattened — see structure notes below.
+
+**ZIP structure notes for Task 4's parser:**
+- Real internal layout: `STATE/SESSION/{bill,people,vote}/*.json` plus three top-level files
+  (`LICENSE`, `README.md`, `hash.md5`) inside the same `STATE/SESSION/` folder — confirmed both by
+  direct inspection AND by the ZIP's own bundled `README.md`, which documents this exact
+  layout in its own words ("Directory Structure" section, copied contents available in the
+  committed fixture). A parser must skip/ignore the three non-`{bill,people,vote}` files, not
+  assume every top-level entry is a data directory.
+- `bill/<BILL_NUMBER>.json` (e.g. `HB1.json`, `HR2.json`, `HCR1.json` — no space, no zero-padding)
+  — each file's payload is `{"bill": {...}}`, the exact `getBill` shape (`sponsors[].people_id`,
+  `votes[]`, `history[]`, `texts[]`, `sasts[]` all present as top-level bill fields, verbatim same
+  field names as `mo-2018-SB894.json`'s already-tested shape).
+- `people/<PEOPLE_ID>.json` (e.g. `14179.json`) — payload is `{"person": {...}}` — note the
+  **singular** wrapper key `person` (not `people`), a real, un-obvious naming asymmetry vs the
+  directory name `people/`. Only 3 people files were present for this session (14179, 16895,
+  12941) — **the people/ directory is NOT a full chamber roster**, only the sponsors actually
+  referenced by this session's bills. A parser needing a full roster must not assume dataset
+  ZIPs are a complete people source.
+- `vote/` — **the directory exists in the archive's own listing but contains ZERO files** in this
+  fixture. Cross-checked and internally consistent: all 18 bills' own `votes` arrays are also `[]`
+  — this MO special session (2018 1st Extraordinary) has no recorded roll call anywhere in the
+  bulk dataset. Only 3 of 18 bills advanced past "Prefiled" at all (`HCR1`/`HR1`/`HR2`, status
+  1/4/1, with `history`/`texts` populated); the other 15 have `status:0, history:[], texts:[]` —
+  a real, coherent "nothing happened to most of these bills" session, not a parsing artifact.
+  **Consequence for Task 4:** this fixture alone can prove "zero votes" parsing (`rollCalls: []`,
+  an empty `vote/` dir handled without error) but CANNOT prove parsing of a populated `vote/*.json`
+  file's real on-disk shape — Task 4 will need to lean on the already-captured
+  `mo-2018-rollcall-747209.json` (captured directly via `getRollCall`, Task 2) for that shape, or a
+  later task should capture a small-but-nonzero-vote dataset (1608, 105,793 bytes, is the next-
+  smallest candidate and likely has real votes, not fetched here to stay inside this task's
+  ≤4 budget with margin).
+- `hash.md5` — single line, no newline-trailing surprises, contains exactly the same 32-hex-char
+  string as `dataset.dataset_hash` in the envelope (`196f5cb2b665116489beb1da7df8f982`) — a free
+  cross-check a parser could use to validate a decoded ZIP against its own claimed hash.
+- `LICENSE` — full Creative Commons Attribution 4.0 legal text, confirms `ATTRIBUTION.license`
+  already hardcoded in `src/adapters/legiscan.js` is correct against a primary source, not just an
+  assumption from the API manual.
+- `README.md` — LegiScan's own bundled directory-structure documentation (see above); confirms the
+  archive is self-documenting and this structure is LegiScan's stated contract, not inferred.
+
+**`access_key` requirement confirmed (ruling 2 / Task 2's flagged guess):** the live `getDataset`
+call used `id=1579&access_key=<the value from this session's own getDatasetList entry>` and
+succeeded; omitting it was not tested (would have cost an extra query with no plan benefit) but
+Task 2's manual-derived finding is now confirmed against a real, successful live response, not
+just the manual's text. The `access_key` value itself is NEVER present in the committed fixture
+(the `getDataset` response envelope does not echo it back) and is redacted in every logged URL per
+the fix above.
