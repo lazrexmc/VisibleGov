@@ -349,8 +349,19 @@ export function nameSetEdgeBasis(rowA, rowB, parsedA, parsedB) {
 // nickname on either row, buildRowNameSet(row) = {given} for both sides, so this collapses to
 // EXACTLY fullNameVariantMatch(rowA.full_name, rowB.full_name)'s own residual_identical_name path —
 // the "withOUT nickname -> the current two-cluster split" regression this amendment must not
-// disturb.
-function rowNameVariantMatch(rowA, rowB) {
+// disturb. `rowA`/`rowB` are row-shaped ({ full_name, nickname? }), not raw strings — this is the
+// ONLY difference from fullNameVariantMatch's own contract.
+//
+// EXPORTED (nickname amendment FIX ROUND 2, controller-extended scope): this is now
+// src/cli/link-persons.js's writeAutoCluster BELT check too (in place of the narrower, nickname-
+// blind fullNameVariantMatch(full_name, full_name) it used before) — the structural invariant a
+// cluster must satisfy before ANY write happens has to validate exactly the property
+// clusterLegislators itself guarantees, or a real, matcher-legal, nickname-bridged cluster would
+// wrongly fail the BELT and never write at all. A residual_identical_name edge is just as valid
+// for the BELT as a direct_name one (nameSetEdgeBasis only distinguishes edge PROVENANCE for
+// auditClusterCoherence's own visibility reporting — the BELT only cares whether a real edge
+// exists at all, i.e. whether the pair is INCOHERENT, never which kind of edge it is).
+export function rowNameVariantMatch(rowA, rowB) {
   const a = splitGivenFamilySuffix(normalizePersonName(rowA?.full_name ?? ''));
   const b = splitGivenFamilySuffix(normalizePersonName(rowB?.full_name ?? ''));
   return namesMatchStructural(a, b, nameSetEdgeBasis(rowA, rowB, a, b) != null);

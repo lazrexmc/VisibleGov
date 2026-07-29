@@ -2,7 +2,7 @@ import {
   getClient, openRun, closeRun, selectAll, additivePatch,
 } from '../lib/db.js';
 import {
-  clusterLegislators, pickDisplayName, fullNameVariantMatch, auditClusterCoherence,
+  clusterLegislators, pickDisplayName, rowNameVariantMatch, auditClusterCoherence,
 } from '../lib/person-identity.js';
 
 // link-persons — Task 1 of docs/superpowers/plans/2026-07-29-identity-merge.md. Loads every
@@ -140,6 +140,21 @@ export class PersonLinkConflictError extends Error {
 // auditClusterCoherence in src/lib/person-identity.js) — this is the second, independent layer:
 // even if a future bug in the matcher ever produced a cluster that violates the invariant,
 // writeAutoCluster refuses to write it rather than trusting the caller.
+//
+// NICKNAME AMENDMENT FIX ROUND 2 (controller-extended scope): the BELT check below now calls
+// rowNameVariantMatch (row-shaped, nickname-aware) instead of the narrower, full_name-only
+// fullNameVariantMatch it used before fix round 1 rewired clusterLegislators' own matcher onto
+// pairwise printed-name-set intersection (nameSetEdgeBasis, src/lib/person-identity.js). This
+// alignment matters: the BELT must validate EXACTLY the property clusterLegislators guarantees, or
+// a real, matcher-legal, nickname-bridged 2-row cluster (e.g. a LegiScan row printing 'Robert
+// Onder'/nickname 'Bob' directly bridging a plain 'Bob Onder' row) would wrongly fail this
+// structural check and never write at all — a real availability gap, not a wrong-merge risk (the
+// old, narrower check only ever fails SAFE, by refusing to write), but real now that migration
+// 0013 is applied live and link-persons.js's own loadLegislators selects nickname. A
+// residual_identical_name edge is exactly as valid for the BELT as a direct_name edge — the two
+// kinds are ONLY distinguished for auditClusterCoherence's own operator-visibility reporting
+// (clusterEdgeBasis/residualOnlyClusters); the BELT itself guards against INCOHERENCE (no shared
+// printed name at all), never which kind of edge justified coherence.
 export class ClusterNameVariantViolationError extends Error {
   constructor(message, meta = {}) {
     super(message);
@@ -155,9 +170,12 @@ export class ClusterNameVariantViolationError extends Error {
 // FIRST, before any write for this cluster happens at all — a single violation of either aborts
 // the whole cluster cleanly, never a partially-linked person: (1) every member's person_id is
 // null (PersonLinkConflictError otherwise); (2) fix round 2's BELT — every PAIR of members shares
-// a full-name variant (ClusterNameVariantViolationError otherwise). `memberRowsById`: a
+// a name variant, nickname-aware (ClusterNameVariantViolationError otherwise; rowNameVariantMatch,
+// see its own comment for the nickname-amendment-fix-round-2 alignment). `memberRowsById`: a
 // Map(legislator_id -> the SAME row objects buildEvidenceRows produced) — the caller's snapshot,
-// looked up by id so pickDisplayName and the per-member writes share one source of truth.
+// looked up by id so pickDisplayName and the per-member writes share one source of truth. Those
+// same row objects (full_name + nickname, when loadLegislators selects it) are what feed
+// rowNameVariantMatch below — no separate re-fetch or re-shaping needed.
 export async function writeAutoCluster(client, runId, cluster, memberRowsById) {
   const memberRows = cluster.memberIds.map((id) => memberRowsById.get(id));
   for (const row of memberRows) {
@@ -172,13 +190,14 @@ export async function writeAutoCluster(client, runId, cluster, memberRowsById) {
 
   for (let a = 0; a < memberRows.length; a += 1) {
     for (let b = a + 1; b < memberRows.length; b += 1) {
-      if (!fullNameVariantMatch(memberRows[a].full_name, memberRows[b].full_name)) {
+      if (!rowNameVariantMatch(memberRows[a], memberRows[b])) {
         throw new ClusterNameVariantViolationError(
           `cluster ${cluster.key} pairs legislator_id=${memberRows[a].id} `
             + `("${memberRows[a].full_name}") with legislator_id=${memberRows[b].id} `
-            + `("${memberRows[b].full_name}") — no full-name-variant match between them; refusing `
-            + 'to write (the structural invariant every auto-cluster member pair must satisfy, '
-            + 'fix round 2)',
+            + `("${memberRows[b].full_name}") — no name variant match between them (full name or `
+            + 'source-printed nickname); refusing to write (the structural invariant every '
+            + 'auto-cluster member pair must satisfy, fix round 2, nickname-aware as of fix round 2 '
+            + 'of the nickname amendment)',
           {
             clusterKey: cluster.key, legislatorIdA: memberRows[a].id, legislatorIdB: memberRows[b].id,
           },

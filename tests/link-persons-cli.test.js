@@ -1111,6 +1111,62 @@ test('writeAutoCluster FIX ROUND 2 BELT: a cluster pairing members that do NOT s
   assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-mosenate').person_id, null, 'no patch applied');
 });
 
+// ---- NICKNAME AMENDMENT FIX ROUND 2 (controller-extended scope): the BELT now calls
+// rowNameVariantMatch (nickname-aware, row-shaped) instead of the narrower full_name-only
+// fullNameVariantMatch — aligned with clusterLegislators' own pairwise printed-name-set matcher
+// (nameSetEdgeBasis, fix round 1) so the structural invariant validates exactly the property the
+// matcher guarantees, never more, never less. ----
+
+test('writeAutoCluster NICKNAME AMENDMENT FIX ROUND 2: a nickname-bridged 2-row cluster ("Robert Onder" nickname "Bob" + "Bob Onder") passes the BELT and writes successfully — this is the exact live-relevant case fix round 1 identified as a false-positive risk under the OLD full_name-only BELT', async () => {
+  const rowsById = new Map([
+    ['leg-onder-legiscan', {
+      id: 'leg-onder-legiscan', full_name: 'Robert Onder', nickname: 'Bob', bioguide_id: null, mo_senate_id: null, mo_house_id: null, legiscan_people_id: 16351, openstates_id: null, person_id: null,
+    }],
+    ['leg-onder-barebob', {
+      id: 'leg-onder-barebob', full_name: 'Bob Onder', nickname: null, bioguide_id: null, mo_senate_id: '2', mo_house_id: null, legiscan_people_id: null, openstates_id: null, person_id: null,
+    }],
+  ]);
+  const cluster = {
+    key: 'onder:leg-onder-barebob,leg-onder-legiscan',
+    memberIds: ['leg-onder-legiscan', 'leg-onder-barebob'],
+    evidence: [
+      { legislatorId: 'leg-onder-legiscan', fullName: 'Robert Onder', nickname: 'Bob' },
+      { legislatorId: 'leg-onder-barebob', fullName: 'Bob Onder', nickname: null },
+    ],
+  };
+  const client = makeFakeClient({ legislatorRows: [...rowsById.values()] });
+  const result = await writeAutoCluster(client, 'run-1', cluster, rowsById);
+  assert.equal(client.state.persons.length, 1);
+  assert.equal(client.state.person_links.length, 2);
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-legiscan').person_id, result.personId);
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-barebob').person_id, result.personId);
+});
+
+test('writeAutoCluster NICKNAME AMENDMENT FIX ROUND 2: a genuinely name-incoherent cluster still throws ClusterNameVariantViolationError even when ONE side carries a nickname — nickname-awareness must not become vacuously permissive (the nickname "Bob" on the legiscan row does not somehow license a match against an unrelated "David Onder")', async () => {
+  const rowsById = new Map([
+    ['leg-onder-legiscan', {
+      id: 'leg-onder-legiscan', full_name: 'Robert Onder', nickname: 'Bob', bioguide_id: null, mo_senate_id: null, mo_house_id: null, legiscan_people_id: 16351, openstates_id: null, person_id: null,
+    }],
+    ['leg-onder-david', {
+      id: 'leg-onder-david', full_name: 'David Onder', nickname: null, bioguide_id: null, mo_senate_id: '9', mo_house_id: null, legiscan_people_id: null, openstates_id: null, person_id: null,
+    }],
+  ]);
+  const cluster = {
+    key: 'onder:leg-onder-david,leg-onder-legiscan',
+    memberIds: ['leg-onder-legiscan', 'leg-onder-david'],
+    evidence: [
+      { legislatorId: 'leg-onder-legiscan', fullName: 'Robert Onder', nickname: 'Bob' },
+      { legislatorId: 'leg-onder-david', fullName: 'David Onder', nickname: null },
+    ],
+  };
+  const client = makeFakeClient({ legislatorRows: [...rowsById.values()] });
+  await assert.rejects(() => writeAutoCluster(client, 'run-1', cluster, rowsById), ClusterNameVariantViolationError);
+  assert.equal(client.state.persons.length, 0, 'no person row created');
+  assert.equal(client.state.person_links.length, 0, 'no link rows created');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-legiscan').person_id, null, 'no patch applied');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-david').person_id, null, 'no patch applied');
+});
+
 test('writeAutoCluster: a member that already carries a DIFFERENT person_id throws PersonLinkConflictError BEFORE any write for the cluster happens (no orphaned person, no partial links)', async () => {
   const rowsById = new Map([
     ['leg-a', {
