@@ -48,7 +48,9 @@ export async function loadLegislators(client) {
   const { data, error } = await selectAll(
     client,
     LEGISLATORS_TABLE,
-    'id,full_name,surname,bioguide_id,openstates_id,mo_house_id,mo_senate_id,legiscan_people_id,person_id',
+    // nickname: 0013 (applied 2026-07-29) — source-printed only; clusterLegislators consumes it
+    // as an exact-match given-name variant (the Robert/'Bob' Onder bridge).
+    'id,full_name,surname,nickname,bioguide_id,openstates_id,mo_house_id,mo_senate_id,legiscan_people_id,person_id',
   );
   if (error) throw new Error(`${LEGISLATORS_TABLE} lookup failed: ${error.message}`);
   return data ?? [];
