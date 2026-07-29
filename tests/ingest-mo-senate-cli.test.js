@@ -9,7 +9,7 @@ import { parseJournalIndex } from '../src/adapters/mo-senate-web.js';
 import { extractJournalText, parseJournalVotes, resolveMoSenator } from '../src/adapters/mo-senate-journal-pdf.js';
 import {
   parseMoSenateArgs, journalPdfBasename, buildVoteSourceKey, buildVoteRow, buildCastTokens,
-  pickRosterSource, buildJournalIndexUrl, shouldRefetch, effectiveMaxAge,
+  pickRosterSource, RosterSourceUnavailableError, buildJournalIndexUrl, shouldRefetch, effectiveMaxAge,
   MO_SENATE_ROSTER_MAX_AGE_MS, MO_SENATE_INDEX_MAX_AGE_MS,
   readDayFailureArtifact, writeDayFailureArtifact, excludeQuarantinedDays, JOURNAL_DAY_MAX_FAILED_ATTEMPTS,
   hasDoneMarker, writeDoneMarker,
@@ -200,12 +200,47 @@ test('pickRosterSource: 2018 resolves to the archived Wayback PDF', () => {
   assert.match(source.url, /web\.archive\.org.*2018Roster\.pdf/);
 });
 
-test('pickRosterSource: any other year falls back to the current live HTML roster', () => {
-  const source = pickRosterSource(2026);
+test('pickRosterSource: 2018 resolves to the archive regardless of currentCalendarYear (archived takes priority)', () => {
+  const source = pickRosterSource(2018, 2018);
+  assert.equal(source.format, 'pdf');
+});
+
+// ---- finding 2 (CRITICAL, latent): the ORIGINAL pickRosterSource fell back to the current live
+// roster for ANY year not in SENATE_ROSTER_ARCHIVE_URLS — a --year 2020 run would silently resolve
+// 2020 vote casts against TODAY's membership (a cross-era misattribution channel), and because
+// effectiveMaxAge() makes a closed year's cache never expire, that wrong cache would be poisoned
+// permanently. FIX: hard refusal for any year that is neither archived nor the current calendar
+// year — only 2018 (archived) and the current year (live, by definition correct) still resolve. ----
+
+test('pickRosterSource: the CURRENT calendar year resolves to the live HTML roster', () => {
+  const source = pickRosterSource(2026, 2026);
   assert.equal(source.format, 'html');
   assert.equal(source.url, 'https://www.senate.mo.gov/Senators/');
-  const other = pickRosterSource(1999);
-  assert.deepEqual(other, source);
+});
+
+test('pickRosterSource: a historical year absent from the archive map is a HARD REFUSAL, never a silent live-roster fallback', () => {
+  assert.throws(
+    () => pickRosterSource(2020, 2026),
+    (err) => {
+      assert.ok(err instanceof RosterSourceUnavailableError);
+      assert.equal(err.year, 2020);
+      assert.equal(err.currentCalendarYear, 2026);
+      // Ground rule: the message must name the missing roster source AND the extension point.
+      assert.match(err.message, /2020/);
+      assert.match(err.message, /SENATE_ROSTER_ARCHIVE_URLS/);
+      return true;
+    },
+  );
+});
+
+test('pickRosterSource: a FUTURE year (also absent from the archive map) is refused the same way — "current year" means exactly one year, not >=', () => {
+  assert.throws(() => pickRosterSource(2027, 2026), RosterSourceUnavailableError);
+});
+
+test('pickRosterSource: string year input still resolves/refuses correctly (Number() coercion)', () => {
+  assert.equal(pickRosterSource('2018').format, 'pdf');
+  assert.equal(pickRosterSource('2026', 2026).format, 'html');
+  assert.throws(() => pickRosterSource('2020', 2026), RosterSourceUnavailableError);
 });
 
 test('buildJournalIndexUrl: SelectedYear query param', () => {
@@ -687,6 +722,52 @@ test('ensureRosterForRun: cache miss — calls the injected fetchLive exactly on
     assert.equal(fetchCalls, 1);
     assert.equal(result.identities.inserted, 1);
     assert.ok(existsSync(join(dir, '2018.json')));
+  });
+});
+
+// ---- finding 2: the refusal must fire INSIDE ensureRosterForRun, before any live fetch or cache
+// write — this is what actually stops a wrong roster from poisoning the closed-year cache
+// (effectiveMaxAge makes a closed year's cache never expire once written). ----
+
+test('ensureRosterForRun: a historical year with no cache and no archive entry refuses loudly — fetchLive is NEVER called, no cache file is ever written', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeLegislatorsDb();
+    const fetchLive = async () => { throw new Error('must never fetch live for a refused year'); };
+    await assert.rejects(
+      () => ensureRosterForRun(client, 'run-1', 2020, { fetchLive, dir, currentCalendarYear: 2026 }),
+      RosterSourceUnavailableError,
+    );
+    assert.equal(existsSync(join(dir, '2020.json')), false, 'no cache was written — a wrong roster can never poison this year\'s (never-expiring) cache');
+  });
+});
+
+test('ensureRosterForRun: the CURRENT calendar year still fetches live normally (the refusal does not regress the one case it must keep working)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const { client } = makeFakeLegislatorsDb();
+    let fetchCalls = 0;
+    const fetchLive = async (source) => {
+      fetchCalls += 1;
+      assert.equal(source.format, 'html');
+      return { members: [{ mo_senate_id: '9', surname: 'Smith', full_name: 'Sam Smith', party: null }], vacancies: 0 };
+    };
+    const result = await ensureRosterForRun(client, 'run-1', 2026, { fetchLive, dir, currentCalendarYear: 2026 });
+    assert.equal(result.fetchedLive, true);
+    assert.equal(fetchCalls, 1);
+    assert.ok(existsSync(join(dir, '2026.json')));
+  });
+});
+
+test('ensureRosterForRun: a warm cache for a refused year is trusted as-is (the refusal only gates a FRESH fetch, never a year that already has a valid cache from before this fix)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    writeFileSync(join(dir, '2020.json'), JSON.stringify({
+      fetched_at: new Date().toISOString(),
+      members: [{ mo_senate_id: '2', surname: 'Onder', full_name: 'Bob Onder', party: null }],
+    }));
+    const { client } = makeFakeLegislatorsDb();
+    const fetchLive = async () => { throw new Error('must not fetch live on a cache hit, refused year or not'); };
+    const result = await ensureRosterForRun(client, 'run-1', 2020, { fetchLive, dir, currentCalendarYear: 2026 });
+    assert.equal(result.fetchedLive, false);
+    assert.equal(result.members[0].surname, 'Onder');
   });
 });
 

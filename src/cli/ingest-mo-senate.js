@@ -118,20 +118,51 @@ export function buildCastTokens(vote) {
 // year/session-parameterized — it's the live app's current-membership view only, with no observed
 // historical mode"). The only historical-year roster with a confirmed fetchable URL is 2018's
 // Wayback-archived PDF (task-1-report.md's Wayback follow-up) — used here since it's directly
-// exercised by this adapter's own research fixtures. Any OTHER historical year falls back to the
-// current live roster, which is only accurate for members still serving today — an honest,
-// documented limitation (see task-5-report.md "Concerns"), not a silent wrong answer: the roster
-// gate (isMissingColumnError) is orthogonal to this and still applies regardless of which source
-// was used.
+// exercised by this adapter's own research fixtures.
+//
+// Final-review finding 2 (CRITICAL, latent — controller ruling): the ORIGINAL version of this
+// function fell back to the CURRENT live roster for every year NOT in SENTE_ROSTER_ARCHIVE_URLS —
+// so a --year 2020 run would resolve 2020 vote casts against TODAY's membership (a 4th cross-era
+// misattribution channel, on top of the three the mo_senate_id roster-identity fixes elsewhere in
+// this file already closed), and because effectiveMaxAge() below makes a closed year's roster cache
+// NEVER expire, that wrong cache would then be POISONED PERMANENTLY — never self-healing once
+// written. FIX: any year that is neither in SENATE_ROSTER_ARCHIVE_URLS nor the CURRENT calendar
+// year (the one case where "today's live roster" is actually correct, by definition) is a HARD
+// REFUSAL — loud, before any fetch or cache write happens, naming what's missing and how to fix it.
+// 2018 (archived) and the current calendar year (live) are the only two paths that still resolve.
 const SENATE_ROSTER_CURRENT_URL = 'https://www.senate.mo.gov/Senators/';
 const SENATE_ROSTER_ARCHIVE_URLS = {
   2018: 'https://web.archive.org/web/20250311182418id_/https://www.senate.mo.gov/18info/2018Roster.pdf',
 };
 
-export function pickRosterSource(year) {
-  const archived = SENATE_ROSTER_ARCHIVE_URLS[Number(year)];
+export class RosterSourceUnavailableError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'RosterSourceUnavailableError';
+    Object.assign(this, meta);
+  }
+}
+
+// currentCalendarYear is injectable (default real wall-clock year) purely for testability — same
+// convention as effectiveMaxAge/replayJournalArtifacts' own currentCalendarYear params elsewhere in
+// this file.
+export function pickRosterSource(year, currentCalendarYear = new Date().getFullYear()) {
+  const numericYear = Number(year);
+  const archived = SENATE_ROSTER_ARCHIVE_URLS[numericYear];
   if (archived) return { url: archived, format: 'pdf' };
-  return { url: SENATE_ROSTER_CURRENT_URL, format: 'html' };
+  if (numericYear === Number(currentCalendarYear)) return { url: SENATE_ROSTER_CURRENT_URL, format: 'html' };
+  throw new RosterSourceUnavailableError(
+    `no roster source for year ${numericYear}: it is neither the current calendar year `
+      + `(${currentCalendarYear}, which resolves to the live current roster at ${SENATE_ROSTER_CURRENT_URL}) `
+      + `nor listed in SENATE_ROSTER_ARCHIVE_URLS (src/cli/ingest-mo-senate.js) — the only confirmed `
+      + 'historical roster source today is 2018\'s Wayback-archived PDF. Refusing rather than silently '
+      + `resolving ${numericYear}'s vote casts against today's live membership (the cross-era `
+      + 'misattribution this refusal exists to close — see this function\'s own comment) or writing a '
+      + 'wrong roster into the closed-year cache, which never expires and would poison it permanently. '
+      + `To unblock year ${numericYear}, add a fetchable archived-roster URL for it to `
+      + 'SENATE_ROSTER_ARCHIVE_URLS.',
+    { year: numericYear, currentCalendarYear: Number(currentCalendarYear) },
+  );
 }
 
 // journallist/?SelectedYear=<Y> is a real GET form, confirmed stable for any year 1996-2026
@@ -504,11 +535,16 @@ export function effectiveMaxAge(year, maxAgeMs, currentCalendarYear = new Date()
 // real gitignored artifacts dir in a test.
 export async function ensureRosterForRun(client, runId, year, {
   fetchLive = fetchAndParseRosterLive, dir = ROSTER_ARTIFACT_DIR, maxAgeMs = MO_SENATE_ROSTER_MAX_AGE_MS,
+  currentCalendarYear = new Date().getFullYear(),
 } = {}) {
   const cacheKey = String(year);
   const cache = readCache(dir, cacheKey);
-  if (shouldRefetch(cache?.fetched_at ?? null, effectiveMaxAge(year, maxAgeMs))) {
-    const source = pickRosterSource(year);
+  if (shouldRefetch(cache?.fetched_at ?? null, effectiveMaxAge(year, maxAgeMs, currentCalendarYear))) {
+    // Finding 2: pickRosterSource throws (RosterSourceUnavailableError) for any year that is
+    // neither archived nor the current calendar year — BEFORE any fetch happens and BEFORE
+    // writeCache below could ever poison this year's (possibly-never-expiring, per
+    // effectiveMaxAge) local cache with the wrong roster.
+    const source = pickRosterSource(year, currentCalendarYear);
     const { members, vacancies } = await fetchLive(source);
     writeCache(dir, cacheKey, {
       source_url: source.url, format: source.format, members, vacancies,
