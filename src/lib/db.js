@@ -59,6 +59,51 @@ export function isMissingRelationError(error, table) {
   return mentionsTable && (msg.includes('does not exist') || msg.includes('could not find the table'));
 }
 
+// Final-review finding 1 (live-verified on THIS instance, per ingest-mo-house.js's own
+// dryRunReport comment above this file): Supabase/PostgREST caps a single .select() response at
+// 1000 rows server-side REGARDLESS of an explicit .range() request. Every unbounded full-table(-ish)
+// select in this codebase must route through THIS one shared helper from here on — loop .range()
+// pages of `pageSize` (default 1000, matching the server's own cap) until a page returns short,
+// exactly like ingest-mo-house.js's dryRunReport pattern (that pattern is now retired in favor of
+// this shared version; the bug it fixed independently resurfaced twice more — auto-publish-
+// glossary.js's loadLatestVerifications and two review-server queue queries — because the fix
+// wasn't shared).
+//
+// `filter` may chain its own business-meaningful predicate/order (e.g. `.eq('status', X)`,
+// `.order('created_at', {ascending: true})`) onto the query builder before pagination begins.
+// Pagination via .range() is only correct with a DETERMINISTIC order — without one, Postgres makes
+// no promise that two separate .range() calls see the same row ordering, which could silently drop
+// a row into the gap between two pages or return it twice. An `id` tiebreaker is therefore ALWAYS
+// appended after whatever order `filter` set (or as the sole order, if `filter` set none) — every
+// table this touches has a uuid primary key named `id`, so this is safe to apply unconditionally.
+//
+// Fail loud, never silently truncate (finding 1's fix direction): if the very LAST page fetched is
+// still full-sized (`pageSize` rows), the loop cannot tell whether that was the true end of the
+// table or whether `maxPages` cut it off mid-scan — throws rather than returning a result that
+// LOOKS complete but might not be. `maxPages` defaults to 200 (200k rows at the default page size),
+// the same sanity-backstop magnitude ingest-mo-house.js's dryRunReport used.
+export async function selectAll(client, table, columns, { filter, pageSize = 1000, maxPages = 200 } = {}) {
+  const rows = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const from = page * pageSize;
+    let query = client.from(table).select(columns);
+    if (filter) query = filter(query);
+    query = query.order('id', { ascending: true }).range(from, from + pageSize - 1);
+    // Sequential (not parallel) is deliberate: each page's .range() bounds depend on knowing the
+    // PRIOR page came back full-sized — same "sequential, small/infrequent backlog" precedent as
+    // ingest-mo-senate.js's replayJournalArtifacts.
+    const { data, error } = await query;
+    if (error) return { data: null, error };
+    rows.push(...(data ?? []));
+    if (!data || data.length < pageSize) return { data: rows, error: null };
+  }
+  throw new Error(
+    `selectAll(${table}): hit maxPages (${maxPages}) at pageSize ${pageSize} without a short final `
+      + 'page — refusing to return a possibly-truncated result. Raise maxPages or investigate why '
+      + 'this table is now this large.',
+  );
+}
+
 // Same shape as isMissingRelationError but for a missing COLUMN (e.g. legislators.mo_house_id
 // before migration 0005 is applied — draft-then-apply, Lance's call when to run it). Matched
 // on `.message` text alone, NOT `.code` — insertIfAbsent (above) wraps the real Supabase error

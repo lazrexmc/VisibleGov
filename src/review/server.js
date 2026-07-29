@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { getClient, isMissingRelationError } from '../lib/db.js';
+import { getClient, isMissingRelationError, selectAll } from '../lib/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PAGE_HTML = readFileSync(path.join(__dirname, 'page.html'));
@@ -27,6 +27,15 @@ const TRANSITIONS = {
 // to make it from. draft/stale are the two "needs a first decision" states; approved is "needs
 // publishing" — all three belong in the working queue.
 const QUEUE_STATUSES = ['draft', 'stale', 'approved'];
+
+// Trust model v3 mechanism 2 (auto-publish-glossary CLI, src/cli/auto-publish-glossary.js): clean,
+// verified glossary drafts now move all the way to 'published' with zero human touch, so the
+// glossary review page's job shifted from "review everything actionable" to "surface what the
+// pipeline could NOT auto-handle, plus reachable context" — flagged items (the real queue),
+// needs_mapping/no-gloss stubs, and a published count + sample pool for Lance's spot-audit role.
+// 'published' has to be queryable here for that last part; summaries have no equivalent auto-path
+// (yet — see the v3 design doc's open decision 4), so QUEUE_STATUSES above stays untouched.
+const GLOSSARY_QUEUE_STATUSES = ['draft', 'stale', 'approved', 'published'];
 
 export function nextStatus(current, action) {
   const next = TRANSITIONS[current] && TRANSITIONS[current][action];
@@ -278,12 +287,19 @@ async function handleQueue(client, res) {
       .order('created_at', { ascending: true });
     if (error) throw error;
 
-    const ids = (data ?? []).map((row) => row.id);
+    // Same header-overflow guard as the glossary queue below: full small-table select + in-JS
+    // filter, never .in() over the whole queue's ids (25 summaries fit today; the glossary tab
+    // proved the pattern breaks past ~200 ids).
+    const idSet = new Set((data ?? []).map((row) => row.id));
     let latestVerification = new Map();
-    if (ids.length > 0) {
-      const verResult = await client
-        .from('summary_verifications').select('summary_id,overall,verdicts,created_at').in('summary_id', ids);
-      latestVerification = latestVerificationBySummary(resolveVerificationRows(verResult));
+    if (idSet.size > 0) {
+      // Final-review finding 1 (CRITICAL): was a bare unbounded .select() — past Supabase's
+      // 1000-row-per-request cap, "latest verification" was computed over an arbitrary subset, so
+      // a newer flagged verification could be invisible to this queue. Routed through selectAll
+      // (src/lib/db.js), the one shared pagination helper every full-table-ish select now uses.
+      const verResult = await selectAll(client, 'summary_verifications', 'summary_id,overall,verdicts,created_at');
+      const rows = resolveVerificationRows(verResult).filter((r) => idSet.has(r.summary_id));
+      latestVerification = latestVerificationBySummary(rows);
     }
 
     sendJson(res, 200, (data ?? []).map((row) => ({
@@ -426,11 +442,14 @@ async function handleDecision(client, req, res) {
 async function handleGlossaryQueue(client, res) {
   if (!client) { sendJson(res, 500, { error: 'internal error' }); return; }
   try {
-    const { data, error } = await client
-      .from('glossary_terms')
-      .select('id,term,kind,citation,needs_mapping,gloss_md,status,created_at')
-      .in('status', QUEUE_STATUSES)
-      .order('created_at', { ascending: true });
+    // Final-review finding 1 (CRITICAL): was a bare .order().select() with no pagination — past
+    // Supabase's 1000-row-per-request cap, this created_at-ASC select silently dropped the NEWEST
+    // terms (the oldest 1000 came back, nothing past them). Routed through selectAll (src/lib/
+    // db.js); the `filter` callback keeps the exact same .in(status)/.order(created_at) query,
+    // selectAll appends the `id` tiebreaker + pagination loop around it.
+    const { data, error } = await selectAll(client, 'glossary_terms', 'id,term,kind,citation,needs_mapping,gloss_md,status,created_at', {
+      filter: (q) => q.in('status', GLOSSARY_QUEUE_STATUSES).order('created_at', { ascending: true }),
+    });
     if (error) {
       if (isMissingRelationError(error, 'glossary_terms')) {
         sendJson(res, 200, { available: false, reason: 'migration 0007 not applied', items: [] });
@@ -439,12 +458,21 @@ async function handleGlossaryQueue(client, res) {
       throw error;
     }
 
-    const ids = (data ?? []).map((row) => row.id);
+    // Fetch ALL verification rows, never .in('term_id', ids): with 400+ queue terms the id-list
+    // URL exceeded undici's 16KB header cap (UND_ERR_HEADERS_OVERFLOW → 500, found live the day
+    // 0007 was applied). The table only holds one small row per gloss attempt; filtering to
+    // queue ids happens in latestVerificationByTerm's Map lookup anyway.
+    //
+    // Final-review finding 1 (CRITICAL): same unbounded-select bug as above — past 1000 rows,
+    // "latest verification" was computed over an arbitrary subset, so a newer FLAGGED verification
+    // could be invisible and auto-publish-glossary.js could publish a flagged gloss claiming clean.
+    const idSet = new Set((data ?? []).map((row) => row.id));
     let latestVerification = new Map();
-    if (ids.length > 0) {
-      const verResult = await client
-        .from('glossary_verifications').select('term_id,overall,verdicts,created_at').in('term_id', ids);
-      latestVerification = latestVerificationByTerm(resolveVerificationRows(verResult, 'glossary_verifications'));
+    if (idSet.size > 0) {
+      const verResult = await selectAll(client, 'glossary_verifications', 'term_id,overall,verdicts,created_at');
+      const rows = resolveVerificationRows(verResult, 'glossary_verifications')
+        .filter((r) => idSet.has(r.term_id));
+      latestVerification = latestVerificationByTerm(rows);
     }
 
     sendJson(res, 200, {

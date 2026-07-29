@@ -114,6 +114,142 @@ query-param endpoints below), which are themselves plain HTTP GETs fetchable dir
   the House's one-PDF-per-roll-call `RollCallPDF`), with several to a few dozen votes embedded in
   each day's file depending on floor activity that day.
 
+**2026-07-28, Task 1 of the MO Senate adapter plan** (`.superpowers/sdd/2026-07-28-mo-senate-adapter/`):
+a second, bounded (<=14 request) live capture pass to get roster + journal-index fixtures the
+above investigation didn't fetch. 12 requests total, all from `www.senate.mo.gov`, self-identifying
+User-Agent `VisibleGov research (contact: repo owner)`, >=2s apart (full request log in
+`task-1-report.md` in that plan folder). "Current year" = 2026 (today's date).
+
+- `journallist-current.html` — live fetch of `https://www.senate.mo.gov/journallist/` (200,
+  130,712 bytes). Confirms this page is real and defaults to the current year (2026, "Second
+  Regular Session") without any query param. **Markup shape for a parser:** each day is a
+  `.journal-entry-card` div containing `<h6><strong>Day N</strong></h6>` + `<p><strong>M/D/YYYY</strong></p>`,
+  a `data-pages="<start>-<end>"` attribute giving the printed page range, and the PDF URL in two
+  places — a `data-filename="..."` attribute on a "Preview Journal" button and a plain
+  `<a href="..." target="_blank">Open PDF</a>` ("Open PDF" text). 70 day-cards found for 2026 (as
+  of this capture, session ongoing). Year selection is a real `<form method="get" id="yearForm">`
+  with a `<select name="SelectedYear">` (`onchange="clearHashAndSubmit();"`, i.e. GET-resubmits the
+  same URL with a `SelectedYear` query param) — years 1996-2026 all listed as options.
+- `journallist-2018.html` — live fetch of `https://www.senate.mo.gov/journallist/?SelectedYear=2018`
+  (200, 166,115 bytes). Confirms the year-selector query param works and correctly reflects 2018
+  (`<option selected>2018</option>`, 88 PDF links under `/18info/Journals/`). **Correction to the
+  plan:** this page's PDF links use a *different* URL/naming scheme than the already-verified
+  `/18info/pdf-jrnl/DAY37.pdf` — here it's `/18info/Journals/RDay<NN><MMDD><startpage>-<endpage>.pdf`,
+  e.g. Day 37 is `/18info/Journals/RDay370308587-610.pdf` (confirmed same calendar day, 3/8/2018,
+  as the already-captured `2018-day37-journal-onder-era.pdf`, and the printed page-range prefix
+  `587-610` matches that fixture's own page 587 start). **Both URL schemes appear to be live,
+  parallel paths to (at least materially) the same content** — `/<yy>info/pdf-jrnl/DAY<NN>.pdf`
+  (short form, used by the BillTracking Actions-fragment journal citations) and
+  `/<yy>info/Journals/RDay<NN><MMDD><pages>.pdf` (long form, used by the `journallist/` index UI).
+  A parser has two independent ways to construct the same fetch; the short form is preferable since
+  it doesn't require scraping page-range/date metadata first.
+- `roster-current.html` — live fetch of `https://www.senate.mo.gov/Senators/` (200, 36,029 bytes),
+  found via a nav link (`Senators/Member?id=9`) already present in
+  `sb834-2026-billinformation.html`. This is the live Blazor app's member grid for the **current**
+  (103rd) General Assembly only — confirmed NOT year/session-parameterized (no historical-roster
+  capability observed). **Markup shape:** each senator is
+  `<a href="https://www.senate.mo.gov/Senators/Member?id=N" aria-label="View Senator FIRST LAST details page">`
+  wrapping a card with `<img ... alt="Senator FIRST LAST">` and a footer div reading
+  `Senator FIRST LAST <br/> District NN`. **34 cards total** (33 named senators + one
+  `Vacant Vacant` placeholder for district 10, i.e. Missouri Senate = 34 seats, 1 vacancy as of this
+  capture), districts 1-34 all present with no gaps or duplicates. **No party affiliation is
+  printed anywhere on this page** (`(R)`/`(D)`/`Republican`/`Democrat` all absent) — a parser
+  needing party will have to get it from a different page (e.g. the per-member `Member?id=N` page,
+  not fetched in this task) or a non-Senate source. District 2 (Bob Onder's former seat) is
+  currently held by Nick Schroer, not Onder — expected, since Onder's Senate term ended
+  2023-01-04, confirming district numbers are stable single-member seats, not renumbered per
+  session.
+- **`roster-2018.html` — MISS, not captured.** Five distinct URLs were tried and all failed within
+  budget: `/18info/SenateRoster.htm` (404), `/18info/senalpha.htm` (404, both the plan's own
+  candidates), `/18info/` itself as a landing page to scan for a members link (403 Forbidden — no
+  directory listing, so this candidate-discovery strategy doesn't work), and two more reasoned
+  guesses, `/18info/senators.htm` and `/18info/members.htm` (both 404), plus `/18info/index.htm`
+  as a second landing-page attempt (404). No working 2018-era roster/member-listing URL was found.
+  **Consequence: the "Onder = district 2" verification could not be performed against a roster
+  fixture** — the already-captured `2018-day37-journal-onder-era.pdf` confirms Onder's *surname*
+  appears in the daily Present roll and multiple YEAS lists for that day, but the daily roll
+  format prints bare surnames only, no district numbers (same finding as the 2026 journal PDFs
+  below), so it cannot independently corroborate district 2 either. A future task should either
+  budget a fresh, larger search for the 2018 roster's real URL, or fall back to a non-Senate
+  source (e.g. Wikipedia/Ballotpedia) for historical district assignment, out of scope for this
+  no-other-hosts research task.
+- `2026-day39-journal.pdf` — live fetch of `https://www.senate.mo.gov/26info/pdf-jrnl/DAY39.pdf`
+  (200, 269,498 bytes, 23 pages). Chosen deliberately over a genuinely "quiet" day: Day 69
+  (5/21/2026, 2 pages, `/26info/Journals/RDay6905211890-1891.pdf`) was fetched first as the
+  smallest day on the 2026 index, but it turned out to contain **zero** roll-call votes (just
+  resolutions/adjournment) — useless for the stated purpose of confirming the vote-block format.
+  DAY39 was picked instead because it's independently known (via the already-captured
+  `sb834-2026-actions-fragment.html`, whose "S Third Read and Passed" action for SB 834 cites
+  `DAY39.pdf#page=2`, journal page S773-774) to contain a real recorded vote. Confirmed
+  text-layer, no OCR: **10 separate roll-call votes** on this one day (SS for SB 834, SB 1119, SS
+  for SCS for SB 1383, SCS for SB 959, SS for SCS for SBs 907/1154/1272, SS for SCS for SBs
+  1066/1088, SS for SJR 87, SS for SB 1421 [bill + a separate emergency-clause vote], SB 945, SS
+  for SCS for SB 1015), format **identical** to the 2018 fixture's
+  `YEAS—Senators` / `NAYS—Senators` / `Absent—Senators` / `Absent with leave—Senators` /
+  `Vacancies—N` blocks with a trailing `—<count>` tally — confirms the vote-block format is stable
+  across at least 2018-2026. **New finding not in the 2018 sample:** the daily Present roll and
+  bill-sponsor lines do show surname collisions here, disambiguated with a parenthesized district
+  number, e.g. `Brown (16)` vs `Brown (26)`, `Gregory (15)` vs `Gregory (21)` — the research doc's
+  earlier claim that "no surname collisions were observed" was an artifact of the one 2018 day
+  sampled, not a general property; a parser must handle the `SURNAME (DISTRICT)` disambiguated
+  form, not just bare surnames, in both the attendance roll and vote-block name lists.
+- Also fetched but not committed as fixtures (logged for completeness/honesty): `/18info/` and
+  `/18info/index.htm` (403/404 landing-page probes, see roster-2018 miss above), and
+  `/26info/Journals/RDay6905211890-1891.pdf` (the vote-free "quiet day" superseded by DAY39.pdf
+  above) and `/26info/Journals/RDay470409900-906.pdf` (Day 47, 4/9/2026, 7 pages — an intermediate
+  attempt that also turned out vote-free, superseded by DAY39.pdf).
+
+**2026-07-28, Task 1 follow-up: Wayback Machine capture of the 2018 roster.** senate.mo.gov no
+longer serves a 2018-era roster at any URL found above, so per controller approval the **one
+authorized additional host**, `web.archive.org`, was used to retrieve an **Internet Archive
+capture of the official page** (not a live senate.mo.gov fetch). Budget: <=8 requests to
+web.archive.org, same UA, >=2s apart. **5 requests used:** two CDX API listing calls that came
+back empty/malformed on the first attempt due to a URL-encoding mistake (query 1: 200, 3 bytes,
+empty `[]`; corrected query 2: 200, 234,479 bytes, 1000 rows, revealed the result set was truncated
+mid-alphabet), a third CDX call scoped to root-level `/18info/*` files only (200, 171,950 bytes,
+756 rows, still noisy because query-string variants share a path depth), a fourth CDX call adding
+a keyword regex filter (`roster|senalpha|alpha|senator|member|biog|directory`) across the whole
+`/18info/*` tree (200, 12,108 bytes, 61 rows — this is what actually found the target), and one
+final fetch of the identified snapshot's raw content (200, 51,017 bytes).
+
+- **Correction to the task instruction:** no HTML roster page exists in the Wayback Machine's
+  index of `senate.mo.gov/18info/*` either — the CDX keyword search covered the *entire* `/18info/`
+  tree (not just the root) and the only consolidated (all-senators) roster-shaped artifacts found
+  were `2018Roster.pdf` and `2018SenateRoster.xlsx`, both directly under `/18info/`. The `mem*.htm`
+  pages found in the same search (`/18info/members/mem01.htm` through `mem33.htm`) are individual
+  per-senator bio-page redirects/404s, not a roster listing. **Saved as
+  `roster-2018-wayback.pdf`, not `.html`** — the underlying official document was always a PDF
+  directory, not a webpage.
+- `roster-2018-wayback.pdf` — Internet Archive capture of
+  `https://web.archive.org/web/20250311182418id_/https://www.senate.mo.gov/18info/2018Roster.pdf`
+  (crawled by IA 2025-03-11, 51,017 bytes, `Content-Type: application/pdf`). **Confirmed
+  contemporaneous, not a later reconstruction:** the response's `x-archive-orig-last-modified`
+  header reads `Tue, 09 Jan 2018 19:29:38 GMT`, matching the "Rev. 1/8/18" date printed at the
+  bottom of the document itself — i.e. senate.mo.gov served this exact unmodified file from
+  January 2018 until at least IA's March 2025 crawl. Text-layer, confirmed via direct extraction
+  (no OCR). Title: "MISSOURI SENATE - 99TH GENERAL ASSEMBLY", a phone/room staff directory, one
+  entry per senator: `SURNAME, FIRSTNAME–DISTRICT` header line, then Room number, Phone number, an
+  internal extension, and staff names, e.g.:
+  ```
+  ONDER, BOB–2. . . . . . . . . . . . . . . 331. . . . . . . . . . 751-1282
+    Internal Number. . . . . . . . . . . . . . . . . . . . . . . . . . 3020
+    Amanda Bell, Theckla Spainhower
+  ```
+  **Onder district 2 verified**, resolving Task 1's original gap. **34 total entries: 33 named
+  senators + 1 vacancy** (`VACANT–17`) — matches the 34-seat chamber count independently observed
+  in `roster-current.html` (2026). **No party affiliation is printed anywhere in this document**
+  either (grepped, absent) — consistent with `roster-current.html`'s same finding, i.e. party
+  appears to never be printed on any MO Senate roster-shaped artifact found in either era.
+- **Parse-shape difference a parser-writer needs:** `roster-current.html` is DOM/CSS-selector
+  scraping (`Senator FIRST LAST <br/> District NN` inside `.card__footer` divs, see above).
+  `roster-2018-wayback.pdf` is **text-layer PDF extraction** against a
+  `SURNAME, FIRSTNAME–DISTRICT` line-header regex (surname/first-name comma-separated, district
+  number after an en-dash `–`, followed by dot-leader padding `. . . .` before the room number) —
+  a structurally different parse path, not a variant of the same one. A parser needing both years
+  will need two separate branches (HTML DOM parse for current/recent years' `/Senators/` app,
+  PDF text parse for archived years' phone-directory PDFs), and should not assume a single roster
+  schema covers both.
+
 ## uscode/
 
 Captured 2026-07-28 for Task 2 of the glossary implementation plan (US Code fetcher). All fetched
@@ -171,3 +307,15 @@ All four fixtures were grepped for anything key-shaped (`api_key`, `token`, `sec
 etc.) before being committed - the only hits were false positives on the word "Secretary" (HHS
 Secretary, printed throughout the actual statute text). No credentials of any kind are involved;
 the site is fully public and unauthenticated.
+
+## LegiScan API probe (2026-07-28, 4 queries, key registered by Lance)
+
+`legiscan/mo-sessions.json` (getSessionList state=MO: 31 sessions, 2010-2026),
+`legiscan/mo-2018-masterlist.json` (getMasterList session 1530: 2,347 bills),
+`legiscan/mo-2018-SB894.json` (getBill 1050440), `legiscan/mo-2018-rollcall-747209.json`
+(getRollCall: House 3rd read on SB 894, yea=121/nay=19/total=161, **161 individual
+{people_id, vote_id, vote_text} entries — MO individual votes CONFIRMED populated**).
+Data © LegiScan, CC BY 4.0, key= param redacted by convention. Note: SB 894's LegiScan record
+carries only the House roll call — the Senate's vote on the combined substitute vehicle
+('SS for SCS for SBs 894 & 921', in our Day 37 journal fixture) presumably lives under a
+different bill record; substitute-vehicle attribution mapping is a real adapter-design task.

@@ -582,3 +582,38 @@ Drafts demoted to "later, when publishing that batch matters."
 gate) → adjudicate glossary terms → merge decision on `glossary-implementation`. Product
 decisions parked: re-gloss path for a rejected-with-gloss term; "(e.g. X)" over-split noise
 accepted-residual; giant-bill policy; Plan 3 mockups.
+
+---
+
+## 2026-07-28 (evening) — MO Senate adapter complete; trust model v3; LegiScan pivot
+
+**MO Senate adapter (branch mo-senate-adapter, 30 commits, 626/626 tests, final review clean):**
+journals-first pipeline — day-journal PDFs parsed into individual votes (13/13 and 11/11 blocks
+on the two real fixtures, every category reconciled against printed tallies), 2018 roster
+rescued from the Internet Archive (Onder district 2 verified), emergency-clause votes attributed
+mechanically from the printed taken-up line with a mandatory cross-check. THE catch of the
+build: a cross-era misattribution class (district numbers reused across eras could assign a
+successor's votes to a predecessor) found by an adversarial reviewer via empirical repro and
+closed at FOUR channels across five fix rounds (live path, replay path, stale-cache, roster
+fallback — the last found by the 16-agent final-review workflow). Migrations 0008+0009 applied
+by Lance. Live backfill cycling on the 30-min-conservative cadence (closed-year caches now
+never expire — half the slots had been wasted re-fetching an immutable 2018 index). CORRECTION
+logged: an earlier status wrongly attributed 20 old OpenStates aggregate rows to this driver;
+the driver's real vote total at that moment was zero.
+
+**Trust model v3 adopted** (Lance: "I'm not a lawyer or a judge... that's too much time and
+work for a human"): Lance is a process auditor, not a truth certifier. Verified-clean items
+auto-approve AND auto-publish with per-item audit logging; he reviews FLAGGED items only.
+Glossary corpus completed same day: 116 glossed across two batches (~$21 total), 104
+auto-published, 8 flags in his queue, 282 popular-name terms in the honest curation queue,
+4 dead citations typed-skipped. Spend hold in force since; the 1000-row-cap Critical found by
+the final review (unbounded selects; 3 of 6 findings lived in two hotfix commits that skipped
+task review — playbook lesson 12) was fixed before any table crossed the cap: no wrong publish
+ever occurred (verified: 116/401/25 rows vs the 1000 cap).
+
+**LegiScan pivot:** Lance registered a key; the settling probe CONFIRMED MO individual votes
+populated (161 real per-person entries on a 2018 roll call; 31 sessions 2010-2026). Bulk
+adapter plan drafted (11 tasks) — LegiScan becomes the PRIMARY MO path (whole backfill ≈ tens
+of queries), the primary-source parsers become the reconciliation/audit layer. 6/7 design
+questions ruled; Q1 (yauzl ZIP dependency) awaits Lance. Binding terms encoded in
+docs/research/2026-07-28-legiscan-terms.md.

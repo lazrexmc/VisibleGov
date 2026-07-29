@@ -288,6 +288,11 @@ function fakeQuery(result, onCall) {
     in: record('in'),
     eq: record('eq'),
     order: record('order'),
+    // range() (finding 1): selectAll (src/lib/db.js) always appends .order('id',...).range(from,to)
+    // — this fake's own canned result comes back in one shot regardless of the requested bounds,
+    // which is fine for every fixture in this suite (all well under the 1000-row page size); the
+    // dedicated capped fake in tests/db.test.js is what actually proves selectAll's pagination math.
+    range: record('range'),
     limit: record('limit'),
     maybeSingle: record('maybeSingle'),
     // update/insert (Task 6's decision handlers, mirroring handleDecision's existing writes):
@@ -697,6 +702,129 @@ test('GET /api/glossary/queue returns items with term/kind/citation/needs_mappin
     assert.equal(t2.citation, null);
     assert.equal(t2.has_gloss, false);
     assert.equal(t2.verified, 'unverified');
+  }, client);
+});
+
+// ---- trust model v3 mechanism 2 (auto-publish-glossary CLI): 'published' rows must stay
+// queryable through /api/glossary/queue — the review page needs them for its published-count and
+// sample-for-audit view, even though clean drafts now leave the review page entirely on their own ----
+
+test('GET /api/glossary/queue queries glossary_terms with status in (draft, stale, approved, published)', () => {
+  const calls = [];
+  const client = fakeClient(
+    { glossary_terms: { data: [], error: null } },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    await fetch(`${base}/api/glossary/queue`);
+    const statusFilter = calls.find((c) => c.table === 'glossary_terms' && c.method === 'in' && c.args[0] === 'status');
+    assert.ok(statusFilter, 'expected a glossary_terms .in("status", [...]) call');
+    assert.deepEqual(statusFilter.args[1].slice().sort(), ['approved', 'draft', 'published', 'stale']);
+  }, client);
+});
+
+// ---- finding 1 integration: the queue ENDPOINTS themselves must actually page past Supabase's
+// 1000-row-per-request cap, not just call selectAll's unit tests in isolation (tests/db.test.js) —
+// a fake that enforces that same real server-side cap per .range() call, mirroring
+// tests/db.test.js's makeCappedTableClient. Every OTHER fake in this file (fakeQuery/fakeClient)
+// returns its whole canned dataset in one shot regardless of the requested range — which is exactly
+// the shape of fake that let this bug ship with a fully green suite in the first place. ----
+
+function cappedTableBuilder(rows, { serverCap = 1000 } = {}) {
+  return () => {
+    const filters = [];
+    const orderCols = [];
+    const builder = {
+      select() { return this; },
+      eq(col, val) { filters.push(['eq', col, val]); return this; },
+      in(col, vals) { filters.push(['in', col, vals]); return this; },
+      order(col) { orderCols.push(col); return this; },
+      range(from, to) {
+        let filtered = rows;
+        for (const [kind, col, val] of filters) {
+          filtered = kind === 'eq' ? filtered.filter((r) => r[col] === val) : filtered.filter((r) => val.includes(r[col]));
+        }
+        const sorted = [...filtered].sort((a, b) => {
+          for (const col of orderCols) {
+            if (a[col] < b[col]) return -1;
+            if (a[col] > b[col]) return 1;
+          }
+          return 0;
+        });
+        const size = Math.min(to - from + 1, serverCap);
+        return Promise.resolve({ data: sorted.slice(from, from + size), error: null });
+      },
+    };
+    return builder;
+  };
+}
+
+function fakeCappedClient(buildersByTable) {
+  return { from: (table) => buildersByTable[table]() };
+}
+
+test('GET /api/glossary/queue: 1500 draft terms past the 1000-row server cap — the NEWEST term (highest created_at) is present, not silently dropped (finding 1\'s named failure mode)', () => {
+  const terms = Array.from({ length: 1500 }, (_, i) => ({
+    id: `t-${String(i).padStart(4, '0')}`,
+    term: `Term ${i}`,
+    kind: 'statute',
+    citation: 'c',
+    needs_mapping: false,
+    gloss_md: 'g',
+    status: 'draft',
+    created_at: new Date(2026, 0, 1, 0, 0, i).toISOString(),
+  }));
+  const client = fakeCappedClient({
+    glossary_terms: cappedTableBuilder(terms),
+    glossary_verifications: cappedTableBuilder([]),
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.items.length, 1500, 'every row must come back, not just the first 1000-row page');
+    assert.ok(body.items.some((it) => it.id === 't-1499'), 'the newest term (last by created_at) must not be dropped');
+  }, client);
+});
+
+test('GET /api/glossary/queue: 1200 verification rows for one term past the 1000-row cap — the newest (clean) verification wins over an older (flagged) one that would otherwise be the only page-1 hit', () => {
+  const oldFlagged = Array.from({ length: 1199 }, (_, i) => ({
+    term_id: 't-other', overall: 'flagged', verdicts: [{ supported: false }], created_at: new Date(2020, 0, 1, 0, 0, i).toISOString(),
+  }));
+  const newestClean = {
+    term_id: 't1', overall: 'clean', verdicts: [{ supported: true }], created_at: '2026-06-01T00:00:00Z',
+  };
+  const client = fakeCappedClient({
+    glossary_terms: cappedTableBuilder([
+      { id: 't1', term: 'X', kind: 'statute', citation: 'c', needs_mapping: false, gloss_md: 'g', status: 'draft', created_at: '2026-01-01T00:00:00Z' },
+    ]),
+    glossary_verifications: cappedTableBuilder([...oldFlagged, newestClean]),
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const t1 = body.items.find((it) => it.id === 't1');
+    assert.ok(t1);
+    assert.equal(t1.verified, 'clean', 'the term\'s own newest verification must win even though it sorts past the first 1000-row page');
+  }, client);
+});
+
+test('GET /api/glossary/queue includes a published-status row (not just draft/stale/approved)', () => {
+  const client = fakeClient({
+    glossary_terms: {
+      data: [{ id: 't1', term: 'X', kind: 'statute', citation: 'y', needs_mapping: false, gloss_md: 'g', status: 'published', created_at: '2026-01-01T00:00:00Z' }],
+      error: null,
+    },
+    glossary_verifications: { data: [], error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/glossary/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const pub = body.items.find((it) => it.id === 't1');
+    assert.ok(pub, 'published row must appear in the glossary queue response');
+    assert.equal(pub.status, 'published');
   }, client);
 });
 

@@ -43,6 +43,16 @@
   #glossary-source-link { font-size: 0.85rem; margin-bottom: 1rem; word-break: break-all; }
   #glossary-gloss-rendered { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; background: #fafafa; white-space: pre-wrap; }
   .quote-label { font-size: 0.8rem; font-weight: 600; margin-top: 0.25rem; }
+  main.panes { min-height: calc(100vh - 3rem); height: auto; }
+  .glossary-toolbar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.5rem 1rem; background: #efefe9; border-bottom: 1px solid #ddd; font-size: 0.85rem; }
+  .glossary-toolbar button { padding: 0.3rem 0.7rem; font-size: 0.82rem; cursor: pointer; border-radius: 4px; border: 1px solid #999; background: #fff; }
+  #glossary-counts { font-weight: 600; }
+  .sample-results { padding: 0.75rem 1rem; background: #fffef5; border-bottom: 1px solid #ddd; }
+  .sample-results h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .sample-card { border: 1px solid #ddd; border-radius: 6px; padding: 0.6rem 0.8rem; margin-bottom: 0.6rem; background: #fff; }
+  .sample-term { font-weight: 600; margin-bottom: 0.3rem; }
+  .sample-gloss { margin-bottom: 0.3rem; }
+  .sample-link { font-size: 0.8rem; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -57,6 +67,15 @@
   <select id="glossary-queue" style="display:none"><option>Loading…</option></select>
   <span id="status-msg"></span>
 </header>
+
+<div id="glossary-toolbar" class="glossary-toolbar" style="display:none">
+  <span id="glossary-counts"></span>
+  <button id="glossary-toggle-stubs" type="button">Show pending stubs</button>
+  <button id="glossary-toggle-pending" type="button">Show awaiting pipeline</button>
+  <button id="glossary-toggle-published" type="button">Show published</button>
+  <button id="glossary-sample-btn" type="button">Sample 5 published for audit</button>
+</div>
+<div id="glossary-sample-results" class="sample-results" style="display:none"></div>
 
 <main class="panes" id="summary-panes">
   <section class="pane pane-text">
@@ -290,6 +309,253 @@
 
   let currentGlossaryId = null;
 
+  // Trust model v3 mechanism 2 (src/cli/auto-publish-glossary.js): clean, verified glossary
+  // drafts now auto-publish with zero human touch, so this tab's job shifted from "review every
+  // actionable item" to "surface what the pipeline could NOT auto-handle." glossaryQueueItems
+  // holds the full, unfiltered /api/glossary/queue response in memory so the toggles below and
+  // the sample-for-audit button can slice it client-side without extra round trips.
+  let glossaryQueueItems = [];
+  let showGlossaryStubs = false;
+  let showGlossaryPublished = false;
+  // Finding 6: the two buckets computeGlossaryGroups used to silently drop are now reachable
+  // behind their own toggle, folded together (both are "pipeline hasn't caught up yet", nothing
+  // for Lance to act on) — "clean — awaiting auto-publish" and "unverified (glossed, not yet
+  // checked)".
+  let showGlossaryPending = false;
+
+  // Flagged is THE queue now (needs Lance's own read) and approved-pending-publish needs his
+  // publish click — both shown expanded by default. Everything else is reachable but collapsed
+  // behind a toggle, same "reachable, not in-your-face" pattern the original stub-collapse design
+  // used.
+  //
+  // Final-review finding 6 fix: mirrors src/review/glossary-buckets.js's computeGlossaryBuckets
+  // EXACTLY (same source-of-truth-duplication convention as verificationBadge/glossVerificationBadge
+  // above — that module is canonical and Node-tested; this is a hand-kept, logic-identical copy
+  // since page.html has no bundler/import step). The buckets below are an EXHAUSTIVE if/continue
+  // chain — every row lands in exactly one, by construction. The PRIOR version used four
+  // INDEPENDENT .filter() calls that could — and did — silently drop a row from every bucket AND
+  // every count: a clean-verified draft not yet picked up by the auto-publish CLI, and an
+  // unverified-but-glossed draft (gloss written, verifier hasn't run yet), both matched none of the
+  // four old predicates, contradicting this function's own former comment that nothing could vanish.
+  function computeGlossaryGroups(items) {
+    const published = [];
+    const approved = [];
+    const needsMapping = [];
+    const stubs = [];
+    const flagged = [];
+    const cleanDraft = [];
+    const unverifiedGlossed = [];
+    for (const it of items) {
+      if (it.status === 'published') { published.push(it); continue; }
+      if (it.status === 'approved') { approved.push(it); continue; }
+      if (it.needs_mapping) { needsMapping.push(it); continue; }
+      if (!it.has_gloss) { stubs.push(it); continue; }
+      if (it.verified === 'flagged') { flagged.push(it); continue; }
+      if (it.verified === 'clean') { cleanDraft.push(it); continue; }
+      unverifiedGlossed.push(it);
+    }
+    return {
+      published, approved, needsMapping, stubs, flagged, cleanDraft, unverifiedGlossed,
+    };
+  }
+
+  function glossaryOptionLabel(it) {
+    const mapping = it.needs_mapping ? ' [needs mapping]' : '';
+    const glossState = it.has_gloss ? '' : ' (not yet glossed)';
+    return '[' + it.status + '] ' + it.term + mapping + glossState;
+  }
+
+  function appendGlossaryOptgroup(select, label, groupItems) {
+    if (groupItems.length === 0) return;
+    const og = document.createElement('optgroup');
+    og.label = label + ' (' + groupItems.length + ')';
+    for (const it of groupItems) og.appendChild(new Option(glossaryOptionLabel(it), it.id));
+    select.appendChild(og);
+  }
+
+  // Finding 6: the toolbar count line now names EVERY bucket, honestly, every time — nothing is
+  // ever summed into an existing number or left out. needsMapping is reported separately from
+  // stubs (a distinct reason, not the same backlog) even though both share one toggle below.
+  function renderGlossaryToolbar(groups) {
+    document.getElementById('glossary-counts').textContent =
+      groups.flagged.length + ' flagged · ' + groups.approved.length + ' approved (pending publish) · '
+      + groups.published.length + ' published · ' + groups.needsMapping.length + ' needs mapping · '
+      + groups.stubs.length + ' pending stubs · ' + groups.cleanDraft.length + ' clean (awaiting auto-publish) · '
+      + groups.unverifiedGlossed.length + ' unverified (glossed, not yet checked)';
+
+    const stubBtn = document.getElementById('glossary-toggle-stubs');
+    const stubTotal = groups.needsMapping.length + groups.stubs.length;
+    stubBtn.textContent = (showGlossaryStubs ? 'Hide' : 'Show') + ' ' + stubTotal + ' pending stubs ('
+      + groups.needsMapping.length + ' needing mapping)';
+    stubBtn.style.display = stubTotal > 0 ? '' : 'none';
+
+    const pubBtn = document.getElementById('glossary-toggle-published');
+    pubBtn.textContent = (showGlossaryPublished ? 'Hide' : 'Show') + ' ' + groups.published.length + ' published';
+    pubBtn.style.display = groups.published.length > 0 ? '' : 'none';
+
+    // Finding 6's other named fix ("fold unverified-glossed visibly"): both pipeline-latency
+    // buckets share one toggle — neither needs Lance's action, both just haven't been picked up by
+    // an automated step yet (auto-publish-glossary.js / the verifier) — but the label breaks the
+    // two counts out so neither is silently merged away.
+    const pendingBtn = document.getElementById('glossary-toggle-pending');
+    const pendingTotal = groups.cleanDraft.length + groups.unverifiedGlossed.length;
+    pendingBtn.textContent = (showGlossaryPending ? 'Hide' : 'Show') + ' ' + pendingTotal + ' awaiting pipeline ('
+      + groups.cleanDraft.length + ' clean, ' + groups.unverifiedGlossed.length + ' unverified)';
+    pendingBtn.style.display = pendingTotal > 0 ? '' : 'none';
+
+    document.getElementById('glossary-sample-btn').style.display = groups.published.length > 0 ? '' : 'none';
+  }
+
+  // Rebuilds the <select> from the in-memory item list — called on load and by the toggle
+  // buttons, never re-fetches. Returns the flat list of currently-selectable items (needed so the
+  // caller can decide whether currentGlossaryId is still reachable).
+  function renderGlossarySelect() {
+    const select = document.getElementById('glossary-queue');
+    const groups = computeGlossaryGroups(glossaryQueueItems);
+    renderGlossaryToolbar(groups);
+    select.textContent = '';
+
+    if (glossaryQueueItems.length === 0) {
+      select.appendChild(new Option('Glossary queue is empty', ''));
+      return [];
+    }
+
+    appendGlossaryOptgroup(select, 'Flagged — needs review', groups.flagged);
+    appendGlossaryOptgroup(select, 'Approved — pending publish', groups.approved);
+    if (showGlossaryStubs) {
+      appendGlossaryOptgroup(select, 'Needs mapping', groups.needsMapping);
+      appendGlossaryOptgroup(select, 'Pending stubs', groups.stubs);
+    }
+    if (showGlossaryPending) {
+      appendGlossaryOptgroup(select, 'Clean — awaiting auto-publish', groups.cleanDraft);
+      appendGlossaryOptgroup(select, 'Unverified (glossed, not yet checked)', groups.unverifiedGlossed);
+    }
+    if (showGlossaryPublished) appendGlossaryOptgroup(select, 'Published', groups.published);
+
+    const visible = groups.flagged.concat(
+      groups.approved,
+      showGlossaryStubs ? groups.needsMapping.concat(groups.stubs) : [],
+      showGlossaryPending ? groups.cleanDraft.concat(groups.unverifiedGlossed) : [],
+      showGlossaryPublished ? groups.published : [],
+    );
+    if (visible.length === 0) select.appendChild(new Option('Nothing needs your review right now', ''));
+    return visible;
+  }
+
+  // Re-renders the select after a toggle flips, keeping the current selection if it's still
+  // reachable, otherwise falling back to the first now-visible item (same "always land on
+  // something selectable" behavior loadGlossaryQueue already had).
+  function refreshGlossarySelectAfterToggle() {
+    const select = document.getElementById('glossary-queue');
+    const visible = renderGlossarySelect();
+    if (visible.length === 0) return;
+    if (!currentGlossaryId || !visible.some((it) => it.id === currentGlossaryId)) {
+      currentGlossaryId = visible[0].id;
+    }
+    select.value = currentGlossaryId;
+    loadGlossaryItem(currentGlossaryId);
+  }
+
+  document.getElementById('glossary-toggle-stubs').addEventListener('click', () => {
+    showGlossaryStubs = !showGlossaryStubs;
+    refreshGlossarySelectAfterToggle();
+  });
+  document.getElementById('glossary-toggle-pending').addEventListener('click', () => {
+    showGlossaryPending = !showGlossaryPending;
+    refreshGlossarySelectAfterToggle();
+  });
+  document.getElementById('glossary-toggle-published').addEventListener('click', () => {
+    showGlossaryPublished = !showGlossaryPublished;
+    refreshGlossarySelectAfterToggle();
+  });
+
+  // Sample 5 for audit (Lance's spot-audit role, trust model v3): now samples from PUBLISHED
+  // items — clean drafts no longer sit in the review queue waiting for a look, they're already
+  // live, so this is the "check the machine's work after the fact" tool. Client-side random pick
+  // from the in-memory item list (no server change — /api/glossary/item/:id already returns
+  // gloss_md/supported_by_quote/source_url for any status, published included), rendered expanded
+  // for eyeball comparison. All model/user text via textContent only (escaping discipline
+  // unchanged).
+  document.getElementById('glossary-sample-btn').addEventListener('click', () => sampleGlossaryPublished());
+
+  async function sampleGlossaryPublished() {
+    const published = glossaryQueueItems.filter((it) => it.status === 'published');
+    if (published.length === 0) { setStatus('No published items to sample yet.'); return; }
+
+    const pool = published.slice();
+    const picks = [];
+    const n = Math.min(5, pool.length);
+    for (let i = 0; i < n; i++) {
+      const idx = Math.floor(Math.random() * pool.length);
+      picks.push(pool.splice(idx, 1)[0]);
+    }
+
+    const container = document.getElementById('glossary-sample-results');
+    container.textContent = '';
+    container.style.display = '';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = 'Close sample';
+    closeBtn.addEventListener('click', () => { container.style.display = 'none'; container.textContent = ''; });
+    container.appendChild(closeBtn);
+
+    const heading = document.createElement('h3');
+    heading.textContent = 'Sample of ' + picks.length + ' published item(s) for audit';
+    container.appendChild(heading);
+
+    for (const it of picks) {
+      let data;
+      try {
+        const res = await fetch('/api/glossary/item/' + encodeURIComponent(it.id));
+        if (!res.ok) continue;
+        data = await res.json();
+      } catch {
+        continue;
+      }
+      if (!data.available) continue;
+      const term = data.term;
+
+      const card = document.createElement('div');
+      card.className = 'sample-card';
+
+      const t = document.createElement('div');
+      t.className = 'sample-term';
+      t.textContent = term.term + ' (' + term.kind + ')';
+      card.appendChild(t);
+
+      const gloss = document.createElement('div');
+      gloss.className = 'sample-gloss';
+      gloss.textContent = term.gloss_md || '';
+      card.appendChild(gloss);
+
+      if (term.supported_by_quote) {
+        const qLabel = document.createElement('div');
+        qLabel.className = 'quote-label';
+        qLabel.textContent = "Author model's claimed supporting quote:";
+        card.appendChild(qLabel);
+        const quote = document.createElement('div');
+        quote.className = 'verify-quote';
+        quote.textContent = term.supported_by_quote;
+        card.appendChild(quote);
+      }
+
+      if (term.source_url) {
+        const link = document.createElement('div');
+        link.className = 'sample-link';
+        const a = document.createElement('a');
+        a.href = term.source_url;
+        a.textContent = term.source_url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        link.appendChild(a);
+        card.appendChild(link);
+      }
+
+      container.appendChild(card);
+    }
+  }
+
   // Mirrors src/review/server.js's TRANSITIONS table, same as STATUS_ACTIONS above.
   var GLOSSARY_STATUS_ACTIONS = {
     draft: ['edit', 'approve', 'reject'],
@@ -377,6 +643,11 @@
     document.getElementById('glossary-edit').value = '';
     renderGlossaryVerification(null);
     updateGlossaryActionButtons('', false);
+    document.getElementById('glossary-counts').textContent = '';
+    document.getElementById('glossary-toggle-stubs').style.display = 'none';
+    document.getElementById('glossary-toggle-pending').style.display = 'none';
+    document.getElementById('glossary-toggle-published').style.display = 'none';
+    document.getElementById('glossary-sample-btn').style.display = 'none';
   }
 
   async function loadGlossaryQueue() {
@@ -389,26 +660,20 @@
     } catch {
       select.textContent = '';
       select.appendChild(new Option('Error loading glossary queue', ''));
+      glossaryQueueItems = [];
       return;
     }
     select.textContent = '';
     if (!body.available) {
       select.appendChild(new Option('Glossary unavailable: ' + (body.reason || 'migration 0007 not applied'), ''));
       showGlossaryUnavailable(body.reason);
+      glossaryQueueItems = [];
       return;
     }
-    const items = body.items || [];
-    if (items.length === 0) {
-      select.appendChild(new Option('Glossary queue is empty', ''));
-      return;
-    }
-    for (const it of items) {
-      const mapping = it.needs_mapping ? ' [needs mapping]' : '';
-      const glossState = it.has_gloss ? '' : ' (not yet glossed)';
-      const label = '[' + it.status + '] ' + it.term + mapping + glossState;
-      select.appendChild(new Option(label, it.id));
-    }
-    if (!currentGlossaryId || !items.some((it) => it.id === currentGlossaryId)) currentGlossaryId = items[0].id;
+    glossaryQueueItems = body.items || [];
+    const visible = renderGlossarySelect();
+    if (visible.length === 0) return;
+    if (!currentGlossaryId || !visible.some((it) => it.id === currentGlossaryId)) currentGlossaryId = visible[0].id;
     select.value = currentGlossaryId;
     await loadGlossaryItem(currentGlossaryId);
   }
@@ -504,6 +769,12 @@
     document.getElementById('glossary-panes').style.display = tab === 'glossary' ? '' : 'none';
     document.getElementById('queue').style.display = tab === 'summaries' ? '' : 'none';
     document.getElementById('glossary-queue').style.display = tab === 'glossary' ? '' : 'none';
+    document.getElementById('glossary-toolbar').style.display = tab === 'glossary' ? '' : 'none';
+    if (tab !== 'glossary') {
+      const sampleResults = document.getElementById('glossary-sample-results');
+      sampleResults.style.display = 'none';
+      sampleResults.textContent = '';
+    }
   }
   document.getElementById('tab-summaries').addEventListener('click', () => showTab('summaries'));
   document.getElementById('tab-glossary').addEventListener('click', () => showTab('glossary'));

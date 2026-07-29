@@ -1,0 +1,2599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home page - Missouri Senate</title>
+    <link rel="stylesheet" href="/journallist/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://www.senate.mo.gov/SenateHome/css/siteMain.css" />
+    <link rel="stylesheet" href="https://www.senate.mo.gov/SenateHome/css/component-library.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/journallist/css/site.css?v=JyYy7dSoqq898lQk_cft5LJiJUlt5TIsMKb_ZHOa0rA" />
+    <script src="https://unpkg.com/pdf-lib"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+
+<body>
+<div class="wrapper">
+    <div id="TopNavTarget">
+    </div>
+    <div class="page-layout">
+        <main role="main" class="pb-3" id="main-content">
+            <style>
+    .btn-outline-primary:hover{
+        color: white !important;  }
+</style>
+
+<div class="container-fluid px-0 py-3">
+    <div class="shadow card">
+        <div class="card-body">
+            <div class="row summary-cards-row">
+                <div class="col-auto">
+                    <div class="card card-session shadow-sm h-100 d-flex flex-column">
+                        <div class="card-header session-card-header">
+                            <h6 class="mb-0">Select a Year</h6>
+                        </div>
+                        <div class="card-footer card-cta-footer" style="background: transparent; border-top: none;">
+                            <form method="get" id="yearForm" class="year-select-form">
+                                <label for="SelectedYear" class="visually-hidden">Year</label>
+                                <select class="form-select year-select" onchange="clearHashAndSubmit();" data-val="true" data-val-required="The SelectedYear field is required." id="SelectedYear" name="SelectedYear">
+                                    <option value="">Select Year</option>
+                                <option>2026</option>
+<option>2025</option>
+<option>2024</option>
+<option>2023</option>
+<option>2022</option>
+<option>2021</option>
+<option>2020</option>
+<option>2019</option>
+<option selected="selected">2018</option>
+<option>2017</option>
+<option>2016</option>
+<option>2015</option>
+<option>2014</option>
+<option>2013</option>
+<option>2012</option>
+<option>2011</option>
+<option>2010</option>
+<option>2009</option>
+<option>2008</option>
+<option>2007</option>
+<option>2006</option>
+<option>2005</option>
+<option>2004</option>
+<option>2003</option>
+<option>2002</option>
+<option>2001</option>
+<option>2000</option>
+<option>1999</option>
+<option>1998</option>
+<option>1997</option>
+<option>1996</option>
+</select>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                    <div class="col-auto">
+                        <div class="card card-session shadow-sm h-100 d-flex flex-column">
+                            <div class="card-header session-card-header">
+                                <h6 class="mb-0">Second Regular Session Journals</h6>
+                            </div>
+                            <div class="card-footer card-cta-footer " style="background: transparent; border-top: none;">
+                                <a href="#secondregular"
+                                   class="card-cta-link"
+                                   onclick="showOnlyCard('secondregular'); return false;">
+                                    Click Here
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="card card-session shadow-sm h-100 d-flex flex-column">
+                            <div class="card-header session-card-header">
+                                <h6 class="mb-0">First Extraordinary Session Journals</h6>
+                            </div>
+                            <div class="card-footer card-cta-footer " style="background: transparent; border-top: none;">
+                                <a href="#firstextraordinary"
+                                   class="card-cta-link"
+                                   onclick="showOnlyCard('firstextraordinary'); return false;">
+                                    Click Here
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="card card-session shadow-sm h-100 d-flex flex-column">
+                            <div class="card-header session-card-header">
+                                <h6 class="mb-0">First Special Session Journals</h6>
+                            </div>
+                            <div class="card-footer card-cta-footer " style="background: transparent; border-top: none;">
+                                <a href="#firstspecial"
+                                   class="card-cta-link"
+                                   onclick="showOnlyCard('firstspecial'); return false;">
+                                    Click Here
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <div class="card card-session shadow-sm h-100 d-flex flex-column">
+                            <div class="card-header session-card-header">
+                                <h6 class="mb-0">Veto Session Journals</h6>
+                            </div>
+                            <div class="card-footer card-cta-footer " style="background: transparent; border-top: none;">
+                                <a href="#veto"
+                                   class="card-cta-link"
+                                   onclick="showOnlyCard('veto'); return false;">
+                                    Click Here
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+      <div class="card shadow-sm session-card" id="secondregular" data-session-anchor="secondregular">
+          <div class="card-header d-flex justify-content-between align-items-center session-card-header"
+               style="cursor: pointer;"
+               data-bs-toggle="collapse"
+               data-bs-target="#collapse-secondregular"
+               aria-expanded="true"
+               aria-controls="collapse-secondregular"
+               tabindex="0"
+               role="button">
+              
+              <h5 class="mb-0">Second Regular Session</h5>
+              <span class="chevron-arrow"></span>
+          </div>
+
+          <div id="collapse-secondregular" class="collapse">
+              <div class="card-body">
+                  <div class="row">
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 01</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/3/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1-86"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay0101031-86.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay0101031-86.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 02</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/4/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="87-98"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay02010487-98.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay02010487-98.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 03</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/8/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="99-111"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay03010899-111.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay03010899-111.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 04</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/9/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="112-121"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay040109112-121.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay040109112-121.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 05</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/10/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="122-135"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay050110122-135.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay050110122-135.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 06</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/11/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="136-140"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay060111136-140.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay060111136-140.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 07</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/16/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="141-151"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay070116141-151.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay070116141-151.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 08</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/17/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="152-159"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay080117152-159.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay080117152-159.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 09</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/18/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="160-168"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay090118160-168.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay090118160-168.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 10</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/22/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="169-178"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay100122169-178.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay100122169-178.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 11</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/23/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="179-185"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay110123179-185.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay110123179-185.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 12</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/24/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="186-195"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay120124186-195.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay120124186-195.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 13</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/25/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="196-206"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay130125196-206.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay130125196-206.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 14</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/29/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="207-214"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay140129207-214.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay140129207-214.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 15</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/30/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="215-221"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay150130215-221.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay150130215-221.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 16</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>1/31/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="222-234"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay160131222-234.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay160131222-234.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 17</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/1/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="235-244"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay170201235-244.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay170201235-244.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 18</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/5/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="245-253"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay180205245-253.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay180205245-253.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 19</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/6/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="254-266"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay190206254-266.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay190206254-266.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 20</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/7/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="267-280"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay200207267-280.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay200207267-280.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 21</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/12/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="281-284"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay210212281-284.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay210212281-284.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 22</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/12/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="285-293"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay220212285-293.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay220212285-293.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 23</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/13/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="294-302"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay230213294-302.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay230213294-302.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 24</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/14/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="303-308"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay240214303-308.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay240214303-308.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 25</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/15/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="309-333"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay250215309-333.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay250215309-333.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 26</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/19/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="334-346"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay260219334-346.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay260219334-346.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 27</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/20/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="347-355"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay270220347-355.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay270220347-355.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 28</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/21/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="356-384"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay280221356-384.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay280221356-384.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 29</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/22/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="385-401"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay290222385-401.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay290222385-401.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 30</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/26/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="402-410"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay300226402-410.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay300226402-410.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 31</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/27/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="411-434"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay310227411-434.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay310227411-434.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 32</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>2/28/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="435-461"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay320228435-461.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay320228435-461.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 33</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/1/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="462-486"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay330301462-486.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay330301462-486.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 34</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/5/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="487-528"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay340305487-528.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay340305487-528.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 35</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/6/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="529-566"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay350306529-566.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay350306529-566.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 36</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/7/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="567-586"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay360307567-586.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay360307567-586.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 37</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/8/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="587-610"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay370308587-610.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay370308587-610.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 38</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/12/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="611-618"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay380312611-618.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay380312611-618.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 39</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/13/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="619-638"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay390313619-638.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay390313619-638.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 40</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/14/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="639-702"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay400314639-702.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay400314639-702.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 41</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/15/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="703-725"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay410315703-725.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay410315703-725.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 42</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/21/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="726-733"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay420321726-733.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay420321726-733.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 43</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/26/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="734-746"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay430326734-746.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay430326734-746.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 44</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/27/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="747-770"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay440327747-770.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay440327747-770.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 45</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/28/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="771-791"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay450328771-791.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay450328771-791.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 46</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>3/29/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="792-812"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay460329792-812.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay460329792-812.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 47</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/3/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="813-826"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay470403813-826.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay470403813-826.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 48</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/4/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="827-841"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay480404827-841.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay480404827-841.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 49</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/5/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="842-872"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay490405842-872.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay490405842-872.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 50</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/9/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="873-884"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay500409873-884.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay500409873-884.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 51</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/10/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="885-899"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay510410885-899.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay510410885-899.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 52</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/11/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="900-917"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay520411900-917.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay520411900-917.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 53</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/12/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="918-930"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay530412918-930.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay530412918-930.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 54</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/17/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="931-939"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay540417931-939.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay540417931-939.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 55</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/18/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="940-980"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay550418940-980.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay550418940-980.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 56</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/19/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="981-998"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay560419981-998.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay560419981-998.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 57</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/23/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="999-1018"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay570423999-1018.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay570423999-1018.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 58</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/24/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1019-1051"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay5804241019-1051.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay5804241019-1051.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 59</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/25/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1052-1088"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay5904251052-1088.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay5904251052-1088.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 60</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/26/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1089-1110"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6004261089-1110.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6004261089-1110.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 61</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>4/30/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1111-1164"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6104301111-1164.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6104301111-1164.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 62</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/1/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1165-1301"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6205011165-1301.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6205011165-1301.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 63</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/2/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1301-1383"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6305021301-1383.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6305021301-1383.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 64</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/3/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1384-1415"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6405031384-1415.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6405031384-1415.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 65</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/7/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1416-1533"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6505071416-1533.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6505071416-1533.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 66</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/8/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1534-1745"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6605081534-1745.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6605081534-1745.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 67</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/9/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1746-1788"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6705091746-1788.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6705091746-1788.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 68</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/10/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1789-1844"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6805101789-1844.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6805101789-1844.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 69</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/11/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1845-1894"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay6905111845-1894.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay6905111845-1894.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 70</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/14/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1895-1955"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7005141895-1955.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7005141895-1955.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 71</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/15/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1956-2133"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7105151956-2133.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7105151956-2133.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 72</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/16/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="2134-2300"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7205162134-2300.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7205162134-2300.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 73</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/17/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="2301-2443"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7305172301-2443.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7305172301-2443.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 74</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/18/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="2444-2490"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7405182444-2490.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7405182444-2490.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 75</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/25/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="2491-2493"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7505252491-2493.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7505252491-2493.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 76</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/30/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="2494-2498"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/RDay7605302494-2498.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/RDay7605302494-2498.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                  </div>
+              </div>
+          </div>
+      </div>
+      <div class="card shadow-sm session-card" id="firstextraordinary" data-session-anchor="firstextraordinary">
+          <div class="card-header d-flex justify-content-between align-items-center session-card-header"
+               style="cursor: pointer;"
+               data-bs-toggle="collapse"
+               data-bs-target="#collapse-firstextraordinary"
+               aria-expanded="true"
+               aria-controls="collapse-firstextraordinary"
+               tabindex="0"
+               role="button">
+              
+              <h5 class="mb-0">First Extraordinary Session</h5>
+              <span class="chevron-arrow"></span>
+          </div>
+
+          <div id="collapse-firstextraordinary" class="collapse">
+              <div class="card-body">
+                  <div class="row">
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 01</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/10/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1-18"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/T1Day0109101-18.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/T1Day0109101-18.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 02</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/11/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="19-21"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/T1Day02091119-21.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/T1Day02091119-21.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 03</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/12/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="22-25"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/T1Day03091222-25.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/T1Day03091222-25.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 04</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/13/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="26-30"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/T1Day04091326-30.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/T1Day04091326-30.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 05</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/14/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="31-38"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/T1Day05091431-38.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/T1Day05091431-38.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 06</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/19/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="39-40"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/T1Day06091939-40.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/T1Day06091939-40.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                  </div>
+              </div>
+          </div>
+      </div>
+      <div class="card shadow-sm session-card" id="firstspecial" data-session-anchor="firstspecial">
+          <div class="card-header d-flex justify-content-between align-items-center session-card-header"
+               style="cursor: pointer;"
+               data-bs-toggle="collapse"
+               data-bs-target="#collapse-firstspecial"
+               aria-expanded="true"
+               aria-controls="collapse-firstspecial"
+               tabindex="0"
+               role="button">
+              
+              <h5 class="mb-0">First Special Session</h5>
+              <span class="chevron-arrow"></span>
+          </div>
+
+          <div id="collapse-firstspecial" class="collapse">
+              <div class="card-body">
+                  <div class="row">
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 01</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/18/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1-3"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/S1Day0105181-3.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/S1Day0105181-3.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 02</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/25/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="4"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/S1Day0205254.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/S1Day0205254.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 03</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>5/30/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="5"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/S1Day0305305.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/S1Day0305305.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 04</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>6/7/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="6-8"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/S1Day0406076-8.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/S1Day0406076-8.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 05</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>6/11/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="9-15"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/S1Day0506119-15.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/S1Day0506119-15.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                  </div>
+              </div>
+          </div>
+      </div>
+      <div class="card shadow-sm session-card" id="veto" data-session-anchor="veto">
+          <div class="card-header d-flex justify-content-between align-items-center session-card-header"
+               style="cursor: pointer;"
+               data-bs-toggle="collapse"
+               data-bs-target="#collapse-veto"
+               aria-expanded="true"
+               aria-controls="collapse-veto"
+               tabindex="0"
+               role="button">
+              
+              <h5 class="mb-0">Veto Session</h5>
+              <span class="chevron-arrow"></span>
+          </div>
+
+          <div id="collapse-veto" class="collapse">
+              <div class="card-body">
+                  <div class="row">
+                          <div class="col-12 col-sm-6 col-md-4 col-lg-3 col-xl-2 col-xxl-2 mb-3">
+                              <div class="w-100 journal-entry-card">
+                                  <div class="d-flex justify-content-between align-items-center">
+                                      <h6 class="mb-0"><strong>Day 01</strong></h6>
+                                      <p class="mb-0 no-wrap"><strong>9/12/2018</strong></p>
+                                  </div>
+
+                                  <div class="w-100 d-flex justify-content-center align-items-center summary-card"
+                                       data-pages="1-9"></div>
+
+                                  <div class="d-flex justify-content-between">
+                                      <button class="btn btn-outline-primary btn-sm preview-button custom-button d-none d-sm-inline-block"
+                                              
+                                              data-filename="/18info/Journals/VDay0109121-9.pdf" data-extension=".pdf">
+                                          Preview Journal
+                                      </button>
+                                      <a href="/18info/Journals/VDay0109121-9.pdf"
+                                         class="btn btn-outline-primary btn-sm custom-button mx-auto mx-sm-0"
+                                         target="_blank">
+                                          
+                                          Open PDF
+                                      </a>
+                                  </div>
+                              </div>
+                          </div>
+                  </div>
+              </div>
+          </div>
+      </div>
+
+<!-- PDF Preview Modal -->
+<div class="modal fade" id="pdfPreviewModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="true"
+     data-bs-keyboard="true">
+    <div class="modal-dialog modal-xl ">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Preview Journal</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0" >
+                <iframe id="pdfPreviewFrame" width="100%" style="border:none; height:80vh;" style="border:none"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scroll to Top Button -->
+<button type="button" class="btn-scroll-top" id="scrollToTopBtn"
+        title="Scroll to top" aria-label="Scroll to top">
+   
+</button>
+
+<script>
+    function clearHashAndSubmit() {
+        if (window.location.hash) {
+            history.replaceState(null, null, window.location.pathname);
+        }
+        document.getElementById('yearForm').submit();
+    }
+</script>
+
+
+        </main>
+    </div>
+
+    <footer id="FooterTarget" class="footer">
+    </footer>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+    <script src="/journallist/lib/jquery/dist/jquery.min.js"></script>
+    <script src="/journallist/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+              const resourceBaseUrl = 'https://www.senate.mo.gov/SenateHome/';
+          </script>
+    <script src="https://www.senate.mo.gov/SenateHome/js/mainSite.js"></script>
+
+    
+    <script>
+                function showOnlyCard(targetId) {
+                    if (!targetId) return;
+
+                    document.querySelectorAll('.session-card').forEach(card => {
+                        const collapse = card.querySelector('.collapse');
+                        const anchor = card.getAttribute('data-session-anchor');
+                        if (anchor !== targetId && collapse) {
+                            bootstrap.Collapse.getOrCreateInstance(collapse, { toggle: false }).hide();
+                        }
+                    });
+
+                    const targetCard = document.getElementById(targetId);
+                    const targetCollapse = document.getElementById('collapse-' + targetId);
+
+                    if (targetCollapse) {
+                        const instance = bootstrap.Collapse.getOrCreateInstance(targetCollapse, { toggle: false });
+                        const isOpen = targetCollapse.classList.contains('show');
+
+                        if (!isOpen) instance.show();
+
+                        const doScroll = () => {
+                            if (targetCard) targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        };
+
+                        if (!isOpen) {
+                            targetCollapse.addEventListener('shown.bs.collapse', doScroll, { once: true });
+                        } else {
+                            requestAnimationFrame(doScroll);
+                        }
+                    } else if (targetCard) {
+                        targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                    }
+                        const pdfJsViewerUrl = '/journallist/lib/pdfjs/web/viewer.html';
+                    async function editAndPreviewPdf(fileUrl, extension) {
+                        const iframe = document.getElementById('pdfPreviewFrame');
+                        const absoluteUrl = new URL(fileUrl, window.location.origin).href;
+                        if (extension === '.htm') {
+                            iframe.src = absoluteUrl;
+                        } else {
+                            iframe.src = `${pdfJsViewerUrl}?file=${encodeURIComponent(absoluteUrl)}`;
+                        }
+                    }
+
+                // Wire preview buttons
+                document.querySelectorAll('.preview-button').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const fileUrl = button.dataset.filename;
+                        const modal = new bootstrap.Modal(document.getElementById('pdfPreviewModal'));
+                        modal.show();
+                setTimeout(() => editAndPreviewPdf(fileUrl, button.dataset.extension), 50);
+                    });
+                });
+
+                document.addEventListener('DOMContentLoaded', function () {
+                    const extraPicker = document.getElementById('extraPicker');
+                    const extraCardLink = document.getElementById('extraCardLink');
+                    const specialPicker = document.getElementById('specialPicker');
+                    const specialCardLink = document.getElementById('specialCardLink');
+
+                    function wire(linkEl, pickerEl, defaultAnchor) {
+                        if (!linkEl) return;
+
+                        linkEl.addEventListener('click', (e) => {
+                            if (e.target.closest('select')) {
+                                e.preventDefault();
+                                return;
+                            }
+                            const anchor = pickerEl ? pickerEl.value : defaultAnchor;
+                            if (anchor) showOnlyCard(anchor);
+                        });
+
+                        if (pickerEl) {
+                            ['mousedown', 'touchstart', 'pointerdown', 'click'].forEach(ev => {
+                                pickerEl.addEventListener(ev, (e) => e.stopPropagation(), { passive: true });
+                            });
+                        }
+                    }
+
+                    wire(extraCardLink, extraPicker, 'firstextraordinary');
+                    wire(specialCardLink, specialPicker, 'firstspecial');
+                });
+    </script>
+
+    <script>
+        function setDefaultStates() {
+            const instEl = document.getElementById('collapse-instructions');
+            if (instEl) bootstrap.Collapse.getOrCreateInstance(instEl, { toggle: false }).show();
+
+            document.querySelectorAll('.session-card .collapse').forEach(el => {
+                bootstrap.Collapse.getOrCreateInstance(el, { toggle: false }).hide();
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', setDefaultStates);
+        window.addEventListener('pageshow', (e) => { if (e.persisted) setDefaultStates(); });
+    </script>
+
+    
+    
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const scrollToTopBtn = document.getElementById('scrollToTopBtn');
+
+            window.addEventListener('scroll', function () {
+                if (window.scrollY > 300) {
+                    scrollToTopBtn.classList.add('show');
+                } else {
+                    scrollToTopBtn.classList.remove('show');
+                }
+            });
+
+            scrollToTopBtn.addEventListener('click', function () {
+                window.scrollTo({
+                    top: 0,
+                    behavior: 'smooth'
+                });
+            });
+        });
+    </script>
+
+    <script src="/journallist/js/site.js"></script>
+</div>
+</body>
+</html>

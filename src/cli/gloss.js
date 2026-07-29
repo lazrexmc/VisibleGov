@@ -1,4 +1,6 @@
-import { getClient, openRun, closeRun, isMissingRelationError } from '../lib/db.js';
+import {
+  getClient, openRun, closeRun, isMissingRelationError, selectAll,
+} from '../lib/db.js';
 import { getAnthropicClient, SummaryRefusedError, SummaryTruncatedError } from '../lib/summarizer.js';
 import { assessVerdicts, VerificationIncompleteError } from '../lib/verifier.js';
 import {
@@ -99,11 +101,19 @@ export function planGlossing(terms) {
 // convention as verify.js's loadAlreadyVerifiedIds / extract-terms.js's loadExtractedSummaryIds —
 // migration 0007 is still an unapplied draft). In live mode the error propagates and hard-fails
 // the run before any model calls are made — 0007 is the gate, not something live mode works around.
-async function loadAllTerms(client, dryRun) {
-  const { data, error } = await client
-    .from(GLOSSARY_TERMS_TABLE)
-    .select('id,term,kind,citation,gloss_md,needs_mapping,status')
-    .order('created_at', { ascending: true });
+//
+// Final-review finding 1 sweep (glossary-trust-surface, controller-adjudicated in-scope): this was
+// a bare, unbounded .select() over the SAME glossary_terms table auto-publish-glossary.js's
+// loadDraftTerms reads (401 live rows and growing with every summarized bill — it WILL cross
+// Supabase's 1000-row cap). Truncation here has the identical consequence class: a term past the
+// cap is silently invisible to planGlossing, so it would never get glossed at all, stuck as a bare
+// stub forever with no error, no count, nothing to signal why. Routed through selectAll like every
+// other glossary_terms/glossary_verifications/glossary_notes read in this codebase. Exported (was
+// module-private) so it's directly testable, matching loadDraftTerms's own shape.
+export async function loadAllTerms(client, dryRun) {
+  const { data, error } = await selectAll(client, GLOSSARY_TERMS_TABLE, 'id,term,kind,citation,gloss_md,needs_mapping,status', {
+    filter: (q) => q.order('created_at', { ascending: true }),
+  });
   if (error) {
     if (dryRun && isMissingRelationError(error, GLOSSARY_TERMS_TABLE)) {
       return { terms: [], tableMissing: true };

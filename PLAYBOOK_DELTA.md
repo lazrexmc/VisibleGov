@@ -211,3 +211,10 @@ it is. Revisit this section before shipping any summarization or scoring logic.
     source as binary. Generate control-char sentinels at runtime (String.fromCharCode), byte-
     check the file after, and sanitize the sentinel out of INPUT before using it (a
     pre-existing occurrence otherwise round-trips into corruption).
+12. **Hotfixes get task reviews too — urgency is when review matters most.** Two "quick"
+    commits shipped outside the SDD review loop during a busy stretch (a review-page query fix
+    and an auto-publish CLI) contained 3 of the 6 findings the final whole-branch review
+    confirmed — including a Critical (unbounded selects silently truncating at Supabase's
+    1000-row cap, which THIS repo had already documented hitting live in another file). The
+    repo's own recorded lessons don't transfer through un-reviewed code paths; reviewers are
+    how they transfer.

@@ -1,0 +1,647 @@
+{
+  "status": "OK",
+  "bill": {
+    "bill_id": 1050440,
+    "change_hash": "2050931303c0c0207a2f62c52493c910",
+    "session_id": 1530,
+    "session": {
+      "session_id": 1530,
+      "state_id": 25,
+      "year_start": 2018,
+      "year_end": 2018,
+      "prefile": 0,
+      "sine_die": 1,
+      "prior": 1,
+      "special": 0,
+      "session_tag": "Regular Session",
+      "session_title": "2018 Regular Session",
+      "session_name": "2018 Regular Session"
+    },
+    "url": "https://legiscan.com/MO/bill/SB894/2018",
+    "state_link": "https://www.senate.mo.gov/18info/BTS_Web/Bill.aspx?SessionType=R&BillID=71289930",
+    "completed": 0,
+    "status": 5,
+    "status_date": "2018-07-13",
+    "progress": [
+      {
+        "date": "2018-01-10",
+        "event": 1
+      },
+      {
+        "date": "2018-01-22",
+        "event": 9
+      },
+      {
+        "date": "2018-03-05",
+        "event": 9
+      },
+      {
+        "date": "2018-04-04",
+        "event": 9
+      },
+      {
+        "date": "2018-04-11",
+        "event": 10
+      },
+      {
+        "date": "2018-04-11",
+        "event": 9
+      },
+      {
+        "date": "2018-04-19",
+        "event": 10
+      },
+      {
+        "date": "2018-04-23",
+        "event": 9
+      },
+      {
+        "date": "2018-04-26",
+        "event": 10
+      },
+      {
+        "date": "2018-05-03",
+        "event": 3
+      },
+      {
+        "date": "2018-07-13",
+        "event": 5
+      }
+    ],
+    "state": "MO",
+    "state_id": 25,
+    "bill_number": "SB894",
+    "bill_type": "B",
+    "bill_type_id": "1",
+    "body": "S",
+    "body_id": 60,
+    "current_body": "S",
+    "current_body_id": 60,
+    "title": "Modifies provisions relating to education curriculum involving science and technology",
+    "description": "Modifies provisions relating to education curriculum involving science and technology",
+    "pending_committee_id": 0,
+    "committee": [],
+    "referrals": [
+      {
+        "date": "2018-01-22",
+        "committee_id": 3494,
+        "chamber": "S",
+        "chamber_id": 60,
+        "name": "Economic Development"
+      },
+      {
+        "date": "2018-03-05",
+        "committee_id": 3404,
+        "chamber": "S",
+        "chamber_id": 60,
+        "name": "Fiscal Oversight"
+      },
+      {
+        "date": "2018-04-04",
+        "committee_id": 2228,
+        "chamber": "H",
+        "chamber_id": 59,
+        "name": "Elementary And Secondary Education"
+      },
+      {
+        "date": "2018-04-11",
+        "committee_id": 3603,
+        "chamber": "H",
+        "chamber_id": 59,
+        "name": "Rules - Administrative Oversight"
+      },
+      {
+        "date": "2018-04-23",
+        "committee_id": 2232,
+        "chamber": "H",
+        "chamber_id": 59,
+        "name": "Fiscal Review"
+      }
+    ],
+    "history": [
+      {
+        "date": "2018-01-10",
+        "action": "S First Read--SB 894-Libla",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-01-22",
+        "action": "Second Read and Referred S Economic Development Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 1
+      },
+      {
+        "date": "2018-02-06",
+        "action": "Hearing Conducted S Economic Development Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-02-20",
+        "action": "SCS Voted Do Pass (w/SCS SBs 894 & 921) Economic Development Committee (5880S.07C)",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-02-22",
+        "action": "Reported from S Economic Development Committee w/SCS",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-01",
+        "action": "SS for SCS S offered & adopted (Libla)--(5880S.08F)",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-01",
+        "action": "Perfected",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-05",
+        "action": "Reported Truly Perfected S Rules, Joint Rules, Resolutions and Ethics Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-05",
+        "action": "Referred S Fiscal Oversight Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 1
+      },
+      {
+        "date": "2018-03-08",
+        "action": "Voted Do Pass S Fiscal Oversight Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-08",
+        "action": "Reported from S Fiscal Oversight Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-08",
+        "action": "S Third Read and Passed",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-08",
+        "action": "H First Read",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-03-12",
+        "action": "H Second Read",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-04",
+        "action": "Referred H Elementary and Secondary Education",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 1
+      },
+      {
+        "date": "2018-04-09",
+        "action": "Hearing Conducted H Elementary and Secondary Education",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-09",
+        "action": "HCS Voted Do Pass H Elementary and Secondary Education",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-11",
+        "action": "HCS Reported Do Pass H Elementary and Secondary Education",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 1
+      },
+      {
+        "date": "2018-04-11",
+        "action": "Referred H Rules - Administrative Oversight",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 1
+      },
+      {
+        "date": "2018-04-18",
+        "action": "HCS Voted Do Pass H Rules - Administrative Oversight",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-19",
+        "action": "HCS Reported Do Pass H Rules - Administrative Oversight",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 1
+      },
+      {
+        "date": "2018-04-23",
+        "action": "Referred H Fiscal Review Committee",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 1
+      },
+      {
+        "date": "2018-04-26",
+        "action": "Voted Do Pass H Fiscal Review",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-26",
+        "action": "HCS Reported Do Pass H Fiscal Review",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 1
+      },
+      {
+        "date": "2018-04-26",
+        "action": "Taken up (H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-27",
+        "action": "Laid over (H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-04-30",
+        "action": "Bill placed on Informal Calendar",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HA 1 to HCS H offered & adopted (Fitzwater)--(5880H09.15H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HA 2 to HCS H offered & adopted (Korman)--(5880H09.20H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HA 3 to HCS H offered (Swan)--(5880H09.18H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HA 1 to HA 3 to HCS H offered & withdrawn (Wood)--(5880H09.31H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HA 3 to HCS H adopted",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HA 4 to HCS H offered & adopted (Black)--(5880H09.07H)",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "HCS, as amended, H adopted",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-02",
+        "action": "H Third Read and Passed",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-03",
+        "action": "S concurs in HCS, as amended",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-03",
+        "action": "S Third Read and Passed",
+        "chamber": "H",
+        "chamber_id": 59,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-03",
+        "action": "Truly Agreed To and Finally Passed",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 1
+      },
+      {
+        "date": "2018-05-30",
+        "action": "Reported Duly Enrolled Rules, Joint Rules, Resolutions & Ethics Committee",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-30",
+        "action": "Signed by Senate President Pro Tem",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-30",
+        "action": "Signed by House Speaker",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-05-30",
+        "action": "Delivered to Governor",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 0
+      },
+      {
+        "date": "2018-07-13",
+        "action": "Vetoed by Governor",
+        "chamber": "S",
+        "chamber_id": 60,
+        "importance": 1
+      }
+    ],
+    "sponsors": [
+      {
+        "people_id": 14996,
+        "person_hash": "45j2wbsj",
+        "party_id": "2",
+        "state_id": 25,
+        "party": "R",
+        "role_id": 2,
+        "role": "Sen",
+        "name": "Douglas Libla",
+        "first_name": "Douglas",
+        "middle_name": "",
+        "last_name": "Libla",
+        "suffix": "",
+        "nickname": "Doug",
+        "district": "SD-025",
+        "ftm_eid": 11029938,
+        "votesmart_id": 139128,
+        "opensecrets_id": "",
+        "knowwho_pid": 402712,
+        "ballotpedia": "Doug_Libla",
+        "bioguide_id": "",
+        "sponsor_type_id": 1,
+        "sponsor_order": 1,
+        "committee_sponsor": 0,
+        "committee_id": 0,
+        "state_federal": 0,
+        "bio": []
+      },
+      {
+        "people_id": 17512,
+        "person_hash": "ltraklqy",
+        "party_id": "2",
+        "state_id": 25,
+        "party": "R",
+        "role_id": 1,
+        "role": "Rep",
+        "name": "Travis Fitzwater",
+        "first_name": "Travis",
+        "middle_name": "",
+        "last_name": "Fitzwater",
+        "suffix": "",
+        "nickname": "",
+        "district": "HD-049",
+        "ftm_eid": 3710003,
+        "votesmart_id": 139297,
+        "opensecrets_id": "",
+        "knowwho_pid": 402790,
+        "ballotpedia": "Travis_Fitzwater",
+        "bioguide_id": "",
+        "sponsor_type_id": 3,
+        "sponsor_order": 2,
+        "committee_sponsor": 0,
+        "committee_id": 0,
+        "state_federal": 0,
+        "bio": {
+          "social": {
+            "capitol_phone": "573-751-2757",
+            "district_phone": "",
+            "email": "",
+            "webmail": "https://www.senate.mo.gov/DistrictWebApplication/Disclaimer?DistrictNumber=10",
+            "biography": "https://www.senate.mo.gov/Senators/Member/10",
+            "image": "https://www.senate.mo.gov/WebPhotos/SenatorPortraits/Fitzwater10.jpg",
+            "ballotpedia": "https://ballotpedia.org/Travis_Fitzwater",
+            "votesmart": "https://justfacts.votesmart.org/candidate/biography/139297"
+          },
+          "capitol_address": {
+            "address1": "201 W Capitol Ave",
+            "address2": "Room 418",
+            "city": "Jefferson City",
+            "state": "MO",
+            "zip": "65101"
+          },
+          "links": {
+            "official": {
+              "bluesky": "",
+              "facebook": "",
+              "instagram": "",
+              "linkedin": "",
+              "tiktok": "",
+              "twitter": "",
+              "website": "https://www.senate.mo.gov/Senators/Member/10",
+              "youtube": ""
+            },
+            "personal": {
+              "bluesky": "",
+              "facebook": "https://www.facebook.com/travisfitzwater49",
+              "instagram": "https://www.instagram.com/travisfitzwater/",
+              "linkedin": "https://www.linkedin.com/in/travisfitzwater/",
+              "tiktok": "",
+              "twitter": "https://www.twitter.com/travisfitzwater",
+              "website": "",
+              "youtube": "https://www.youtube.com/c/TravisFitzwater"
+            }
+          }
+        }
+      }
+    ],
+    "sasts": [],
+    "subjects": [],
+    "texts": [
+      {
+        "doc_id": 1680835,
+        "date": "2018-01-10",
+        "type": "Introduced",
+        "type_id": 1,
+        "mime": "application/pdf",
+        "mime_id": 2,
+        "url": "https://legiscan.com/MO/text/SB894/id/1680835",
+        "state_link": "https://www.senate.mo.gov/18info/pdf-bill/intro/SB894.pdf",
+        "text_size": 130829,
+        "text_hash": "f1b2c358cf394ff59ba9b10c3f58ed41",
+        "alt_bill_text": 0,
+        "alt_mime": "",
+        "alt_mime_id": 0,
+        "alt_state_link": "",
+        "alt_text_size": 0,
+        "alt_text_hash": ""
+      },
+      {
+        "doc_id": 1740347,
+        "date": "2018-02-22",
+        "type": "Comm Sub",
+        "type_id": 2,
+        "mime": "application/pdf",
+        "mime_id": 2,
+        "url": "https://legiscan.com/MO/text/SB894/id/1740347",
+        "state_link": "https://www.senate.mo.gov/18info/pdf-bill/comm/SB894.pdf",
+        "text_size": 207198,
+        "text_hash": "06fe1fa34560ca4a47802d93b4ae057e",
+        "alt_bill_text": 0,
+        "alt_mime": "",
+        "alt_mime_id": 0,
+        "alt_state_link": "",
+        "alt_text_size": 0,
+        "alt_text_hash": ""
+      },
+      {
+        "doc_id": 1749950,
+        "date": "2018-03-02",
+        "type": "Engrossed",
+        "type_id": 4,
+        "mime": "application/pdf",
+        "mime_id": 2,
+        "url": "https://legiscan.com/MO/text/SB894/id/1749950",
+        "state_link": "https://www.senate.mo.gov/18info/pdf-bill/perf/SB894.pdf",
+        "text_size": 207684,
+        "text_hash": "8c0ae9896ee62fa9a9d158ebe5ecebc8",
+        "alt_bill_text": 0,
+        "alt_mime": "",
+        "alt_mime_id": 0,
+        "alt_state_link": "",
+        "alt_text_size": 0,
+        "alt_text_hash": ""
+      },
+      {
+        "doc_id": 1787286,
+        "date": "2018-04-12",
+        "type": "Comm Sub",
+        "type_id": 2,
+        "mime": "application/pdf",
+        "mime_id": 2,
+        "url": "https://legiscan.com/MO/text/SB894/id/1787286",
+        "state_link": "https://www.senate.mo.gov/18info/pdf-bill/House/HCS-SB/SB0894.pdf",
+        "text_size": 79307,
+        "text_hash": "55234659a5b9ec0a4155e15bac7cc189",
+        "alt_bill_text": 0,
+        "alt_mime": "",
+        "alt_mime_id": 0,
+        "alt_state_link": "",
+        "alt_text_size": 0,
+        "alt_text_hash": ""
+      },
+      {
+        "doc_id": 1794488,
+        "date": "2018-05-11",
+        "type": "Enrolled",
+        "type_id": 5,
+        "mime": "application/pdf",
+        "mime_id": 2,
+        "url": "https://legiscan.com/MO/text/SB894/id/1794488",
+        "state_link": "https://www.senate.mo.gov/18info/pdf-bill/tat/SB894.pdf",
+        "text_size": 538327,
+        "text_hash": "5a18edac9f25a9e9c6571754f722ccd2",
+        "alt_bill_text": 0,
+        "alt_mime": "",
+        "alt_mime_id": 0,
+        "alt_state_link": "",
+        "alt_text_size": 0,
+        "alt_text_hash": ""
+      }
+    ],
+    "votes": [
+      {
+        "roll_call_id": 747209,
+        "date": "2018-05-02",
+        "desc": "House: SB 894  SBs 3rd READ - INFORMAL",
+        "yea": 121,
+        "nay": 19,
+        "nv": 0,
+        "absent": 21,
+        "total": 161,
+        "passed": 1,
+        "chamber": "H",
+        "chamber_id": 59,
+        "url": "https://legiscan.com/MO/rollcall/SB894/id/747209",
+        "state_link": "https://www.house.mo.gov/billtracking/bills181/rollcalls/065.005.pdf"
+      }
+    ],
+    "amendments": [],
+    "supplements": [],
+    "calendar": [
+      {
+        "type_id": 1,
+        "event_hash": "dd66e942",
+        "type": "Hearing",
+        "date": "2018-02-06",
+        "time": "12:00",
+        "location": "Senate Lounge",
+        "description": "Economic Development Hearing"
+      }
+    ]
+  }
+}
