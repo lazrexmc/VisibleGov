@@ -258,6 +258,20 @@ export function reconcileLegiscanTallies(rollCall) {
 // source_key prefix" — that phrase does not appear anywhere in the actual driver code; corrected
 // here after reading src/cli/ingest-mo-senate.js directly (verify current state, don't trust a
 // stale doc — per project convention).
+//
+// DISPLAY-TIME DEDUP RULE (Task 8 of the plan, CONTROLLER RULING 3 — documented here, not coded):
+// Task 7 (docs/research/2026-07-29-legiscan-substitute-vehicles.md) confirmed the same real floor
+// vote can now legitimately exist as TWO stored rows — a LegiScan row (this module) and a
+// primary-source row (source_key prefixed below), different source_keys, both correctly stored
+// (expected, not a bug — neither source subsumes the other for every case, per Task 7's finding).
+// A downstream consumer (Plan 3's bill/vote rendering, not built yet) needs a tie-break rule for
+// which row to SHOW: the primary-source row wins for display whenever both exist for the same
+// (chamber, date, bill, tallies) — exactly the correspondence crossCheckAgainstPrimarySource below
+// already computes for its flag rows, so Plan 3 can reuse this function's candidate-matching logic
+// rather than re-deriving it. This is documentation only, no code change: the flag rows this
+// function already writes on any mismatch make the correspondence visible for a human reviewer;
+// nothing here silently hides, merges, or deletes the LegiScan row. Same rule is restated in
+// src/cli/ingest-mo-house.js's and src/cli/ingest-mo-senate.js's own module-header comments.
 export const PRIMARY_SOURCE_KEY_PREFIXES = ['mo-house-xml-', 'mo-senate-web-'];
 
 // KNOWN CAVEAT (task-6-brief.md, explicit; promoted to a STRUCTURAL rule by FIX ROUND 1; SOFTENED

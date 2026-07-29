@@ -16,7 +16,14 @@ becoming the PRIMARY MO ingestion path — individual roll-call votes at a fract
 cost of the primary-source PDF/journal parsers, with the same reconcile-or-throw integrity gate,
 fail-loud identity resolution, and draft-then-apply migration discipline as every prior adapter in
 this repo. The existing `mo-house-xml`/`mo-rollcall-pdf` and `mo-senate-web`/`mo-senate-journal-
-pdf` pipelines do not retire — they demote to an audit/reconciliation role (see Task 8).
+pdf` pipelines do not retire. **Task 8, REVISED by Task 7's evidence**
+(`docs/research/2026-07-29-legiscan-substitute-vehicles.md`, VERIFIED-BY-PAYLOAD): the MO Senate
+journals pipeline is COMPLETENESS-CRITICAL — LegiScan's own schema cannot represent a
+combined-vehicle floor vote (`ls_bill_vote.bill_id` is a single scalar FK), and the real SBs 894 &
+921 case proves LegiScan has zero record of a genuine individually-recorded vote for either
+sibling bill — so it keeps its full ingestion cadence PERMANENTLY, not demoted to audit-only. The
+House XML pipeline's exposure to the same gap is UNKNOWN, documented as such pending Task 10's
+evidence. See Task 8 below for the full revised policy.
 
 **Architecture:** **Dataset-bulk-first for backfill, not per-bill polling.** LegiScan's
 `getDatasetList`/`getDataset` operations return one Base64-encoded ZIP per session containing
@@ -533,42 +540,87 @@ whether its `bill_id` points at SB921 only or is somehow shared); 1 query held i
 - [ ] TDD the implemented rule against whatever real fixture the investigation produced.
 - [ ] Commit `feat: legiscan substitute-vehicle attribution (investigated, not assumed)`.
 
-### Task 8: Coexistence policy — demote primary-source drivers to reconciliation cadence
+### Task 8: Coexistence policy — REVISED by Task 7's evidence (Senate stays completeness-critical)
+
+> **REVISED (controller ruling, post-Task-7-evidence — binding, appended to
+> `.superpowers/sdd/2026-07-29-legiscan-bulk-adapter/task-8-brief.md`):** this task's original
+> framing below ("demote primary-source drivers to reconciliation cadence," written before Task 7
+> ran) is SUPERSEDED for the MO Senate journals pipeline. Task 7's bounded live investigation
+> (`docs/research/2026-07-29-legiscan-substitute-vehicles.md`, VERIFIED-BY-PAYLOAD) found LegiScan's
+> own schema structurally cannot attribute one roll call to more than one sibling bill_id
+> (`ls_bill_vote.bill_id` is a single scalar FK) and proved a real case (`SS for SCS for SBs 894 &
+> 921`, a genuine individually-recorded 31-0 Senate vote, 2018-03-08, ground-truthed against the Day
+> 37 journal fixture) where LegiScan has ZERO record of the vote for EITHER sibling bill. The MO
+> Senate journals-first pipeline (`ingest-mo-senate.js`/`mo-senate-journal-pdf.js`) is therefore
+> COMPLETENESS-CRITICAL — sole source for that entire class of combined-vehicle floor votes — and
+> keeps its full ingestion cadence PERMANENTLY; it is NOT demoted to audit-only. The House XML
+> pipeline's exposure to the same gap is UNKNOWN (Task 7 was Senate-scoped only, by design) —
+> documented as such, never assumed either way; Task 10 gathers the first evidence via a
+> per-chamber count comparison before any House-side demotion/completeness-critical call is made.
+> Scope stays SMALL exactly as originally ruled (Q7) — policy/comment updates in the two drivers +
+> this plan-level statement + exercising the Task 6 cross-check wiring; still NO new reconciliation
+> CLI/UI. One addition: CONTROLLER RULING 3 requires documenting a display-time dedup rule for
+> downstream consumers (Plan 3) — see item 4 below, comment-only, no code change. The text below
+> (original, pre-Task-7) is kept for its still-accurate parts (the `crossCheckAgainstPrimarySource`
+> wiring mechanism, the "scope stays small" ruling) but its blanket "demote to reconciliation
+> cadence" framing no longer applies uniformly — see items 1-2 as amended.
 
 **Files:** Modify `src/cli/ingest-mo-house.js`, `src/cli/ingest-mo-senate.js` (cadence/role
-comments + a `--reconcile-only` mode flag); no new adapter files — **deliberately right-sized**:
-this task lands the POLICY and the LEDGER WIRING (Task 1's `vote_reconciliation_flags` table +
-Task 6's `crossCheckAgainstPrimarySource`), not a full new automated comparison engine. **Ruled**
-(`.superpowers/sdd/legiscan-plan-draft-notes.md` Q7, APPROVED — ship the small version now): a
-fuller reconciliation-review CLI/UI is legitimate follow-on work, explicit and deferred, not built
-here — it's premature before `vote_reconciliation_flags` has ever had real rows to review.
+comments only — no `--reconcile-only` flag: neither driver's cadence actually changes, per the
+revision above, so that flag from the original framing is not built); no new adapter files —
+**deliberately right-sized**: this task lands the POLICY and the LEDGER WIRING (Task 1's
+`vote_reconciliation_flags` table + Task 6's `crossCheckAgainstPrimarySource`), not a full new
+automated comparison engine. **Ruled** (`.superpowers/sdd/legiscan-plan-draft-notes.md` Q7,
+APPROVED — ship the small version now): a fuller reconciliation-review CLI/UI is legitimate
+follow-on work, explicit and deferred, not built here — it's premature before
+`vote_reconciliation_flags` has ever had real rows to review.
 
 **Concrete changes:**
-1. Both drivers' module-header comments updated: role changes from "primary MO vote ingestion"
-   to "primary-source audit/reconciliation layer, LegiScan (`src/cli/ingest-legiscan.js`, Task 9)
-   is now PRIMARY for MO backfill." No functional behavior change required in THIS task beyond
-   what's below — the drivers keep working exactly as they do today (they still write votes rows
-   when run; nothing about their parsing/reconcile-or-throw internals changes).
+1. Both drivers' module-header comments updated — **per-driver, not uniform** (revised, per Task
+   7's finding): both state LegiScan (`src/cli/ingest-legiscan.js`, Task 9) is now PRIMARY for MO
+   backfill generally. But `ingest-mo-senate.js`'s comment states it stays COMPLETENESS-CRITICAL,
+   keeps its full cadence, and is NOT demoted; `ingest-mo-house.js`'s comment states its exposure to
+   the same combined-vehicle gap is UNKNOWN, deferred to Task 10's per-chamber count comparison, not
+   assumed either way. No functional behavior change in THIS task for either driver — both keep
+   working exactly as they do today (they still write votes rows when run; nothing about their
+   parsing/reconcile-or-throw internals changes).
 2. `crossCheckAgainstPrimarySource` (Task 6) is the actual mechanism: it runs from the LegiScan
    ingestion side and looks up whatever the primary-source drivers have ALREADY written — meaning
    the coexistence check happens automatically whenever LegiScan ingestion runs, with zero new
    scheduled job needed for the backfill period. `mo-house-xml`/`mo-senate-web`'s own cadence
-   (30-min, ToU-driven) is UNCHANGED by this plan — they were already slow/rare by ToU necessity;
-   "demote to audit cadence" in practice means "their future runs matter for cross-checking
-   already-LegiScan-covered bills more than for being the first writer," a framing change more
-   than a code change for the backfill window.
+   (30-min, ToU-driven) is UNCHANGED by this plan — they were already slow/rare by ToU necessity.
+   For `mo-senate-web`/`mo-senate-journal-pdf` the accurate framing post-Task-7 is "primary source
+   for its combined-vehicle vote class, cross-check source for everything else LegiScan also
+   covers" — not "demoted to audit cadence." For `mo-house-xml`, whether an analogous "future runs
+   matter more for cross-checking than first-writing" framing applies is UNKNOWN pending Task 10's
+   evidence — not assumed.
 3. Bill/vote coexistence itself is guaranteed by the identifier-normalization + session-mapping
    Global Constraints already specified (Tasks 1/4) — a LegiScan-sourced bill for a session/
    identifier a primary-source driver already created lands on the SAME `bills` row (unique
    constraint dedupe), not a duplicate.
+4. **Display-time dedup rule for downstream consumers** (CONTROLLER RULING 3 — documented here,
+   not coded): the same real-world floor vote may now legitimately exist as TWO rows — a LegiScan
+   row and a primary-source row, different `source_key`s, both correctly stored (expected, not a
+   bug, once Task 7 confirmed neither source subsumes the other for every case). Rule for whoever
+   builds Plan 3's rendering: the primary-source (journal/PDF) row wins for display whenever both
+   exist for the same (chamber, date, bill, tallies) — the same correspondence
+   `crossCheckAgainstPrimarySource` (Task 6) already computes for its flag rows, so Plan 3 can reuse
+   that matching logic rather than re-deriving it. No code change here; the same rule is documented
+   as a comment beside `PRIMARY_SOURCE_KEY_PREFIXES` in `src/adapters/legiscan-votes.js`.
 
-- [ ] Update both drivers' header comments (documented policy, per above).
-- [ ] `crossCheckAgainstPrimarySource` (already built in Task 6) is exercised end-to-end here
-      against a synthetic scenario: a `mo-house-xml`-sourced vote row exists for a bill LegiScan
-      also covers, tallies deliberately mismatched → flag row lands in
-      `vote_reconciliation_flags` with both sources' tallies and the Task-6 caveat note.
-- [ ] Commit `docs+feat: coexistence policy - primary-source drivers demote to reconciliation
-      role; cross-check wiring exercised end-to-end`.
+- [ ] Update both drivers' header comments (documented policy, per-driver as revised above).
+- [ ] `crossCheckAgainstPrimarySource` (already built in Task 6) is exercised end-to-end against
+      exactly the synthetic scenario this bullet describes: a `mo-house-xml`-sourced vote row
+      exists for a bill LegiScan also covers, tallies deliberately mismatched → flag row lands in
+      `vote_reconciliation_flags` with both sources' tallies and the Task-6 caveat note. Already
+      covered by Task 6's own test suite (`tests/legiscan-votes.test.js` — the "YEA mismatch" and
+      "Present-category caveat" cases both exercise a `mo-house-xml-*`-sourced primary vote row
+      against a mismatched LegiScan tally) — confirmed still green here rather than duplicated with
+      a redundant Task-8-local test.
+- [ ] Document the display-time dedup rule (item 4 above): comment in
+      `src/adapters/legiscan-votes.js` beside `PRIMARY_SOURCE_KEY_PREFIXES`.
+- [ ] Commit `docs: coexistence policy revised - MO Senate journals stay completeness-critical
+      (Task 7 evidence), House exposure unknown pending Task 10, display-dedup rule documented`.
 
 ### Task 9: `src/cli/ingest-legiscan.js` — driver
 

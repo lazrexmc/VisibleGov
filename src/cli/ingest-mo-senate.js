@@ -19,6 +19,33 @@ import * as journalPdf from '../adapters/mo-senate-journal-pdf.js';
 // for the day-completeness rule, ruling 4; roster+journal-index local caches to keep this driver's
 // "one live document per 30-minute slot" discipline even though MO Senate ingestion needs THREE
 // distinct live document types, not one).
+//
+// COEXISTENCE POLICY (Task 8 of docs/superpowers/plans/2026-07-29-legiscan-bulk-adapter.md,
+// REVISED by Task 7's evidence — controller ruling appended to .superpowers/sdd/2026-07-29-
+// legiscan-bulk-adapter/task-8-brief.md): this driver is NOT demoted to an audit/reconciliation-
+// only cadence, unlike the plan's original pre-Task-7 framing. Task 7
+// (docs/research/2026-07-29-legiscan-substitute-vehicles.md, VERIFIED-BY-PAYLOAD) found LegiScan's
+// own schema structurally cannot attribute one roll call to more than one sibling bill_id
+// (`ls_bill_vote.bill_id` is a single scalar FK) and proved the gap in practice: `SS for SCS for
+// SBs 894 & 921`, a genuine individually-recorded 31-0 Senate vote (2018-03-08, ground-truthed
+// against the Day 37 journal fixture by this file's own parseJournalVotes/mo-senate-journal-pdf.js
+// pipeline) has ZERO record anywhere in LegiScan's data for either sibling bill. This journals-first
+// pipeline is therefore COMPLETENESS-CRITICAL — the sole source for that entire class of
+// combined-vehicle floor votes — and keeps its full ingestion cadence PERMANENTLY. LegiScan
+// (src/cli/ingest-legiscan.js, Task 9) becomes PRIMARY for MO backfill generally (most bills/votes
+// are not combined vehicles, and LegiScan covers those at a fraction of the query cost), but this
+// driver's own runs remain load-bearing for that vote class, not merely a cross-check convenience.
+// No functional change from this policy: parsing/reconcile-or-throw internals and the 30-minute
+// ToU-driven cadence are unchanged. crossCheckAgainstPrimarySource (src/adapters/legiscan-votes.js,
+// Task 6) runs from the LegiScan ingestion side and looks up whatever this driver has already
+// written — the cross-check happens automatically whenever LegiScan ingestion runs, no new
+// scheduled job needed. DISPLAY-TIME DEDUP RULE for downstream consumers (Plan 3, not built here;
+// CONTROLLER RULING 3): when the same real floor vote legitimately exists twice — a LegiScan row
+// and a journal row here, different source_keys — the journal (primary-source) row wins for
+// display whenever both exist for the same (chamber, date, bill, tallies); see the matching
+// comment in src/adapters/legiscan-votes.js beside PRIMARY_SOURCE_KEY_PREFIXES. The cross-check
+// flags (vote_reconciliation_flags) already make the correspondence visible; this is a
+// display-layer convention, not a data-integrity mechanism.
 
 // ---- artifact dirs (gitignored, same convention as ingest-mo-house.js's ROLLCALL_ARTIFACT_DIR
 // etc.) ----

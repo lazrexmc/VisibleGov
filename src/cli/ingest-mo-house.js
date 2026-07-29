@@ -13,6 +13,31 @@ import * as pdf from '../adapters/mo-rollcall-pdf.js';
 // different cadence (30-minute mechanically-enforced limiter vs. the other adapters' sub-10s
 // limiters) and a fetch-list-then-loop-per-item shape that doesn't fit ingest.js's existing
 // one-collect-call-per-source pattern without complicating it for every other source.
+//
+// COEXISTENCE POLICY (Task 8 of docs/superpowers/plans/2026-07-29-legiscan-bulk-adapter.md,
+// REVISED by Task 7's evidence — controller ruling appended to .superpowers/sdd/2026-07-29-
+// legiscan-bulk-adapter/task-8-brief.md): LegiScan (src/cli/ingest-legiscan.js, Task 9) becomes
+// PRIMARY for MO backfill generally — a fraction of the query cost of this XML/PDF path for
+// ordinary bills. Task 7 (docs/research/2026-07-29-legiscan-substitute-vehicles.md,
+// VERIFIED-BY-PAYLOAD, SENATE-SIDE ONLY) found LegiScan's own schema structurally cannot
+// attribute one roll call to more than one sibling bill_id (`ls_bill_vote.bill_id` is a single
+// scalar FK) and proved a real Senate case where LegiScan has ZERO record of a genuine
+// individually-recorded vote for either sibling bill. Whether the MO HOUSE has an equivalent
+// combined-vehicle mechanism, and whether this driver carries the same completeness exposure the
+// Senate journals pipeline (ingest-mo-senate.js) does, is UNKNOWN — not yet evidenced either way.
+// This is deliberately NOT decided here: Task 10 (a per-chamber count comparison) gathers the
+// first evidence before any House-side demotion or completeness-critical call is made. Until then
+// this driver is functionally UNCHANGED by this policy — same 30-minute ToU-driven cadence, same
+// parsing/reconcile-or-throw internals. crossCheckAgainstPrimarySource (src/adapters/legiscan-
+// votes.js, Task 6) runs from the LegiScan ingestion side and looks up whatever this driver has
+// already written — the cross-check happens automatically whenever LegiScan ingestion runs, no new
+// scheduled job needed. DISPLAY-TIME DEDUP RULE for downstream consumers (Plan 3, not built here;
+// CONTROLLER RULING 3): when the same real floor vote legitimately exists twice — a LegiScan row
+// and a primary-source row here, different source_keys — the primary-source row wins for display
+// whenever both exist for the same (chamber, date, bill, tallies); see the matching comment in
+// src/adapters/legiscan-votes.js beside PRIMARY_SOURCE_KEY_PREFIXES. The cross-check flags
+// (vote_reconciliation_flags) already make the correspondence visible; this is a display-layer
+// convention, not a data-integrity mechanism.
 
 const ROSTER_REPRESENTATIVE_FIXTURE = 'tests/fixtures/research/mo-house-xml/representative-107.xml';
 
