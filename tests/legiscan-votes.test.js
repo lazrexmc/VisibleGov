@@ -610,6 +610,35 @@ test('crossCheckAgainstPrimarySource: the REAL HB 3 same-day pattern (5 real Hou
   assert.equal(flags.length, 0, 'exact-match verification passing writes no flag');
 });
 
+// FIX ROUND 3 (re-review, execution-caught regression): round 2 returned matched:true the instant
+// exactly one candidate's (yea, nay) matched, without ever checking that candidate's own soft
+// (present/absent/not_voting) bucket — the re-reviewer proved this by construction: 500 doctored
+// Present casts on the uniquely-matched candidate still came back matched:true, zero flags, even
+// though the single-candidate path DOES flag the identical scenario (see the "Present-category
+// caveat in practice" test above). Mirrored here as the reviewer's own control case.
+test('crossCheckAgainstPrimarySource: FIX ROUND 3 regression check — the tally-uniquely-selected candidate STILL gets the full soft-bucket check; 500 doctored Present casts on it are caught, not waved through by tally-selection alone', async () => {
+  const { voteRows, castRows: realCastRows } = buildHb3HouseCandidates(HB3_HOUSE_TALLIES);
+  // Doctor ONLY the uniquely-matching candidate (774312-mirror, ordinal 1: real yea=119/nay=23,
+  // still the unique tally match) by adding 500 extra Present casts nothing on the LegiScan side
+  // has any analog for — its yea/nay are untouched (still uniquely selected), but its own bucket
+  // (present+absent+not_voting+other = 500+14 = 514) now wildly disagrees with LegiScan's own
+  // not_voting+absent = 0+14 = 14.
+  const castRows = [...realCastRows, ...castRowsOfPosition('primary-hb3-1', 'present', 500)];
+  const { client, flags } = makeFakeVotesDb({ voteRows, castRows });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false, 'tally-unique SELECTION happened, but verification must NOT pass silently on top of a real bucket blowout');
+  assert.equal(result.quarantine, false, 'still a soft-only mismatch (yea/nay both agree exactly) — never quarantined');
+  assert.ok(result.flag, 'a flag row must be returned, not null — this is the whole point of the regression fix');
+  assert.equal(flags.length, 1);
+  assert.equal(flags[0].discrepancy.hard_mismatches.length, 0, 'yea/nay still agree exactly — the selection criterion itself');
+  assert.ok(flags[0].discrepancy.soft_mismatches.length > 0, 'the 500-cast bucket blowout must be caught');
+  assert.equal(flags[0].discrepancy.caveat, PRESENT_CATEGORY_CAVEAT);
+  assert.match(flags[0].discrepancy.note, /tally-unique/);
+  assert.match(flags[0].discrepancy.note, /among 5 same-day candidates/);
+  assert.equal(flags[0].vote_id, 'primary-hb3-1', 'the flag attaches to the actual selected candidate');
+});
+
 test('crossCheckAgainstPrimarySource: a doctored ZERO-tally-match case among the 5 same-day HB 3 candidates -> no assertable 1:1 correspondence, so quarantine:false — stores, flagged "no_tally_corresponding_primary" listing every candidate', async () => {
   const { voteRows, castRows } = buildHb3HouseCandidates(HB3_HOUSE_TALLIES);
   const { client, flags } = makeFakeVotesDb({ voteRows, castRows });

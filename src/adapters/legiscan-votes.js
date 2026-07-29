@@ -31,9 +31,8 @@ import { isMissingRelationError } from '../lib/db.js';
 //       primary-source candidate matches that tuple, disambiguate by TALLY IDENTITY ((yea, nay) —
 //       the two categories both sources define identically) rather than treating every multi-match
 //       as one flat "ambiguous" bucket:
-//         - exactly one candidate's own (yea, nay) equals LegiScan's -> `matched:true`,
-//           `reason: 'tally_unique_match'` — finding that candidate IS the verification passing
-//           (not a "pick one, then check" two-step, which would be circular), stores, no flag.
+//         - exactly one candidate's own (yea, nay) equals LegiScan's -> that candidate is SELECTED
+//           as the corresponding row (see FIX ROUND 3 immediately below for what happens next).
 //         - zero candidates match on (yea, nay) -> no 1:1 correspondence is mechanically assertable,
 //           so no hard contradiction is assertable either -> stores (internally reconciled,
 //           uncontradicted by anything specific), flags `reason: 'no_tally_corresponding_primary'`
@@ -41,11 +40,26 @@ import { isMissingRelationError } from '../lib/db.js';
 //         - more than one candidate matches on (yea, nay) -> genuinely ambiguous (two same-day votes
 //           coincidentally sharing a head count) -> stores, flags
 //           `reason: 'ambiguous_tally_match'` with the matching subset listed.
+//       FIX ROUND 3 (re-review — a real regression, caught by execution, not just reading): round
+//       2's own comment claimed tally-unique selection "IS the verification passing" and returned
+//       matched:true immediately — WRONG. TALLY-UNIQUE SELECTION IS SELECTION, NOT VERIFICATION.
+//       (yea, nay) agreement only identifies WHICH candidate corresponds; it says nothing about
+//       whether the rest of that candidate's own tallies also agree (the re-reviewer proved this by
+//       running it: 500 doctored Present casts on the uniquely-selected candidate still returned
+//       matched:true with zero flags — the exact scenario the single-candidate path DOES flag).
+//       Fixed: the tally-uniquely-selected candidate now goes through the SAME
+//       compareTalliesForCrossCheck call the single-candidate path uses (not a hand-rolled second
+//       copy). Hard mismatches are impossible there BY CONSTRUCTION (yea/nay equality is literally
+//       the selection filter) — soft-clean -> matched:true, `reason: 'tally_unique_match'`, no flag
+//       (the real happy path); soft-mismatch -> stores + flags with the identical soft-mismatch
+//       shape/caveat the single-candidate path produces, plus a `note` documenting the candidate
+//       was tally-uniquely selected among N same-day candidates (a reviewer seeing this flag should
+//       know the disambiguation mechanism that picked this specific row).
 //       Quarantine is asserted ONLY where a 1:1 correspondence is assertable — i.e. only on the
-//       single-candidate path below (round 1's semantics, unchanged there). Multi-candidate days
-//       cap out at flag-for-human; a same-day discrepancy this function cannot mechanically pin to
-//       one specific row is never grounds to quarantine, since quarantine requires knowing WHAT is
-//       being contradicted.
+//       single-candidate path AND the tally-unique-selection path (both now share the same hard/soft
+//       comparison, so both share the same quarantine rule — never grounds to quarantine on the
+//       zero-match or ambiguous-match branches, since quarantine requires knowing WHAT is being
+//       contradicted, which those two branches cannot establish).
 //       No primary-source counterpart at all -> `checked:false`, `quarantine:false` (unchanged) —
 //       LegiScan covers far more sessions than the primary parsers have reached; absence of a
 //       counterpart is the whole point of this backfill, never treated as a failure.
@@ -463,13 +477,16 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
   // distinguish between them, so disambiguate by TALLY IDENTITY — (yea, nay), the two categories
   // both sources define identically (see compareTalliesForCrossCheck's own hard/soft split).
   //
-  // CIRCULARITY GUARD (explicit, per the controller ruling): (yea, nay) equality is how a
-  // corresponding row is IDENTIFIED in this branch — a candidate selected this way is therefore
-  // NEVER also reported as a hard mismatch against itself (that would compare a value to itself
-  // and trivially always agree, manufacturing a false verification out of nothing). The one thing
-  // tally-selection legitimately establishes is "this specific candidate agrees with LegiScan on
-  // the two categories both sources define identically" — which IS round-1's own matched:true
-  // criterion, nothing stronger and nothing circular.
+  // CIRCULARITY GUARD (explicit, per the controller ruling; corrected by FIX ROUND 3 — see the
+  // module header for the regression this replaced): (yea, nay) equality is how a corresponding
+  // row is IDENTIFIED in this branch, so a candidate selected this way can NEVER also be reported
+  // as a HARD mismatch against itself (that would compare a value to itself and trivially always
+  // agree, manufacturing a false verification out of nothing) — that part is genuinely guaranteed
+  // by construction. But identifying WHICH row corresponds is not the same as confirming the two
+  // sources agree on EVERYTHING about that vote: the selected candidate still goes through the
+  // full compareTalliesForCrossCheck (below, once selected) exactly like the single-candidate
+  // path, so a soft-bucket disagreement on the selected candidate is still caught, not waved
+  // through just because tally-selection is how it was found.
   const candidateTallies = [];
   for (const c of candidates) {
     // Sequential, not Promise.all: a handful of same-day candidates at most (5 real, per the HB 3
@@ -490,10 +507,51 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
   ));
 
   if (tallyMatches.length === 1) {
-    // Exactly one same-day candidate's own (yea, nay) agrees with LegiScan's — verification
-    // passing, nothing to review.
+    // FIX ROUND 3: TALLY-UNIQUE SELECTION IS SELECTION, NOT VERIFICATION. Finding the one
+    // same-day candidate whose (yea, nay) agrees with LegiScan's only identifies WHICH row
+    // corresponds — it does not by itself confirm the two sources agree on everything else about
+    // that vote. The selected candidate now runs through the exact same compareTalliesForCrossCheck
+    // the single-candidate path uses (reusing the function, not a second hand-rolled comparison,
+    // so this class of regression can't reappear via code drift between two copies).
+    const { candidate: selectedCandidate, counts: selectedCounts } = tallyMatches[0];
+    const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, selectedCounts);
+    // hardMismatches is IMPOSSIBLE here by construction (yea/nay equality is literally the filter
+    // that put this candidate in tallyMatches) — proved by reuse of the shared function rather than
+    // assumed, but never hand-waved into a hardcoded `false` either: quarantine is derived the same
+    // way the single-candidate path derives it, so if that invariant were ever broken by a future
+    // change to the selection filter, this code would still behave correctly rather than silently
+    // asserting something no longer true.
+    const quarantine = hardMismatches.length > 0;
+
+    if (hardMismatches.length === 0 && softMismatches.length === 0) {
+      // The real happy path: verification actually passing, not just selection succeeding.
+      return {
+        checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match',
+      };
+    }
+
+    // A soft-bucket mismatch on the tally-uniquely-selected candidate: same shape/consequence as
+    // the single-candidate path's own soft-mismatch branch (stores, flags, caveat attached — an
+    // accounting difference or a genuine defect, never automatically quarantined for a soft-only
+    // mismatch), PLUS a `note` documenting that this candidate was identified via tally-unique
+    // selection among N same-day candidates — a reviewer seeing this flag should know the
+    // disambiguation mechanism that picked this specific row, not just the mismatch itself.
+    const discrepancy = {
+      source_a_tallies: legiscanTallies.tallies,
+      source_b_tallies: selectedCounts,
+      source_b_vote_id: selectedCandidate.id,
+      source_b_source_key: selectedCandidate.source_key,
+      hard_mismatches: hardMismatches,
+      soft_mismatches: softMismatches,
+      quarantine,
+      note: `selected via tally-unique (yea, nay) match among ${candidates.length} same-day candidates for this (jurisdiction, chamber, date, bill) tuple`,
+    };
+    if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
+    const flag = await writeReconciliationFlag(client, {
+      voteId: selectedCandidate.id, sourceB: primarySourceLabel(selectedCandidate.source_key), discrepancy, runId: legiscanTallies.runId,
+    });
     return {
-      checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match',
+      checked: true, matched: false, flag, quarantine,
     };
   }
 
