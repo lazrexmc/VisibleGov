@@ -633,3 +633,26 @@ LEGISCAN_API_KEY placeholder.
 
 **Awaiting Lance (all non-blocking):** yauzl dependency approval (gates LegiScan Task 3);
 apply 0010 when the driver tasks near; 8 flagged glosses in the review page.
+
+---
+
+## 2026-07-29 — LegiScan bulk adapter complete; first live slice landed
+
+Branch legiscan-bulk-adapter, Tasks 1-10 complete (787/787 tests), every task adversarially
+reviewed; Criticals caught pre-live at three layers (cross-jurisdiction identity merge,
+collateral quarantine, plus the earlier 1000-row class). Key evidence findings along the way:
+LegiScan structurally lacks combined-vehicle floor votes (SBs 894&921 proven; scalar FK) — the
+journals-first Senate pipeline is therefore PERMANENTLY completeness-critical, not an audit
+layer; LegiScan prints nicknames (Robert/'Bob' Onder), which the identity matcher uses as
+exact-match variants, never fuzzily.
+
+FIRST LIVE SLICE (session 1608, 2018 2nd Extraordinary): 8 roll calls, 1,002 individual casts
+written live through every gate — 0 reconciliation failures, 0 quarantines, 0 unresolved casts,
+2 API queries of 30,000. 30 people converged onto existing legislator rows (the first real
+cross-source identity merges); Onder himself went AMBIGUOUS — he already had 3 rows
+(bioguide/openstates/mo_senate), the matcher found two candidates and refused to guess, so a
+4th (LegiScan) row was created with honest logging. Identity merge (TODO 8) is now the
+highest-leverage data-quality item and gets its own plan next.
+
+Remaining: final whole-branch review → merge menu to Lance → post-merge full 31-session sweep
+(~60-70 queries, an afternoon).
