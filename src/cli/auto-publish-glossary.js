@@ -105,12 +105,17 @@ function buildNote(verifierModel, actionWord) {
 // Returns {terms, tableMissing}. Missing-table tolerance applies ONLY when dryRun is true — same
 // convention as verify.js's loadAlreadyVerifiedIds / gloss.js's loadAllTerms: migration 0007 is
 // the gate in live mode, never silently worked around.
+//
+// Final-review finding 1 addendum (controller-adjudicated in-scope, not just the four originally
+// named call sites): this was the same bare, unbounded .select() shape as loadLatestVerifications
+// above — glossary_terms is at 401 live rows and grows with every summarized bill, so it WILL cross
+// Supabase's 1000-row cap. Past that cap, this created_at-ASC query would silently drop draft terms
+// from auto-publish eligibility entirely (never even considered, not just mis-verified) — the same
+// trust-surface finding 1 closes everywhere else. Routed through selectAll like the rest.
 export async function loadDraftTerms(client, dryRun) {
-  const { data, error } = await client
-    .from(GLOSSARY_TERMS_TABLE)
-    .select('id,term,kind,citation,gloss_md,needs_mapping,status,created_at')
-    .eq('status', TARGET_STATUS)
-    .order('created_at', { ascending: true });
+  const { data, error } = await selectAll(client, GLOSSARY_TERMS_TABLE, 'id,term,kind,citation,gloss_md,needs_mapping,status,created_at', {
+    filter: (q) => q.eq('status', TARGET_STATUS).order('created_at', { ascending: true }),
+  });
   if (error) {
     if (dryRun && isMissingRelationError(error, GLOSSARY_TERMS_TABLE)) {
       return { terms: [], tableMissing: true };

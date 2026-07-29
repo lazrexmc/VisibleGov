@@ -268,6 +268,7 @@ function makeStatefulClient(initialTerms, initialVerifications) {
           select() { return this; },
           eq(col, val) { this._filters = this._filters.concat([[col, val]]); return this; },
           order() { return this; },
+          range() { return this; }, // selectAll always appends .order('id',...).range(...); this fake's own dataset always fits on page 1
           then(resolve) {
             let rows = state.glossary_terms;
             for (const [col, val] of this._filters) rows = rows.filter((r) => r[col] === val);
@@ -371,6 +372,75 @@ test('idempotency: a flagged term stays untouched and stays eligible-zero across
   const second = await pass();
   assert.equal(second.eligible.length, 0);
   assert.equal(client.state.glossary_notes.length, 0, 'no notes are ever written for a term the CLI never touched');
+});
+
+// ---- loadDraftTerms (finding 1 addendum, controller-adjudicated in-scope): glossary_terms is at
+// 401 live rows and grows with every summarized bill — it WILL cross Supabase's 1000-row cap, and
+// a truncated read here would silently drop draft terms from auto-publish eligibility entirely
+// (never even considered, not just mis-verified like the originally-named call sites). Same class
+// of cap-enforcing fake as tests/db.test.js's makeCappedTableClient / review-logic.test.js's
+// cappedTableBuilder — a fake that returns its whole seeded dataset regardless of the requested
+// range is exactly the shape that let this class of bug ship unnoticed the first time. ----
+
+function makeCappedGlossaryTermsClient(allTerms, { serverCap = 1000 } = {}) {
+  const sorted = [...allTerms].sort((a, b) => {
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+  return {
+    from(table) {
+      if (table !== 'glossary_terms') throw new Error(`unexpected table in this test: ${table}`);
+      const filters = [];
+      const builder = {
+        select() { return this; },
+        eq(col, val) { filters.push([col, val]); return this; },
+        order() { return this; },
+        range(from, to) {
+          let rows = sorted;
+          for (const [col, val] of filters) rows = rows.filter((r) => r[col] === val);
+          const size = Math.min(to - from + 1, serverCap);
+          return Promise.resolve({ data: rows.slice(from, from + size), error: null });
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+test('loadDraftTerms: 1500 draft terms past the 1000-row server cap — every term comes back, including the newest (highest id), never silently truncated', async () => {
+  const terms = Array.from({ length: 1500 }, (_, i) => ({
+    id: `t-${String(i).padStart(4, '0')}`,
+    term: `Term ${i}`,
+    kind: 'statute',
+    citation: 'c',
+    gloss_md: 'g',
+    needs_mapping: false,
+    status: 'draft',
+    created_at: new Date(2026, 0, 1, 0, 0, i).toISOString(),
+  }));
+  const client = makeCappedGlossaryTermsClient(terms);
+  const { terms: loaded, tableMissing } = await loadDraftTerms(client, false);
+  assert.equal(tableMissing, false);
+  assert.equal(loaded.length, 1500, 'every draft term must come back, not just the first 1000-row page');
+  assert.ok(loaded.some((t) => t.id === 't-1499'), 'the newest term must not be silently dropped past page 1');
+});
+
+test('loadDraftTerms: the status=draft filter survives pagination — a published term mixed into the same >1000-row table never leaks through', async () => {
+  const terms = Array.from({ length: 1500 }, (_, i) => ({
+    id: `t-${String(i).padStart(4, '0')}`,
+    term: `Term ${i}`,
+    kind: 'statute',
+    citation: 'c',
+    gloss_md: 'g',
+    needs_mapping: false,
+    status: i % 2 === 0 ? 'draft' : 'published',
+    created_at: new Date(2026, 0, 1, 0, 0, i).toISOString(),
+  }));
+  const client = makeCappedGlossaryTermsClient(terms);
+  const { terms: loaded } = await loadDraftTerms(client, false);
+  assert.equal(loaded.length, 750);
+  assert.ok(loaded.every((t) => t.status === 'draft'));
 });
 
 // ---- loadLatestEditNotes (finding 3's DB-facing helper): reduces to the newest 'edited'
