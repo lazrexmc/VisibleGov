@@ -17,6 +17,7 @@
     "gloss": "node --env-file=.env src/cli/gloss.js",
     "auto-publish:glossary": "node --env-file=.env src/cli/auto-publish-glossary.js",
     "golden": "node --env-file=.env src/cli/golden.js",
+    "link:persons": "node --env-file=.env src/cli/link-persons.js",
     "review": "node --env-file=.env src/review/server.js"
   },
   "dependencies": {
