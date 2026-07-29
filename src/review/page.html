@@ -168,6 +168,13 @@
 
 <script>
   let currentId = null;
+  // Controller ruling 3 fix round 1 (RULED SCOPE EXTENSION — ported from the glossary tab, same
+  // mechanics): the last body_md value actually loaded from or saved to the server, vs. the live
+  // textarea value — the two diverging is "dirty". Tracked alongside the summary's current status
+  // (needed to know whether an auto-save is even legal right now) so approve/reject/publish can
+  // never silently discard an unsaved edit.
+  let lastLoadedBodyMd = '';
+  let currentSummaryStatus = null;
 
   // Minimal markdown renderer: bold + bullets + paragraphs only (the body_md we generate uses
   // nothing else). Escapes HTML first so bold markers can't be used to inject tags.
@@ -205,6 +212,14 @@
     approved: ['publish', 'reject'],
   };
 
+  // Controller ruling 3 fix round 1: 'edit' is only a legal action from draft/stale (see
+  // STATUS_ACTIONS/TRANSITIONS above; 'approved' has no way back to an editable state). Mirrors
+  // glossaryEditIsLegal below exactly — gates both auto-save-on-decide and the textarea's
+  // read-only state.
+  function summaryEditIsLegal(status) {
+    return Boolean(STATUS_ACTIONS[status] && STATUS_ACTIONS[status].indexOf('edit') !== -1);
+  }
+
   function updateActionButtons(status) {
     var actions = STATUS_ACTIONS[status] || [];
     var buttonsByAction = {
@@ -216,6 +231,7 @@
     for (var action in buttonsByAction) {
       buttonsByAction[action].style.display = actions.indexOf(action) !== -1 ? '' : 'none';
     }
+    document.getElementById('draft-edit').readOnly = !summaryEditIsLegal(status);
   }
 
   // Mirrors src/review/server.js's verificationBadge() — null/no verification yet vs. clean vs.
@@ -304,6 +320,8 @@
       document.getElementById('draft-rendered').innerHTML = renderMarkdown(data.summary.body_md || '');
       document.getElementById('draft-edit').value = data.summary.body_md || '';
       document.getElementById('note').value = '';
+      lastLoadedBodyMd = data.summary.body_md || '';
+      currentSummaryStatus = data.summary.status;
       renderVerification(data.verification || null);
       updateActionButtons(data.summary.status);
 
@@ -316,8 +334,41 @@
     }
   }
 
+  // Controller ruling 3 fix round 1 (RULED SCOPE EXTENSION, near-mechanical port of
+  // autoSaveGlossaryEditIfDirty below): approve/reject/publish must never silently discard a
+  // dirty draft editor either. Same contract: no-op if not dirty or if 'edit' isn't legal for the
+  // current status (defensive — draft-edit is read-only in that case); auto-saves as its own
+  // 'edit' decision (its own summary_notes row) FIRST, only then lets the caller proceed — "one
+  // click = save+decide, logged as both actions". Returns false (decision NOT applied) if the
+  // auto-save itself fails, leaving the dirty edit exactly as typed.
+  async function autoSaveSummaryEditIfDirty() {
+    const current = document.getElementById('draft-edit').value;
+    if (current === lastLoadedBodyMd) return true;
+    if (!summaryEditIsLegal(currentSummaryStatus)) return true;
+    try {
+      const res = await fetch('/api/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary_id: currentId, action: 'edit', body_md: current, note: document.getElementById('note').value,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus('Auto-save of your edit failed: ' + (body.error || res.status)); return false; }
+      lastLoadedBodyMd = current;
+      return true;
+    } catch {
+      setStatus('Network error while auto-saving your edit — decision NOT applied.');
+      return false;
+    }
+  }
+
   async function postDecision(action) {
     if (!currentId) return;
+    if (action !== 'edit') {
+      const saved = await autoSaveSummaryEditIfDirty();
+      if (!saved) return; // never proceed to decide against an edit that failed to save
+    }
     const payload = { summary_id: currentId, action, note: document.getElementById('note').value };
     if (action === 'edit') payload.body_md = document.getElementById('draft-edit').value;
     try {
@@ -328,6 +379,7 @@
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setStatus('Error: ' + (body.error || res.status)); return; }
+      if (action === 'edit') lastLoadedBodyMd = payload.body_md;
       setStatus('Saved: ' + body.status);
       await loadQueue();
     } catch {
@@ -1111,6 +1163,21 @@
   loadQueue();
   loadGlossaryQueue();
   loadIdentityQueue();
+
+  // Test hook (Node+jsdom only, tests/review-page-decisions.test.js — inert in every real
+  // browser, since window.__registerTestHooks is never defined there). Fix round 1's reviewed
+  // ask was to prove the save-before-decide mechanism (both tabs) actually works, not just that
+  // it reads as mechanical — this exposes exactly the functions/state a test needs to drive a
+  // real load-then-decide sequence against the ACTUAL shipped script (not a hand-copied
+  // reimplementation), with no production behavior gated on it.
+  if (typeof window !== 'undefined' && typeof window.__registerTestHooks === 'function') {
+    window.__registerTestHooks({
+      loadQueue, loadItem, postDecision,
+      loadGlossaryQueue, loadGlossaryItem, postGlossaryDecision,
+      getSummaryState: () => ({ currentId, lastLoadedBodyMd, currentSummaryStatus }),
+      getGlossaryState: () => ({ currentGlossaryId, lastLoadedGlossMd, currentGlossaryStatus }),
+    });
+  }
 </script>
 </body>
 </html>

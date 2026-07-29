@@ -1148,6 +1148,12 @@ function identityFakeClient({
   newPersonId = 'person-new-1',
 } = {}, onCall) {
   const record = (table, method, args) => { if (onCall) onCall(table, method, args); };
+  // Real Supabase generates a fresh uuid per insert; a fixed canned id would make every 'link'
+  // decision within the same test collapse onto the SAME person (masking a real bug — see the
+  // 14-candidate lifecycle test, which links two independent subsets and must see two DIFFERENT
+  // person ids). Scoped at the client level (not inside from('persons')) so it persists across
+  // multiple decision requests against one identityFakeClient instance.
+  let personInsertCount = 0;
 
   return {
     from(table) {
@@ -1243,9 +1249,11 @@ function identityFakeClient({
         return {
           insert(row) {
             record(table, 'insert', [row]);
+            personInsertCount += 1;
+            const id = personInsertCount === 1 ? newPersonId : `${newPersonId}-${personInsertCount}`;
             return {
               select: () => ({
-                single: () => Promise.resolve({ data: { id: newPersonId }, error: null }),
+                single: () => Promise.resolve({ data: { id }, error: null }),
               }),
             };
           },
@@ -1414,7 +1422,7 @@ test('POST /api/identity/decision: foreign Origin -> 403', () => withServer(asyn
   assert.equal(res.status, 403);
 }));
 
-test('POST /api/identity/decision degrades honestly (not 500, not 403) when identity_flags is missing', () => {
+test('POST /api/identity/decision degrades honestly to a literal 503 (not 500, not 403) when identity_flags is missing', () => {
   const client = identityFakeClient({ identityFlagsMissing: true });
   return withServer(async (base) => {
     const res = await fetch(`${base}/api/identity/decision`, {
@@ -1422,8 +1430,10 @@ test('POST /api/identity/decision degrades honestly (not 500, not 403) when iden
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'x' }),
     });
-    assert.notEqual(res.status, 500);
-    assert.notEqual(res.status, 403);
+    // Fix round 1, minor 2: assert the literal status code, not just "not 500/403" — 503 is the
+    // deliberate choice (service temporarily unavailable pending the migration), distinct from the
+    // GET queue route's own degradation, which is a 200 by design (see handleIdentityQueue).
+    assert.equal(res.status, 503);
     const body = await res.json();
     assert.match(body.error, /0012/);
   }, client);
@@ -1483,26 +1493,39 @@ test('POST /api/identity/decision: already-resolved flag -> 400', () => {
 
 // ---- POST /api/identity/decision: keep-separate happy path ----
 
-test('POST /api/identity/decision keep-separate: resolves the flag with a note, writes NOTHING to persons/person_links', () => {
+test('POST /api/identity/decision keep-separate: resolves the flag with a note, evidence.resolutions records the ACTUAL still-unlinked ids (fix round 1, minor 1 — not the literal \'all\'), writes NOTHING to persons/person_links', () => {
   const flag = {
-    id: 'f1', cluster_key: 'brown:a,b', resolved: false,
-    candidate_legislator_ids: ['leg-a', 'leg-b'],
-    evidence: { reason: 'ambiguous_era', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+    id: 'f1', cluster_key: 'brown:a,b,c', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b', 'leg-c'],
+    evidence: { reason: 'ambiguous_era', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }, { legislatorId: 'leg-c' }] },
   };
+  // leg-a was already linked by an earlier partial decision on this same flag; leg-b/leg-c never
+  // were — the audit entry must name only the latter two, proving this isn't just the original
+  // candidate_legislator_ids echoed back.
+  const legislatorsById = new Map([
+    ['leg-a', { id: 'leg-a', person_id: 'person-earlier' }],
+    ['leg-b', { id: 'leg-b', person_id: null }],
+    ['leg-c', { id: 'leg-c', person_id: null }],
+  ]);
   const calls = [];
-  const client = identityFakeClient({ flags: [flag] }, (table, method, args) => calls.push({ table, method, args }));
+  const client = identityFakeClient({ flags: [flag], legislatorsById }, (table, method, args) => calls.push({ table, method, args }));
   return withServer(async (base) => {
     const res = await fetch(`${base}/api/identity/decision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'two real, unrelated Browns' }),
+      body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'leg-b and leg-c are unrelated Browns' }),
     });
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { resolved: true });
     assert.equal(flag.resolved, true, 'the fake\'s own flag row was mutated to resolved:true');
     assert.equal(flag.evidence.resolutions.length, 1);
     assert.equal(flag.evidence.resolutions[0].action, 'keep-separate');
-    assert.equal(flag.evidence.resolutions[0].note, 'two real, unrelated Browns');
+    assert.deepEqual(
+      flag.evidence.resolutions[0].legislatorIds.slice().sort(),
+      ['leg-b', 'leg-c'],
+      'only the STILL-unlinked ids are recorded — leg-a was already linked before this decision, and must not be re-claimed by it',
+    );
+    assert.equal(flag.evidence.resolutions[0].note, 'leg-b and leg-c are unrelated Browns');
     assert.equal(flag.evidence.resolutions[0].decidedBy, 'lance');
     assert.ok(!calls.some((c) => c.table === 'persons'), 'keep-separate must never touch persons');
     assert.ok(!calls.some((c) => c.table === 'person_links'), 'keep-separate must never touch person_links');
@@ -1702,5 +1725,170 @@ test('POST /api/identity/decision link: a legislator_id that no longer resolves 
       body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-ghost'] }),
     });
     assert.equal(res.status, 404);
+  }, client);
+});
+
+// ============================================================================
+// Fix round 1, IMPORTANT finding: no prior test exercised the DOCUMENTED real queue scale
+// (controller ruling 1 — "two 14-member brown/smith blobs"). This is that test: a real
+// 14-candidate flag, rendered, then resolved across MULTIPLE decisions (two per-subset links +
+// a terminal keep-separate on the remainder) — the full multi-decision lifecycle, asserted
+// non-vacuously at every step (specific per-row values and writes, not just counts).
+// ============================================================================
+
+test('14-candidate flag: queue render (all 14, real per-candidate data) -> link 2 -> link 2 more -> keep-separate the other 10 -> flag fully resolved, precise audit trail throughout', async () => {
+  const memberIds = Array.from({ length: 14 }, (_, i) => `leg-${String(i + 1).padStart(2, '0')}`);
+
+  const evidenceCandidates = memberIds.map((id, i) => ({
+    legislatorId: id,
+    fullName: `Brown Member ${i + 1}`,
+    sourceKeys: {
+      bioguide_id: i < 3 ? `B00${i}` : null,
+      openstates_id: null,
+      mo_house_id: null,
+      mo_senate_id: null,
+      legiscan_people_id: i >= 3 ? `L${1000 + i}` : null,
+    },
+    // Varied chamber/district/era per candidate — real, distinguishable evidence, not a repeated
+    // fixture value (the whole point of a table review is that these DIFFER row to row).
+    chamberDistrictEra: [{
+      source: i < 3 ? 'terms' : 'legiscan_people_id',
+      jurisdiction_id: i < 3 ? 'us-congress' : 'mo-legislature',
+      chamber: i % 2 === 0 ? 'senate' : 'house',
+      district: i < 3 ? null : String(i),
+      start_date: i < 3 ? `${2000 + i}-01-03` : null,
+      end_date: null,
+    }],
+  }));
+
+  const flag = {
+    id: 'flag-brown-14',
+    cluster_key: 'brown:leg-01,...,leg-14',
+    resolved: false,
+    created_at: '2026-07-29T00:00:00Z',
+    candidate_legislator_ids: memberIds,
+    evidence: { reason: 'internal_contradiction', candidates: evidenceCandidates },
+  };
+
+  const legislatorsById = new Map(memberIds.map((id, i) => [id, {
+    id,
+    full_name: `Brown Member ${i + 1}`,
+    bioguide_id: i < 3 ? `B00${i}` : null,
+    openstates_id: null,
+    mo_house_id: null,
+    mo_senate_id: null,
+    legiscan_people_id: i >= 3 ? `L${1000 + i}` : null,
+    person_id: null,
+  }]));
+  const castCountsByLegislatorId = new Map(memberIds.map((id, i) => [id, i * 10]));
+
+  const calls = [];
+  const client = identityFakeClient(
+    { flags: [flag], legislatorsById, castCountsByLegislatorId, newPersonId: 'person-placeholder' },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+
+  await withServer(async (base) => {
+    // ---- Step 1: queue render — all 14 candidates present with real, distinct per-row data ----
+    const queueRes = await fetch(`${base}/api/identity/queue`);
+    assert.equal(queueRes.status, 200);
+    const queueBody = await queueRes.json();
+    assert.equal(queueBody.items.length, 1);
+    const item = queueBody.items[0];
+    assert.equal(item.id, 'flag-brown-14');
+    assert.equal(item.candidates.length, 14, 'all 14 candidates render, none dropped or collapsed');
+
+    const c1 = item.candidates.find((c) => c.legislator_id === 'leg-01');
+    assert.equal(c1.full_name, 'Brown Member 1');
+    assert.deepEqual(c1.source_keys, { bioguide_id: 'B000', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null });
+    assert.equal(c1.district, 'senate');
+    assert.equal(c1.era_span, '2000-01-03 – ?');
+    assert.equal(c1.cast_count, 0);
+    assert.equal(c1.already_linked, false);
+
+    const c8 = item.candidates.find((c) => c.legislator_id === 'leg-08');
+    assert.equal(c8.full_name, 'Brown Member 8');
+    assert.deepEqual(c8.source_keys, { bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 'L1007' });
+    assert.equal(c8.district, 'house 7');
+    assert.equal(c8.era_span, '(no dates on file)');
+    assert.equal(c8.cast_count, 70);
+
+    const c14 = item.candidates.find((c) => c.legislator_id === 'leg-14');
+    assert.equal(c14.cast_count, 130);
+    assert.equal(c14.district, 'house 13');
+
+    // ---- Step 2: link a first subset (leg-01, leg-02) — exactly those two written, the other 12 untouched ----
+    calls.length = 0;
+    const link1Res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'flag-brown-14', action: 'link', legislator_ids: ['leg-01', 'leg-02'], note: 'same Brown, verified' }),
+    });
+    assert.equal(link1Res.status, 200);
+    const link1Body = await link1Res.json();
+    assert.equal(link1Body.resolved, false, '12 of 14 candidates are still unaccounted for');
+    const personX = link1Body.person_id;
+    assert.ok(personX);
+
+    assert.equal(legislatorsById.get('leg-01').person_id, personX);
+    assert.equal(legislatorsById.get('leg-02').person_id, personX);
+    for (const id of memberIds) {
+      if (id === 'leg-01' || id === 'leg-02') continue;
+      assert.equal(legislatorsById.get(id).person_id, null, `${id} must be untouched by the first subset link`);
+    }
+    assert.equal(calls.filter((c) => c.table === 'persons' && c.method === 'insert').length, 1);
+    assert.equal(calls.filter((c) => c.table === 'legislators' && c.method === 'update').length, 2);
+    assert.equal(calls.filter((c) => c.table === 'person_links' && c.method === 'insert').length, 2);
+    assert.equal(flag.resolved, false);
+
+    // ---- Step 3: a second, independent subset link (leg-03, leg-04) — a DIFFERENT person, first subset unaffected ----
+    calls.length = 0;
+    const link2Res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'flag-brown-14', action: 'link', legislator_ids: ['leg-03', 'leg-04'] }),
+    });
+    assert.equal(link2Res.status, 200);
+    const link2Body = await link2Res.json();
+    assert.equal(link2Body.resolved, false, '10 of 14 candidates are still unaccounted for');
+    const personY = link2Body.person_id;
+    assert.notEqual(personY, personX, 'the second subset is a DIFFERENT real person from the first');
+
+    assert.equal(legislatorsById.get('leg-03').person_id, personY);
+    assert.equal(legislatorsById.get('leg-04').person_id, personY);
+    assert.equal(legislatorsById.get('leg-01').person_id, personX, 'the first subset\'s link is untouched by the second decision');
+    assert.equal(legislatorsById.get('leg-02').person_id, personX);
+    for (const id of memberIds) {
+      if (['leg-01', 'leg-02', 'leg-03', 'leg-04'].includes(id)) continue;
+      assert.equal(legislatorsById.get(id).person_id, null, `${id} must still be untouched after the second subset link`);
+    }
+    assert.equal(flag.resolved, false, 'still 10 unaccounted-for candidates — the flag stays open');
+    assert.equal(flag.evidence.resolutions.length, 2, 'two link decisions logged so far');
+
+    // ---- Step 4: terminal keep-separate closes out the remaining 10 — flag fully resolved ----
+    calls.length = 0;
+    const keepSepRes = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'flag-brown-14', action: 'keep-separate', note: 'remaining 10 are unrelated same-surname noise' }),
+    });
+    assert.equal(keepSepRes.status, 200);
+    assert.deepEqual(await keepSepRes.json(), { resolved: true });
+    assert.equal(flag.resolved, true);
+    assert.equal(flag.evidence.resolutions.length, 3);
+    const finalResolution = flag.evidence.resolutions[2];
+    assert.equal(finalResolution.action, 'keep-separate');
+    // Precision (minor 1, at real scale): exactly the 10 STILL-unlinked candidates, never the
+    // original 14 and never a hardcoded 'all'.
+    const expectedRemainder = memberIds.filter((id) => !['leg-01', 'leg-02', 'leg-03', 'leg-04'].includes(id));
+    assert.deepEqual(finalResolution.legislatorIds.slice().sort(), expectedRemainder.slice().sort());
+    assert.equal(finalResolution.legislatorIds.length, 10);
+    assert.ok(!calls.some((c) => c.table === 'persons'), 'keep-separate never creates a person');
+    assert.ok(!calls.some((c) => c.table === 'person_links'), 'keep-separate never writes a link');
+
+    // ---- Step 5: the fully-resolved flag disappears from the live queue ----
+    const finalQueueRes = await fetch(`${base}/api/identity/queue`);
+    const finalQueueBody = await finalQueueRes.json();
+    assert.deepEqual(finalQueueBody.items, [], 'a resolved:true flag is excluded by the queue\'s own resolved=false filter');
   }, client);
 });

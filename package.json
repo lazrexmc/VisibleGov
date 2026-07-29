@@ -26,5 +26,8 @@
     "fast-xml-parser": "^4.4.0",
     "pdfjs-dist": "6.1.200",
     "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
   }
 }

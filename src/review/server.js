@@ -732,6 +732,20 @@ async function countCastsForLegislator(client, legislatorId) {
   return count ?? 0;
 }
 
+// fetchPersonIdsForCandidates — a targeted `.in('id', candidateIds)` lookup (small, bounded by one
+// flag's own candidate set — never the "hundreds of ids across many flags" shape the .in() ban is
+// about) returning legislator_id -> person_id (or null). Shared by both decision branches below:
+// keep-separate needs it to know WHICH of the flag's candidates are still genuinely unlinked (fix
+// round 1, minor 1 — the audit entry must name the actual still-open ids, not the literal 'all',
+// since an earlier partial link decision may have already closed out some of them); link needs it
+// to decide whether the flag is now fully resolved (controller ruling 1).
+async function fetchPersonIdsForCandidates(client, candidateIds) {
+  if (!candidateIds.length) return new Map();
+  const { data, error } = await client.from('legislators').select('id,person_id').in('id', candidateIds);
+  if (error) throw error;
+  return new Map((data ?? []).map((r) => [r.id, r.person_id]));
+}
+
 async function handleIdentityQueue(client, res) {
   if (!client) { sendJson(res, 500, { error: 'internal error' }); return; }
   try {
@@ -839,7 +853,15 @@ async function handleIdentityDecision(client, req, res) {
     if (flag.resolved) { sendJson(res, 400, { error: 'flag already resolved' }); return; }
 
     if (action === 'keep-separate') {
-      const patchedEvidence = appendResolution(flag.evidence, { action: 'keep-separate', legislatorIds: 'all', note });
+      // Fix round 1, minor 1: name the ACTUAL still-unlinked candidates, not the literal 'all' —
+      // an earlier partial link decision on this same flag may have already closed some of them
+      // out, and the audit trail must be precise about which ones this decision actually covers.
+      const allCandidateIds = flag.candidate_legislator_ids ?? [];
+      const personIdById = await fetchPersonIdsForCandidates(client, allCandidateIds);
+      const stillUnlinkedIds = allCandidateIds.filter((id) => (personIdById.get(id) ?? null) == null);
+      const patchedEvidence = appendResolution(flag.evidence, {
+        action: 'keep-separate', legislatorIds: stillUnlinkedIds, note,
+      });
       const { error: uErr } = await client.from('identity_flags')
         .update({ resolved: true, evidence: patchedEvidence }).eq('id', flag_id);
       if (uErr) throw uErr;
@@ -903,11 +925,9 @@ async function handleIdentityDecision(client, req, res) {
     // re-check the flag's FULL candidate set (not just this decision's subset) against fresh
     // person_id state; only mark the flag resolved once every candidate is accounted for.
     const allCandidateIds = flag.candidate_legislator_ids ?? [];
-    const { data: statusRows, error: stErr } = await client
-      .from('legislators').select('id,person_id').in('id', allCandidateIds);
-    if (stErr) throw stErr;
-    const allLinked = (statusRows ?? []).length === allCandidateIds.length
-      && (statusRows ?? []).every((r) => r.person_id != null);
+    const personIdById = await fetchPersonIdsForCandidates(client, allCandidateIds);
+    const allLinked = allCandidateIds.length > 0
+      && allCandidateIds.every((id) => personIdById.get(id) != null);
 
     const patchedEvidence = appendResolution(flag.evidence, {
       action: 'link', legislatorIds: legislator_ids, personId, note,
