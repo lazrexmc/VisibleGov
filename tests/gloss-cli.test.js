@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, planGlossing, persistGloss, GLOSS_COST_PER_TERM_USD } from '../src/cli/gloss.js';
+import {
+  parseArgs, planGlossing, persistGloss, GLOSS_COST_PER_TERM_USD, loadAllTerms,
+} from '../src/cli/gloss.js';
 
 // ---- planGlossing: the branched routing decision (mirrors extract-terms.js's planExtraction) ----
 
@@ -203,4 +205,68 @@ test('parseArgs defaults dryRun to false and accepts --dry-run', () => {
 
 test('parseArgs rejects unknown flags', () => {
   assert.throws(() => parseArgs(['--bogus']), /unknown flag/);
+});
+
+// ---- loadAllTerms (final-review finding 1 sweep, glossary-trust-surface): glossary_terms is the
+// SAME growable table (401 live rows, growing with every summarized bill) auto-publish-glossary.js's
+// loadDraftTerms reads — a truncated read here silently strands terms past the 1000-row cap as
+// permanent bare stubs, never even considered by planGlossing. Same class of cap-enforcing fake as
+// tests/auto-publish-glossary-cli.test.js's makeCappedGlossaryTermsClient — a fake that hands back
+// its whole seeded dataset regardless of the requested range is exactly the shape that would hide
+// this bug. ----
+
+function makeCappedGlossaryTermsClient(allTerms, { serverCap = 1000, error = null } = {}) {
+  const sorted = [...allTerms].sort((a, b) => {
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+  return {
+    from(table) {
+      if (table !== 'glossary_terms') throw new Error(`unexpected table in this test: ${table}`);
+      const builder = {
+        select() { return this; },
+        order() { return this; },
+        range(from, to) {
+          if (error) return Promise.resolve({ data: null, error });
+          const size = Math.min(to - from + 1, serverCap);
+          return Promise.resolve({ data: sorted.slice(from, from + size), error: null });
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+test('loadAllTerms: 1500 glossary_terms rows past the 1000-row server cap — every term comes back, including the newest (highest id), never silently stranded', async () => {
+  const terms = Array.from({ length: 1500 }, (_, i) => ({
+    id: `t-${String(i).padStart(4, '0')}`,
+    term: `Term ${i}`,
+    kind: 'statute',
+    citation: 'c',
+    gloss_md: null,
+    needs_mapping: false,
+    status: 'draft',
+  }));
+  const client = makeCappedGlossaryTermsClient(terms);
+  const { terms: loaded, tableMissing } = await loadAllTerms(client, false);
+  assert.equal(tableMissing, false);
+  assert.equal(loaded.length, 1500, 'every term must come back, not just the first 1000-row page');
+  assert.ok(loaded.some((t) => t.id === 't-1499'), 'the newest term must not be silently stranded past page 1');
+});
+
+test('loadAllTerms: dry-run tolerates a missing glossary_terms relation (migration 0007 not applied)', async () => {
+  const client = makeCappedGlossaryTermsClient([], {
+    error: { code: 'PGRST205', message: "Could not find the table 'public.glossary_terms' in the schema cache" },
+  });
+  const { terms, tableMissing } = await loadAllTerms(client, true);
+  assert.equal(tableMissing, true);
+  assert.deepEqual(terms, []);
+});
+
+test('loadAllTerms: a live (non-dry-run) missing-relation error still throws — migration 0007 is the real gate', async () => {
+  const client = makeCappedGlossaryTermsClient([], {
+    error: { code: 'PGRST205', message: "Could not find the table 'public.glossary_terms' in the schema cache" },
+  });
+  await assert.rejects(() => loadAllTerms(client, false), /glossary_terms lookup failed/);
 });
