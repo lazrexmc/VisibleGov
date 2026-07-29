@@ -656,3 +656,17 @@ highest-leverage data-quality item and gets its own plan next.
 
 Remaining: final whole-branch review → merge menu to Lance → post-merge full 31-session sweep
 (~60-70 queries, an afternoon).
+
+### 2026-07-29 (cont.) — final review clean; gloss re-adjudication reset
+
+Final whole-branch review (20-agent workflow): 7 confirmed cross-task-seam defects (3 Critical
+— budget-ledger self-erasure, unretractable quarantines, false quarantines on partially-
+ingested primaries), all execution-proven, all fixed in one wave (808/808) with the seam tests
+the suite lacked. Doctrine established and fuzz-confirmed (200k inputs): machine-proven
+quarantine is a null set at this data granularity — correspondence proof requires tally
+agreement, contradiction requires disagreement; cross-source disputes are permanently human-
+review flags with primary-wins display; retraction machinery retained as defense-in-depth.
+Migration 0011 (flag idempotency) drafted for Lance. Separately: Lance's first gloss
+adjudication session hit a UX trap (edits not saved before decisions) — all 8 flagged glosses
+administratively reverted to draft with full audit notes for a proper second pass; reject-
+confirmation UX queued.
