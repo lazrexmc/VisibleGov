@@ -320,8 +320,7 @@ carries only the House roll call — the Senate's vote on the combined substitut
 ('SS for SCS for SBs 894 & 921', in our Day 37 journal fixture) presumably lives under a
 different bill record; substitute-vehicle attribution mapping is a real adapter-design task.
 
-## LegiScan dataset ZIP capture (2026-07-28, Task 3 of the LegiScan bulk adapter plan,
-`.superpowers/sdd/2026-07-29-legiscan-bulk-adapter/`)
+## LegiScan dataset ZIP capture (2026-07-28, Task 3 of the LegiScan bulk adapter plan, `.superpowers/sdd/2026-07-29-legiscan-bulk-adapter/`)
 
 **Dependency:** `yauzl@3.4.0` added, `--save-exact` (pin-exact precedent: `pdfjs-dist`).
 DEPENDENCY APPROVED by Lance, 2026-07-28, verbatim: "yes for yauzl" (ruling 1 of the task brief) —
