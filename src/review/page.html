@@ -53,6 +53,19 @@
   .sample-term { font-weight: 600; margin-bottom: 0.3rem; }
   .sample-gloss { margin-bottom: 0.3rem; }
   .sample-link { font-size: 0.8rem; word-break: break-all; }
+  /* Task 2: identity review tab. A single full-width pane (not the text/draft two-column split
+     the other tabs use) — the candidate table IS the review surface. */
+  .pane-identity { flex: 1 1 100%; }
+  .identity-meta { font-size: 0.85rem; color: #444; margin-bottom: 0.75rem; }
+  #identity-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 0.75rem; }
+  #identity-table th, #identity-table td { border: 1px solid #ddd; padding: 0.4rem 0.5rem; text-align: left; vertical-align: top; }
+  #identity-table th { background: #efefe9; cursor: pointer; -webkit-user-select: none; user-select: none; white-space: nowrap; }
+  #identity-table th.sorted-asc::after { content: ' \25B2'; }
+  #identity-table th.sorted-desc::after { content: ' \25BC'; }
+  #identity-table tr.already-linked { opacity: 0.55; }
+  #identity-table tr.already-linked td { font-style: italic; }
+  #identity-btn-link { border-color: #2e7d32; color: #2e7d32; }
+  #identity-btn-keep-separate { border-color: #c62828; color: #c62828; }
 </style>
 </head>
 <body>
@@ -62,9 +75,11 @@
   <nav class="tabs">
     <button id="tab-summaries" type="button" class="tab-btn active">Summaries</button>
     <button id="tab-glossary" type="button" class="tab-btn">Glossary</button>
+    <button id="tab-identity" type="button" class="tab-btn">Identity</button>
   </nav>
   <select id="queue"><option>Loading…</option></select>
   <select id="glossary-queue" style="display:none"><option>Loading…</option></select>
+  <select id="identity-queue" style="display:none"><option>Loading…</option></select>
   <span id="status-msg"></span>
 </header>
 
@@ -119,6 +134,34 @@
       <button id="g-btn-approve" type="button">Approve</button>
       <button id="g-btn-reject" type="button">Reject</button>
       <button id="g-btn-publish" type="button">Publish</button>
+    </div>
+  </section>
+</main>
+
+<main class="panes" id="identity-panes" style="display:none">
+  <section class="pane pane-identity">
+    <h2 id="identity-heading">Select a flag from the queue</h2>
+    <div id="identity-meta" class="identity-meta"></div>
+    <div id="identity-table-wrap">
+      <table id="identity-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th data-sort="full_name">Name</th>
+            <th data-sort="source_keys">Source keys present</th>
+            <th data-sort="district">District</th>
+            <th data-sort="era_span">Era span</th>
+            <th data-sort="cast_count">Cast count</th>
+          </tr>
+        </thead>
+        <tbody id="identity-table-body"></tbody>
+      </table>
+    </div>
+    <label for="identity-note">Note (required for Keep Separate; optional context for Link)</label>
+    <textarea id="identity-note" rows="3"></textarea>
+    <div class="actions">
+      <button id="identity-btn-link" type="button" disabled>Link selected as one person</button>
+      <button id="identity-btn-keep-separate" type="button" disabled>Keep whole flag separate</button>
     </div>
   </section>
 </main>
@@ -308,6 +351,12 @@
   // ==========================================================================================
 
   let currentGlossaryId = null;
+  // Controller ruling 3 (save-before-decide UX fix): the last gloss_md value actually loaded from
+  // or saved to the server, vs. the live textarea value — the two diverging is "dirty". Tracked
+  // alongside the term's current status (needed to know whether an auto-save is even legal right
+  // now) so approve/reject/publish can never silently discard an unsaved edit.
+  let lastLoadedGlossMd = '';
+  let currentGlossaryStatus = null;
 
   // Trust model v3 mechanism 2 (src/cli/auto-publish-glossary.js): clean, verified glossary
   // drafts now auto-publish with zero human touch, so this tab's job shifted from "review every
@@ -563,6 +612,15 @@
     approved: ['publish', 'reject'],
   };
 
+  // Controller ruling 3 (save-before-decide UX fix — burned Lance twice): 'edit' is only a legal
+  // action from draft/stale (see GLOSSARY_STATUS_ACTIONS/TRANSITIONS above; 'approved' has no way
+  // back to an editable state). Used both to gate auto-save-on-decide below and to make the
+  // textarea itself read-only once there is nowhere legal to save an edit — so a stray keystroke
+  // on an approved term can never go "dirty" with no way to persist it.
+  function glossaryEditIsLegal(status) {
+    return Boolean(GLOSSARY_STATUS_ACTIONS[status] && GLOSSARY_STATUS_ACTIONS[status].indexOf('edit') !== -1);
+  }
+
   // Controller ruling #2: "the queue SHOULD only offer publish on glossed+verified terms" — the
   // server's DB CHECK (glossary_terms_published_complete) is the real enforcement; this is only a
   // client-side courtesy that hides the button when there is plainly nothing to publish yet
@@ -580,6 +638,7 @@
     for (var action in buttonsByAction) {
       buttonsByAction[action].style.display = actions.indexOf(action) !== -1 ? '' : 'none';
     }
+    document.getElementById('glossary-edit').readOnly = !glossaryEditIsLegal(status);
   }
 
   // Mirrors src/review/server.js's glossVerificationBadge() — same mechanical derivation as
@@ -641,6 +700,8 @@
     document.getElementById('glossary-gloss-rendered').textContent = '';
     document.getElementById('glossary-quote-block').textContent = '';
     document.getElementById('glossary-edit').value = '';
+    lastLoadedGlossMd = '';
+    currentGlossaryStatus = null;
     renderGlossaryVerification(null);
     updateGlossaryActionButtons('', false);
     document.getElementById('glossary-counts').textContent = '';
@@ -712,6 +773,8 @@
       document.getElementById('glossary-gloss-rendered').textContent = term.gloss_md || '(not yet glossed)';
       document.getElementById('glossary-edit').value = term.gloss_md || '';
       document.getElementById('glossary-note').value = '';
+      lastLoadedGlossMd = term.gloss_md || '';
+      currentGlossaryStatus = term.status;
 
       const quoteBlock = document.getElementById('glossary-quote-block');
       quoteBlock.textContent = '';
@@ -733,8 +796,44 @@
     }
   }
 
+  // Controller ruling 3 (save-before-decide UX fix, promised to Lance — it burned him twice):
+  // approve/reject/publish must never silently discard a dirty gloss editor. If the textarea's
+  // live value differs from the last loaded/saved value AND 'edit' is still a legal action for
+  // the term's current status (glossaryEditIsLegal — the textarea is read-only otherwise, so this
+  // branch is a defensive no-op, not a reachable path), auto-save it FIRST as its own 'edit'
+  // decision (its own glossary_notes row), THEN the caller proceeds with the requested decision —
+  // "one click = save+decide, logged as both actions" (ruling 3's preferred fix, chosen over a
+  // hard refusal). Returns false (and leaves the dirty edit exactly as Lance typed it, untouched)
+  // if the auto-save itself fails, so postGlossaryDecision can bail out rather than proceed to
+  // decide against a value that was never actually persisted.
+  async function autoSaveGlossaryEditIfDirty() {
+    const current = document.getElementById('glossary-edit').value;
+    if (current === lastLoadedGlossMd) return true;
+    if (!glossaryEditIsLegal(currentGlossaryStatus)) return true;
+    try {
+      const res = await fetch('/api/glossary/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          term_id: currentGlossaryId, action: 'edit', gloss_md: current, note: document.getElementById('glossary-note').value,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus('Auto-save of your edit failed: ' + (body.error || res.status)); return false; }
+      lastLoadedGlossMd = current;
+      return true;
+    } catch {
+      setStatus('Network error while auto-saving your edit — decision NOT applied.');
+      return false;
+    }
+  }
+
   async function postGlossaryDecision(action) {
     if (!currentGlossaryId) return;
+    if (action !== 'edit') {
+      const saved = await autoSaveGlossaryEditIfDirty();
+      if (!saved) return; // never proceed to decide against an edit that failed to save
+    }
     const payload = { term_id: currentGlossaryId, action, note: document.getElementById('glossary-note').value };
     if (action === 'edit') payload.gloss_md = document.getElementById('glossary-edit').value;
     try {
@@ -745,6 +844,7 @@
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setStatus('Error: ' + (body.error || res.status)); return; }
+      if (action === 'edit') lastLoadedGlossMd = payload.gloss_md;
       setStatus('Saved: ' + body.status);
       await loadGlossaryQueue();
     } catch {
@@ -761,14 +861,242 @@
   document.getElementById('g-btn-reject').addEventListener('click', () => postGlossaryDecision('reject'));
   document.getElementById('g-btn-publish').addEventListener('click', () => postGlossaryDecision('publish'));
 
+  // ==========================================================================================
+  // Task 2 (.superpowers/sdd/2026-07-29-identity-merge/task-2-brief.md): identity review tab.
+  // Structurally different from the summary/glossary tabs above — there is no single "item" to
+  // load, a FLAG is a whole cluster of candidate legislator rows reviewed as a sortable table
+  // (controller ruling 1: "candidates as a sortable table ... with PER-SUBSET linking"). All
+  // model/DB-sourced text (full_name, cluster_key, reason, district, era_span) rendered via
+  // textContent only — same escaping discipline as every other tab, never innerHTML.
+  // ==========================================================================================
+
+  let identityQueueItems = []; // full /api/identity/queue response, in memory (small: today's live queue is 21 flags)
+  let currentIdentityFlagId = null;
+  let currentIdentityCandidates = []; // working (sortable) copy of the selected flag's candidates
+  let identitySelectedIds = new Set(); // legislator_ids Lance has checked, for the NEXT link decision
+  let identitySortCol = null;
+  let identitySortDir = 1;
+
+  var SOURCE_KEY_LABELS = {
+    bioguide_id: 'bioguide', openstates_id: 'openstates', mo_house_id: 'mo_house', mo_senate_id: 'mo_senate', legiscan_people_id: 'legiscan',
+  };
+
+  function formatSourceKeys(sourceKeys) {
+    var labels = [];
+    for (var col in SOURCE_KEY_LABELS) {
+      if (sourceKeys && sourceKeys[col] != null) labels.push(SOURCE_KEY_LABELS[col]);
+    }
+    return labels.length ? labels.join(', ') : '(none)';
+  }
+
+  var IDENTITY_SORT_GETTERS = {
+    full_name: function (c) { return (c.full_name || '').toLowerCase(); },
+    source_keys: function (c) { return formatSourceKeys(c.source_keys); },
+    district: function (c) { return c.district || ''; },
+    era_span: function (c) { return c.era_span || ''; },
+    cast_count: function (c) { return c.cast_count || 0; },
+  };
+
+  function sortIdentityCandidates() {
+    var getter = IDENTITY_SORT_GETTERS[identitySortCol];
+    if (!getter) return;
+    currentIdentityCandidates.sort(function (a, b) {
+      var va = getter(a);
+      var vb = getter(b);
+      if (va < vb) return -1 * identitySortDir;
+      if (va > vb) return 1 * identitySortDir;
+      return 0;
+    });
+  }
+
+  function updateIdentitySortHeaders() {
+    document.querySelectorAll('#identity-table th[data-sort]').forEach(function (th) {
+      th.classList.remove('sorted-asc', 'sorted-desc');
+      if (th.getAttribute('data-sort') === identitySortCol) {
+        th.classList.add(identitySortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+      }
+    });
+  }
+
+  function updateIdentityLinkButton() {
+    document.getElementById('identity-btn-link').disabled = identitySelectedIds.size < 2;
+  }
+
+  // Builds every row with DOM APIs + textContent only (escaping discipline, controller ruling 5's
+  // convention carried over from the glossary tab) — full_name/district/era_span all ultimately
+  // trace back to legislators.full_name and terms rows, real DB text.
+  function renderIdentityTableBody() {
+    var tbody = document.getElementById('identity-table-body');
+    tbody.textContent = '';
+    currentIdentityCandidates.forEach(function (c) {
+      var tr = document.createElement('tr');
+      if (c.already_linked) tr.className = 'already-linked';
+
+      var tdCheck = document.createElement('td');
+      var checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = identitySelectedIds.has(c.legislator_id);
+      checkbox.disabled = c.already_linked;
+      checkbox.addEventListener('change', function () {
+        if (checkbox.checked) identitySelectedIds.add(c.legislator_id);
+        else identitySelectedIds.delete(c.legislator_id);
+        updateIdentityLinkButton();
+      });
+      tdCheck.appendChild(checkbox);
+      tr.appendChild(tdCheck);
+
+      var tdName = document.createElement('td');
+      tdName.textContent = c.full_name + (c.already_linked ? ' (already linked)' : '');
+      tr.appendChild(tdName);
+
+      var tdKeys = document.createElement('td');
+      tdKeys.textContent = formatSourceKeys(c.source_keys);
+      tr.appendChild(tdKeys);
+
+      var tdDistrict = document.createElement('td');
+      tdDistrict.textContent = c.district;
+      tr.appendChild(tdDistrict);
+
+      var tdEra = document.createElement('td');
+      tdEra.textContent = c.era_span;
+      tr.appendChild(tdEra);
+
+      var tdCast = document.createElement('td');
+      tdCast.textContent = String(c.cast_count);
+      tr.appendChild(tdCast);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  document.querySelectorAll('#identity-table th[data-sort]').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var col = th.getAttribute('data-sort');
+      identitySortDir = identitySortCol === col ? -identitySortDir : 1;
+      identitySortCol = col;
+      sortIdentityCandidates();
+      renderIdentityTableBody();
+      updateIdentitySortHeaders();
+    });
+  });
+
+  function renderIdentityFlag(id) {
+    var item = identityQueueItems.find(function (it) { return it.id === id; });
+    if (!item) return;
+    currentIdentityFlagId = item.id;
+    currentIdentityCandidates = item.candidates.slice();
+    identitySelectedIds = new Set();
+    identitySortCol = null;
+    identitySortDir = 1;
+    document.getElementById('identity-heading').textContent = item.cluster_key;
+    document.getElementById('identity-meta').textContent = '[' + item.reason + '] ' + item.candidates.length + ' candidate(s)';
+    document.getElementById('identity-note').value = '';
+    document.getElementById('identity-btn-keep-separate').disabled = false;
+    renderIdentityTableBody();
+    updateIdentityLinkButton();
+    updateIdentitySortHeaders();
+  }
+
+  function showIdentityPlaceholder(heading, meta) {
+    currentIdentityFlagId = null;
+    currentIdentityCandidates = [];
+    identitySelectedIds = new Set();
+    document.getElementById('identity-heading').textContent = heading;
+    document.getElementById('identity-meta').textContent = meta;
+    document.getElementById('identity-table-body').textContent = '';
+    document.getElementById('identity-btn-link').disabled = true;
+    document.getElementById('identity-btn-keep-separate').disabled = true;
+  }
+
+  async function loadIdentityQueue() {
+    const select = document.getElementById('identity-queue');
+    let body;
+    try {
+      const res = await fetch('/api/identity/queue');
+      if (!res.ok) throw new Error('identity queue fetch failed');
+      body = await res.json();
+    } catch {
+      select.textContent = '';
+      select.appendChild(new Option('Error loading identity queue', ''));
+      identityQueueItems = [];
+      showIdentityPlaceholder('Error loading identity queue', '');
+      return;
+    }
+    select.textContent = '';
+    // Honest degradation (controller ruling 5, same convention as the glossary tab's ruling 6):
+    // pre-0012, never a 500 — render plainly as "not yet available".
+    if (!body.available) {
+      select.appendChild(new Option('Identity queue unavailable: ' + (body.reason || 'migration 0012 not applied'), ''));
+      identityQueueItems = [];
+      showIdentityPlaceholder('Identity queue unavailable', body.reason || 'migration 0012 not applied');
+      return;
+    }
+    identityQueueItems = body.items || [];
+    if (identityQueueItems.length === 0) {
+      // Zero flags is a valid render (e.g. pre-linker, or every flag resolved) — not an error.
+      select.appendChild(new Option('Identity queue is empty', ''));
+      showIdentityPlaceholder('Identity queue is empty', 'No unresolved identity flags right now.');
+      return;
+    }
+    for (const it of identityQueueItems) {
+      select.appendChild(new Option('[' + it.reason + '] ' + it.cluster_key + ' (' + it.candidates.length + ')', it.id));
+    }
+    if (!currentIdentityFlagId || !identityQueueItems.some((it) => it.id === currentIdentityFlagId)) {
+      currentIdentityFlagId = identityQueueItems[0].id;
+    }
+    select.value = currentIdentityFlagId;
+    renderIdentityFlag(currentIdentityFlagId);
+  }
+
+  async function postIdentityDecision(action) {
+    if (!currentIdentityFlagId) return;
+    const note = document.getElementById('identity-note').value;
+    if (action === 'keep-separate' && !note.trim()) {
+      setStatus('A note is required for Keep Separate.');
+      return;
+    }
+    const payload = { flag_id: currentIdentityFlagId, action, note };
+    if (action === 'link') {
+      if (identitySelectedIds.size < 2) { setStatus('Select at least 2 candidates to link.'); return; }
+      payload.legislator_ids = Array.from(identitySelectedIds);
+    }
+    try {
+      const res = await fetch('/api/identity/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus('Error: ' + (body.error || res.status)); return; }
+      if (action === 'link') {
+        setStatus(body.resolved ? 'Linked — flag fully resolved.' : 'Linked this subset — remaining candidates stay in the flag.');
+      } else {
+        setStatus('Marked keep-separate — flag resolved.');
+      }
+      await loadIdentityQueue();
+    } catch {
+      setStatus('Network error.');
+    }
+  }
+
+  document.getElementById('identity-queue').addEventListener('change', (e) => {
+    currentIdentityFlagId = e.target.value;
+    if (currentIdentityFlagId) renderIdentityFlag(currentIdentityFlagId);
+  });
+  document.getElementById('identity-btn-link').addEventListener('click', () => postIdentityDecision('link'));
+  document.getElementById('identity-btn-keep-separate').addEventListener('click', () => postIdentityDecision('keep-separate'));
+
   // ---- tab switching ----
   function showTab(tab) {
     document.getElementById('tab-summaries').classList.toggle('active', tab === 'summaries');
     document.getElementById('tab-glossary').classList.toggle('active', tab === 'glossary');
+    document.getElementById('tab-identity').classList.toggle('active', tab === 'identity');
     document.getElementById('summary-panes').style.display = tab === 'summaries' ? '' : 'none';
     document.getElementById('glossary-panes').style.display = tab === 'glossary' ? '' : 'none';
+    document.getElementById('identity-panes').style.display = tab === 'identity' ? '' : 'none';
     document.getElementById('queue').style.display = tab === 'summaries' ? '' : 'none';
     document.getElementById('glossary-queue').style.display = tab === 'glossary' ? '' : 'none';
+    document.getElementById('identity-queue').style.display = tab === 'identity' ? '' : 'none';
     document.getElementById('glossary-toolbar').style.display = tab === 'glossary' ? '' : 'none';
     if (tab !== 'glossary') {
       const sampleResults = document.getElementById('glossary-sample-results');
@@ -778,9 +1106,11 @@
   }
   document.getElementById('tab-summaries').addEventListener('click', () => showTab('summaries'));
   document.getElementById('tab-glossary').addEventListener('click', () => showTab('glossary'));
+  document.getElementById('tab-identity').addEventListener('click', () => showTab('identity'));
 
   loadQueue();
   loadGlossaryQueue();
+  loadIdentityQueue();
 </script>
 </body>
 </html>

@@ -2,7 +2,17 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { getClient, isMissingRelationError, selectAll } from '../lib/db.js';
+import {
+  getClient, isMissingRelationError, selectAll, additivePatch,
+} from '../lib/db.js';
+import { pickDisplayName } from '../lib/person-identity.js';
+// PersonLinkConflictError reused verbatim (Task 2, controller ruling 4: "conflict-throw path
+// intact") — the SAME typed guard link-persons.js's writeAutoCluster throws when a cluster
+// member already carries a non-null person_id, now also thrown here for Lance's manual
+// per-subset link decisions. Importing a CLI module into the review server is safe: link-
+// persons.js only imports from ../lib/db.js and ../lib/person-identity.js (no circularity), and
+// its own `invokedDirectly` guard at the bottom means importing it here never runs its main().
+import { PersonLinkConflictError } from '../cli/link-persons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PAGE_HTML = readFileSync(path.join(__dirname, 'page.html'));
@@ -596,6 +606,327 @@ async function handleGlossaryDecision(client, req, res) {
   }
 }
 
+// ---- Task 2 (identity-merge plan, .superpowers/sdd/2026-07-29-identity-merge/task-2-brief.md):
+// identity review tab. Lance's adjudication surface for identity_flags rows link-persons.js
+// (Task 1) wrote when a cluster of legislator rows couldn't be linked automatically without risk
+// of a wrong merge. Mirrors the glossary tab's route shape (queue/decision, CSRF, degradation,
+// selectAll discipline) but the decision payload and write shape are new: per-subset linking
+// (controller ruling 1), not a single flag-wide approve/reject.
+//
+// identity_flags.evidence, as written by link-persons.js's writeIdentityFlag, is already
+// `{ reason, candidates: [{ legislatorId, fullName, surnameKeyUsed, sourceKeys, chamberDistrictEra
+// }, ...] }` — a full snapshot of exactly the evidence that caused the flag (buildMemberEvidence).
+// That snapshot, not a fresh terms/legislators join, is the source of truth for the review
+// table's full_name/source-keys/district/era-span columns: it IS the audit trail ("the audit is
+// the product's trust story", Task 1's own Global Constraints), and re-deriving it live would
+// only risk disagreeing with the very evidence Lance is being asked to adjudicate. The ONE thing
+// that legitimately changes between flag-creation and review is person_id (a candidate may have
+// been linked already by an earlier partial decision, Task 1/1-lite, or the read that hides the
+// flag entirely per ruling 2's "self-healing display") — that alone is fetched live.
+
+// formatCandidateDistrict / formatCandidateEraSpan — pure, table-column-ready summaries over one
+// candidate's chamberDistrictEra evidence array (each entry the same {source, jurisdiction_id,
+// chamber, district, start_date, end_date} shape buildEvidenceRows in link-persons.js produces).
+// Deliberately don't collapse to a single value when a candidate carries several inconsistent-
+// looking entries (that inconsistency IS the reviewable signal) — dedupe identical labels only,
+// never merge different ones away. Missing bounds render as '?', never guessed or invented.
+export function formatCandidateDistrict(evidenceEntries) {
+  const seen = new Set();
+  const parts = [];
+  for (const e of evidenceEntries ?? []) {
+    const label = [e?.chamber, e?.district].filter((v) => v != null && String(v).trim() !== '').join(' ');
+    if (label && !seen.has(label)) { seen.add(label); parts.push(label); }
+  }
+  return parts.length ? parts.join(', ') : '(no district evidence)';
+}
+
+export function formatCandidateEraSpan(evidenceEntries) {
+  let earliestStart = null;
+  let latestEnd = null;
+  let anyDate = false;
+  for (const e of evidenceEntries ?? []) {
+    if (e?.start_date != null) {
+      anyDate = true;
+      if (earliestStart == null || e.start_date < earliestStart) earliestStart = e.start_date;
+    }
+    if (e?.end_date != null) {
+      anyDate = true;
+      if (latestEnd == null || e.end_date > latestEnd) latestEnd = e.end_date;
+    }
+  }
+  if (!anyDate) return '(no dates on file)';
+  return `${earliestStart ?? '?'} – ${latestEnd ?? '?'}`;
+}
+
+// findCandidateEvidence — pulls one member's frozen evidence entry out of a flag's evidence blob
+// by legislatorId. Tolerant of a malformed/missing evidence shape (returns null, never throws) —
+// this only feeds an audit-trail field on the person_links row, never a decision gate.
+export function findCandidateEvidence(flagEvidence, legislatorId) {
+  const candidates = flagEvidence && Array.isArray(flagEvidence.candidates) ? flagEvidence.candidates : [];
+  return candidates.find((c) => c?.legislatorId === legislatorId) ?? null;
+}
+
+// buildLanceLinkEvidence — controller ruling 4: person_links.evidence for a Lance-decided link is
+// "evidence from the flag + Lance's selection". Starts from that candidate's own frozen flag
+// evidence (names/source keys/chamberDistrictEra — whatever findCandidateEvidence found, or {} if
+// none), then layers on which flag this came from and who else Lance grouped with this row in the
+// SAME decision (never including the row's own id in its own "linked with" list).
+export function buildLanceLinkEvidence(candidateEvidence, {
+  flagId, clusterKey, linkedLegislatorIds, note,
+}) {
+  const base = candidateEvidence ?? {};
+  return {
+    ...base,
+    flagId,
+    clusterKey,
+    linkedWith: (linkedLegislatorIds ?? []).filter((id) => id !== base.legislatorId),
+    note: note ?? null,
+  };
+}
+
+// appendResolution — identity_flags has no notes table and controller ruling 2 is explicit ("no
+// schema change"), so a per-decision audit trail for THIS flag lives inside its own `evidence`
+// jsonb column: an append-only `resolutions` array, one entry per decision (link-subset or
+// keep-separate), layered on top of the original `{reason, candidates}` the flag was created
+// with — never overwriting it. `nowIso` is an injectable seam for tests; production calls omit it
+// and get the real clock.
+export function appendResolution(evidence, resolution, nowIso = new Date().toISOString()) {
+  const base = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? evidence : {};
+  const priorResolutions = Array.isArray(base.resolutions) ? base.resolutions : [];
+  return {
+    ...base,
+    resolutions: [...priorResolutions, { ...resolution, decidedBy: 'lance', decidedAt: nowIso }],
+  };
+}
+
+const IDENTITY_ACTIONS = new Set(['link', 'keep-separate']);
+
+// validateIdentityDecisionInput — controller ruling 1 (per-subset: link needs 2+ distinct ids)
+// and ruling 4 (keep-separate "resolves the flag with a note" — mirrors validateDecisionInput's
+// own reject-requires-note rule: the one case with no person_links audit row to explain itself,
+// so the note IS the record of why these stayed separate).
+export function validateIdentityDecisionInput({ action, legislator_ids, note }) {
+  if (!IDENTITY_ACTIONS.has(action)) return 'unknown action';
+  if (action === 'link') {
+    if (!Array.isArray(legislator_ids) || legislator_ids.length < 2) {
+      return 'legislator_ids must include at least 2 ids for link';
+    }
+    if (new Set(legislator_ids).size !== legislator_ids.length) return 'legislator_ids must not contain duplicates';
+  }
+  if (action === 'keep-separate' && !note) return 'note is required for keep-separate';
+  return null;
+}
+
+// countCastsForLegislator — the brief's "cast count via selectAll-safe count queries": an exact
+// COUNT via head:true (same pattern as ingest-legiscan.js/ingest-mo-house.js's own count queries)
+// never fetches a single cast row, so it cannot hit the 1000-row page cap selectAll exists to
+// guard against — "selectAll-safe" without literally being selectAll. One query per candidate
+// (today's live queue tops out around 70-90 distinct candidates across 21 flags) rather than one
+// full-table selectAll+group-by over what could be a much larger vote_casts table.
+async function countCastsForLegislator(client, legislatorId) {
+  const { count, error } = await client
+    .from('vote_casts')
+    .select('id', { count: 'exact', head: true })
+    .eq('legislator_id', legislatorId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function handleIdentityQueue(client, res) {
+  if (!client) { sendJson(res, 500, { error: 'internal error' }); return; }
+  try {
+    const flagsResult = await selectAll(client, 'identity_flags', 'id,cluster_key,candidate_legislator_ids,evidence,created_at', {
+      filter: (q) => q.eq('resolved', false).order('created_at', { ascending: true }),
+    });
+    if (flagsResult.error) {
+      if (isMissingRelationError(flagsResult.error, 'identity_flags')) {
+        sendJson(res, 200, { available: false, reason: 'migration 0012 not applied', items: [] });
+        return;
+      }
+      throw flagsResult.error;
+    }
+    const flags = flagsResult.data ?? [];
+    if (flags.length === 0) { sendJson(res, 200, { available: true, items: [] }); return; }
+
+    // Live person_id lookup — fetch-all-then-filter-in-JS, the SAME convention the glossary
+    // queue's own verification lookup uses (never .in() over a possibly-large id list — see that
+    // route's comment on the undici 16KB header cap found live the day 0007 shipped).
+    const legResult = await selectAll(client, 'legislators', 'id,person_id');
+    if (legResult.error) throw legResult.error;
+    const personIdByLegislator = new Map((legResult.data ?? []).map((r) => [r.id, r.person_id]));
+
+    const items = [];
+    for (const flag of flags) {
+      const candidates = flag.evidence && Array.isArray(flag.evidence.candidates) ? flag.evidence.candidates : [];
+      // Controller ruling 2: self-healing display — a flag whose every candidate already carries
+      // a person_id (linked via an earlier partial decision, or resolved some other way) is
+      // hidden from the queue. Purely a display-time filter — the row itself is never touched by
+      // a read, no schema change.
+      const allLinked = candidates.length > 0
+        && candidates.every((c) => personIdByLegislator.get(c.legislatorId) != null);
+      if (allLinked) continue;
+
+      const candidateViews = [];
+      for (const c of candidates) {
+        // eslint-disable-next-line no-await-in-loop -- sequential, low-traffic admin page; same
+        // precedent as link-persons.js's own per-cluster/per-flag write loops.
+        const castCount = await countCastsForLegislator(client, c.legislatorId);
+        const linkedPersonId = personIdByLegislator.get(c.legislatorId) ?? null;
+        candidateViews.push({
+          legislator_id: c.legislatorId,
+          full_name: c.fullName,
+          source_keys: c.sourceKeys ?? {},
+          district: formatCandidateDistrict(c.chamberDistrictEra),
+          era_span: formatCandidateEraSpan(c.chamberDistrictEra),
+          cast_count: castCount,
+          already_linked: linkedPersonId != null,
+          linked_person_id: linkedPersonId,
+        });
+      }
+
+      items.push({
+        id: flag.id,
+        cluster_key: flag.cluster_key,
+        reason: (flag.evidence && flag.evidence.reason) || null,
+        created_at: flag.created_at,
+        candidates: candidateViews,
+      });
+    }
+
+    sendJson(res, 200, { available: true, items });
+  } catch (err) {
+    sendServerError(res, 'identity-queue', err);
+  }
+}
+
+async function handleIdentityDecision(client, req, res) {
+  let bodyBuf;
+  try {
+    bodyBuf = await readBody(req, BODY_LIMIT);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) { sendJson(res, 413, { error: 'payload too large' }); return; }
+    sendJson(res, 400, { error: 'bad request' });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(bodyBuf.toString('utf8'));
+  } catch {
+    sendJson(res, 400, { error: 'invalid JSON' });
+    return;
+  }
+
+  const { flag_id, action, legislator_ids } = payload ?? {};
+  const note = payload && payload.note != null ? payload.note : null;
+  if (!flag_id) { sendJson(res, 400, { error: 'flag_id is required' }); return; }
+  const validationError = validateIdentityDecisionInput({ action, legislator_ids, note });
+  if (validationError) { sendJson(res, 400, { error: validationError }); return; }
+
+  try {
+    const { data: flag, error: fErr } = await client
+      .from('identity_flags')
+      .select('id,cluster_key,candidate_legislator_ids,evidence,resolved')
+      .eq('id', flag_id).maybeSingle();
+    if (fErr) {
+      if (isMissingRelationError(fErr, 'identity_flags')) {
+        sendJson(res, 503, { error: 'migration 0012 not applied' });
+        return;
+      }
+      throw fErr;
+    }
+    if (!flag) { sendJson(res, 404, { error: 'not found' }); return; }
+    if (flag.resolved) { sendJson(res, 400, { error: 'flag already resolved' }); return; }
+
+    if (action === 'keep-separate') {
+      const patchedEvidence = appendResolution(flag.evidence, { action: 'keep-separate', legislatorIds: 'all', note });
+      const { error: uErr } = await client.from('identity_flags')
+        .update({ resolved: true, evidence: patchedEvidence }).eq('id', flag_id);
+      if (uErr) throw uErr;
+      sendJson(res, 200, { resolved: true });
+      return;
+    }
+
+    // action === 'link' — controller ruling 1: PER-SUBSET. legislator_ids is Lance's selection
+    // within this flag, never assumed to be the flag's whole candidate set (a 14-member blob may
+    // contain several real people plus noise — each subset is its own decision).
+    const candidateIdSet = new Set(flag.candidate_legislator_ids ?? []);
+    const outsiders = legislator_ids.filter((id) => !candidateIdSet.has(id));
+    if (outsiders.length > 0) { sendJson(res, 400, { error: 'legislator_ids must all belong to this flag' }); return; }
+
+    const { data: selectedRows, error: srErr } = await client
+      .from('legislators')
+      .select('id,full_name,bioguide_id,openstates_id,mo_house_id,mo_senate_id,legiscan_people_id,person_id')
+      .in('id', legislator_ids);
+    if (srErr) throw srErr;
+    const rows = selectedRows ?? [];
+    if (rows.length !== legislator_ids.length) { sendJson(res, 404, { error: 'one or more legislators not found' }); return; }
+
+    // Every selected member's person_id validated null FIRST, before any write for this decision
+    // happens at all (controller ruling 4: "conflict-throw path intact" — same all-or-nothing
+    // guard as writeAutoCluster's own pre-check in link-persons.js).
+    for (const row of rows) {
+      if (row.person_id != null) {
+        throw new PersonLinkConflictError(
+          `legislators.id=${row.id} already has person_id=${row.person_id} — refusing to link it `
+            + '(a non-null person_id is never overwritten)',
+          { legislatorId: row.id, existingPersonId: row.person_id, flagId: flag_id },
+        );
+      }
+    }
+
+    const { display_name, display_name_source } = pickDisplayName(rows);
+    const { data: person, error: insErr } = await client
+      .from('persons').insert({ display_name, display_name_source }).select('id').single();
+    if (insErr) throw insErr;
+    const personId = person.id;
+
+    for (const row of rows) {
+      const patch = additivePatch(row, { person_id: personId });
+      // eslint-disable-next-line no-await-in-loop -- small (2-14) member loop, same sequential
+      // precedent as writeAutoCluster's own per-member loop.
+      const { error: updErr } = await client.from('legislators').update(patch).eq('id', row.id);
+      if (updErr) throw updErr;
+
+      const candidateEvidence = findCandidateEvidence(flag.evidence, row.id);
+      const linkEvidence = buildLanceLinkEvidence(candidateEvidence, {
+        flagId: flag.id, clusterKey: flag.cluster_key, linkedLegislatorIds: legislator_ids, note,
+      });
+      // eslint-disable-next-line no-await-in-loop
+      const { error: linkErr } = await client.from('person_links').insert({
+        person_id: personId, legislator_id: row.id, evidence: linkEvidence, decided_by: 'lance',
+      });
+      if (linkErr) throw linkErr;
+    }
+
+    // Controller ruling 1: "remaining candidates stay in the flag until it's fully resolved" —
+    // re-check the flag's FULL candidate set (not just this decision's subset) against fresh
+    // person_id state; only mark the flag resolved once every candidate is accounted for.
+    const allCandidateIds = flag.candidate_legislator_ids ?? [];
+    const { data: statusRows, error: stErr } = await client
+      .from('legislators').select('id,person_id').in('id', allCandidateIds);
+    if (stErr) throw stErr;
+    const allLinked = (statusRows ?? []).length === allCandidateIds.length
+      && (statusRows ?? []).every((r) => r.person_id != null);
+
+    const patchedEvidence = appendResolution(flag.evidence, {
+      action: 'link', legislatorIds: legislator_ids, personId, note,
+    });
+    const flagPatch = { evidence: patchedEvidence };
+    if (allLinked) flagPatch.resolved = true;
+    const { error: fpErr } = await client.from('identity_flags').update(flagPatch).eq('id', flag_id);
+    if (fpErr) throw fpErr;
+
+    sendJson(res, 200, { person_id: personId, resolved: allLinked });
+  } catch (err) {
+    if (err instanceof PersonLinkConflictError) {
+      sendJson(res, 409, { error: 'one or more selected legislators are already linked to a different person' });
+      return;
+    }
+    sendServerError(res, 'identity-decision', err);
+  }
+}
+
 // ---- Router ----
 
 // clientOverride is test-only dependency injection (a fake Supabase-shaped client) — production
@@ -630,6 +961,15 @@ export async function requestListener(req, res, clientOverride) {
   if (req.method === 'POST' && pathname === '/api/glossary/decision') {
     if (!isAllowedDecisionRequest(req.headers)) { sendJson(res, 403, { error: 'forbidden' }); return; }
     await handleGlossaryDecision(client, req, res);
+    return;
+  }
+
+  // Task 2: identity review tab routes. Same CSRF allowlist as every other decision route.
+  if (req.method === 'GET' && pathname === '/api/identity/queue') { await handleIdentityQueue(client, res); return; }
+
+  if (req.method === 'POST' && pathname === '/api/identity/decision') {
+    if (!isAllowedDecisionRequest(req.headers)) { sendJson(res, 403, { error: 'forbidden' }); return; }
+    await handleIdentityDecision(client, req, res);
     return;
   }
 

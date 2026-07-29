@@ -8,6 +8,8 @@ import {
   verificationBadge, latestVerificationBySummary, resolveVerificationRows,
   validateGlossaryDecisionInput, glossVerificationBadge, latestVerificationByTerm,
   isPublishCompletenessViolation,
+  formatCandidateDistrict, formatCandidateEraSpan, findCandidateEvidence,
+  buildLanceLinkEvidence, appendResolution, validateIdentityDecisionInput,
   HOST, PORT,
 } from '../src/review/server.js';
 
@@ -995,5 +997,710 @@ test('POST /api/glossary/decision publish on a bare stub surfaces the CHECK viol
     const body = await res.json();
     assert.match(body.error, /gloss_md|source_url|source_hash/);
     assert.equal(updateCallCount, 1);
+  }, client);
+});
+
+// ============================================================================
+// Task 2 (.superpowers/sdd/2026-07-29-identity-merge/task-2-brief.md): identity review tab.
+// Lance's adjudication surface for identity_flags rows link-persons.js (Task 1) writes when a
+// cluster of legislator rows can't be linked automatically without risking a wrong merge.
+// ============================================================================
+
+// ---- formatCandidateDistrict / formatCandidateEraSpan (pure table-column summaries) ----
+
+test('formatCandidateDistrict: joins chamber+district labels, deduped', () => {
+  const entries = [
+    { chamber: 'senate', district: '2' },
+    { chamber: 'senate', district: '2' }, // duplicate label — collapsed, not doubled
+    { chamber: 'house', district: '24' },
+  ];
+  assert.equal(formatCandidateDistrict(entries), 'senate 2, house 24');
+});
+
+test('formatCandidateDistrict: entry with chamber but no district still renders', () => {
+  assert.equal(formatCandidateDistrict([{ chamber: 'senate', district: null }]), 'senate');
+});
+
+test('formatCandidateDistrict: empty/absent evidence -> honest placeholder, never blank', () => {
+  assert.equal(formatCandidateDistrict([]), '(no district evidence)');
+  assert.equal(formatCandidateDistrict(undefined), '(no district evidence)');
+});
+
+test('formatCandidateEraSpan: earliest start .. latest end across every entry', () => {
+  const entries = [
+    { start_date: '2019-01-01', end_date: '2021-01-01' },
+    { start_date: '2015-01-01', end_date: '2017-01-01' },
+  ];
+  assert.equal(formatCandidateEraSpan(entries), '2015-01-01 – 2021-01-01');
+});
+
+test('formatCandidateEraSpan: missing bound renders as "?", never invented', () => {
+  assert.equal(formatCandidateEraSpan([{ start_date: '2019-01-01', end_date: null }]), '2019-01-01 – ?');
+});
+
+test('formatCandidateEraSpan: every entry fully dateless -> honest placeholder', () => {
+  assert.equal(formatCandidateEraSpan([{ start_date: null, end_date: null }]), '(no dates on file)');
+  assert.equal(formatCandidateEraSpan([]), '(no dates on file)');
+});
+
+// ---- findCandidateEvidence (pulls one member's frozen flag evidence by legislatorId) ----
+
+test('findCandidateEvidence finds the matching candidate by legislatorId', () => {
+  const evidence = { reason: 'internal_contradiction', candidates: [{ legislatorId: 'a' }, { legislatorId: 'b' }] };
+  assert.deepEqual(findCandidateEvidence(evidence, 'b'), { legislatorId: 'b' });
+});
+
+test('findCandidateEvidence returns null when not found or evidence is malformed', () => {
+  assert.equal(findCandidateEvidence({ candidates: [{ legislatorId: 'a' }] }, 'nope'), null);
+  assert.equal(findCandidateEvidence({}, 'a'), null);
+  assert.equal(findCandidateEvidence(null, 'a'), null);
+});
+
+// ---- buildLanceLinkEvidence (controller ruling 4: "evidence from the flag + Lance's selection") ----
+
+test('buildLanceLinkEvidence layers flagId/clusterKey/linkedWith/note onto the frozen candidate evidence', () => {
+  const candidateEvidence = { legislatorId: 'x', fullName: 'Sherrod Brown', sourceKeys: { bioguide_id: 'B1' } };
+  const result = buildLanceLinkEvidence(candidateEvidence, {
+    flagId: 'flag-1', clusterKey: 'brown:x,y,z', linkedLegislatorIds: ['x', 'y', 'z'], note: 'same person, verified',
+  });
+  assert.equal(result.legislatorId, 'x');
+  assert.equal(result.fullName, 'Sherrod Brown');
+  assert.deepEqual(result.sourceKeys, { bioguide_id: 'B1' });
+  assert.equal(result.flagId, 'flag-1');
+  assert.equal(result.clusterKey, 'brown:x,y,z');
+  assert.deepEqual(result.linkedWith, ['y', 'z'], 'excludes the row\'s own id from its own linked-with list');
+  assert.equal(result.note, 'same person, verified');
+});
+
+test('buildLanceLinkEvidence tolerates a null candidateEvidence (defensive, never throws)', () => {
+  const result = buildLanceLinkEvidence(null, { flagId: 'f1', clusterKey: 'k', linkedLegislatorIds: ['x', 'y'], note: null });
+  assert.deepEqual(result.linkedWith, ['x', 'y']);
+  assert.equal(result.note, null);
+});
+
+// ---- appendResolution (identity_flags has no notes table — audit lives in evidence.resolutions) ----
+
+test('appendResolution appends the first resolution while preserving reason/candidates', () => {
+  const evidence = { reason: 'ambiguous_era', candidates: [{ legislatorId: 'a' }] };
+  const result = appendResolution(evidence, { action: 'keep-separate', legislatorIds: 'all', note: 'two real people' }, '2026-07-29T00:00:00Z');
+  assert.equal(result.reason, 'ambiguous_era');
+  assert.deepEqual(result.candidates, [{ legislatorId: 'a' }]);
+  assert.equal(result.resolutions.length, 1);
+  assert.deepEqual(result.resolutions[0], {
+    action: 'keep-separate', legislatorIds: 'all', note: 'two real people', decidedBy: 'lance', decidedAt: '2026-07-29T00:00:00Z',
+  });
+});
+
+test('appendResolution appends onto an existing resolutions array (per-subset link history)', () => {
+  const evidence = { reason: 'internal_contradiction', candidates: [], resolutions: [{ action: 'link', legislatorIds: ['a', 'b'] }] };
+  const result = appendResolution(evidence, { action: 'link', legislatorIds: ['c', 'd'] }, '2026-07-29T01:00:00Z');
+  assert.equal(result.resolutions.length, 2);
+  assert.deepEqual(result.resolutions[0], { action: 'link', legislatorIds: ['a', 'b'] });
+  assert.equal(result.resolutions[1].legislatorIds.join(','), 'c,d');
+});
+
+// ---- validateIdentityDecisionInput (controller rulings 1 + 4) ----
+
+test('validateIdentityDecisionInput: link with fewer than 2 ids is invalid', () => {
+  assert.match(validateIdentityDecisionInput({ action: 'link', legislator_ids: ['a'] }), /at least 2/);
+  assert.match(validateIdentityDecisionInput({ action: 'link', legislator_ids: [] }), /at least 2/);
+  assert.match(validateIdentityDecisionInput({ action: 'link' }), /at least 2/);
+});
+
+test('validateIdentityDecisionInput: link with duplicate ids is invalid', () => {
+  assert.match(validateIdentityDecisionInput({ action: 'link', legislator_ids: ['a', 'a'] }), /duplicate/);
+});
+
+test('validateIdentityDecisionInput: link with 2+ unique ids is valid', () => {
+  assert.equal(validateIdentityDecisionInput({ action: 'link', legislator_ids: ['a', 'b'] }), null);
+});
+
+test('validateIdentityDecisionInput: keep-separate without a note is invalid', () => {
+  assert.match(validateIdentityDecisionInput({ action: 'keep-separate' }), /note is required/);
+  assert.match(validateIdentityDecisionInput({ action: 'keep-separate', note: '' }), /note is required/);
+});
+
+test('validateIdentityDecisionInput: keep-separate with a note is valid', () => {
+  assert.equal(validateIdentityDecisionInput({ action: 'keep-separate', note: 'two unrelated Browns' }), null);
+});
+
+test('validateIdentityDecisionInput: unknown action is invalid', () => {
+  assert.match(validateIdentityDecisionInput({ action: 'merge-everything' }), /unknown action/);
+});
+
+// ---- route-level fake client: identity_flags / legislators / vote_casts / persons / person_links ----
+//
+// A purpose-built fake (not the generic fakeQuery/fakeClient above): unlike every other route in
+// this file, the identity routes need PER-ID variation from the same table across a single
+// request (a cast count per candidate, a live person_id per candidate, a targeted legislators
+// lookup by a specific id subset) — the generic fixed-canned-result fake can't express that.
+
+const MISSING_IDENTITY_FLAGS_ERROR = {
+  code: 'PGRST205',
+  message: "Could not find the table 'public.identity_flags' in the schema cache",
+};
+
+function identityFakeClient({
+  flags = [],
+  legislatorsById = new Map(),
+  castCountsByLegislatorId = new Map(),
+  identityFlagsMissing = false,
+  newPersonId = 'person-new-1',
+} = {}, onCall) {
+  const record = (table, method, args) => { if (onCall) onCall(table, method, args); };
+
+  return {
+    from(table) {
+      if (table === 'identity_flags') {
+        return {
+          select(cols) {
+            record(table, 'select', [cols]);
+            const st = { filters: [] };
+            return {
+              eq(col, val) { record(table, 'eq', [col, val]); st.filters.push([col, val]); return this; },
+              order(col, opts) { record(table, 'order', [col, opts]); return this; },
+              range(from, to) {
+                record(table, 'range', [from, to]);
+                if (identityFlagsMissing) return Promise.resolve({ data: null, error: MISSING_IDENTITY_FLAGS_ERROR });
+                let rows = flags;
+                for (const [col, val] of st.filters) rows = rows.filter((r) => r[col] === val);
+                return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
+              },
+              maybeSingle() {
+                record(table, 'maybeSingle', []);
+                if (identityFlagsMissing) return Promise.resolve({ data: null, error: MISSING_IDENTITY_FLAGS_ERROR });
+                let rows = flags;
+                for (const [col, val] of st.filters) rows = rows.filter((r) => r[col] === val);
+                return Promise.resolve({ data: rows[0] ?? null, error: null });
+              },
+            };
+          },
+          update(patch) {
+            record(table, 'update', [patch]);
+            return {
+              eq: (col, val) => {
+                record(table, 'eq', [col, val]);
+                const flag = flags.find((f) => f[col] === val);
+                if (flag) Object.assign(flag, patch);
+                return Promise.resolve({ data: null, error: null });
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'legislators') {
+        return {
+          select(cols) {
+            record(table, 'select', [cols]);
+            const st = { ids: null };
+            const builder = {
+              in(col, ids) { record(table, 'in', [col, ids]); st.ids = ids; return this; },
+              order(col, opts) { record(table, 'order', [col, opts]); return this; },
+              range(from, to) {
+                record(table, 'range', [from, to]);
+                const all = [...legislatorsById.values()];
+                return Promise.resolve({ data: all.slice(from, to + 1), error: null });
+              },
+              then(resolve, reject) {
+                const rows = st.ids
+                  ? st.ids.map((id) => legislatorsById.get(id)).filter(Boolean)
+                  : [...legislatorsById.values()];
+                return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+              },
+            };
+            return builder;
+          },
+          update(patch) {
+            record(table, 'update', [patch]);
+            return {
+              eq: (col, val) => {
+                record(table, 'eq', [col, val]);
+                const row = legislatorsById.get(val);
+                if (row) Object.assign(row, patch);
+                return Promise.resolve({ data: null, error: null });
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'vote_casts') {
+        return {
+          select(cols, opts) {
+            record(table, 'select', [cols, opts]);
+            return {
+              eq: (col, val) => {
+                record(table, 'eq', [col, val]);
+                return Promise.resolve({ data: null, error: null, count: castCountsByLegislatorId.get(val) ?? 0 });
+              },
+            };
+          },
+        };
+      }
+
+      if (table === 'persons') {
+        return {
+          insert(row) {
+            record(table, 'insert', [row]);
+            return {
+              select: () => ({
+                single: () => Promise.resolve({ data: { id: newPersonId }, error: null }),
+              }),
+            };
+          },
+        };
+      }
+
+      if (table === 'person_links') {
+        return {
+          insert(row) {
+            record(table, 'insert', [row]);
+            return Promise.resolve({ data: null, error: null });
+          },
+        };
+      }
+
+      throw new Error(`identityFakeClient: unexpected table in this test: ${table}`);
+    },
+  };
+}
+
+// ---- GET /api/identity/queue ----
+
+test('GET /api/identity/queue degrades to {available:false} (200, not 500) when identity_flags is missing (pre-0012)', () => {
+  const client = identityFakeClient({ identityFlagsMissing: true });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, false);
+    assert.match(body.reason, /0012/);
+    assert.deepEqual(body.items, []);
+  }, client);
+});
+
+test('GET /api/identity/queue: zero unresolved flags is a valid, empty render', () => {
+  const client = identityFakeClient({ flags: [] });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/queue`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { available: true, items: [] });
+  }, client);
+});
+
+test('GET /api/identity/queue with no DB client configured returns a clean 500, not a crash', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/identity/queue`);
+  assert.equal(res.status, 500);
+  assert.deepEqual(await res.json(), { error: 'internal error' });
+}));
+
+test('GET /api/identity/queue happy path: full_name, source_keys, district, era_span, cast_count all present', () => {
+  const flag = {
+    id: 'flag-1',
+    cluster_key: 'brown:leg-a,leg-b',
+    resolved: false,
+    created_at: '2026-07-29T00:00:00Z',
+    evidence: {
+      reason: 'internal_contradiction',
+      candidates: [
+        {
+          legislatorId: 'leg-a', fullName: 'Sherrod Brown',
+          sourceKeys: { bioguide_id: 'B000944', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null },
+          chamberDistrictEra: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: null, start_date: '2007-01-04', end_date: null }],
+        },
+        {
+          legislatorId: 'leg-b', fullName: 'Hank Brown',
+          sourceKeys: { bioguide_id: 'B000944', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null },
+          chamberDistrictEra: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: null, start_date: '1991-01-03', end_date: '1997-01-03' }],
+        },
+      ],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', { id: 'leg-a', person_id: null }],
+    ['leg-b', { id: 'leg-b', person_id: null }],
+  ]);
+  const castCountsByLegislatorId = new Map([['leg-a', 4200], ['leg-b', 900]]);
+  const client = identityFakeClient({ flags: [flag], legislatorsById, castCountsByLegislatorId });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/queue`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.available, true);
+    assert.equal(body.items.length, 1);
+    const item = body.items[0];
+    assert.equal(item.id, 'flag-1');
+    assert.equal(item.cluster_key, 'brown:leg-a,leg-b');
+    assert.equal(item.reason, 'internal_contradiction');
+    assert.equal(item.candidates.length, 2);
+    const a = item.candidates.find((c) => c.legislator_id === 'leg-a');
+    assert.equal(a.full_name, 'Sherrod Brown');
+    assert.deepEqual(a.source_keys, { bioguide_id: 'B000944', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null });
+    assert.equal(a.district, 'senate');
+    assert.equal(a.era_span, '2007-01-04 – ?');
+    assert.equal(a.cast_count, 4200);
+    assert.equal(a.already_linked, false);
+    assert.equal(a.linked_person_id, null);
+    const b = item.candidates.find((c) => c.legislator_id === 'leg-b');
+    assert.equal(b.era_span, '1991-01-03 – 1997-01-03');
+    assert.equal(b.cast_count, 900);
+  }, client);
+});
+
+test('GET /api/identity/queue: a flag whose candidates are ALL already person_id-linked is hidden (controller ruling 2, self-healing display)', () => {
+  const flag = {
+    id: 'flag-1', cluster_key: 'k', resolved: false, created_at: '2026-07-29T00:00:00Z',
+    evidence: { reason: 'ambiguous_era', candidates: [{ legislatorId: 'leg-a', fullName: 'X', sourceKeys: {}, chamberDistrictEra: [] }, { legislatorId: 'leg-b', fullName: 'Y', sourceKeys: {}, chamberDistrictEra: [] }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', { id: 'leg-a', person_id: 'person-1' }],
+    ['leg-b', { id: 'leg-b', person_id: 'person-1' }],
+  ]);
+  const client = identityFakeClient({ flags: [flag], legislatorsById });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/queue`);
+    const body = await res.json();
+    assert.deepEqual(body.items, [], 'fully-linked flag must not appear in the queue');
+  }, client);
+});
+
+test('GET /api/identity/queue: a flag with SOME (not all) candidates already linked still appears, per-candidate already_linked marked correctly', () => {
+  const flag = {
+    id: 'flag-1', cluster_key: 'k', resolved: false, created_at: '2026-07-29T00:00:00Z',
+    evidence: {
+      reason: 'internal_contradiction',
+      candidates: [
+        { legislatorId: 'leg-a', fullName: 'X', sourceKeys: {}, chamberDistrictEra: [] },
+        { legislatorId: 'leg-b', fullName: 'Y', sourceKeys: {}, chamberDistrictEra: [] },
+        { legislatorId: 'leg-c', fullName: 'Z', sourceKeys: {}, chamberDistrictEra: [] },
+      ],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', { id: 'leg-a', person_id: 'person-1' }],
+    ['leg-b', { id: 'leg-b', person_id: 'person-1' }],
+    ['leg-c', { id: 'leg-c', person_id: null }],
+  ]);
+  const client = identityFakeClient({ flags: [flag], legislatorsById });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/queue`);
+    const body = await res.json();
+    assert.equal(body.items.length, 1, 'partially-linked flag stays in the queue (remaining candidates need a decision)');
+    const candidates = body.items[0].candidates;
+    assert.equal(candidates.find((c) => c.legislator_id === 'leg-a').already_linked, true);
+    assert.equal(candidates.find((c) => c.legislator_id === 'leg-a').linked_person_id, 'person-1');
+    assert.equal(candidates.find((c) => c.legislator_id === 'leg-c').already_linked, false);
+  }, client);
+});
+
+// ---- POST /api/identity/decision: CSRF + degradation + validation ----
+
+test('POST /api/identity/decision: Content-Type text/plain -> 403 (same CSRF vector as every other decision route)', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/identity/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'x' }),
+  });
+  assert.equal(res.status, 403);
+}));
+
+test('POST /api/identity/decision: foreign Origin -> 403', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/identity/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+    body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'x' }),
+  });
+  assert.equal(res.status, 403);
+}));
+
+test('POST /api/identity/decision degrades honestly (not 500, not 403) when identity_flags is missing', () => {
+  const client = identityFakeClient({ identityFlagsMissing: true });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'x' }),
+    });
+    assert.notEqual(res.status, 500);
+    assert.notEqual(res.status, 403);
+    const body = await res.json();
+    assert.match(body.error, /0012/);
+  }, client);
+});
+
+test('POST /api/identity/decision: missing flag_id -> 400', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/identity/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'keep-separate', note: 'x' }),
+  });
+  assert.equal(res.status, 400);
+}));
+
+test('POST /api/identity/decision: link with fewer than 2 legislator_ids -> 400', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/identity/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['a'] }),
+  });
+  assert.equal(res.status, 400);
+}));
+
+test('POST /api/identity/decision: keep-separate without a note -> 400', () => withServer(async (base) => {
+  const res = await fetch(`${base}/api/identity/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate' }),
+  });
+  assert.equal(res.status, 400);
+}));
+
+test('POST /api/identity/decision: unknown flag_id -> 404', () => {
+  const client = identityFakeClient({ flags: [] });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'nope', action: 'keep-separate', note: 'x' }),
+    });
+    assert.equal(res.status, 404);
+  }, client);
+});
+
+test('POST /api/identity/decision: already-resolved flag -> 400', () => {
+  const flag = { id: 'f1', cluster_key: 'k', resolved: true, evidence: { reason: 'ambiguous_era', candidates: [] }, candidate_legislator_ids: [] };
+  const client = identityFakeClient({ flags: [flag] });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'x' }),
+    });
+    assert.equal(res.status, 400);
+  }, client);
+});
+
+// ---- POST /api/identity/decision: keep-separate happy path ----
+
+test('POST /api/identity/decision keep-separate: resolves the flag with a note, writes NOTHING to persons/person_links', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'brown:a,b', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'ambiguous_era', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const calls = [];
+  const client = identityFakeClient({ flags: [flag] }, (table, method, args) => calls.push({ table, method, args }));
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'two real, unrelated Browns' }),
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { resolved: true });
+    assert.equal(flag.resolved, true, 'the fake\'s own flag row was mutated to resolved:true');
+    assert.equal(flag.evidence.resolutions.length, 1);
+    assert.equal(flag.evidence.resolutions[0].action, 'keep-separate');
+    assert.equal(flag.evidence.resolutions[0].note, 'two real, unrelated Browns');
+    assert.equal(flag.evidence.resolutions[0].decidedBy, 'lance');
+    assert.ok(!calls.some((c) => c.table === 'persons'), 'keep-separate must never touch persons');
+    assert.ok(!calls.some((c) => c.table === 'person_links'), 'keep-separate must never touch person_links');
+  }, client);
+});
+
+// ---- POST /api/identity/decision: link happy path (whole flag in one subset -> fully resolved) ----
+
+test('POST /api/identity/decision link: writes persons (display-name precedence), legislators.person_id patches, person_links (decided_by lance), and resolves the flag when every candidate is now linked', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'onder:a,b', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: {
+      reason: 'internal_contradiction',
+      candidates: [
+        { legislatorId: 'leg-a', fullName: 'Onder, Robert F.', sourceKeys: { bioguide_id: 'O000177' }, chamberDistrictEra: [] },
+        { legislatorId: 'leg-b', fullName: 'Bob Onder', sourceKeys: { mo_senate_id: '2' }, chamberDistrictEra: [] },
+      ],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'Onder, Robert F.', bioguide_id: 'O000177', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Bob Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: '2', legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient(
+    { flags: [flag], legislatorsById, newPersonId: 'person-onder-1' },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'], note: 'same Robert "Bob" Onder' }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.person_id, 'person-onder-1');
+    assert.equal(body.resolved, true, 'both candidates were in this one link decision, so the flag is fully resolved');
+
+    const personInsert = calls.find((c) => c.table === 'persons' && c.method === 'insert');
+    assert.ok(personInsert);
+    // bioguide beats mo_senate in display-name precedence (pickDisplayName, imported from
+    // src/lib/person-identity.js) — 'Onder, Robert F.' reorders to 'Robert F. Onder'.
+    assert.equal(personInsert.args[0].display_name, 'Robert F. Onder');
+    assert.equal(personInsert.args[0].display_name_source, 'bioguide');
+
+    const legUpdates = calls.filter((c) => c.table === 'legislators' && c.method === 'update');
+    assert.equal(legUpdates.length, 2);
+    for (const u of legUpdates) assert.equal(u.args[0].person_id, 'person-onder-1');
+    assert.equal(legislatorsById.get('leg-a').person_id, 'person-onder-1');
+    assert.equal(legislatorsById.get('leg-b').person_id, 'person-onder-1');
+
+    const linkInserts = calls.filter((c) => c.table === 'person_links' && c.method === 'insert');
+    assert.equal(linkInserts.length, 2);
+    for (const li of linkInserts) {
+      assert.equal(li.args[0].decided_by, 'lance');
+      assert.equal(li.args[0].person_id, 'person-onder-1');
+      assert.equal(li.args[0].evidence.flagId, 'f1');
+      assert.equal(li.args[0].evidence.clusterKey, 'onder:a,b');
+      assert.equal(li.args[0].evidence.note, 'same Robert "Bob" Onder');
+    }
+    const aLink = linkInserts.find((li) => li.args[0].legislator_id === 'leg-a');
+    assert.deepEqual(aLink.args[0].evidence.linkedWith, ['leg-b']);
+
+    const flagUpdate = calls.find((c) => c.table === 'identity_flags' && c.method === 'update');
+    assert.equal(flagUpdate.args[0].resolved, true);
+    assert.equal(flag.resolved, true);
+  }, client);
+});
+
+// ---- POST /api/identity/decision: PER-SUBSET link (controller ruling 1) — a 3-candidate flag,
+// Lance links only 2 of them; the 3rd stays in the flag, unresolved ----
+
+test('POST /api/identity/decision link (per-subset): linking 2 of 3 candidates leaves the flag unresolved, third candidate untouched', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'smith:a,b,c', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b', 'leg-c'],
+    evidence: {
+      reason: 'internal_contradiction',
+      candidates: [
+        { legislatorId: 'leg-a', fullName: 'Smith A', sourceKeys: {}, chamberDistrictEra: [] },
+        { legislatorId: 'leg-b', fullName: 'Smith B', sourceKeys: {}, chamberDistrictEra: [] },
+        { legislatorId: 'leg-c', fullName: 'Smith C', sourceKeys: {}, chamberDistrictEra: [] },
+      ],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'Smith A', bioguide_id: 'S1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Smith B', bioguide_id: 'S2', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-c', {
+      id: 'leg-c', full_name: 'Smith C', bioguide_id: 'S3', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient(
+    { flags: [flag], legislatorsById },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'] }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.resolved, false, 'leg-c is still unlinked, so the whole flag cannot resolve yet');
+
+    assert.equal(legislatorsById.get('leg-a').person_id, body.person_id);
+    assert.equal(legislatorsById.get('leg-b').person_id, body.person_id);
+    assert.equal(legislatorsById.get('leg-c').person_id, null, 'the third candidate was never touched by this decision');
+
+    assert.equal(flag.resolved, false, 'the flag itself must stay unresolved — remaining candidates stay in the flag (ruling 1)');
+    const flagUpdate = calls.find((c) => c.table === 'identity_flags' && c.method === 'update');
+    assert.ok(flagUpdate, 'the flag is still patched (its evidence.resolutions audit trail grows) even though resolved stays false');
+    assert.notEqual(flagUpdate.args[0].resolved, true);
+  }, client);
+});
+
+// ---- POST /api/identity/decision: legislator_ids outside the flag's own candidate set -> 400 ----
+
+test('POST /api/identity/decision link: a legislator_id not among this flag\'s candidates -> 400, nothing written', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const calls = [];
+  const client = identityFakeClient({ flags: [flag] }, (table, method, args) => calls.push({ table, method, args }));
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-outsider'] }),
+    });
+    assert.equal(res.status, 400);
+    assert.ok(!calls.some((c) => c.table === 'persons'));
+  }, client);
+});
+
+// ---- POST /api/identity/decision: conflict-throw path intact (controller ruling 4) ----
+
+test('POST /api/identity/decision link: a selected legislator already carrying a person_id -> 409, zero writes (conflict-throw path)', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'X', bioguide_id: 'X1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: 'already-linked-elsewhere',
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Y', bioguide_id: 'Y1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient({ flags: [flag], legislatorsById }, (table, method, args) => calls.push({ table, method, args }));
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'] }),
+    });
+    assert.equal(res.status, 409);
+    assert.ok(!calls.some((c) => c.table === 'persons'), 'no person row created once a conflict is found');
+    assert.ok(!calls.some((c) => c.table === 'person_links'), 'no link rows written once a conflict is found');
+    assert.equal(legislatorsById.get('leg-b').person_id, null, 'leg-b (checked, no conflict) still never got written — the whole decision aborts before any write');
+  }, client);
+});
+
+test('POST /api/identity/decision link: a legislator_id that no longer resolves to a row -> 404', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-ghost'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-ghost' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'X', bioguide_id: 'X1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const client = identityFakeClient({ flags: [flag], legislatorsById });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-ghost'] }),
+    });
+    assert.equal(res.status, 404);
   }, client);
 });
