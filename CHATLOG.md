@@ -617,3 +617,19 @@ adapter plan drafted (11 tasks) — LegiScan becomes the PRIMARY MO path (whole 
 of queries), the primary-source parsers become the reconciliation/audit layer. 6/7 design
 questions ruled; Q1 (yauzl ZIP dependency) awaits Lance. Binding terms encoded in
 docs/research/2026-07-28-legiscan-terms.md.
+
+### 2026-07-28 (late) — merge + LegiScan build start
+
+Lance chose merge option 1: `mo-senate-adapter` merged to main (`c731450`, 626/626 on the
+merged result, branch deleted). LegiScan plan finalized (`419e524`, all rulings folded, Task 3
+mechanically gated on Lance's yauzl-dependency approval) and SDD execution started on branch
+`legiscan-bulk-adapter`: Task 1 done (migration 0010 draft — legiscan_people_id /
+legiscan_session_id / legiscan_datasets / vote_reconciliation_flags; pre-flight probe found the
+sessions table already carries TWO MO identifier schemes in prod ('2018' bare-year + mo-house's
+'261' with 2,099 bills) → binding Task 9 ruling: resolve onto the existing row, never mint a
+duplicate). Task 2 (API client core) in flight. Docs refreshed this checkpoint: README status
+rewritten (was still slice-1-era), TODO items 12/16/17 closed, .env.example gains
+LEGISCAN_API_KEY placeholder.
+
+**Awaiting Lance (all non-blocking):** yauzl dependency approval (gates LegiScan Task 3);
+apply 0010 when the driver tasks near; 8 flagged glosses in the review page.

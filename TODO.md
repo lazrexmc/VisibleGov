@@ -114,17 +114,24 @@
 
 13. **Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion** - daily delta runs (new House rolls via ceiling probe, new Senate votes via menu diff, MO XML on its half-hour ToU), plus a summary-candidate report Lance approves as batches. Design after Plan 3a lands.
 
-12. **US Senate roll-call adapter (unlocks Hawley + every senator).** Senate votes live at
-    senate.gov in their own XML format (different from House Clerk EVS) — one new adapter, then
-    the whole existing pipeline (canonical tables, summarize triggers, verification, profiles)
-    works for senators unchanged. Hawley (H001089) is already in our legislators table via the
-    MO delegation ingest. Note: his MO-era record (Attorney General) is executive, not
-    legislative — Senate-only profile, honestly labeled. Captured 2026-07-28 from Lance's ask;
-    decide fold-into-Plan-3 vs fast-follow during the Plan 3 spec.
+12. [x] ~~US Senate roll-call adapter~~ **DONE 2026-07-28** — senate.gov LIS XML adapter live:
+    869 Senate votes, every senator's cast, 0 unresolved (Hawley/Schmitt 869/869; historical
+    seat successions handled). Hawley's MO-era executive record remains a Plan-3 labeling note.
 
 15. **Giant-bill summarization policy (Lance decision):** 3 bills exceeded the 400k-char oversize gate (HR 8800 1.97M, S 4784 1.88M, HR 9237 567k). Options: raise cap toward opus-5 1M-token context (~$4/giant bill full-text) or chunked summarization design. Gate behaved correctly - nothing truncated silently.
-16. **Verifier output cap fix (next code item):** 2 many-bullet drafts (HR 6955, HR 8595) hit the verifier 16k output cap (SummaryTruncatedError). One-line raise + re-verify (~$0.10, needs approval under policy).
-17. **MO Senate adapter build (research complete + corrected, queued):** journal-day-PDF block parser (bare surnames, printed tallies = reconciliation gate), HTML-fragment discovery, House-conservative cadence. Onder-era coverage verified to 2018.
+16. [x] ~~Verifier output cap fix~~ **DONE 2026-07-28** (32k via streaming; the 2 stalled drafts
+    re-verified — both came back flagged; extraction later got the same treatment).
+17. [x] ~~MO Senate adapter build~~ **BUILT + MERGED 2026-07-28** (`c731450`): journals-first
+    pipeline, 5 fix rounds closing a cross-era misattribution class at four channels, final
+    16-agent adversarial review clean, 626/626 tests. 2018 backfill cycling live on the
+    House-conservative cadence. Migrations 0008/0009 applied.
+18. **Hygiene: unbounded-select sweep (from the final review's grep ledger, in
+    `.superpowers/sdd/2026-07-28-mo-senate-adapter/final-fix-wave-report.md`).** Glossary trust
+    surface is fully paginated via `selectAll`; the ingestion/summary paths are not.
+    **URGENT-WHEN-SUMMARIES-RESUME: `summarize.js:96` selects the whole votes table (~1,627
+    rows live, already past the 1000 cap) — its candidate picker is silently incomplete TODAY;
+    fix via selectAll before the next summarize run.** Others (verify/extract/golden/ingest
+    paths) are sub-1000 today.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
