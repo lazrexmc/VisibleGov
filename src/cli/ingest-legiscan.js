@@ -338,6 +338,51 @@ function checkVoteId3Sighting(rollCall, sample) {
   }
 }
 
+// classifyCrossCheckFlagReason — MINOR 1 fix (Task 9 review, label precision): the original
+// version dumped every flag whose discrepancy carried no explicit `reason` key (i.e. every
+// single-candidate-path hard/soft mismatch, from BOTH the ordinary N=1 branch and this fix round's
+// new tally-unique-reverse-match soft-mismatch branch) into one undifferentiated "other" bucket,
+// indistinguishable from a genuinely unclassified/unexpected discrepancy shape. Both mismatch
+// kinds are recognizable by their own discrepancy shape (`hard_mismatches`/`soft_mismatches`
+// arrays, always both present together whenever a flag is written from that code path) — split out
+// explicitly so a human reading run detail can tell "N real hard mismatches (== N quarantined
+// votes, since hard mismatch is exactly what triggers quarantine on this path)" from "N soft/
+// bucket-only mismatches (never quarantined)" from a true "other" catch-all, which should now be
+// empty in practice and only exists as a defensive fallback.
+function classifyCrossCheckFlagReason(discrepancy) {
+  const reason = discrepancy?.reason;
+  if (reason === 'no_tally_corresponding_primary') return 'no_tally_corresponding_primary';
+  if (reason === 'ambiguous_tally_match') return 'ambiguous_tally_match';
+  if (Array.isArray(discrepancy?.hard_mismatches)) {
+    return discrepancy.hard_mismatches.length > 0 ? 'hard_mismatch' : 'soft_mismatch';
+  }
+  return 'other';
+}
+
+// buildSameTupleKey / groupReconciledRollCallsByTuple — FIX ROUND (Task 9 review finding, mirror
+// of legiscan-votes.js's own FIX ROUND 2): crossCheckAgainstPrimarySource's single-candidate
+// (candidates.length === 1) branch needs to know, for THIS roll call, which OTHER LegiScan roll
+// calls in the CURRENT dataset share the exact same (bill, chamber, date) tuple — otherwise every
+// LegiScan roll call sharing a tuple with a genuinely-corresponding sibling would independently see
+// the same one primary-source row and risk being wrongly treated as contradicting it. This driver
+// has the whole parsed dataset in hand (legiscan-votes.js does not, by design — it only ever sees
+// one roll call at a time), so the grouping is built HERE, once per run, from every roll call that
+// passed the internal reconciliation gate (a) and resolved to a real bill row — the only pool a
+// cross-check could ever run against anyway.
+function buildSameTupleKey(billRowId, chamber, date) {
+  return `${billRowId}|${chamber}|${date}`;
+}
+
+function groupReconciledRollCallsByTuple(reconciled) {
+  const groups = new Map();
+  for (const entry of reconciled) {
+    const key = buildSameTupleKey(entry.billEntry.rowId, entry.legiscanTallies.chamber, entry.legiscanTallies.date);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ rollCallId: entry.legiscanTallies.rollCallId, tallies: entry.legiscanTallies.tallies });
+  }
+  return groups;
+}
+
 async function ingestLegiscanRollCalls(client, runId, {
   rollCalls, legiscanSessionId, billRecordByLegiscanBillId, legislatorIdByPeopleId,
 }) {
@@ -348,7 +393,13 @@ async function ingestLegiscanRollCalls(client, runId, {
     reconciliationFailures: 0,
     reconciliationFailureDetails: [],
     crossCheckFlags: {
-      total: 0, tally_unique_match: 0, no_tally_corresponding_primary: 0, ambiguous_tally_match: 0, other: 0,
+      total: 0,
+      tally_unique_match: 0,
+      no_tally_corresponding_primary: 0,
+      ambiguous_tally_match: 0,
+      hard_mismatch: 0,
+      soft_mismatch: 0,
+      other: 0,
     },
     quarantinedVotes: 0,
     quarantinedRollCalls: [],
@@ -356,9 +407,12 @@ async function ingestLegiscanRollCalls(client, runId, {
     voteId3SpotVerify: [],
   };
 
-  // Sequential — same precedent as ensureLegiscanBillRows/ensureLegiscanPeople; a roll call's own
-  // cross-check + insert path is itself several round trips, not parallelizable against the
-  // shared per-run counters above without real risk of double-counting.
+  // Phase 1: reconcile every roll call (internal gate (a)) and resolve its bill row — gathers
+  // exactly the pool a same-tuple grouping (phase 2) needs, and exactly the pool phase 3's
+  // cross-check loop iterates. checkVoteId3Sighting runs unconditionally, even for a roll call
+  // that goes on to fail reconciliation — a printed vote_id 3 is real source data regardless of
+  // whether the REST of that roll call's own numbers happen to reconcile.
+  const reconciled = [];
   for (const rollCall of rollCalls) {
     checkVoteId3Sighting(rollCall, result.voteId3SpotVerify);
 
@@ -390,14 +444,26 @@ async function ingestLegiscanRollCalls(client, runId, {
       continue;
     }
 
+    reconciled.push({ rollCall, legiscanTallies, billEntry });
+  }
+
+  // Phase 2: group by (bill, chamber, date) tuple — the same correspondence key
+  // crossCheckAgainstPrimarySource itself matches on.
+  const tupleGroups = groupReconciledRollCallsByTuple(reconciled);
+
+  // Phase 3: cross-check + store, one roll call at a time. Sequential — same precedent as
+  // ensureLegiscanBillRows/ensureLegiscanPeople; a roll call's own cross-check + insert path is
+  // itself several round trips, not parallelizable against the shared per-run counters above
+  // without real risk of double-counting.
+  for (const { rollCall, legiscanTallies, billEntry } of reconciled) {
+    const tupleKey = buildSameTupleKey(billEntry.rowId, legiscanTallies.chamber, legiscanTallies.date);
+    const siblingTallies = tupleGroups.get(tupleKey).filter((s) => s.rollCallId !== legiscanTallies.rollCallId);
+
     // eslint-disable-next-line no-await-in-loop
-    const crossCheck = await crossCheckAgainstPrimarySource(client, billEntry.rowId, legiscanTallies);
+    const crossCheck = await crossCheckAgainstPrimarySource(client, billEntry.rowId, legiscanTallies, siblingTallies);
     if (crossCheck.flag) {
       result.crossCheckFlags.total += 1;
-      const reason = crossCheck.flag?.discrepancy?.reason ?? null;
-      if (reason === 'no_tally_corresponding_primary') result.crossCheckFlags.no_tally_corresponding_primary += 1;
-      else if (reason === 'ambiguous_tally_match') result.crossCheckFlags.ambiguous_tally_match += 1;
-      else result.crossCheckFlags.other += 1;
+      result.crossCheckFlags[classifyCrossCheckFlagReason(crossCheck.flag.discrepancy)] += 1;
     } else if (crossCheck.reason === 'tally_unique_match') {
       result.crossCheckFlags.tally_unique_match += 1;
     }
@@ -617,7 +683,13 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
       reconciliationFailures: 0,
       reconciliationFailureDetails: [],
       crossCheckFlags: {
-        total: 0, tally_unique_match: 0, no_tally_corresponding_primary: 0, ambiguous_tally_match: 0, other: 0,
+        total: 0,
+        tally_unique_match: 0,
+        no_tally_corresponding_primary: 0,
+        ambiguous_tally_match: 0,
+        hard_mismatch: 0,
+        soft_mismatch: 0,
+        other: 0,
       },
       quarantinedVotes: 0,
       quarantinedRollCalls: [],
@@ -773,6 +845,13 @@ async function main() {
     // openRun and runLegiscanIngest — a refusal here means runLegiscanIngest (and therefore every
     // live LegiScan call and every DB write it could make) is never reached.
     const plannedQueries = args.datasetFile ? 0 : PLANNED_QUERIES_PER_RUN;
+    // MINOR 2 (Task 9 review, accepted as intentional-conservative, not a bug): a --dataset-file
+    // run still calls assertRunUnderBudget even though plannedQueries=0 here means it can never
+    // itself push usage over the cap — so a month that has ALREADY breached the cap from other
+    // (live) runs still refuses a zero-cost fixture-driven run too, rather than carving out an
+    // exception. Deliberate: refusal semantics stay uniform and simple to reason about (one gate,
+    // no special cases to remember), and it avoids a cap-breached month quietly continuing to run
+    // local-fixture backfills that would normally accompany live catches.
     await assertRunUnderBudget(client, { plannedQueries });
 
     const result = await runLegiscanIngest(client, runId, args);

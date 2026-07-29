@@ -637,6 +637,114 @@ test('runLegiscanIngest: CONTROLLER RULING 1 — a hard tally mismatch against a
   assert.equal(tables.vote_reconciliation_flags[0].discrepancy.quarantine, true);
 });
 
+// ---- FIX ROUND (review finding, disclosed): the test above deliberately picked roll call 774411
+// specifically BECAUSE seeding a single primary-source row for HB3/house/2018-09-12 would have
+// made ALL FIVE same-day house roll calls (774312-774316) see that same one candidate and,
+// pre-fix, get compared against it independently — collaterally quarantining up to 4 roll calls
+// that were never actually contradicted, not just the one under test. That was a real gap in
+// crossCheckAgainstPrimarySource (src/adapters/legiscan-votes.js), found while writing that very
+// test, and worked around in the test rather than fixed or disclosed. Fixed now (siblingTallies
+// parameter, mirroring legiscan-votes.js's own FIX ROUND 2 in the opposite direction) — these two
+// tests exercise the ONE-primary/FIVE-legiscan tuple directly, through the full driver, the exact
+// scenario the original test avoided. ----------------------------------------------------------
+
+test('runLegiscanIngest: FIX ROUND — one primary row seeded with 774312\'s TRUE tallies, against ALL FIVE real same-day HB3 house roll calls -> 774312 verifies cleanly, the other 4 store uncorresponded, ZERO collateral quarantine (the scenario the earlier 774411 test deliberately routed around)', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-sibling-verify', source: 'legiscan', status: 'running', detail: {} });
+
+  await runLegiscanIngest(client, 'run-sibling-verify', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const hb3BillRow = tables.bills.find((b) => b.identifier === 'HB 3');
+  assert.ok(hb3BillRow);
+
+  const primaryVoteId = 'primary-hb3-house-true-774312';
+  tables.votes.push({
+    id: primaryVoteId, bill_id: hb3BillRow.id, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+  });
+  for (let i = 0; i < 119; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'yea' }); // 774312's REAL tallies, exactly
+  for (let i = 0; i < 23; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'nay' });
+  for (let i = 0; i < 14; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'absent' });
+
+  tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+  tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+
+  const result = await runLegiscanIngest(client, 'run-sibling-verify', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+
+  assert.equal(result.counts.quarantinedVotes, 0, 'ZERO collateral quarantine — this is the entire point of the fix');
+  assert.equal(result.counts.votes, 8, 'all 8 real roll calls store, including the 4 that merely share the tuple without corresponding to the primary');
+  assert.equal(result.counts.crossCheckFlags.total, 0, 'the one genuine correspondence verifies cleanly (no flag); the other 4 are honestly uncorresponded (no flag) — nothing here is actually contradicted');
+  assert.equal(result.counts.crossCheckFlags.tally_unique_match, 1);
+  assert.equal(tables.vote_reconciliation_flags.length, 0);
+  for (const rollCallId of [774312, 774313, 774314, 774315, 774316]) {
+    assert.equal(tables.votes.some((v) => v.source_key === `legiscan-1608-rollcall-${rollCallId}`), true, `roll call ${rollCallId} must be stored`);
+  }
+});
+
+test('runLegiscanIngest: FIX ROUND — one primary row matching NONE of the 5 same-day HB3 house roll calls -> every one that checks it gets flagged no_tally_corresponding_primary, still zero quarantine', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-sibling-nomatch', source: 'legiscan', status: 'running', detail: {} });
+
+  await runLegiscanIngest(client, 'run-sibling-nomatch', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const hb3BillRow = tables.bills.find((b) => b.identifier === 'HB 3');
+
+  const primaryVoteId = 'primary-hb3-house-no-match';
+  tables.votes.push({
+    id: primaryVoteId, bill_id: hb3BillRow.id, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+  });
+  for (let i = 0; i < 999; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'yea' }); // matches none of 119/36/33/41/96
+  for (let i = 0; i < 999; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'nay' });
+
+  tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+  tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+
+  const result = await runLegiscanIngest(client, 'run-sibling-nomatch', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+
+  assert.equal(result.counts.quarantinedVotes, 0, 'no assertable 1:1 correspondence anywhere in the group -> never quarantine');
+  assert.equal(result.counts.votes, 8);
+  assert.equal(result.counts.crossCheckFlags.no_tally_corresponding_primary, 5, 'all 5 same-day house roll calls independently flag against the one non-matching primary row');
+  assert.equal(tables.vote_reconciliation_flags.length, 5);
+  assert.ok(tables.vote_reconciliation_flags.every((f) => f.discrepancy.reason === 'no_tally_corresponding_primary'));
+});
+
+test('runLegiscanIngest: FIX ROUND — two synthetic same-tuple roll calls sharing IDENTICAL tallies against one matching primary row -> both genuinely ambiguous, both flagged ambiguous_tally_match, still zero quarantine (closes the driver-level gap for this branch, not left as unit-tested-only)', async () => {
+  await withScratchDirAsync(async (dir) => {
+    const path = join(dir, 'ambiguous.json');
+    writeFileSync(path, JSON.stringify({
+      status: 'OK',
+      dataset: {
+        session_id: 99002, year_start: 2019, year_end: 2019, special: 1, session_tag: '1st Special Session', session_title: '2019 1st Special Session', session_name: '2019 1st Extraordinary Session', dataset_hash: 'x', zip: buildAmbiguousSyntheticZipBase64(),
+      },
+    }));
+    const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+    tables.ingestion_runs.push({ id: 'run-ambiguous', source: 'legiscan', status: 'running', detail: {} });
+
+    await runLegiscanIngest(client, 'run-ambiguous', { datasetFile: path, session: null, limit: null });
+    const hb1BillRow = tables.bills.find((b) => b.identifier === 'HB 1');
+    assert.ok(hb1BillRow);
+
+    const primaryVoteId = 'primary-hb1-matches-both';
+    tables.votes.push({
+      id: primaryVoteId, bill_id: hb1BillRow.id, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2019-02-01', source_key: 'mo-house-xml-HB1-1',
+    });
+    tables.vote_casts.push({ vote_id: primaryVoteId, position: 'yea' }); // 1 yea, 0 nay — matches BOTH 601 and 602 exactly
+    tables.vote_casts.push({ vote_id: primaryVoteId, position: 'absent' });
+
+    tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+    tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+
+    const result = await runLegiscanIngest(client, 'run-ambiguous', { datasetFile: path, session: null, limit: null });
+
+    assert.equal(result.counts.quarantinedVotes, 0, 'ambiguity is never grounds to quarantine — both candidates AGREE with the primary, it\'s which one corresponds that\'s unresolved');
+    assert.equal(result.counts.votes, 2, 'both roll calls store');
+    assert.equal(result.counts.crossCheckFlags.ambiguous_tally_match, 2, 'BOTH roll calls independently discover the ambiguity from their own perspective');
+    assert.equal(tables.vote_reconciliation_flags.length, 2);
+    assert.ok(tables.vote_reconciliation_flags.every((f) => f.discrepancy.reason === 'ambiguous_tally_match'));
+    assert.deepEqual(
+      tables.vote_reconciliation_flags[0].discrepancy.matching_legiscan_roll_calls.map((c) => c.roll_call_id).sort(),
+      [601, 602],
+    );
+  });
+});
+
 // ---- vote_id 3 spot-verify sample (CONTROLLER RULING 8) — real fixtures have zero vote_id 3
 // casts (legiscan-votes.test.js's own corpus proof), so this proves the SAMPLING MECHANISM itself
 // on a synthetic roll call rather than claiming a live sighting that doesn't exist in any fixture. --
@@ -660,6 +768,47 @@ function buildSyntheticZipBase64() {
     { name: 'MO/99001/people/1.json', data: Buffer.from(JSON.stringify({ person: { people_id: 1, name: 'A One', first_name: 'A', last_name: 'One', role: 'Rep', district: 'HD-001', party: 'R' } })) },
     { name: 'MO/99001/people/2.json', data: Buffer.from(JSON.stringify({ person: { people_id: 2, name: 'B Two', first_name: 'B', last_name: 'Two', role: 'Rep', district: 'HD-002', party: 'D' } })) },
     { name: 'MO/99001/hash.md5', data: Buffer.from('x') },
+  ];
+  return buildStoredZip(entries).toString('base64');
+}
+
+// buildAmbiguousSyntheticZipBase64 — FIX ROUND (disclosed gap, closed rather than left open): the
+// real fixtures have no two roll calls sharing identical tallies (needed to exercise
+// ambiguous_tally_match through the driver's own sibling-grouping mechanism, not just as an
+// isolated legiscan-votes.test.js unit test) — a hand-built synthetic dataset with two roll calls
+// on the SAME bill/chamber/date, DELIBERATELY given the exact same (yea, nay), closes that gap.
+function buildAmbiguousSyntheticZipBase64() {
+  const entries = [
+    {
+      name: 'MO/99002/bill/HB1.json',
+      data: Buffer.from(JSON.stringify({
+        bill: {
+          bill_id: 1, bill_number: 'HB1', title: 't', status: 1, url: 'https://legiscan.com/x', votes: [{ roll_call_id: 601, url: 'https://legiscan.com/rc/601', state_link: 'https://mo.gov/rc/601' }, { roll_call_id: 602, url: 'https://legiscan.com/rc/602', state_link: 'https://mo.gov/rc/602' }],
+        },
+      })),
+    },
+    {
+      name: 'MO/99002/vote/601.json',
+      data: Buffer.from(JSON.stringify({
+        roll_call: {
+          roll_call_id: 601, bill_id: 1, date: '2019-02-01', desc: 'RC A', yea: 1, nay: 0, nv: 0, absent: 1, total: 2, passed: 1, chamber: 'H', chamber_id: 1, votes: [{ people_id: 1, vote_id: 1, vote_text: 'Yea' }, { people_id: 2, vote_id: 4, vote_text: 'Absent' }],
+        },
+      })),
+    },
+    {
+      name: 'MO/99002/vote/602.json',
+      data: Buffer.from(JSON.stringify({
+        // Deliberately IDENTICAL (yea, nay) to 601 — different voters, same head count.
+        roll_call: {
+          roll_call_id: 602, bill_id: 1, date: '2019-02-01', desc: 'RC B', yea: 1, nay: 0, nv: 0, absent: 1, total: 2, passed: 1, chamber: 'H', chamber_id: 1, votes: [{ people_id: 3, vote_id: 1, vote_text: 'Yea' }, { people_id: 4, vote_id: 4, vote_text: 'Absent' }],
+        },
+      })),
+    },
+    { name: 'MO/99002/people/1.json', data: Buffer.from(JSON.stringify({ person: { people_id: 1, name: 'A One', first_name: 'A', last_name: 'One', role: 'Rep', district: 'HD-001', party: 'R' } })) },
+    { name: 'MO/99002/people/2.json', data: Buffer.from(JSON.stringify({ person: { people_id: 2, name: 'B Two', first_name: 'B', last_name: 'Two', role: 'Rep', district: 'HD-002', party: 'D' } })) },
+    { name: 'MO/99002/people/3.json', data: Buffer.from(JSON.stringify({ person: { people_id: 3, name: 'C Three', first_name: 'C', last_name: 'Three', role: 'Rep', district: 'HD-003', party: 'R' } })) },
+    { name: 'MO/99002/people/4.json', data: Buffer.from(JSON.stringify({ person: { people_id: 4, name: 'D Four', first_name: 'D', last_name: 'Four', role: 'Rep', district: 'HD-004', party: 'D' } })) },
+    { name: 'MO/99002/hash.md5', data: Buffer.from('x') },
   ];
   return buildStoredZip(entries).toString('base64');
 }

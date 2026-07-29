@@ -421,7 +421,28 @@ async function writeReconciliationFlag(client, {
 // candidate for that candidate's own cast tally (a handful at most, bounded by how many roll calls
 // one bill/chamber/date can realistically hold in one real legislative day) — plain .select(),
 // selectAll (src/lib/db.js:85) not needed at either step.
-export async function crossCheckAgainstPrimarySource(client, billId, legiscanTallies) {
+//
+// FIX ROUND (Task 9 review finding — the mirror of FIX ROUND 2's own multi-candidate
+// disambiguation, never previously extended to this direction): the ORIGINAL single-candidate
+// branch (candidates.length === 1) silently assumed a 1:1 correspondence purely from "exactly one
+// PRIMARY-source row exists for this tuple" — but that is not sufficient when MULTIPLE LegiScan
+// roll calls in the CURRENT dataset also share the exact same (bill, chamber, date) tuple (the
+// real HB 3 fixture again: 5 same-day House roll calls, this time on the LegiScan side of the
+// comparison rather than the primary side). Without knowing about those siblings, every one of
+// them independently sees the SAME single primary candidate and gets compared against it in
+// isolation — a roll call whose own tallies genuinely do NOT correspond to that primary row
+// (because the primary actually corresponds to a DIFFERENT sibling) would be wrongly treated as a
+// real hard mismatch and QUARANTINED, even though nothing about it is actually contradicted (found
+// empirically during Task 9's own driver-level testing, not derived from first principles).
+//
+// `siblingTallies` (new, optional, defaults to `[]`) is an array of `{ rollCallId, tallies: {yea,
+// nay, ...} }` for every OTHER LegiScan roll call in the currently-processing dataset that shares
+// this exact (bill, chamber, date) tuple, EXCLUDING the one `legiscanTallies` itself describes. The
+// caller (Task 9's driver, which has the whole parsed dataset in hand) computes this grouping — see
+// that file's own comment for how. An empty array (every pre-existing caller/test, and any tuple
+// that genuinely has only one LegiScan roll call) preserves the ORIGINAL single-candidate semantics
+// EXACTLY — this is a pure addition, not a behavior change for the N=1 case.
+export async function crossCheckAgainstPrimarySource(client, billId, legiscanTallies, siblingTallies = []) {
   const { data, error } = await client
     .from('votes')
     .select('id,vote_date,chamber,source_key,jurisdiction_id')
@@ -440,33 +461,141 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
   };
 
   if (candidates.length === 1) {
-    // The ordinary case (one primary-source vote per bill/chamber/date) — round-1 semantics,
-    // unchanged: a 1:1 correspondence is directly assertable without needing tally disambiguation,
-    // so quarantine on a hard mismatch is safe here in a way it is NOT for the multi-candidate
-    // branch below.
     const primaryVote = candidates[0];
     const { data: castRows, error: castErr } = await client
       .from('vote_casts')
       .select('position')
       .eq('vote_id', primaryVote.id);
     if (castErr) throw new Error(`legiscan-votes cross-check cast lookup failed: ${castErr.message}`);
-
     const primaryCounts = summarizePrimaryCastPositions(castRows ?? []);
-    const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
 
-    if (hardMismatches.length === 0 && softMismatches.length === 0) {
+    if (siblingTallies.length === 0) {
+      // The ordinary case (one primary-source vote per bill/chamber/date, AND no other LegiScan
+      // roll call in this dataset shares the tuple either) — original semantics, unchanged: a 1:1
+      // correspondence is directly assertable without needing tally disambiguation, so quarantine
+      // on a hard mismatch is safe here in a way it is NOT once siblings exist (see below).
+      const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
+
+      if (hardMismatches.length === 0 && softMismatches.length === 0) {
+        return {
+          checked: true, matched: true, flag: null, quarantine: false,
+        };
+      }
+
+      // FIX ROUND 1: quarantine iff a HARD (yea/nay) mismatch exists — a soft (bucket-only)
+      // mismatch flags but stores (accounting difference, not necessarily a contradiction; see
+      // PRESENT_CATEGORY_CAVEAT and compareTalliesForCrossCheck's own comment). The caveat is
+      // attached only when the soft bucket is actually part of what's being flagged — a pure
+      // yea/nay divergence isn't explained by a category-vocabulary quirk, so attaching the caveat
+      // there would misleadingly soften a REAL divergence instead of clarifying an accounting one.
+      const quarantine = hardMismatches.length > 0;
+      const discrepancy = {
+        source_a_tallies: legiscanTallies.tallies,
+        source_b_tallies: primaryCounts,
+        source_b_vote_id: primaryVote.id,
+        source_b_source_key: primaryVote.source_key,
+        hard_mismatches: hardMismatches,
+        soft_mismatches: softMismatches,
+        quarantine,
+      };
+      if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
+      const flag = await writeReconciliationFlag(client, {
+        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+      });
       return {
-        checked: true, matched: true, flag: null, quarantine: false,
+        checked: true, matched: false, flag, quarantine,
       };
     }
 
-    // FIX ROUND 1: quarantine iff a HARD (yea/nay) mismatch exists — a soft (bucket-only) mismatch
-    // flags but stores (accounting difference, not necessarily a contradiction; see
-    // PRESENT_CATEGORY_CAVEAT and compareTalliesForCrossCheck's own comment). The caveat is
-    // attached only when the soft bucket is actually part of what's being flagged — a pure
-    // yea/nay divergence isn't explained by a category-vocabulary quirk, so attaching the caveat
-    // there would misleadingly soften a REAL divergence instead of clarifying an accounting one.
+    // FIX ROUND (mirror of FIX ROUND 2, this file's module comment above): ONE primary-source row
+    // exists, but MULTIPLE LegiScan roll calls (this one + siblingTallies) share the exact same
+    // tuple — a 1:1 correspondence is NOT directly assertable purely from "one primary candidate
+    // exists" anymore. Disambiguate the SAME way FIX ROUND 2 disambiguates multiple PRIMARY
+    // candidates against one LegiScan roll call, just mirrored: by tally identity (yea, nay) among
+    // the WHOLE group {this roll call, ...siblings}, asking "which of these does the ONE known
+    // primary row's own (yea, nay) actually correspond to?"
+    const thisMatchesPrimary = legiscanTallies.tallies.yea === primaryCounts.yea && legiscanTallies.tallies.nay === primaryCounts.nay;
+    const matchingSiblings = siblingTallies.filter((s) => s.tallies.yea === primaryCounts.yea && s.tallies.nay === primaryCounts.nay);
+    const totalMatches = (thisMatchesPrimary ? 1 : 0) + matchingSiblings.length;
+
+    if (totalMatches === 0) {
+      // The primary matches NEITHER this roll call NOR any sibling — no assertable 1:1
+      // correspondence for ANYONE in this group, so this is exactly the "zero-match" case FIX
+      // ROUND 2 already established for the opposite direction: stores (internally reconciled,
+      // uncontradicted by anything specific), flagged for human review. Never quarantined — there
+      // is nothing specific being contradicted, only an absence of correspondence.
+      const discrepancy = {
+        reason: 'no_tally_corresponding_primary',
+        legiscan_tallies: legiscanTallies.tallies,
+        source_b_tallies: primaryCounts,
+        source_b_vote_id: primaryVote.id,
+        source_b_source_key: primaryVote.source_key,
+        sibling_legiscan_roll_calls: siblingTallies.map((s) => ({ roll_call_id: s.rollCallId, tallies: s.tallies })),
+        quarantine: false,
+      };
+      const flag = await writeReconciliationFlag(client, {
+        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+      });
+      return {
+        checked: true, matched: false, flag, quarantine: false,
+      };
+    }
+
+    if (totalMatches > 1) {
+      // Two or more of {this roll call, ...siblings} coincidentally share the exact same (yea,
+      // nay) as the one known primary row — genuinely ambiguous which one it corresponds to
+      // (mirrors FIX ROUND 2's own ambiguous_tally_match branch, reversed). Cannot pick one
+      // without guessing, so this stores (uncontradicted) and flags the matching group.
+      const matchingGroup = [
+        ...(thisMatchesPrimary ? [{ roll_call_id: legiscanTallies.rollCallId, tallies: legiscanTallies.tallies }] : []),
+        ...matchingSiblings.map((s) => ({ roll_call_id: s.rollCallId, tallies: s.tallies })),
+      ];
+      const discrepancy = {
+        reason: 'ambiguous_tally_match',
+        legiscan_tallies: legiscanTallies.tallies,
+        source_b_tallies: primaryCounts,
+        source_b_vote_id: primaryVote.id,
+        source_b_source_key: primaryVote.source_key,
+        matching_legiscan_roll_calls: matchingGroup,
+        quarantine: false,
+      };
+      const flag = await writeReconciliationFlag(client, {
+        voteId: primaryVote.id, sourceB: primarySourceLabel(primaryVote.source_key), discrepancy, runId: legiscanTallies.runId,
+      });
+      return {
+        checked: true, matched: false, flag, quarantine: false,
+      };
+    }
+
+    // totalMatches === 1 (exactly one of {this, siblings} corresponds to the primary's tallies).
+    if (!thisMatchesPrimary) {
+      // The ONE primary row corresponds to a DIFFERENT sibling, not this roll call. This roll call
+      // is simply uncorresponded — the sibling that matches carries the actual verification (when
+      // IT is processed through this same function, it will find thisMatchesPrimary===true and run
+      // the full comparator below). Stores (already internally reconciled by gate (a)), never
+      // flagged — flagging here would be a redundant, misleading duplicate of a discrepancy that
+      // belongs entirely to a different roll call.
+      return {
+        checked: true, matched: false, flag: null, quarantine: false, reason: 'corresponds_to_sibling',
+      };
+    }
+
+    // thisMatchesPrimary === true and no sibling shares that tally — THIS roll call uniquely
+    // corresponds to the primary among the whole group. Assertable 1:1, so it now runs through the
+    // EXACT SAME comparator the ordinary (siblingTallies.length === 0) branch above uses — reusing
+    // the function, not a hand-rolled second copy, so the "selection is not verification" class of
+    // regression (FIX ROUND 3, the multi-primary-candidate mirror of this exact situation) cannot
+    // reappear here via code drift. hardMismatches is impossible by construction (yea/nay equality
+    // IS the selection criterion), proved by reuse rather than hardcoded to false.
+    const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
     const quarantine = hardMismatches.length > 0;
+
+    if (hardMismatches.length === 0 && softMismatches.length === 0) {
+      return {
+        checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match',
+      };
+    }
+
     const discrepancy = {
       source_a_tallies: legiscanTallies.tallies,
       source_b_tallies: primaryCounts,
@@ -475,6 +604,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
       hard_mismatches: hardMismatches,
       soft_mismatches: softMismatches,
       quarantine,
+      note: `selected via tally-unique (yea, nay) match among this roll call + ${siblingTallies.length} sibling LegiScan roll call(s) sharing this (jurisdiction, chamber, date, bill) tuple`,
     };
     if (softMismatches.length > 0) discrepancy.caveat = PRESENT_CATEGORY_CAVEAT;
     const flag = await writeReconciliationFlag(client, {

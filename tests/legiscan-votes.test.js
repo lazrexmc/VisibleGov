@@ -772,3 +772,135 @@ test('crossCheckAgainstPrimarySource: a votes-table lookup error (unrelated to t
     /connection reset/,
   );
 });
+
+// ---- FIX ROUND (Task 9 review finding): the MIRROR of the same-day disambiguation above — ONE
+// primary-source row, but MULTIPLE LegiScan roll calls in the current dataset share the exact same
+// (bill, chamber, date) tuple. Found empirically during Task 9's own driver-level testing: without
+// this, every one of the 5 real same-day HB3 roll calls would independently see the SAME single
+// primary candidate and get compared against it in isolation, wrongly quarantining every one whose
+// own tallies don't happen to match — not just the one that's genuinely contradicted. ----
+
+const legiscanTallies774313 = reconcileLegiscanTallies(findRc(774313));
+const legiscanTallies774314 = reconcileLegiscanTallies(findRc(774314));
+const legiscanTallies774315 = reconcileLegiscanTallies(findRc(774315));
+const legiscanTallies774316 = reconcileLegiscanTallies(findRc(774316));
+const HB3_HOUSE_LEGISCAN_TALLIES = [
+  { rollCallId: 774312, legiscanTallies: legiscanTallies774312 },
+  { rollCallId: 774313, legiscanTallies: legiscanTallies774313 },
+  { rollCallId: 774314, legiscanTallies: legiscanTallies774314 },
+  { rollCallId: 774315, legiscanTallies: legiscanTallies774315 },
+  { rollCallId: 774316, legiscanTallies: legiscanTallies774316 },
+];
+
+function siblingsExcluding(rollCallId) {
+  return HB3_HOUSE_LEGISCAN_TALLIES
+    .filter((e) => e.rollCallId !== rollCallId)
+    .map((e) => ({ rollCallId: e.rollCallId, tallies: e.legiscanTallies.tallies }));
+}
+
+test('crossCheckAgainstPrimarySource: THE REVIEWER\'S EXACT SCENARIO — one primary row (774312\'s true tallies) + all 5 real same-day HB3 roll calls as each other\'s siblings -> 774312 alone verifies (tally_unique_match), the other 4 are simply uncorresponded (no flag, no quarantine, not treated as contradicted)', async () => {
+  const primaryVoteId = 'primary-hb3-single';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119),
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14),
+    ],
+  });
+
+  const result312 = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312, siblingsExcluding(774312));
+  assert.equal(result312.checked, true);
+  assert.equal(result312.matched, true);
+  assert.equal(result312.quarantine, false);
+  assert.equal(result312.flag, null);
+  assert.equal(result312.reason, 'tally_unique_match');
+
+  for (const rollCallId of [774313, 774314, 774315, 774316]) {
+    const entry = HB3_HOUSE_LEGISCAN_TALLIES.find((e) => e.rollCallId === rollCallId);
+    // eslint-disable-next-line no-await-in-loop
+    const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', entry.legiscanTallies, siblingsExcluding(rollCallId));
+    assert.equal(result.checked, true, `roll call ${rollCallId}`);
+    assert.equal(result.matched, false, `roll call ${rollCallId} does not correspond to the primary — 774312 does`);
+    assert.equal(result.quarantine, false, `roll call ${rollCallId} must NEVER be collateral-quarantined just because it shares the tuple with the one that DOES correspond`);
+    assert.equal(result.flag, null, `roll call ${rollCallId} gets no flag — it is simply uncorresponded, not contradicted`);
+    assert.equal(result.reason, 'corresponds_to_sibling');
+  }
+
+  assert.equal(flags.length, 0, 'exactly one flag-free run: the single genuine correspondence verified cleanly, everything else honestly deferred');
+});
+
+test('crossCheckAgainstPrimarySource: the ONE primary row matches NONE of the 5 same-day siblings -> every one that checks it gets store+flag "no_tally_corresponding_primary", never quarantined', async () => {
+  const primaryVoteId = 'primary-hb3-no-match';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 999), // matches none of 119/36/33/41/96
+      ...castRowsOfPosition(primaryVoteId, 'nay', 999),
+    ],
+  });
+
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312, siblingsExcluding(774312));
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false);
+  assert.equal(result.quarantine, false, 'no assertable 1:1 correspondence anywhere in the group -> never quarantine');
+  assert.ok(result.flag);
+  assert.equal(result.flag.discrepancy.reason, 'no_tally_corresponding_primary');
+  assert.equal(result.flag.discrepancy.sibling_legiscan_roll_calls.length, 4);
+  assert.equal(flags.length, 1);
+});
+
+test('crossCheckAgainstPrimarySource: this roll call AND a sibling both share the primary\'s exact tallies -> genuinely ambiguous which one corresponds -> store+flag "ambiguous_tally_match", never quarantined', async () => {
+  const primaryVoteId = 'primary-hb3-ambiguous';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119), // matches 774312's real tally exactly
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14),
+    ],
+  });
+  // A synthetic "sibling" that happens to share 774312's own real (yea, nay) — genuinely possible
+  // (two procedural votes with an identical head count), not assumed impossible; this is data the
+  // caller (the driver) constructs from ITS OWN dataset, not something this function invents.
+  const siblingsWithCollision = [
+    { rollCallId: 774313, tallies: { yea: 119, nay: 23, not_voting: 0, absent: 14, total: 156 } },
+    ...siblingsExcluding(774312).filter((s) => s.rollCallId !== 774313),
+  ];
+
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312, siblingsWithCollision);
+  assert.equal(result.checked, true);
+  assert.equal(result.matched, false);
+  assert.equal(result.quarantine, false, 'ambiguity is never grounds to quarantine — every match AGREES on the tally, it\'s which row corresponds that\'s unresolved');
+  assert.ok(result.flag);
+  assert.equal(result.flag.discrepancy.reason, 'ambiguous_tally_match');
+  assert.deepEqual(
+    result.flag.discrepancy.matching_legiscan_roll_calls.map((c) => c.roll_call_id).sort(),
+    [774312, 774313],
+  );
+  assert.equal(flags.length, 1);
+});
+
+test('crossCheckAgainstPrimarySource: siblingTallies defaulting to [] preserves the ORIGINAL single-candidate semantics exactly — a genuine hard mismatch with NO siblings still quarantines (proves the fix is additive, not a behavior change for the N=1 case)', async () => {
+  const primaryVoteId = 'primary-vote-no-siblings';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 115), // real is 119 -> hard mismatch
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14),
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312); // no 4th arg at all
+  assert.equal(result.quarantine, true, 'unchanged from before this fix round — a lone (no-sibling) roll call with a real hard mismatch still quarantines');
+  assert.equal(flags.length, 1);
+  assert.deepEqual(flags[0].discrepancy.hard_mismatches, ['yea: legiscan 119 vs primary 115']);
+});
