@@ -82,6 +82,10 @@ export function termDateEvidence(term) {
 // start_date — never guessed, never "current."
 const ASOF_FALLBACK = 'per the most recent term evidence in our data (dates unrecorded)';
 
+// Fix round 1 (task-8 review, LOW-6): the dates-present form now reads as a variant of the SAME
+// sentence as the fallback, rather than a differently-worded one — "per the most recent term
+// evidence in our data" stays the constant lead-in either way; only the parenthetical changes
+// between "(dates unrecorded)" and "(most recent: <date>)."
 function asOfLabel(matchedTerms) {
   const dated = (matchedTerms || []).filter((t) => t && t.start_date);
   if (dated.length === 0) return ASOF_FALLBACK;
@@ -89,7 +93,15 @@ function asOfLabel(matchedTerms) {
     (latest, t) => (t.start_date > latest ? t.start_date : latest),
     dated[0].start_date,
   );
-  return `per the term beginning ${mostRecent}`;
+  return `per the most recent term evidence in our data (most recent: ${mostRecent})`;
+}
+
+// Fix round 1 (task-8 review, LOW-13): state codes are compared case-insensitively everywhere —
+// STUSAB from Census is always uppercase in practice, but terms.state/terms.district are filled
+// by several independent adapters/backfills over time, so nothing here should depend on every
+// writer having matched Census's casing convention by coincidence.
+function sameState(a, b) {
+  return typeof a === 'string' && typeof b === 'string' && a.toUpperCase() === b.toUpperCase();
 }
 
 function buildCandidates(matchedTerms, legislatorById) {
@@ -113,22 +125,35 @@ export function matchReps({ terms, legislators } = {}, {
   const legislatorList = Array.isArray(legislators) ? legislators : [];
   const legislatorById = new Map(legislatorList.filter(Boolean).map((l) => [l.id, l]));
 
+  const isMO = typeof state === 'string' && state.toUpperCase() === 'MO';
+
   const usSenatorTerms = state
     ? termList.filter((t) => t && t.jurisdiction_id === 'us-congress' && t.chamber === 'senate'
-      && (t.state ?? t.district) === state)
+      && sameState(t.state ?? t.district, state))
     : [];
 
+  // MAJOR-2 (task-8 review, live-verified at-large hole): six states (AK/DE/ND/SD/VT/WY) have
+  // exactly one, statewide, at-large U.S. House seat. The federal ingestion adapter's own
+  // convention (src/adapters/us-congress.js) stores that seat's `district` as null rather than a
+  // printed '0' or '00' — but the Census Geocoder returns CD119='00' for an at-large address,
+  // which normalizeDistrict reduces to '0'. Without this bridge, a null term.district can never
+  // equal cd='0' and every at-large state's House seat silently, honestly-but-WRONGLY reports
+  // "not found." Ingestion writing a real '0' into these terms is a queued upstream follow-up
+  // (would let this bridge retire); until then this is the mechanical fix at the matching layer,
+  // not a guess: null + cd==='0' is the ONE specific, evidenced convention this bridges, nothing
+  // broader (a null district still fails to match any OTHER real cd value).
   const usHouseTerms = (state && cd != null)
     ? termList.filter((t) => t && t.jurisdiction_id === 'us-congress' && t.chamber === 'house'
-      && t.state === state && normalizeDistrict(t.district) === cd)
+      && sameState(t.state, state)
+      && (normalizeDistrict(t.district) === cd || (t.district == null && cd === '0')))
     : [];
 
-  const moSenateTerms = (state === 'MO' && sldu != null)
+  const moSenateTerms = (isMO && sldu != null)
     ? termList.filter((t) => t && t.jurisdiction_id === 'mo-legislature' && t.chamber === 'senate'
       && normalizeDistrict(t.district) === sldu)
     : [];
 
-  const moHouseTerms = (state === 'MO' && sldl != null)
+  const moHouseTerms = (isMO && sldl != null)
     ? termList.filter((t) => t && t.jurisdiction_id === 'mo-legislature' && t.chamber === 'house'
       && normalizeDistrict(t.district) === sldl)
     : [];

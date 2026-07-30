@@ -3,8 +3,9 @@
 // model functions first (TDD'd in tests/directory-model.test.js BEFORE the DOM code existed),
 // DOM/network orchestration below. Reuses the existing toolbox by exact name — never a lookalike
 // reimplementation: rest.js (fetchAllRows), render.js (el/clearChildren/sectionState/mountFooter),
-// profile-model.js (chamberLabel), person-page.js (slugify — the report for Task 6 flagged a
-// third slug scheme as the thing to avoid), districts.js (parseGeographies/matchReps/
+// profile-model.js (chamberLabel), slugs.js (slugify — moved there in fix round 1, LOW-8, so the
+// front door's own import graph doesn't have to pull in the whole person-page.js/vote-charts.js
+// module tree just for one string helper), districts.js (parseGeographies/matchReps/
 // termDateEvidence, task-8's own new pure module).
 
 import { fetchAllRows } from './rest.js';
@@ -12,7 +13,7 @@ import {
   el, clearChildren, sectionState, mountFooter,
 } from './render.js';
 import { chamberLabel } from './profile-model.js';
-import { slugify } from './person-page.js';
+import { slugify } from './slugs.js';
 import { parseGeographies, matchReps, termDateEvidence } from './districts.js';
 
 // ============================================================================
@@ -28,6 +29,17 @@ function mostRecentDatedTerm(terms) {
   const dated = (terms || []).filter((t) => t && t.start_date);
   if (dated.length === 0) return null;
   return dated.reduce((best, t) => (!best || t.start_date > best.start_date ? t : best), null);
+}
+
+// Fix round 1 (task-8 review, LOW-7): mirrors profile-model.js's own isMeaninglessDistrict —
+// U.S. Senate terms store the state's USPS abbreviation in `district` (terms.district-as-state
+// convention, backfill-term-states.js's own header comment), never a real district number.
+// "U.S. Senate, district MO" would read as a real congressional district that doesn't exist.
+// Small independent copy (not imported — profile-model.js keeps this private) rather than
+// widening that module's exported surface for a one-line predicate; MO/state-legislature
+// districts are real numbers and stay unaffected.
+function isSenateDistrictMeaningless(jurisdictionId, chamber) {
+  return jurisdictionId === 'us-congress' && chamber === 'senate';
 }
 
 // legislators.surname (migration 0006) is populated for MO House/Senate rows only — federal rows
@@ -84,7 +96,9 @@ export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
       || fallbackSurname(displayName);
     const party = anchorTerm?.party || anchorLegislator?.party || null;
     const chamber = anchorTerm ? chamberLabel(anchorTerm.jurisdiction_id, anchorTerm.chamber) : null;
-    const district = anchorTerm?.district ?? null;
+    const district = (anchorTerm && !isSenateDistrictMeaningless(anchorTerm.jurisdiction_id, anchorTerm.chamber))
+      ? (anchorTerm.district ?? null)
+      : null;
 
     const href = group.personId
       ? `/person/${group.personId}/${slugify(displayName)}`
@@ -103,14 +117,14 @@ export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
     });
   }
 
+  // Fix round 1 (task-8 review, LOW-10): localeCompare with a fixed locale/sensitivity rather
+  // than a manual toLowerCase()+</> comparison — the standard, locale-aware way to alphabetize
+  // (handles accented surnames etc. correctly; toLowerCase()+</> is a plain codepoint compare that
+  // gets those wrong).
   entries.sort((a, b) => {
-    const sa = (a.surname || '').toLowerCase();
-    const sb = (b.surname || '').toLowerCase();
-    if (sa !== sb) return sa < sb ? -1 : 1;
-    const na = (a.displayName || '').toLowerCase();
-    const nb = (b.displayName || '').toLowerCase();
-    if (na !== nb) return na < nb ? -1 : 1;
-    return 0;
+    const bySurname = (a.surname || '').localeCompare(b.surname || '', 'en', { sensitivity: 'base' });
+    if (bySurname !== 0) return bySurname;
+    return (a.displayName || '').localeCompare(b.displayName || '', 'en', { sensitivity: 'base' });
   });
 
   return entries;
@@ -182,20 +196,37 @@ function renderCandidate(candidate, entryIndex) {
   return li;
 }
 
-// A category is only rendered at all when it is GEOGRAPHICALLY applicable to the matched address
-// (mirrors matchReps' own gating conditions exactly) — a non-MO address never shows "MO Senate:
-// not found," since MO categories are structurally inapplicable there, not merely empty.
-const SEAT_APPLICABLE = {
+// A category is only rendered at all when it is GEOGRAPHICALLY IN SCOPE for the matched address
+// (mirrors matchReps' own gating conditions) — a non-MO address never mentions MO Senate/House at
+// all, since those categories are structurally inapplicable there, not merely empty.
+const SEAT_IN_SCOPE = {
   usSenators: (geo) => Boolean(geo?.state),
-  usHouse: (geo) => Boolean(geo?.state) && geo?.cd != null,
-  moSenate: (geo) => geo?.state === 'MO' && geo?.sldu != null,
-  moHouse: (geo) => geo?.state === 'MO' && geo?.sldl != null,
+  usHouse: (geo) => Boolean(geo?.state),
+  moSenate: (geo) => geo?.state === 'MO',
+  moHouse: (geo) => geo?.state === 'MO',
+};
+
+// MED-5 (task-8 review): distinct from "in scope but zero legislators matched" — this is "in
+// scope, but the Census Geocoder itself didn't return the district layer this category needs" (a
+// real, legitimate Census response shape: PO boxes and some edge-case addresses omit a layer).
+// U.S. Senate has no district dimension at all, so it can never hit this case.
+const SEAT_DISTRICT_MISSING = {
+  usSenators: () => false,
+  usHouse: (geo) => geo?.cd == null,
+  moSenate: (geo) => geo?.sldu == null,
+  moHouse: (geo) => geo?.sldl == null,
+};
+
+const SEAT_DISTRICT_MISSING_MESSAGE = {
+  usHouse: "The geocoder didn't return your U.S. House district.",
+  moSenate: "The geocoder didn't return your MO Senate district.",
+  moHouse: "The geocoder didn't return your MO House district.",
 };
 
 // "skip != empty" (the same discipline sectionState enforces everywhere else on this site): an
-// applicable category with zero matched legislators says so explicitly (a real, evidenced live
-// case — the terms table currently carries near-zero mo-legislature rows) rather than silently
-// vanishing from the page, which would look identical to "this address has no MO Senate seat."
+// in-scope category with a known district but zero matched legislators says so explicitly (a
+// real, evidenced live case — the terms table currently carries near-zero mo-legislature rows)
+// rather than silently vanishing, which would look identical to "this address has no such seat."
 const SEAT_EMPTY_MESSAGE = {
   usSenators: 'No U.S. Senate representative found in our data for this state.',
   usHouse: 'No U.S. House representative found in our data for this district.',
@@ -203,24 +234,32 @@ const SEAT_EMPTY_MESSAGE = {
   moHouse: 'No MO House representative found in our data for this district.',
 };
 
-// Renders every GEOGRAPHICALLY APPLICABLE category, plus the single as-of label (currency-
-// honesty law, spec §5: never the word "current" — matchReps already enforces this in the string
-// it hands back here). An ambiguous seat's every candidate renders, each with its own term as
-// visible date evidence — showing candidates honestly beats guessing.
+// Renders every IN-SCOPE category (fix round 1, LOW-11: unconditionally — even when every single
+// category came back empty, this still renders the as-of line plus each category's own honest
+// message, never one generic "nothing found" line that erases which categories were even
+// checked). Each category gets exactly one of three honest states: a missing-district notice
+// (MED-5), an explicit "not found" (skip != empty), or its real candidates with per-candidate date
+// evidence (an ambiguous seat's every candidate renders — showing candidates honestly beats
+// guessing). Currency-honesty law (spec §5): never the word "current" — matchReps already
+// enforces this in the asOf string rendered here.
 function renderMatchedReps(container, matched, entryIndex, geo) {
   clearChildren(container);
   container.appendChild(el('p', { class: 'reps-as-of' }, `Results shown ${matched.asOf}.`));
   for (const groupKey of SEAT_ORDER) {
-    if (!SEAT_APPLICABLE[groupKey](geo)) continue;
-    const candidates = matched[groupKey] || [];
+    if (!SEAT_IN_SCOPE[groupKey](geo)) continue;
     const section = el('section', { class: `rep-group rep-group-${groupKey}` });
     section.appendChild(el('h3', {}, SEAT_LABELS[groupKey]));
-    if (candidates.length === 0) {
-      section.appendChild(el('p', { class: 'rep-group-empty' }, SEAT_EMPTY_MESSAGE[groupKey]));
+    if (SEAT_DISTRICT_MISSING[groupKey](geo)) {
+      section.appendChild(el('p', { class: 'rep-group-missing-district' }, SEAT_DISTRICT_MISSING_MESSAGE[groupKey]));
     } else {
-      const ul = el('ul', {});
-      for (const candidate of candidates) ul.appendChild(renderCandidate(candidate, entryIndex));
-      section.appendChild(ul);
+      const candidates = matched[groupKey] || [];
+      if (candidates.length === 0) {
+        section.appendChild(el('p', { class: 'rep-group-empty' }, SEAT_EMPTY_MESSAGE[groupKey]));
+      } else {
+        const ul = el('ul', {});
+        for (const candidate of candidates) ul.appendChild(renderCandidate(candidate, entryIndex));
+        section.appendChild(ul);
+      }
     }
     container.appendChild(section);
   }
@@ -241,7 +280,18 @@ async function runAddressLookup(address, {
   sectionState(resultsContainer, { state: 'loading' });
   let censusJson;
   try {
-    const res = await fetch(`/geocode?address=${encodeURIComponent(address)}`);
+    // CONTROLLER RULING (task-8 review, fix round 1 — was "design call for Lance," ruled toward
+    // the STRONGER privacy reading): POST with the address in a JSON body, never a GET query
+    // string. Cloudflare records ClientRequestURI (including query strings) on OUR OWN origin's
+    // edge logs regardless of anything the geocode function itself does — a POST body is not part
+    // of that request-line surface. The outbound request to the Census Geocoder itself is
+    // unchanged (their API requires GET) — that half is exactly what the privacy contract
+    // sentence on the page discloses.
+    const res = await fetch('/geocode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
     censusJson = await res.json();
     if (!res.ok) {
       // The pass-through function itself returned an error body (upstream Census failure, or our
@@ -263,28 +313,71 @@ async function runAddressLookup(address, {
     return;
   }
 
+  // LOW-11 (task-8 review): renderMatchedReps ALWAYS runs once an address resolves to a state —
+  // it renders its own honest per-category message for every empty/missing-district case, so
+  // there is no separate "nothing found at all" branch here that would erase which categories
+  // were even checked.
   const matched = matchReps({ terms, legislators }, geo);
-  const total = SEAT_ORDER.reduce((sum, k) => sum + (matched[k]?.length || 0), 0);
-  if (total === 0) {
-    sectionState(resultsContainer, { state: 'empty', message: 'No representatives found in our data for these districts.' });
-    return;
-  }
-
   sectionState(resultsContainer, { state: 'ready' });
   renderMatchedReps(resultsContainer, matched, entryIndex, geo);
 }
 
-function wireAddressForm({
-  form, input, resultsContainer, legislators, terms, entryIndex,
+// The three fetchAllRows calls the directory (list AND address lookup) both depend on, factored
+// out so a retry of either section can re-issue it independently (see dataState below).
+async function loadDirectoryData() {
+  const [legislators, persons, terms] = await Promise.all([
+    fetchAllRows('legislators?select=id,full_name,surname,party,person_id,bioguide_id,mo_senate_id,mo_house_id,openstates_id,legiscan_people_id'),
+    fetchAllRows('persons?select=id,display_name'),
+    fetchAllRows('terms?select=legislator_id,jurisdiction_id,chamber,district,state,party,start_date,end_date'),
+  ]);
+  return { legislators, persons, terms };
+}
+
+// MAJOR-1 (task-8 review, review-blocking privacy fix): preventDefault() fires FIRST and
+// UNCONDITIONALLY, synchronously inside the listener — the form can never fall through to a
+// native GET navigation (which would put the typed address on the URL, browser history, and this
+// origin's own request-line logs) regardless of whether directory data has loaded, is still
+// loading, or has already failed. Exported so tests/directory-page.test.js can wire a bare
+// form/input/container directly (same convention as person-page.js's other DOM-touching exports)
+// and prove `event.defaultPrevented` synchronously, before any await ever runs.
+//
+// `dataState` is a mutable `{ promise }` holder (not a bare promise): a later retry of the
+// directory-list section can refresh `dataState.promise` in place, and every future submit reads
+// it fresh — without ever needing to attach a second listener to the same form element.
+export function wireAddressForm({
+  form, input, resultsContainer, dataState,
 }) {
   if (!form) return;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const address = (input?.value || '').trim();
     if (!address) return;
-    runAddressLookup(address, {
-      resultsContainer, legislators, terms, entryIndex,
-    }).catch(() => {});
+    runAddressLookupWithData(address, { resultsContainer, dataState }).catch(() => {});
+  });
+}
+
+// Awaits the shared directory-data promise ONLY at submit time (never eagerly at mount) — if it's
+// still pending, this waits for it; if it has already rejected (or rejects later), this renders
+// the honest "unavailable" message instead of ever silently doing nothing.
+async function runAddressLookupWithData(address, { resultsContainer, dataState }) {
+  let data;
+  try {
+    data = await dataState.promise;
+  } catch {
+    sectionState(resultsContainer, {
+      state: 'failed',
+      message: "Directory data unavailable — districts can't be matched right now",
+      onRetry: () => {
+        dataState.promise = loadDirectoryData();
+        runAddressLookupWithData(address, { resultsContainer, dataState }).catch(() => {});
+      },
+    });
+    return;
+  }
+  const entries = buildDirectoryEntries(data);
+  const entryIndex = indexEntriesByLegislatorId(entries);
+  await runAddressLookup(address, {
+    resultsContainer, legislators: data.legislators, terms: data.terms, entryIndex,
   });
 }
 
@@ -301,6 +394,36 @@ function wireDirectoryFilter(input, container, allEntries) {
   });
 }
 
+// The directory-list section's own fetch-or-reuse + render + retry — split out from
+// bootstrapDirectoryPage so its retry can refresh `dataState.promise` IN PLACE (benefiting the
+// address form's next submit too) without ever re-running bootstrapDirectoryPage as a whole
+// (which would re-attach a second submit listener to the same, already-wired form element).
+async function loadAndRenderDirectory(dataState, { directoryListContainer, filterInput }) {
+  sectionState(directoryListContainer, { state: 'loading' });
+  let entries;
+  try {
+    entries = buildDirectoryEntries(await dataState.promise);
+  } catch {
+    sectionState(directoryListContainer, {
+      state: 'failed',
+      message: "Couldn't load the directory — retry",
+      onRetry: () => {
+        dataState.promise = loadDirectoryData();
+        loadAndRenderDirectory(dataState, { directoryListContainer, filterInput }).catch(() => {});
+      },
+    });
+    return;
+  }
+
+  if (entries.length === 0) {
+    sectionState(directoryListContainer, { state: 'empty', message: 'No legislators recorded.' });
+  } else {
+    sectionState(directoryListContainer, { state: 'ready' });
+    renderDirectoryList(directoryListContainer, entries);
+  }
+  wireDirectoryFilter(filterInput, directoryListContainer, entries);
+}
+
 // Entry point for site/index.html — exported, never auto-run at module load (same convention as
 // bootstrapPersonPage/bootstrapLegislatorPage).
 export async function bootstrapDirectoryPage() {
@@ -311,36 +434,13 @@ export async function bootstrapDirectoryPage() {
   const addressResults = document.getElementById('address-results');
   mountFooter(document.getElementById('site-footer'));
 
-  sectionState(directoryListContainer, { state: 'loading' });
-  let legislators;
-  let persons;
-  let terms;
-  try {
-    [legislators, persons, terms] = await Promise.all([
-      fetchAllRows('legislators?select=id,full_name,surname,party,person_id,bioguide_id,mo_senate_id,mo_house_id,openstates_id,legiscan_people_id'),
-      fetchAllRows('persons?select=id,display_name'),
-      fetchAllRows('terms?select=legislator_id,jurisdiction_id,chamber,district,state,party,start_date,end_date'),
-    ]);
-  } catch {
-    sectionState(directoryListContainer, {
-      state: 'failed',
-      message: "Couldn't load the directory — retry",
-      onRetry: () => bootstrapDirectoryPage(),
-    });
-    return;
-  }
-
-  const entries = buildDirectoryEntries({ legislators, persons, terms });
-  if (entries.length === 0) {
-    sectionState(directoryListContainer, { state: 'empty', message: 'No legislators recorded.' });
-  } else {
-    sectionState(directoryListContainer, { state: 'ready' });
-    renderDirectoryList(directoryListContainer, entries);
-  }
-  wireDirectoryFilter(filterInput, directoryListContainer, entries);
-
-  const entryIndex = indexEntriesByLegislatorId(entries);
+  // MAJOR-1: the address form is wired SYNCHRONOUSLY here, before the first `await` below —
+  // never after the directory fetch settles, and never inside its own failure path (which used
+  // to `return` before ever reaching the wiring call at all).
+  const dataState = { promise: loadDirectoryData() };
   wireAddressForm({
-    form: addressForm, input: addressInput, resultsContainer: addressResults, legislators, terms, entryIndex,
+    form: addressForm, input: addressInput, resultsContainer: addressResults, dataState,
   });
+
+  await loadAndRenderDirectory(dataState, { directoryListContainer, filterInput });
 }

@@ -118,6 +118,32 @@ test('parseGeographies: layer-key matching is substring-based, robust to a diffe
   assert.equal(result.sldl, '60');
 });
 
+// MED-5 (task-8 review): a geocode result that matches a state but is missing one specific
+// district layer (the Census Geocoder can legitimately omit a layer for some addresses — PO
+// boxes, edge cases) must parse to a null for JUST that field, never throw and never silently
+// fabricate a district from a different layer. site/js/directory-page.js's renderMatchedReps
+// renders an honest "the geocoder didn't return your district" message for this exact case,
+// distinct from "we checked and found no representative."
+test('parseGeographies: state matched but the Congressional Districts layer is entirely absent -> cd is null, sldu/sldl still parse normally', () => {
+  const missingCdLayer = {
+    result: {
+      addressMatches: [{
+        geographies: {
+          States: [{ STUSAB: 'MO' }],
+          '2024 State Legislative Districts - Upper': [{ SLDU: '006', BASENAME: '6' }],
+          '2024 State Legislative Districts - Lower': [{ SLDL: '060', BASENAME: '60' }],
+          // no Congressional Districts layer at all
+        },
+      }],
+    },
+  };
+  const result = parseGeographies(missingCdLayer);
+  assert.equal(result.state, 'MO');
+  assert.equal(result.cd, null);
+  assert.equal(result.sldu, '6');
+  assert.equal(result.sldl, '60');
+});
+
 // ============================================================================
 // matchReps — currency-honest district matching against a terms/legislators fixture
 // ============================================================================
@@ -210,6 +236,92 @@ test('matchReps: no matched term carries a start_date -> asOf is the exact hones
   const result = matchReps({ terms, legislators: ALL_LEGISLATORS }, MATCH_TARGET);
   assert.equal(result.moHouse.length, 1);
   assert.equal(result.asOf, 'per the most recent term evidence in our data (dates unrecorded)');
+});
+
+// Fix round 1 (task-8 review, LOW-6): the dates-present asOf form is a variant of the SAME lead-in
+// sentence as the fallback, not a differently-worded one.
+test('matchReps: with real dates present, asOf reads "...(most recent: <date>)", the exact new format', () => {
+  const terms = [
+    {
+      legislator_id: 'leg-house-3', jurisdiction_id: 'us-congress', chamber: 'house', state: 'MO', district: '3', start_date: '2023-01-03', end_date: null,
+    },
+  ];
+  const result = matchReps({ terms, legislators: ALL_LEGISLATORS }, MATCH_TARGET);
+  assert.equal(result.asOf, 'per the most recent term evidence in our data (most recent: 2023-01-03)');
+});
+
+// MAJOR-2 (task-8 review, live-verified): six states (AK/DE/ND/SD/VT/WY) have exactly one,
+// at-large, statewide U.S. House seat. The federal ingestion adapter stores that seat's
+// `district` as null (its own convention), while the Census Geocoder returns CD119='00' for an
+// at-large address, normalized to '0' by normalizeDistrict. Without the bridge, null can never
+// equal '0' and the at-large state's House seat wrongly reports "not found" despite real data
+// existing for it. Reviewer's own construction: Wyoming.
+test('matchReps: MAJOR-2 at-large bridge — a null-district U.S. House term matches when cd is "0" (Wyoming construction)', () => {
+  const wyRep = { id: 'leg-wy-house', full_name: 'WY At-Large Rep', party: 'Republican' };
+  const terms = [
+    {
+      legislator_id: 'leg-wy-house', jurisdiction_id: 'us-congress', chamber: 'house', state: 'WY', district: null, start_date: '2023-01-03', end_date: null,
+    },
+  ];
+  const result = matchReps({ terms, legislators: [wyRep] }, {
+    state: 'WY', cd: '0', sldu: null, sldl: null,
+  });
+  assert.equal(result.usHouse.length, 1, 'the at-large seat matches despite term.district being null');
+  assert.equal(result.usHouse[0].legislator.id, 'leg-wy-house');
+});
+
+test('matchReps: the at-large bridge is narrow — a null-district term does NOT match any OTHER cd value, only "0"', () => {
+  const terms = [
+    {
+      legislator_id: 'leg-wy-house', jurisdiction_id: 'us-congress', chamber: 'house', state: 'WY', district: null, start_date: '2023-01-03', end_date: null,
+    },
+  ];
+  const result = matchReps({ terms, legislators: ALL_LEGISLATORS }, {
+    state: 'WY', cd: '3', sldu: null, sldl: null,
+  });
+  assert.equal(result.usHouse.length, 0, 'a null district only bridges to cd==="0", never any other real district number');
+});
+
+test('matchReps: the at-large bridge does not fire for a normal (non-at-large) state with a real numbered district', () => {
+  const terms = [
+    {
+      legislator_id: 'leg-house-3', jurisdiction_id: 'us-congress', chamber: 'house', state: 'MO', district: '3', start_date: '2023-01-03', end_date: null,
+    },
+  ];
+  const result = matchReps({ terms, legislators: ALL_LEGISLATORS }, {
+    state: 'MO', cd: '0', sldu: null, sldl: null,
+  });
+  assert.equal(result.usHouse.length, 0, 'MO district 3 must never match a stray cd="0" target');
+});
+
+// LOW-13 (task-8 review): state comparisons are case-insensitive on both sides — STUSAB from
+// Census is always uppercase in practice, but terms.state/district values are filled by several
+// independent adapters/backfills, so matching must not depend on every writer's casing matching
+// Census's by coincidence.
+test('matchReps: LOW-13 — state comparisons are case-insensitive (a lowercase term.state still matches an uppercase target state)', () => {
+  const terms = [
+    {
+      legislator_id: 'leg-sen-a', jurisdiction_id: 'us-congress', chamber: 'senate', state: 'mo', district: null, start_date: '2019-01-03', end_date: null,
+    },
+    {
+      legislator_id: 'leg-house-3', jurisdiction_id: 'us-congress', chamber: 'house', state: 'mo', district: '3', start_date: '2023-01-03', end_date: null,
+    },
+  ];
+  const result = matchReps({ terms, legislators: ALL_LEGISLATORS }, MATCH_TARGET);
+  assert.equal(result.usSenators.length, 1);
+  assert.equal(result.usHouse.length, 1);
+});
+
+test('matchReps: LOW-13 — a lowercase target state still matches MO Senate/House seats (isMO check is case-insensitive too)', () => {
+  const terms = [
+    {
+      legislator_id: 'leg-mo-sen-new', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '6', start_date: '2021-01-06', end_date: null,
+    },
+  ];
+  const result = matchReps({ terms, legislators: ALL_LEGISLATORS }, {
+    state: 'mo', cd: '3', sldu: '6', sldl: '60',
+  });
+  assert.equal(result.moSenate.length, 1);
 });
 
 test('matchReps: a non-MO state never matches MO seats even if district numbers coincidentally line up', () => {

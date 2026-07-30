@@ -84,22 +84,45 @@ function getGeocodeFetch() {
   return geocodeFetchOverride || fetch;
 }
 
+// Reads and JSON-parses a request body. Never used for anything but the /geocode POST body below
+// — the rest of this server only ever serves static files.
+async function readJsonBody(req) {
+  const chunks = [];
+  // eslint-disable-next-line no-restricted-syntax
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : {};
+}
+
 // PRIVACY CONTRACT (spec §5, review-blocking — identical to site/functions/geocode.js's own):
 // the address is forwarded to the Census request and NOWHERE else. No console.log, no analytics,
 // no file writes, no error reporting that includes the address. Errors return generic JSON.
+//
+// Fix round 1 (task-8 review, CONTROLLER RULING): POST with a JSON body, mirroring
+// site/functions/geocode.js's own onRequestPost exactly — the address never rides a GET request
+// line (query string) to our own origin, where it would land in Cloudflare's own edge logging
+// (ClientRequestURI) regardless of anything either passthrough does itself.
 async function handleGeocodeRequest(req, res) {
-  const parsedUrl = new URL(req.url, `http://${HOST}`);
-  const address = parsedUrl.searchParams.get('address');
   const respond = (status, body) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(body));
   };
-  if (!address || address.length > 500) {
+  let address;
+  try {
+    const parsed = await readJsonBody(req);
+    address = parsed?.address;
+  } catch {
     respond(400, { error: 'address required' });
     return;
   }
-  const u = buildUpstreamUrl(address);
+  if (typeof address !== 'string' || !address || address.length > 500) {
+    respond(400, { error: 'address required' });
+    return;
+  }
+  // LOW-12 (task-8 review): the try opens one line earlier, covering buildUpstreamUrl itself
+  // (defensive-only today) under the same honest-502 handling as the network call.
   try {
+    const u = buildUpstreamUrl(address);
     const doFetch = getGeocodeFetch();
     const upstream = await doFetch(u, { signal: AbortSignal.timeout(15000) });
     if (!upstream.ok) {
@@ -115,7 +138,7 @@ async function handleGeocodeRequest(req, res) {
 export function createSiteServer(siteRoot = SITE_ROOT) {
   return createServer(async (req, res) => {
     const urlPath = String(req.url || '').split('?')[0];
-    if (urlPath === '/geocode') {
+    if (urlPath === '/geocode' && req.method === 'POST') {
       await handleGeocodeRequest(req, res);
       return;
     }

@@ -6,3 +6,4 @@ PrivateData/
 Thumbs.db
 .superpowers/
 node_modules/
+.playwright-mcp/

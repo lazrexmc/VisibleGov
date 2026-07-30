@@ -152,6 +152,45 @@ test('buildIdentity: fix round 1 finding 2 — a distinct affiliation with no di
   assert.equal(identity.chamberLabel, 'MO Senate, district 2 · U.S. Senate');
 });
 
+// Fix round 1 (task-8 review, LOW-7): U.S. Senate terms store the state's USPS abbreviation in
+// `district` (terms.district-as-state convention), not a real district number — "U.S. Senate,
+// district MO" reads as a real congressional district that doesn't exist. Covers all three
+// buildIdentity paths that could print a district suffix.
+test('buildIdentity: a dated U.S. Senate anchor term never prints a "district" suffix (the stored value is the state, not a district)', () => {
+  const terms = [
+    {
+      jurisdiction_id: 'us-congress', chamber: 'senate', district: 'MO', party: 'Republican', start_date: '2019-01-03', end_date: null,
+    },
+  ];
+  const identity = buildIdentity({ person: null, legislators: [], terms });
+  assert.equal(identity.chamberLabel, 'U.S. Senate');
+  assert.equal(identity.districtLabel, null);
+});
+
+test('buildIdentity: a single date-unproven U.S. Senate affiliation never prints a "district" suffix', () => {
+  const terms = [
+    {
+      jurisdiction_id: 'us-congress', chamber: 'senate', district: 'MO', start_date: null, end_date: null,
+    },
+  ];
+  const identity = buildIdentity({ person: null, legislators: [], terms });
+  assert.equal(identity.chamberLabel, 'U.S. Senate');
+  assert.equal(identity.districtLabel, null);
+});
+
+test('buildIdentity: a joined multi-affiliation string never prints "district" for the U.S. Senate segment, even when that term carries a state-as-district value', () => {
+  const terms = [
+    {
+      jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null,
+    },
+    {
+      jurisdiction_id: 'us-congress', chamber: 'senate', district: 'MO', start_date: null, end_date: null,
+    },
+  ];
+  const identity = buildIdentity({ person: null, legislators: [], terms });
+  assert.equal(identity.chamberLabel, 'MO Senate, district 2 · U.S. Senate');
+});
+
 test('buildIdentity: fix round 1 finding 2 — when dates DO order the terms, single-line anchor-term behavior stands unchanged (no regression)', () => {
   const identity = buildIdentity({ person: onderPerson, legislators: onderLegislators(), terms: onderTerms() });
   assert.equal(identity.chamberLabel, 'U.S. House');

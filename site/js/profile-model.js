@@ -155,9 +155,21 @@ function distinctAffiliations(termRows) {
   return result;
 }
 
+// Fix round 1 (task-8 review, LOW-7): a U.S. Senate term's `district` column stores the state's
+// USPS abbreviation (terms.district-as-state convention, backfill-term-states.js's own header
+// comment — "Senate terms have stored the state's USPS abbreviation THERE since
+// ensureSenateMembers/ensureFederalMemberMetadata first created them"), not a real district
+// number. Rendering it as ", district MO" reads as a real congressional district that does not
+// exist — U.S. Senate seats have none. Every place that would otherwise print a district suffix
+// checks this first; MO/state-legislature districts are real numbers and stay unaffected.
+function isMeaninglessDistrict(jurisdictionId, chamber) {
+  return jurisdictionId === 'us-congress' && chamber === 'senate';
+}
+
 function formatAffiliation(affiliation) {
   const label = chamberLabel(affiliation.jurisdiction_id, affiliation.chamber);
-  return affiliation.district ? `${label}, district ${affiliation.district}` : label;
+  const showDistrict = affiliation.district && !isMeaninglessDistrict(affiliation.jurisdiction_id, affiliation.chamber);
+  return showDistrict ? `${label}, district ${affiliation.district}` : label;
 }
 
 export function buildIdentity({ person, legislators, terms }) {
@@ -179,7 +191,9 @@ export function buildIdentity({ person, legislators, terms }) {
     // Dates DO order the terms — single-line anchor-term behavior stands unchanged (no picking
     // ambiguity: the most-recent-by-date term is a real, evidenced answer, not a guess).
     chamberLabelOut = chamberLabel(anchorTerm.jurisdiction_id, anchorTerm.chamber);
-    districtLabelOut = anchorTerm.district ?? null;
+    districtLabelOut = isMeaninglessDistrict(anchorTerm.jurisdiction_id, anchorTerm.chamber)
+      ? null
+      : (anchorTerm.district ?? null);
   } else if (anchorTerm) {
     // Date-unproven (no term carries a start_date): the data cannot order the terms, so picking
     // one (the old `termRows[0]` fallback) is a guess — the live smoke caught exactly this
@@ -192,7 +206,9 @@ export function buildIdentity({ person, legislators, terms }) {
       districtLabelOut = null; // already folded into chamberLabelOut; avoids a doubled suffix
     } else if (affiliations.length === 1) {
       chamberLabelOut = chamberLabel(affiliations[0].jurisdiction_id, affiliations[0].chamber);
-      districtLabelOut = affiliations[0].district;
+      districtLabelOut = isMeaninglessDistrict(affiliations[0].jurisdiction_id, affiliations[0].chamber)
+        ? null
+        : affiliations[0].district;
     }
   }
 

@@ -130,6 +130,38 @@ test('buildDirectoryEntries: never throws on missing/malformed inputs', () => {
   assert.deepEqual(buildDirectoryEntries({ legislators: null, persons: null, terms: null }), []);
 });
 
+// Fix round 1 (task-8 review, LOW-7): a U.S. Senate term's `district` column stores the state's
+// USPS abbreviation (terms.district-as-state convention), not a real district number — the
+// directory's meta line must never show "district MO" for a senator (mirrors the same fix in
+// profile-model.js's buildIdentity).
+test('buildDirectoryEntries: a U.S. Senate anchor term never carries a "district" value (the stored value is the state, not a district)', () => {
+  const legislators = [{
+    id: 'leg-sen', full_name: 'Josh Hawley', surname: 'Hawley', party: 'Republican', person_id: null,
+  }];
+  const terms = [
+    {
+      legislator_id: 'leg-sen', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'MO', party: 'Republican', start_date: '2019-01-03', end_date: null,
+    },
+  ];
+  const entries = buildDirectoryEntries({ legislators, persons: [], terms });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].chamber, 'U.S. Senate');
+  assert.equal(entries[0].district, null, 'the state-as-district value is suppressed, never rendered as a district');
+});
+
+test('buildDirectoryEntries: a real MO Senate district number is NOT suppressed (only U.S. Senate is meaningless)', () => {
+  const legislators = [{
+    id: 'leg-mo-sen', full_name: 'Mo Senator', surname: 'Senator', party: 'Republican', person_id: null,
+  }];
+  const terms = [
+    {
+      legislator_id: 'leg-mo-sen', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '6', party: 'Republican', start_date: '2021-01-06', end_date: null,
+    },
+  ];
+  const entries = buildDirectoryEntries({ legislators, persons: [], terms });
+  assert.equal(entries[0].district, '6');
+});
+
 // ============================================================================
 // filterDirectory — client-side text filter over the COMPLETE fetched list (name + chamber +
 // party), never a partial-page server re-sort.
