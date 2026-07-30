@@ -42,8 +42,25 @@ a {
   color: #b00020;
 }
 
-.footer-placeholder {
+/* Task 10 — the real footer (render.js's mountFooter), same on every page. */
+
+footer#site-footer {
+  max-width: 720px;
+  margin: 2rem auto 1rem;
+  padding: 0 1rem;
+  border-top: 1px solid var(--muted);
+  padding-top: 0.75rem;
+}
+
+.footer-tagline {
   color: var(--muted);
+  font-size: 0.85em;
+  margin: 0 0 0.35rem;
+}
+
+.footer-links {
+  display: flex;
+  gap: 1rem;
   font-size: 0.85em;
 }
 
@@ -336,4 +353,68 @@ main#app.bill-not-found section:not(#bill-identity) {
   margin: 0.35rem 0;
   padding-left: 0.5rem;
   border-left: 2px solid var(--muted);
+}
+
+/* Task 10 — the trust page (site/trust.html / site/js/trust-page.js). Functional only, same
+   minimal-polish level as every other page's first pass. */
+
+main#app.trust-page {
+  max-width: 720px;
+}
+
+.trust-page section {
+  margin-bottom: 2rem;
+}
+
+.trust-page section h2 {
+  border-bottom: 1px solid var(--muted);
+  padding-bottom: 0.25rem;
+}
+
+.metric-definition {
+  margin-bottom: 1rem;
+}
+
+.metric-definition h3 {
+  margin-bottom: 0.25rem;
+  font-size: 1em;
+}
+
+.counts-caption {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.counts-list {
+  list-style: none;
+  padding: 0;
+}
+
+.counts-label {
+  font-weight: 600;
+}
+
+.freshness-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.freshness-table th,
+.freshness-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--muted);
+}
+
+.freshness-row-quarantine td {
+  color: #b00020;
+}
+
+.attribution-list {
+  padding-left: 1.25rem;
+}
+
+.attribution-list li {
+  margin-bottom: 0.75rem;
 }

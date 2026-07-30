@@ -16,6 +16,10 @@ import {
   _setGeocodeFetch,
 } from '../scripts/serve-site.js';
 import { buildUpstreamUrl, onRequestPost } from '../site/functions/geocode.js';
+import { METRIC_DEFINITIONS } from '../site/js/vote-charts.js';
+import {
+  COUNT_SPECS, renderMetricDefinitions, loadCountsSection, loadFreshnessSection,
+} from '../site/js/trust-page.js';
 
 // render.js is a plain browser-native ES module — it reaches for the global `document`, exactly
 // as it will in a real browser tab. jsdom supplies that global here so node:test can drive it
@@ -377,10 +381,30 @@ test('sectionState: an unrecognized state throws a typed error rather than silen
   assert.equal(container.childNodes.length, 0, 'nothing rendered — the throw happens before any DOM mutation');
 });
 
-test('mountFooter: renders placeholder attribution text (Task 10 fills real content)', () => {
+// Task 10: mountFooter's real content (design spec §6: "This page is linked from every footer";
+// task-10 brief: 'Every fact links to its source. · [How this works](/trust) · [Data
+// freshness](/trust#freshness) · [Attribution](/trust#attribution)'). Exact tagline text + exact
+// link order/href/label — every page (index, person, legislator, bill, trust itself) renders this
+// SAME footer through this one function, so getting it right here gets it right everywhere.
+test('mountFooter: renders the exact tagline + three links (How this works / Data freshness / Attribution), in order, with the exact hrefs', () => {
   const footer = document.createElement('footer');
   mountFooter(footer);
-  assert.ok(footer.textContent.length > 0);
+  assert.ok(footer.textContent.includes('Every fact links to its source.'));
+  const links = [...footer.querySelectorAll('a')];
+  assert.equal(links.length, 3);
+  assert.equal(links[0].textContent, 'How this works');
+  assert.equal(links[0].getAttribute('href'), '/trust');
+  assert.equal(links[1].textContent, 'Data freshness');
+  assert.equal(links[1].getAttribute('href'), '/trust#freshness');
+  assert.equal(links[2].textContent, 'Attribution');
+  assert.equal(links[2].getAttribute('href'), '/trust#attribution');
+});
+
+test('mountFooter: clears any prior content before rendering (idempotent — safe to call again)', () => {
+  const footer = document.createElement('footer');
+  footer.appendChild(el('p', {}, 'stale'));
+  mountFooter(footer);
+  assert.equal(footer.textContent.includes('stale'), false);
 });
 
 // ============================================================================
@@ -752,4 +776,125 @@ test('createSiteServer: GET /geocode (the old query-string shape) is no longer r
     server.close();
     _setGeocodeFetch(null);
   }
+});
+
+// ============================================================================
+// site/js/trust-page.js — Task 10, the trust page (.superpowers/sdd/2026-07-30-public-site/
+// task-10-brief.md). #metrics renders vote-charts.js's own METRIC_DEFINITIONS verbatim (single-
+// source contract — Task 10 never paraphrases it); #counts and #freshness are the page's two live
+// sections (countOnly numbers; the FULL public_freshness table, unlike the profile page's own
+// jurisdiction-scoped subset), each independently three-stated.
+// ============================================================================
+
+test('COUNT_SPECS: exactly the five live counts the brief names (vote casts, bills, legislators, published summaries, published glossary terms)', () => {
+  assert.equal(COUNT_SPECS.length, 5);
+  const byKey = Object.fromEntries(COUNT_SPECS.map((s) => [s.key, s]));
+  assert.equal(byKey.voteCasts.path, 'vote_casts?select=id');
+  assert.equal(byKey.voteCasts.label, 'Vote casts');
+  assert.equal(byKey.bills.path, 'bills?select=id');
+  assert.equal(byKey.bills.label, 'Bills');
+  assert.equal(byKey.legislators.path, 'legislators?select=id');
+  assert.equal(byKey.legislators.label, 'Legislators');
+  // summaries/glossary_terms mirror the SAME status=eq.published filter bill-page.js/
+  // person-page.js already use (RLS also enforces it — anon_read_published, migrations 0001/0007
+  // — this is belt-and-braces, matching the rest of the codebase's convention, not a new rule).
+  assert.equal(byKey.summaries.path, 'summaries?select=id&status=eq.published');
+  assert.equal(byKey.summaries.label, 'Published summaries');
+  assert.equal(byKey.glossaryTerms.path, 'glossary_terms?select=id&status=eq.published');
+  assert.equal(byKey.glossaryTerms.label, 'Published glossary terms');
+});
+
+test('renderMetricDefinitions: loops over ALL FOUR METRIC_DEFINITIONS keys (including the staleness disclosure), rendering title/body verbatim — never a paraphrase', () => {
+  const container = document.createElement('div');
+  renderMetricDefinitions(container);
+  const headings = [...container.querySelectorAll('h3')].map((h) => h.textContent);
+  assert.deepEqual(headings, [
+    METRIC_DEFINITIONS.distribution.title,
+    METRIC_DEFINITIONS.partyComparison.title,
+    METRIC_DEFINITIONS.cohesion.title,
+    METRIC_DEFINITIONS.staleness.title,
+  ]);
+  const bodies = [...container.querySelectorAll('p')].map((p) => p.textContent);
+  assert.deepEqual(bodies, [
+    METRIC_DEFINITIONS.distribution.body,
+    METRIC_DEFINITIONS.partyComparison.body,
+    METRIC_DEFINITIONS.cohesion.body,
+    METRIC_DEFINITIONS.staleness.body,
+  ]);
+});
+
+test('renderMetricDefinitions: clears prior content before rendering', () => {
+  const container = document.createElement('div');
+  container.appendChild(el('p', {}, 'stale'));
+  renderMetricDefinitions(container);
+  assert.equal(container.textContent.includes('stale'), false);
+});
+
+test('loadCountsSection: fetches all five countOnly numbers via the SAME rest.js countOnly, renders them ready (three-stated)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const totals = {
+    vote_casts: 1462338, bills: 38252, legislators: 1607, summaries: 10, glossary_terms: 116,
+  };
+  _setFetch(async (url) => {
+    const hit = Object.entries(totals).find(([table]) => url.includes(`/${table}?`));
+    return mockResponse({ status: 206, rows: [{ id: 1 }], contentRange: `0-0/${hit[1]}` });
+  });
+  const container = document.createElement('div');
+  const results = await loadCountsSection(container);
+  assert.deepEqual(results.map((r) => r.value), [1462338, 38252, 1607, 10, 116]);
+  assert.ok(container.textContent.includes('Vote casts'));
+  assert.ok(container.textContent.includes('1462338'));
+  assert.ok(container.textContent.includes('Published summaries'));
+  assert.ok(container.textContent.includes('10'));
+  assert.ok(container.textContent.includes('Published glossary terms'));
+  assert.ok(container.textContent.includes('116'));
+  assert.equal(container.querySelector('.section-state'), null, 'ready state — no loading/failed message left behind');
+});
+
+test('loadCountsSection: a failed countOnly fetch renders the FAILED state with a working retry — never an empty/zero-looking section', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => mockResponse({ status: 500, rows: { message: 'canceling statement due to statement timeout' } }));
+  const container = document.createElement('div');
+  await assert.rejects(() => loadCountsSection(container));
+  assert.ok(container.textContent.includes("Couldn't load live counts"));
+  assert.ok(container.querySelector('button'), 'a retry button is rendered');
+});
+
+test('loadFreshnessSection (trust page): renders the FULL public_freshness table, unfiltered — including sources a profile page\'s jurisdiction scoping would exclude (e.g. "gloss", "summarize") — proving this is the whole table, not the person-page.js jurisdiction-scoped subset', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const rows = [
+    { source: 'legiscan', status: 'succeeded', finished_at: '2026-07-29T16:32:12.831+00:00', quarantined_days: 0 },
+    { source: 'gloss', status: 'partial', finished_at: '2026-07-29T00:04:17.534+00:00', quarantined_days: 2 },
+    { source: 'summarize', status: 'succeeded', finished_at: null, quarantined_days: 0 },
+  ];
+  _setFetch(async () => mockResponse({ status: 200, rows, contentRange: null }));
+  const container = document.createElement('div');
+  const result = await loadFreshnessSection(container);
+  assert.equal(result.length, 3);
+  const table = container.querySelector('table');
+  assert.ok(table, 'a real table renders');
+  assert.equal(table.querySelectorAll('tbody tr').length, 3);
+  assert.ok(container.textContent.includes('legiscan'));
+  assert.ok(container.textContent.includes('gloss'));
+  assert.ok(container.textContent.includes('summarize'));
+  assert.ok(container.textContent.includes('2'), 'the quarantined-day count renders');
+  assert.ok(container.textContent.includes('(never)'), 'a null finished_at renders honestly, never blank');
+});
+
+test('loadFreshnessSection (trust page): zero rows renders the honest EMPTY state, not a blank table', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => mockResponse({ status: 200, rows: [], contentRange: null }));
+  const container = document.createElement('div');
+  await loadFreshnessSection(container);
+  assert.equal(container.querySelector('table'), null);
+  assert.ok(container.textContent.length > 0);
+});
+
+test('loadFreshnessSection (trust page): a failed fetch renders FAILED with a working retry, never an empty-looking table', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => mockResponse({ status: 503, rows: { message: 'server unavailable' } }));
+  const container = document.createElement('div');
+  await assert.rejects(() => loadFreshnessSection(container));
+  assert.ok(container.textContent.includes("Couldn't load freshness data"));
+  assert.ok(container.querySelector('button'), 'a retry button is rendered');
 });

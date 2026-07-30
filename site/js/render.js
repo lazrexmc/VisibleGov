@@ -197,13 +197,18 @@ export function sectionState(container, { state, message, onRetry } = {}) {
   }
 }
 
-// Task 10 fills the real footer (attribution links, trust-page link — design spec §6). This
-// scaffold renders honest placeholder text so no page ships with a blank/broken footer meanwhile.
+// Task 10: the real footer (design spec §6, "This page is linked from every footer"; task-10
+// brief, verbatim contract: 'Every fact links to its source. · [How this works](/trust) ·
+// [Data freshness](/trust#freshness) · [Attribution](/trust#attribution)'). Every page (index,
+// person, legislator, bill, and the trust page itself) calls this SAME function via the SAME
+// `<footer id="site-footer">` mount point — one wording, never a lookalike copy per page.
 export function mountFooter(node) {
   clearChildren(node);
-  node.appendChild(el(
-    'p',
-    { class: 'footer-placeholder' },
-    'VisibleGov — source attribution and the trust page link here (Task 10).',
-  ));
+  node.appendChild(el('p', { class: 'footer-tagline' }, 'Every fact links to its source.'));
+  const nav = el('nav', { class: 'footer-links' });
+  nav.setAttribute('aria-label', 'About this site'); // not in el()'s attrs allowlist; set directly.
+  nav.appendChild(el('a', { href: '/trust' }, 'How this works'));
+  nav.appendChild(el('a', { href: '/trust#freshness' }, 'Data freshness'));
+  nav.appendChild(el('a', { href: '/trust#attribution' }, 'Attribution'));
+  node.appendChild(nav);
 }

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisibleGov — how this works</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b5fff'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='18' font-weight='700' fill='%23fff' text-anchor='middle'%3EV%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <main id="app" class="trust-page">
+    <h1>How this works</h1>
+    <p>This page explains, in plain terms, how a fact gets from an official government document
+      onto this site — and where to look when something is disputed or missing.</p>
+
+    <section aria-label="The pipeline">
+      <h2 id="pipeline">From official record to this page</h2>
+      <p>Every fact on this site starts as a document published by an official source: LegiScan's
+        bulk data service and the Missouri Senate's own journals for Missouri Senate roll calls,
+        the house.mo.gov XML data service for Missouri House bills and votes, and Congress.gov,
+        the Clerk of the U.S. House, and the U.S. Senate's Legislative Information System for
+        federal bills and votes. Nothing on this site is entered by hand from a news story, a
+        press release, or anyone's recollection of what happened.</p>
+      <p>Before an individual legislator's recorded vote ("cast") on a roll call is stored, the
+        count of casts for each position — yea, nay, not voting, absent — must match the tally
+        the source itself printed for that roll call. If the counts don't match, nothing is
+        quietly corrected or averaged to make them fit: the mismatched roll call is held back, or,
+        when two independent sources genuinely disagree about the same roll call, it is flagged
+        for a human to read both sources and decide (see "Reconciliation flags and quarantined
+        data" below). A cast is never invented to make a tally add up.</p>
+      <p>A bill's plain-language summary is authored only from that bill's own official text —
+        never from a model's general knowledge of the subject, and never from news coverage or
+        commentary about the bill. Before a summary publishes, a second, independent model reads
+        the same official text and tries to find anything the summary claims that the text does
+        not actually support — an adversarial check, not a second opinion that simply agrees.</p>
+      <p>A summary publishes automatically only after it clears mechanical completeness checks
+        (every required section present, every claim's citation resolves to real text in the
+        source) and the adversarial verification comes back clean. The system never trusts a
+        model's own report that it verified something; the check itself has to run and produce a
+        clean result. Anything the verification flags waits in a queue for this project's
+        maintainer to read personally before it can publish — a flagged item is never quietly
+        waved through, and the page says so wherever it applies.</p>
+      <p>Every published fact carries its own receipt: a link to the official source, and, where
+        the fact is drawn from a larger document, the exact quoted excerpt it came from. Nothing
+        here asks you to trust a rating or a label in place of the source.</p>
+    </section>
+
+    <section aria-label="Reconciliation flags and quarantined data">
+      <h2 id="flags">Reconciliation flags and quarantined data</h2>
+      <p>A <strong>reconciliation flag</strong> means two of this project's independent data
+        sources recorded the same roll call differently — for example, LegiScan's tally and the
+        Missouri Senate's own printed journal disagree about how a specific legislator voted, or
+        about the final count. When that happens, the disagreement is not resolved by picking
+        whichever number looks right, or by averaging the two. It is recorded as an open flag and
+        set aside for a human to read both sources and decide. Any vote shown on this site
+        carrying a "⚑ reconciliation flag" badge links back to this page.</p>
+      <p>While a flag is open, this site does not blend or split the difference between the
+        disagreeing sources — it displays the record from this project's designated primary
+        source for that chamber, shown exactly as printed. This is <strong>primary-source-first
+        display</strong>: the badge is the reader's signal that a second source disagrees, so you
+        can go compare both original documents yourself, rather than trust a number this site
+        invented to reconcile them.</p>
+      <p>Missouri Senate roll-call detail — which legislator cast which vote — comes from scanned
+        journal documents that have to be mechanically extracted before they can be checked
+        against LegiScan's own tallies. When a given journal day's extraction cannot be
+        automatically confirmed against the printed tally (a parsing failure, an unreadable page,
+        a mismatch that cannot be resolved without a person looking at the source), that day is
+        <strong>quarantined</strong>: held out of the published record rather than guessed at, and
+        counted honestly as a day "pending human review," never silently dropped and never
+        silently published as if it had been confirmed. The data-freshness table below shows the
+        current quarantined-day count for every source that has one.</p>
+      <p>The same discipline runs in both directions: a fact is never invented to fill a gap, and
+        a fact is never suppressed just because it is inconvenient. A dispute or a gap is shown as
+        a dispute or a gap, with a path back to the primary documents so it can be checked
+        directly.</p>
+    </section>
+
+    <section aria-label="Vote-aggregate metric definitions">
+      <h2 id="metrics">What the vote-aggregate numbers mean</h2>
+      <p>The charts on a legislator's page (position distribution, party comparison, party-line
+        cohesion) are numbers only — no grades, no adjectives, no ranked lists of politicians. The
+        exact definition of each figure, in the same wording the charts themselves are built from,
+        is rendered below.</p>
+      <div id="metrics-list"></div>
+    </section>
+
+    <section aria-label="Data freshness">
+      <h2 id="freshness">Data freshness</h2>
+      <p>What is ingested, from where, and through when — the same table every page's own
+        freshness box is drawn from, shown here in full for every source this project tracks.</p>
+      <div id="freshness-table"></div>
+    </section>
+
+    <section aria-label="Live counts">
+      <h2 id="counts">What's in the database right now</h2>
+      <p class="counts-caption">These five counts are fetched live from the same database the
+        site reads — not a cached snapshot, not a rounded estimate.</p>
+      <div id="counts-list"></div>
+    </section>
+
+    <section aria-label="Attribution">
+      <h2 id="attribution">Attribution</h2>
+      <p>This site republishes and summarizes records published by the sources below. The license
+        notices are stated because their terms require it, and because anything on this site
+        should be traceable back to where it actually came from.</p>
+      <ul class="attribution-list">
+        <li><strong>LegiScan</strong> (<a href="https://legiscan.com">legiscan.com</a>) — Missouri
+          roll-call and bill data, used under LegiScan's CC BY 4.0 license, which requires this
+          attribution wherever the data is shown.</li>
+        <li><strong>Congress.gov</strong> (<a href="https://www.congress.gov">congress.gov</a>) —
+          federal bill text, status, and sponsor data.</li>
+        <li><strong>U.S. Senate Legislative Information System (LIS)</strong>
+          (<a href="https://www.senate.gov/legislative/LIS/">senate.gov/legislative/LIS</a>) —
+          U.S. Senate roll-call votes.</li>
+        <li><strong>house.mo.gov XML data service</strong>
+          (<a href="https://documents.house.mo.gov/xml/">documents.house.mo.gov/xml</a>) —
+          Missouri House bill and roll-call data.</li>
+        <li><strong>Missouri Senate</strong>
+          (<a href="https://www.senate.mo.gov">senate.mo.gov</a>), including the Senate's own
+          published journals — the primary source this project's Missouri Senate roll-call
+          reconciliation checks against. Same disclaimer as the bill page: "Bill text and status
+          shown are not official copies; the official record is at the linked source." The
+          journal data on this site is drawn from those published journals but is not itself an
+          official copy — the official record is the Missouri Senate's own published journal.</li>
+        <li><strong>U.S. Census Bureau Geocoder</strong>
+          (<a href="https://geocoding.geo.census.gov/geocoder/">geocoding.geo.census.gov/geocoder</a>),
+          used by the "Find your representatives" address lookup. Restated verbatim from that
+          page: "Your address is sent to the U.S. Census Bureau geocoder to find your districts,
+          and is not stored or logged — not by us, not ever."</li>
+        <li><strong>unitedstates/congress-legislators</strong>
+          (<a href="https://github.com/unitedstates/congress-legislators">github.com/unitedstates/congress-legislators</a>),
+          released under a CC0 (public domain) dedication. Adopted as this site's source for
+          federal legislators' real, per-term start and end dates.</li>
+        <li><strong>Photographs</strong> — sourced from the Congressional Biographical Directory
+          (bioguide.congress.gov) and served via the unitedstates/images mirror
+          (<a href="https://unitedstates.github.io/images/congress/">unitedstates.github.io/images/congress</a>).</li>
+      </ul>
+    </section>
+  </main>
+  <footer id="site-footer"></footer>
+  <script type="module">
+    import { bootstrapTrustPage } from '/js/trust-page.js';
+    bootstrapTrustPage();
+  </script>
+</body>
+</html>
