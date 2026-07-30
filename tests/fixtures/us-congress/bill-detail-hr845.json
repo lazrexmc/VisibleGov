@@ -1,0 +1,93 @@
+{
+    "bill": {
+        "actions": {
+            "count": 25,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/actions?format=json"
+        },
+        "amendments": {
+            "count": 1,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/amendments?format=json"
+        },
+        "cboCostEstimates": [
+            {
+                "description": "As ordered reported by the House Committee on Natural Resources on April 9, 2025",
+                "pubDate": "2025-08-28T19:47:00Z",
+                "title": "H.R. 845, Pet and Livestock Protection Act",
+                "url": "https://www.cbo.gov/publication/61710"
+            }
+        ],
+        "committeeReports": [
+            {
+                "citation": "H. Rept. 119-332",
+                "url": "https://api.congress.gov/v3/committee-report/119/HRPT/332?format=json"
+            }
+        ],
+        "committees": {
+            "count": 2,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/committees?format=json"
+        },
+        "congress": 119,
+        "constitutionalAuthorityStatementText": "<pre>\n[Congressional Record Volume 171, Number 21 (Friday, January 31, 2025)]\n[House]\nFrom the Congressional Record Online through the Government Publishing Office [<a href=\"https://www.gpo.gov\">www.gpo.gov</a>]\nBy Ms. BOEBERT:\nH.R. 845.\nCongress has the power to enact this legislation pursuant\nto the following:\nArticle I, Section 8: The Congress shall have Power To lay\nand collect Taxes, Duties, Imposts and Excises, to pay the\nDebts and provide for the common Defence and general Welfare\nof the United States; but all Duties, Imposts and Excises\nshall be uniform throughout the United States\n[Page H433]\n</pre>",
+        "cosponsors": {
+            "count": 37,
+            "countIncludingWithdrawnCosponsors": 37,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/cosponsors?format=json"
+        },
+        "introducedDate": "2025-01-31",
+        "latestAction": {
+            "actionDate": "2025-12-18",
+            "text": "Received in the Senate and Read twice and referred to the Committee on Environment and Public Works."
+        },
+        "legislationUrl": "https://www.congress.gov/bill/119th-congress/house-bill/845",
+        "number": "845",
+        "originChamber": "House",
+        "originChamberCode": "H",
+        "policyArea": {
+            "name": "Environmental Protection"
+        },
+        "relatedBills": {
+            "count": 3,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/relatedbills?format=json"
+        },
+        "sponsors": [
+            {
+                "bioguideId": "B000825",
+                "district": 4,
+                "firstName": "Lauren",
+                "fullName": "Rep. Boebert, Lauren [R-CO-4]",
+                "isByRequest": "N",
+                "lastName": "Boebert",
+                "party": "R",
+                "state": "CO",
+                "url": "https://api.congress.gov/v3/member/B000825?format=json"
+            }
+        ],
+        "subjects": {
+            "count": 6,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/subjects?format=json"
+        },
+        "summaries": {
+            "count": 1,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/summaries?format=json"
+        },
+        "textVersions": {
+            "count": 4,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/text?format=json"
+        },
+        "title": "Pet and Livestock Protection Act",
+        "titles": {
+            "count": 7,
+            "url": "https://api.congress.gov/v3/bill/119/hr/845/titles?format=json"
+        },
+        "type": "HR",
+        "updateDate": "2026-02-04T05:06:25Z",
+        "updateDateIncludingText": "2026-07-18T22:24:41Z"
+    },
+    "request": {
+        "billNumber": "845",
+        "billType": "hr",
+        "congress": "119",
+        "contentType": "application/json",
+        "format": "json"
+    }
+}

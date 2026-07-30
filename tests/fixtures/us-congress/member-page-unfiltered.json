@@ -1,0 +1,435 @@
+{
+    "members": [
+        {
+            "bioguideId": "P000604",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/b760fa371f50c3ff96e1ee3ad53ef9ac_200.jpg"
+            },
+            "district": 10,
+            "name": "Payne, Donald M.",
+            "partyName": "Democratic",
+            "state": "New Jersey",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2024,
+                        "startYear": 2012
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T16:00:33Z",
+            "url": "https://api.congress.gov/v3/member/P000604?format=json"
+        },
+        {
+            "bioguideId": "S001154",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives <a href=\"https://history.house.gov/Collection/Detail/25769807476\">About this object</a>",
+                "imageUrl": "https://www.congress.gov/img/member/2b1f6c8efefb719ed9ea5b0963377921_200.jpg"
+            },
+            "district": 9,
+            "name": "Shuster, Bill",
+            "partyName": "Republican",
+            "state": "Pennsylvania",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2019,
+                        "startYear": 2001
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T16:00:33Z",
+            "url": "https://api.congress.gov/v3/member/S001154?format=json"
+        },
+        {
+            "bioguideId": "H001092",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/789c63845c47f5a311b4bd4d03fde85d_200.jpg"
+            },
+            "district": 5,
+            "name": "Hall, Kwanza",
+            "partyName": "Democratic",
+            "state": "Georgia",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 2021,
+                        "startYear": 2020
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T16:00:32Z",
+            "url": "https://api.congress.gov/v3/member/H001092?format=json"
+        },
+        {
+            "bioguideId": "M000843",
+            "depiction": {
+                "attribution": "Collection of the U.S. House of Representatives",
+                "imageUrl": "https://www.congress.gov/img/member/852af832fa4160dcdf555a21e60cd885_200.jpg"
+            },
+            "district": 13,
+            "name": "Molinari, Susan",
+            "partyName": "Republican",
+            "state": "New York",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "endYear": 1999,
+                        "startYear": 1989
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T16:00:32Z",
+            "url": "https://api.congress.gov/v3/member/M000843?format=json"
+        },
+        {
+            "bioguideId": "G000607",
+            "depiction": {
+                "imageUrl": "https://www.congress.gov/img/member/6a29d4f81c6ce0de6fbae1f7_200.jpg"
+            },
+            "district": 1,
+            "name": "Gallagher, James",
+            "partyName": "Republican",
+            "state": "California",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2026
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/G000607?format=json"
+        },
+        {
+            "bioguideId": "M001246",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/69eb9743277642362f6112ce_200.jpg"
+            },
+            "district": 11,
+            "name": "Mejia, Analilia",
+            "partyName": "Democratic",
+            "state": "New Jersey",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2026
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/M001246?format=json"
+        },
+        {
+            "bioguideId": "F000485",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/69eb95e5277642362f6112c5_200.jpg"
+            },
+            "district": 14,
+            "name": "Fuller, Clay",
+            "partyName": "Republican",
+            "state": "Georgia",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2026
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/F000485?format=json"
+        },
+        {
+            "bioguideId": "M001245",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/698206b2eb30d3271899373e_200.jpg"
+            },
+            "district": 18,
+            "name": "Menefee, Christian D.",
+            "partyName": "Democratic",
+            "state": "Texas",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2026
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/M001245?format=json"
+        },
+        {
+            "bioguideId": "V000139",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/6931b7d5f478c0f1228e9abe_200.jpg"
+            },
+            "district": 7,
+            "name": "Van Epps, Matt",
+            "partyName": "Republican",
+            "state": "Tennessee",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/V000139?format=json"
+        },
+        {
+            "bioguideId": "P000622",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67efdb991b05a5a598f7fde9_200.jpg"
+            },
+            "district": 1,
+            "name": "Patronis, Jimmy",
+            "partyName": "Republican",
+            "state": "Florida",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/P000622?format=json"
+        },
+        {
+            "bioguideId": "F000484",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67efda8c1b05a5a598f7fde0_200.jpg"
+            },
+            "district": 6,
+            "name": "Fine, Randy",
+            "partyName": "Republican",
+            "state": "Florida",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/F000484?format=json"
+        },
+        {
+            "bioguideId": "V000138",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/6774617a0b34857ecc9091b5_200.jpg"
+            },
+            "district": 7,
+            "name": "Vindman, Eugene Simon",
+            "partyName": "Democratic",
+            "state": "Virginia",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/V000138?format=json"
+        },
+        {
+            "bioguideId": "T000490",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/677460190b34857ecc9091a3_200.jpg"
+            },
+            "district": 2,
+            "name": "Taylor, David J.",
+            "partyName": "Republican",
+            "state": "Ohio",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/T000490?format=json"
+        },
+        {
+            "bioguideId": "S001230",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/6797be8bc75fbc6f720e476a_200.jpg"
+            },
+            "district": 10,
+            "name": "Subramanyam, Suhas",
+            "partyName": "Democratic",
+            "state": "Virginia",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/S001230?format=json"
+        },
+        {
+            "bioguideId": "R000622",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67745e360b34857ecc909179_200.jpg"
+            },
+            "district": 19,
+            "name": "Riley, Josh",
+            "partyName": "Democratic",
+            "state": "New York",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/R000622?format=json"
+        },
+        {
+            "bioguideId": "P000621",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67745d3b0b34857ecc909167_200.jpg"
+            },
+            "district": 9,
+            "name": "Pou, Nellie",
+            "partyName": "Democratic",
+            "state": "New Jersey",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/P000621?format=json"
+        },
+        {
+            "bioguideId": "M001240",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67744e930b34857ecc90914f_200.jpg"
+            },
+            "district": 6,
+            "name": "McDowell, Addison P.",
+            "partyName": "Republican",
+            "state": "North Carolina",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/M001240?format=json"
+        },
+        {
+            "bioguideId": "M001239",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67744ba20b34857ecc909149_200.jpg"
+            },
+            "district": 5,
+            "name": "McGuire, John J.",
+            "partyName": "Republican",
+            "state": "Virginia",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/M001239?format=json"
+        },
+        {
+            "bioguideId": "M001237",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/69d7f4ee7304cef7a0c977a8_200.jpg"
+            },
+            "district": 8,
+            "name": "McDonald Rivet, Kristen",
+            "partyName": "Democratic",
+            "state": "Michigan",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/M001237?format=json"
+        },
+        {
+            "bioguideId": "M001236",
+            "depiction": {
+                "attribution": "Image courtesy of the Member",
+                "imageUrl": "https://www.congress.gov/img/member/67744a540b34857ecc909137_200.jpg"
+            },
+            "district": 14,
+            "name": "Moore, Tim",
+            "partyName": "Republican",
+            "state": "North Carolina",
+            "terms": {
+                "item": [
+                    {
+                        "chamber": "House of Representatives",
+                        "startYear": 2025
+                    }
+                ]
+            },
+            "updateDate": "2026-07-29T07:40:29Z",
+            "url": "https://api.congress.gov/v3/member/M001236?format=json"
+        }
+    ],
+    "pagination": {
+        "count": 2694,
+        "next": "https://api.congress.gov/v3/member?offset=20&limit=20&format=json"
+    },
+    "request": {
+        "contentType": "application/json",
+        "format": "json"
+    }
+}

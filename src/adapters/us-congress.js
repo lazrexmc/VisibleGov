@@ -94,6 +94,15 @@ export function parseBillDetail(json) {
     title: b.title ?? '',
     status: b.latestAction?.text ?? null,
     canonical_url: `https://www.congress.gov/bill/${b.congress}th-congress/${slugToPath(b.type)}/${b.number}`,
+    // Task 3 (profile-completeness) addition. Congress.gov's bill-detail response distinguishes
+    // `sponsors` (the official introducing sponsor(s), embedded directly here) from a SEPARATE
+    // `cosponsors` sub-resource (count+url only on this endpoint, its own bill/.../cosponsors
+    // fetch) — cosponsors are out of scope (an extra live request per bill for a field the task
+    // brief doesn't ask for), so every entry in `sponsors` maps to sponsor_type 'primary'. Not a
+    // guess: Congress.gov's own field split is what draws this line, verified against two real
+    // bills (tests/fixtures/us-congress/bill-detail.json HR 498, bill-detail-hr845.json HR 845 —
+    // both single-primary-sponsor, matching this endpoint's documented shape).
+    sponsors: (b.sponsors ?? []).map((s) => ({ bioguide_id: s.bioguideId, sponsor_type: 'primary' })),
   };
 }
 

@@ -204,7 +204,10 @@ async function persistUsCongress(client, runId, data) {
 // Controller ruling: rows with a null start_date can't be deduped by insertIfAbsent's
 // upsert-on-conflict — Postgres unique indexes never treat two NULLs as equal, so every
 // re-run would insert a fresh duplicate term. Manually check for an existing row first.
-async function findExistingTerm(client, { legislatorId, jurisdictionId, chamber, district }) {
+// Exported (2026-07-29, Task 3 of the profile-completeness plan): enrich-federal-bills.js reuses
+// this + upsertTerm below to write House delegation terms with the SAME null-start_date-safe
+// upsert semantics ensureSenateMembers already relies on — no parallel term-matching logic.
+export async function findExistingTerm(client, { legislatorId, jurisdictionId, chamber, district }) {
   let query = client.from('terms').select('id')
     .eq('legislator_id', legislatorId)
     .eq('jurisdiction_id', jurisdictionId)
@@ -215,7 +218,13 @@ async function findExistingTerm(client, { legislatorId, jurisdictionId, chamber,
   return data;
 }
 
-async function upsertTerm(client, runId, { legislatorId, jurisdictionId, party, role }) {
+// Return value added 2026-07-29 (Task 3): { created: true|false|null } so a caller can count
+// created-vs-already-existing honestly (null only on the has-start_date branch, where
+// insertIfAbsent's upsert doesn't report which rows were actually new — no existing caller reads
+// this branch's outcome). Purely additive: every pre-existing caller (ensureSenateMembers,
+// persistMoLegislature) calls this with a bare `await upsertTerm(...)`, discarding the return
+// value, so this changes nothing about their behavior.
+export async function upsertTerm(client, runId, { legislatorId, jurisdictionId, party, role }) {
   const row = {
     legislator_id: legislatorId, jurisdiction_id: jurisdictionId, chamber: role.chamber,
     district: role.district, party, start_date: role.start_date, end_date: role.end_date, run_id: runId,
@@ -224,12 +233,13 @@ async function upsertTerm(client, runId, { legislatorId, jurisdictionId, party, 
     const existing = await findExistingTerm(client, {
       legislatorId, jurisdictionId, chamber: role.chamber, district: role.district,
     });
-    if (existing) return;
+    if (existing) return { created: false };
     const { error } = await client.from('terms').insert(row);
     if (error) throw new Error(`terms insert failed: ${error.message}`);
-    return;
+    return { created: true };
   }
   await insertIfAbsent(client, 'terms', [row], 'legislator_id,jurisdiction_id,chamber,district,start_date');
+  return { created: null };
 }
 
 async function persistMoLegislature(client, runId, data) {
