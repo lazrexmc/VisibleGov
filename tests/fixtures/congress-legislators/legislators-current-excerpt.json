@@ -1,0 +1,10 @@
+[
+  {
+    "id": { "bioguide": "H001089" },
+    "name": { "first": "Joshua", "nickname": "Josh", "last": "Hawley", "official_full": "Josh Hawley" },
+    "terms": [
+      { "type": "sen", "start": "2019-01-03", "end": "2025-01-03", "state": "MO", "class": 1, "party": "Republican" },
+      { "type": "sen", "start": "2025-01-03", "end": "2031-01-03", "state": "MO", "class": 1, "party": "Republican" }
+    ]
+  }
+]

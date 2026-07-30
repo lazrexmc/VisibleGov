@@ -1,3 +1,4 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import {
   getClient, openRun, closeRun, selectAll,
 } from '../lib/db.js';
@@ -58,30 +59,61 @@ import { loadTermIndex, loadLegislatorBioguideIndex } from './backfill-term-stat
 //
 // T8c (coordinator follow-on, 2026-07-30): a live smoke test found US Senate rendering 11 honest
 // candidates for a MO address — every undated historical MO senator matches site/js/districts.js's
-// matchReps with no date evidence to tell them apart (the site already RENDERS each candidate's
-// own date evidence honestly; this pass is what gives that evidence something real to show, for
-// every legislator the 119th-Congress roster can still resolve). `runFederalTermDatesBackfill`
-// fills `terms.start_date`/`end_date` (fills-null only, additive) for `us-congress` terms whose
-// legislator has an EXACT bioguide_id match in the `/member/congress/119` pages, from that
-// member's own service years for the SAME CHAMBER as the term.
+// matchReps with no date evidence to tell them apart. `runFederalTermDatesBackfill` fills
+// `terms.start_date`/`end_date` (fills-null only, additive, both columns guarded `.is(col, null)`
+// on the update) for `us-congress` terms whose legislator has an EXACT bioguide_id match in the
+// `unitedstates/congress-legislators` dataset, from that member's own REAL per-term dates for the
+// SAME CHAMBER as the term.
 //
-// PAYLOAD GRANULARITY (verified against the real committed fixture, tests/fixtures/us-congress/
-// member-page-unfiltered.json — all 20 real members): every `terms.item` entry is YEAR-ONLY
-// (`startYear`/optional `endYear` — no month or day anywhere in the payload), and congress.gov
-// COLLAPSES consecutive same-chamber terms into ONE item spanning the whole stint — e.g. Payne,
-// Donald M. (P000604) shows a SINGLE House item `{startYear:2012, endYear:2024}` covering what was
-// actually six separate 2-year House terms, not six items; Shuster, Bill (S001154) the same
-// (`{startYear:2001, endYear:2019}`, one item for a stint that spanned nine 2-year terms). No
-// member in the fixture carries more than one item for the SAME chamber. `congressionalTermDate`
-// below documents the year -> real-date mapping this granularity forces.
+// FIX ROUND (controller-owned MAJOR, T8c review): the FIRST implementation of this pass derived
+// dates from congress.gov's own member-list payload, which is YEAR-ONLY — it mechanically
+// synthesized both start_date AND end_date as `${year}-01-03` (the 20th Amendment's congressional
+// turnover day). That convention produced PROVABLY FALSE personal dates: Payne, Donald M.
+// (P000604) was rendered with end_date 2024-01-03, when he actually died in office on 2024-04-24;
+// start_date 2012-01-03, when the seat was still held by his father (Donald Payne Sr., who died
+// 2012-03-06) until Payne Jr. won the special election and was sworn in 2012-11-15. Lance approved
+// the fix (2026-07-30): swap the DATE SOURCE entirely to the unitedstates/congress-legislators
+// dataset (public domain, CC0-licensed, bioguide-keyed, REAL per-term DAY-precision dates sourced
+// from the House/Senate Biographical Directory) — never a synthesized calendar convention again.
+// The guard/chamber-isolation/honest-count mechanics from the first round were verified correct by
+// review and are UNCHANGED; only the date SOURCE and its derivation function changed.
 //
-// EFFICIENCY NOTE: this pass fetches the SAME `/member/congress/119` roster the D2 name-fill pass
-// fetches, via its OWN independent gate/fetch — mirrors `runAtLargeBackfill`'s existing
-// independence from D2, rather than threading one shared fetch through three differently-shaped
-// passes. A live run needing BOTH D2 fills AND date fills therefore pays for the ~11-request
-// roster page TWICE (~80s total, throttled, still $0) — a real but bounded, one-time operational
-// cost, ledgered here rather than hidden; not a correctness concern (both fetches read the exact
-// same live data).
+// DATASET SHAPE (verified against the real files, downloaded 2026-07-30 from the URLs below —
+// tests/fixtures/congress-legislators/ holds small excerpts of the SAME real records, not
+// reconstructed data): each record is `{ id: { bioguide }, name: {...}, terms: [...] }`; each term
+// is `{ type: 'rep'|'sen', start: 'YYYY-MM-DD', end: 'YYYY-MM-DD', state, district|class, party,
+// ... }`, terms listed chronologically (oldest first). `legislators-current.json` holds ONLY
+// currently-serving members (each entry's `terms[]` still carries their FULL career, not just the
+// active term); `legislators-historical.json` holds everyone whose service has ended — a person
+// appears in exactly one of the two files, never both. Real-verified: Hawley (H001089)'s CURRENT
+// term in legislators-current.json carries a real `end` of '2031-01-03' — the term's own
+// CONSTITUTIONALLY-SCHEDULED end, not "when he actually left" (he hasn't) — so presence in
+// legislators-current, not a term's own `end` field, is what this pass uses to decide "still
+// serving" (see OPEN SERVICE below); the scheduled-but-not-yet-real end date is never written.
+//
+// CACHE DISCIPLINE (mirrors the LegiScan ZIP-cache discipline exactly — backfill-nicknames.js's
+// own header comment): `legislators-current.json` (~1.4MB) and `legislators-historical.json`
+// (~13.5MB) are downloaded ONCE into `.superpowers/artifacts/congress-legislators/` with a dated
+// filename (this task's own one-time download: `legislators-current-2026-07-30.json`,
+// `legislators-historical-2026-07-30.json` — from https://unitedstates.github.io/congress-
+// legislators/legislators-current.json and .../legislators-historical.json).
+// `readCongressLegislatorsCache` below reads ONLY from that cache directory (picks the
+// lexicographically-latest dated file per prefix — an ISO-dated filename sorts chronologically) —
+// this file makes ZERO live HTTP requests for date data, ever. A missing/unreadable cache is
+// honestly skip-counted
+// (`noMemberFound`, this pass's existing catch-all — Counts unchanged in shape per the fix round's
+// own instruction), never a reason to fetch. The two large files are NEVER committed (gitignored
+// under `.superpowers/`); only the small excerpt fixtures (Payne, Shuster, Hawley — real records,
+// trimmed of non-essential contact-info fields) are committed, under `tests/fixtures/congress-
+// legislators/`.
+//
+// OPEN SERVICE: a member present in `legislators-current.json` whose OWN LAST (most recent) term
+// is of the SAME type as the term being resolved is "open" for that chamber — `end_date` stays
+// null (the site already renders "(end date unrecorded)" honestly for that case,
+// site/js/districts.js's termDateEvidence). Every other case (closed career, or a chamber-mismatch
+// — e.g. a member who moved from the House to the Senate has a CLOSED House stint even though they
+// are still serving overall) uses the real MIN start / MAX end across that member's OWN terms of
+// the matching type only.
 
 const SOURCE = 'backfill-federal-names';
 const CONGRESS = 119; // hardcoded current-congress convention, matches ingest.js/enrich-federal-bills.js
@@ -117,34 +149,13 @@ export async function loadPlaceholderLegislators(client) {
   return data.filter((row) => row.bioguide_id != null && row.full_name === row.bioguide_id);
 }
 
-function classifyServiceChamber(rawChamber) {
-  if (/senate/i.test(rawChamber ?? '')) return 'senate';
-  if (/house/i.test(rawChamber ?? '')) return 'house';
-  return null;
-}
-
-// extractServiceRanges — one raw member's `terms.item[]` -> `{ house: [...], senate: [...] }`, one
-// entry per SOURCE item, UNCOLLAPSED and untouched by parseMemberList's own single-latest-chamber
-// reduction (T8c's date-fill pass needs every stint per chamber, not just the member's current
-// one). See the T8c header comment (PAYLOAD GRANULARITY) for what the real fixture actually shows.
-function extractServiceRanges(rawMember) {
-  const ranges = { house: [], senate: [] };
-  for (const item of rawMember.terms?.item ?? []) {
-    const chamber = classifyServiceChamber(item.chamber);
-    if (!chamber) continue;
-    ranges[chamber].push({ startYear: item.startYear ?? null, endYear: item.endYear ?? null });
-  }
-  return ranges;
-}
-
-// loadFederalMemberIndex -> Map<bioguide_id, { full_name, party, service }> for EVERY member who
-// served in the given congress (current AND departed — the whole reason this uses `/member/
-// congress/{congress}` rather than the current-member-only `/member` endpoint every other caller
-// in this codebase pages). Deliberately does NOT filter through isCurrentMember (ingest.js) — a
-// departed member is exactly who D2 needs to find, and T8c's date-fill pass needs their FULL
-// per-chamber service history either way. `service` (extractServiceRanges, above) is captured in
-// the SAME pass/fetch that already builds `full_name`/`party` for D2 — one roster page read serves
-// both this function's own two callers, not a second read.
+// loadFederalMemberIndex -> Map<bioguide_id, { full_name, party }> for EVERY member who served in
+// the given congress (current AND departed — the whole reason this uses `/member/congress/
+// {congress}` rather than the current-member-only `/member` endpoint every other caller in this
+// codebase pages). Deliberately does NOT filter through isCurrentMember (ingest.js) — a departed
+// member is exactly who D2 needs to find. D2-only (T8c's date-fill pass, below, reads real
+// per-term dates from the unitedstates/congress-legislators cache instead — see that section's own
+// header comment for why congress.gov's own year-only payload was replaced as a date source).
 export async function loadFederalMemberIndex({
   fetchMemberPageFn = fetchMemberPage, congress = CONGRESS,
 } = {}) {
@@ -176,16 +187,7 @@ export async function loadFederalMemberIndex({
     } catch (err) {
       failures.push({ step: `member page offset=${offset}`, message: err.message });
     }
-    // parsed[i] corresponds positionally to withTerms[i] — parseMemberList is a pure .map() over
-    // its input array (src/adapters/us-congress.js), so the two stay index-aligned whenever
-    // parsed is non-empty (a thrown error empties `parsed` entirely for the WHOLE page, per the
-    // catch above — never a partial/misaligned result).
-    for (let i = 0; i < parsed.length; i += 1) {
-      const m = parsed[i];
-      index.set(m.bioguide_id, {
-        full_name: m.full_name, party: m.party, service: extractServiceRanges(withTerms[i]),
-      });
-    }
+    for (const m of parsed) index.set(m.bioguide_id, { full_name: m.full_name, party: m.party });
     if (raw.length < MEMBER_PAGE_SIZE) break;
     offset += MEMBER_PAGE_SIZE;
   }
@@ -253,52 +255,104 @@ export async function runAtLargeBackfill(client, {
   return { counts, plan: dryRun ? plan : undefined };
 }
 
-// ---- T8c: federal term dates from member service years (fills-null) — see header comment ----
+// ---- T8c: federal term dates from the unitedstates/congress-legislators dataset — see header
+// comment (FIX ROUND / DATASET SHAPE / CACHE DISCIPLINE / OPEN SERVICE) ----
 
-const CONGRESS_START_YEAR = 2025; // 119th Congress: Jan 2025 - Jan 2027 (20th Amendment turnover)
+const CONGRESS_LEGISLATORS_CACHE_DIR = '.superpowers/artifacts/congress-legislators';
+const CURRENT_FILE_PREFIX = 'legislators-current-';
+const HISTORICAL_FILE_PREFIX = 'legislators-historical-';
 
-// congressionalTermDate — the 20th Amendment fixes BOTH a new Congress's term START and the
-// OUTGOING term's END at noon, January 3rd (odd-numbered years) — the constitutional turnover day.
-// Since the source payload is year-only (PAYLOAD GRANULARITY, header comment), this is the
-// documented, non-guessed mapping from a bare year to a real calendar date, used identically for
-// both `start_date` and `end_date`.
-function congressionalTermDate(year) {
-  return `${year}-01-03`;
+// CHAMBER_TERM_TYPE — this repo's own 'house'/'senate' chamber vocabulary (terms.chamber) mapped
+// onto the dataset's own printed term `type` ('rep'/'sen' — verified against all three real
+// excerpt records, tests/fixtures/congress-legislators/).
+const CHAMBER_TERM_TYPE = { house: 'rep', senate: 'sen' };
+
+// listCachedLegislatorFiles — every *.json file directly under the cache dir whose name starts
+// with the given prefix, lexicographically sorted (a dated filename, e.g.
+// 'legislators-current-2026-07-30.json', sorts chronologically — the LAST entry is always the
+// latest snapshot on file). Mirrors listCachedDatasetFiles's own "sorted, not readdirSync's raw
+// order" discipline (backfill-nicknames.js) for the identical determinism reason.
+function listCachedLegislatorFiles(cacheDir, prefix) {
+  if (!existsSync(cacheDir)) return [];
+  return readdirSync(cacheDir)
+    .filter((name) => name.startsWith(prefix) && name.endsWith('.json'))
+    .sort()
+    .map((name) => `${cacheDir}/${name}`);
 }
 
-// resolveServiceRangeForChamber — picks ONE range to use for a term. The real fixture never shows
-// more than one range per chamber (PAYLOAD GRANULARITY, header comment), so the multi-range branch
-// below is a documented defensive fallback, not a behavior exercised by any committed fixture data.
-function resolveServiceRangeForChamber(ranges) {
-  if (!ranges || ranges.length === 0) return null;
-  if (ranges.length === 1) return ranges[0];
-  // Multiple stints in the SAME chamber (a gap then a return, or a future API shape not observed
-  // today): prefer whichever range actually COVERS the 119th Congress. If none do (a stale or
-  // incomplete response), fall back to the most-recently-started range rather than guessing an
-  // arbitrary one.
-  const covering = ranges.find((r) => r.startYear != null && r.startYear <= CONGRESS_START_YEAR
-    && (r.endYear == null || r.endYear >= CONGRESS_START_YEAR));
-  if (covering) return covering;
-  return ranges.reduce((latest, r) => ((r.startYear ?? -Infinity) > (latest.startYear ?? -Infinity) ? r : latest));
+// buildCongressLegislatorsIndex -> Map<bioguide, { terms, isCurrent }>. `isCurrent` distinguishes
+// a legislators-current.json record (still serving — see OPEN SERVICE, header comment) from a
+// legislators-historical.json one (career closed). A bioguide with no `id.bioguide` field
+// (malformed/unexpected record shape) is skipped, never indexed under `undefined`.
+function buildCongressLegislatorsIndex(currentRecords, historicalRecords) {
+  const index = new Map();
+  for (const rec of historicalRecords ?? []) {
+    const bioguide = rec?.id?.bioguide;
+    if (!bioguide) continue;
+    index.set(bioguide, { terms: rec.terms ?? [], isCurrent: false });
+  }
+  for (const rec of currentRecords ?? []) {
+    const bioguide = rec?.id?.bioguide;
+    if (!bioguide) continue;
+    index.set(bioguide, { terms: rec.terms ?? [], isCurrent: true }); // a real person is never in
+    // both files at once (verified against the real downloaded data), but current wins on the
+    // (unexpected) chance of an overlap rather than leaving it to insertion order.
+  }
+  return index;
+}
+
+// readCongressLegislatorsCache -> { ok, index }. `ok:false` (empty index) when either file is
+// missing from the cache dir, or either is unreadable/malformed — counted honestly by the caller
+// (this pass's own `noMemberFound` catch-all — see CACHE DISCIPLINE, header comment), NEVER a
+// reason to fetch. Synchronous (a local file read, unlike every network-backed loader in this
+// file) — matches backfill-mo-terms.js's own resolveLatestMoDatasetFile precedent for a sync
+// cache-resolution seam.
+export function readCongressLegislatorsCache({
+  cacheDir = CONGRESS_LEGISLATORS_CACHE_DIR,
+  listFilesFn = listCachedLegislatorFiles,
+  readFileFn = readFileSync,
+} = {}) {
+  const currentFiles = listFilesFn(cacheDir, CURRENT_FILE_PREFIX);
+  const historicalFiles = listFilesFn(cacheDir, HISTORICAL_FILE_PREFIX);
+  if (currentFiles.length === 0 || historicalFiles.length === 0) return { ok: false, index: new Map() };
+  let currentRecords;
+  let historicalRecords;
+  try {
+    currentRecords = JSON.parse(readFileFn(currentFiles[currentFiles.length - 1], 'utf8'));
+    historicalRecords = JSON.parse(readFileFn(historicalFiles[historicalFiles.length - 1], 'utf8'));
+  } catch {
+    return { ok: false, index: new Map() };
+  }
+  return { ok: true, index: buildCongressLegislatorsIndex(currentRecords, historicalRecords) };
 }
 
 // resolveTermDates — pure. `term` needs `jurisdiction_id`/`chamber`/`legislator_id`; returns
-// `{ start_date, end_date }` (end_date null for an open/current service — no endYear on file) or
-// null when nothing can be honestly resolved (never guessed): not a federal term, no bioguide
-// match, bioguide not in the fetched roster, or the member has no service range at all for THIS
-// specific chamber (e.g. a House-only member whose term row is, oddly, chamber:'senate').
+// `{ start_date, end_date }` (real day-precision 'YYYY-MM-DD' strings; `end_date` null for an open
+// service — see OPEN SERVICE, header comment) or null when nothing can be honestly resolved (never
+// guessed): not a federal term, no bioguide match, bioguide absent from BOTH dataset files, or the
+// member has no term of THIS specific chamber's type at all (e.g. a House-only member whose term
+// row is, oddly, chamber:'senate' — never borrows the other chamber's dates).
 export function resolveTermDates(term, { legislatorBioguideIndex, memberIndex }) {
   if (term.jurisdiction_id !== FEDERAL_JURISDICTION) return null;
   const bioguideId = legislatorBioguideIndex.get(term.legislator_id);
   if (!bioguideId) return null;
   const member = memberIndex.get(bioguideId);
   if (!member) return null;
-  const range = resolveServiceRangeForChamber(member.service?.[term.chamber] ?? []);
-  if (!range || range.startYear == null) return null;
-  return {
-    start_date: congressionalTermDate(range.startYear),
-    end_date: range.endYear != null ? congressionalTermDate(range.endYear) : null,
-  };
+  const type = CHAMBER_TERM_TYPE[term.chamber];
+  if (!type) return null;
+
+  const matching = (member.terms ?? []).filter((t) => t.type === type && t.start);
+  if (matching.length === 0) return null;
+
+  const start_date = matching.reduce((min, t) => (t.start < min ? t.start : min), matching[0].start);
+
+  const lastTerm = member.terms[member.terms.length - 1];
+  const openService = member.isCurrent && lastTerm?.type === type;
+  const end_date = openService
+    ? null
+    : matching.reduce((max, t) => (t.end && (!max || t.end > max) ? t.end : max), null);
+
+  return { start_date, end_date };
 }
 
 // loadTermDateIndex -> the FULL `terms` bulk read, `start_date`/`end_date` included. UNGATED —
@@ -318,15 +372,15 @@ function emptyDateCounts() {
 }
 
 // runFederalTermDatesBackfill — the testable seam (mirrors runAtLargeBackfill's own shape:
-// independent gate, independent fetch — see EFFICIENCY NOTE, header comment). dryRun:true performs
-// every read live mode would (terms bulk load, legislator bioguide index, the roster fetch when at
-// least one real candidate needs it) but never writes — `datesFilled`/`partialFilled` stay 0, and
-// every row that WOULD be written lands in `plan` instead.
+// independent gate, independent cache read). dryRun:true performs every read live mode would
+// (terms bulk load, legislator bioguide index, the cache read when at least one real candidate
+// needs it) but never writes — `datesFilled`/`partialFilled` stay 0, and every row that WOULD be
+// written lands in `plan` instead.
 export async function runFederalTermDatesBackfill(client, {
   dryRun = false, runId = null,
   loadTermDateIndexFn = loadTermDateIndex,
   loadLegislatorBioguideIndexFn = loadLegislatorBioguideIndex,
-  loadFederalMemberIndexFn = loadFederalMemberIndex,
+  loadCongressLegislatorsIndexFn = readCongressLegislatorsCache,
 } = {}) {
   const counts = emptyDateCounts();
   const plan = [];
@@ -335,27 +389,30 @@ export async function runFederalTermDatesBackfill(client, {
   counts.termsSeen = rows.length;
 
   const legislatorBioguideIndex = await loadLegislatorBioguideIndexFn(client);
-  const needsRoster = rows.some((t) => t.jurisdiction_id === FEDERAL_JURISDICTION && t.start_date == null
+  const needsDataset = rows.some((t) => t.jurisdiction_id === FEDERAL_JURISDICTION && t.start_date == null
     && legislatorBioguideIndex.has(t.legislator_id));
-  const roster = needsRoster ? await loadFederalMemberIndexFn() : { index: new Map(), failures: [] };
+  const dataset = needsDataset ? loadCongressLegislatorsIndexFn() : { ok: true, index: new Map() };
 
   for (const term of rows) {
     if (term.start_date != null) { counts.alreadyDated += 1; continue; }
     // Non-federal (mo-legislature) undated terms have no bioguide identity to resolve against at
     // all — folded into the same catch-all `noMemberFound` bucket backfill-term-states.js's own
-    // `memberNotFound` uses for its own out-of-scope cases, rather than inventing a 6th bucket the
-    // brief's honest-count list does not ask for.
+    // `memberNotFound` uses for its own out-of-scope cases, rather than inventing a 6th bucket.
     if (term.jurisdiction_id !== FEDERAL_JURISDICTION) { counts.noMemberFound += 1; continue; }
 
-    const resolved = resolveTermDates(term, { legislatorBioguideIndex, memberIndex: roster.index });
+    // Cache missing/unreadable entirely (CACHE DISCIPLINE, header comment): every genuine
+    // candidate folds into the same noMemberFound catch-all — never a fetch, never a crash.
+    if (!dataset.ok) { counts.noMemberFound += 1; continue; }
+
+    const resolved = resolveTermDates(term, { legislatorBioguideIndex, memberIndex: dataset.index });
     if (!resolved) { counts.noMemberFound += 1; continue; }
 
     if (dryRun) { plan.push({ termId: term.id, ...resolved }); continue; }
 
     const patch = { start_date: resolved.start_date, run_id: runId };
-    // end_date stays additive/absent (never guarded/written) when the member's service is still
-    // open (no endYear on file) — the site already renders "(end date unrecorded)" honestly for
-    // that case (site/js/districts.js's termDateEvidence).
+    // end_date stays additive/absent (never guarded/written) for an open service (OPEN SERVICE,
+    // header comment) — the site already renders "(end date unrecorded)" honestly for that case
+    // (site/js/districts.js's termDateEvidence).
     const hasEndDate = resolved.end_date != null;
     if (hasEndDate) patch.end_date = resolved.end_date;
 
@@ -374,7 +431,7 @@ export async function runFederalTermDatesBackfill(client, {
     else counts.partialFilled += 1;
   }
 
-  return { counts, plan: dryRun ? plan : undefined, failures: roster.failures };
+  return { counts, plan: dryRun ? plan : undefined };
 }
 
 // ---- orchestration (D2 + D3 + T8c combined into one run/report) ----
@@ -390,6 +447,7 @@ export async function runBackfillFederalNames(client, {
   loadTermIndexFn = loadTermIndex,
   loadTermDateIndexFn = loadTermDateIndex,
   loadLegislatorBioguideIndexFn = loadLegislatorBioguideIndex,
+  loadCongressLegislatorsIndexFn = readCongressLegislatorsCache,
 } = {}) {
   const counts = emptyCounts();
   const plan = { fills: [] };
@@ -432,7 +490,7 @@ export async function runBackfillFederalNames(client, {
 
   const atLarge = await runAtLargeBackfill(client, { dryRun, runId, loadTermIndexFn });
   const dates = await runFederalTermDatesBackfill(client, {
-    dryRun, runId, loadTermDateIndexFn, loadLegislatorBioguideIndexFn, loadFederalMemberIndexFn,
+    dryRun, runId, loadTermDateIndexFn, loadLegislatorBioguideIndexFn, loadCongressLegislatorsIndexFn,
   });
 
   return {
@@ -440,7 +498,7 @@ export async function runBackfillFederalNames(client, {
     counts,
     atLarge: atLarge.counts,
     dates: dates.counts,
-    failures: [...roster.failures, ...dates.failures],
+    failures: roster.failures,
     plan: dryRun ? { ...plan, atLarge: atLarge.plan, dates: dates.plan } : undefined,
   };
 }
