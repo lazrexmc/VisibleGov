@@ -205,6 +205,17 @@ export function partyComparisonModel(memberTotals, partyTotals) {
 // jurisdiction set, active chamber); cohesion names its real grouping (year AND chamber), its
 // exact exclusion set, the singleton-caster exclusion, the null-party no-figure rule, and the
 // party-normalization equivalence — replacing the earlier, now-FALSE "not normalized" sentences.
+//
+// N2-A (re-review, MED-HIGH blocker, fix round 3): partyComparison's scope description and its
+// group-of-one "no figure" rule both now name YEAR alongside chamber — the party-comparison guard
+// itself gained a year-server-side-scope fix in person-page.js's loadChartsSection (see that
+// file's own comment), and this text would otherwise have understated what the guard actually
+// checks.
+//
+// N2-LOW(d): `staleness` (below) is a DISCLOSURE about all three metrics above, not a fourth
+// metric of its own — kept as a peer key anyway because Task 10 renders every key in this object
+// through the same {title, body} loop; a special-cased shape here would just push that special
+// case onto the renderer instead.
 // ============================================================================
 export const METRIC_DEFINITIONS = {
   distribution: {
@@ -223,9 +234,10 @@ export const METRIC_DEFINITIONS = {
     body: 'The legislator\'s yea share on the roll calls in the current chamber/year filter, shown '
       + 'beside the aggregate yea share of every legislator recorded with the same party (see the '
       + 'normalization note below) within the jurisdictions this legislator has served in and, '
-      + 'when a chamber filter is active, that same chamber — the same scope on both sides, '
-      + 'including the legislator\'s own votes in the party aggregate. This is arithmetic against '
-      + 'a group aggregate, never a comparison between two individual legislators. Party is '
+      + 'when a chamber and/or year filter is active, that same chamber and/or year — the same '
+      + 'scope on both sides, including the legislator\'s own votes in the party aggregate. This '
+      + 'is arithmetic against a group aggregate, never a comparison between two individual '
+      + 'legislators. Party is '
       + 'recorded as our sources printed it, with one documented normalization applied equally to '
       + 'everyone: the abbreviations \'R\', \'D\', and \'I\' are treated as identical to '
       + '\'Republican\', \'Democratic\', and \'Independent\' respectively (a known formatting '
@@ -233,9 +245,10 @@ export const METRIC_DEFINITIONS = {
       + 'recorded. A legislator whose recorded party does not resolve to one of those three common '
       + 'forms has no party-comparison figure at all, rather than being compared against a group '
       + 'of one. The same "no figure" rule applies when this legislator is the ONLY one recorded '
-      + 'with that party within the relevant jurisdictions/chamber — comparing a legislator against '
-      + 'a group that is only themselves would not be a real comparison, so no figure renders in '
-      + 'that case either, even when the party label itself is one of the three common ones.',
+      + 'with that party within the relevant jurisdictions, chamber, and year — comparing a '
+      + 'legislator against a group that is only themselves would not be a real comparison, so no '
+      + 'figure renders in that case either, even when the party label itself is one of the three '
+      + 'common ones.',
   },
   cohesion: {
     title: 'Party-line cohesion',
@@ -257,6 +270,7 @@ export const METRIC_DEFINITIONS = {
       + 'common forms has no cohesion figure at all. This is identical math applied to every '
       + 'legislator — a plain percentage, never a grade, rating, or ranking.',
   },
+  // A disclosure about the three metrics above, not a fourth metric of its own (N2-LOW(d)).
   staleness: {
     title: 'How current are these numbers?',
     body: 'These three charts are computed from a periodically refreshed snapshot of the vote '

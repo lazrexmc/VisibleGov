@@ -80,17 +80,23 @@ function appendQueryParam(path, key, value) {
   return `${path}${sep}${key}=${value}`;
 }
 
-// The one shared primitive every exported function below builds on. Always requests
-// count=exact — restGet's contract ("total from content-range when count=exact requested") is
+// The one shared primitive every exported function below builds on. Requests count=exact BY
+// DEFAULT — restGet's contract ("total from content-range when count=exact requested") is
 // describing this: every read through this module asks for the count, since pagedFetch/
-// countOnly always need it and the cost is one response header.
-async function doFetch(path, { range } = {}) {
+// countOnly always need it and the cost is normally just one response header.
+//
+// N2-LOW(a) (task 6b review, fix round 3): `noCount` opts OUT of that default — a real cost, not
+// just a header, on a `limit=1` existence-style probe (Postgres must otherwise compute an exact
+// total match count even though the caller only ever checks `rows.length > 0`). Default
+// unchanged (`noCount` falsy/omitted behaves exactly as before) — this is additive, not a
+// behavior change for any existing caller.
+async function doFetch(path, { range, noCount } = {}) {
   const { anonKey } = getConfig();
   const headers = {
     apikey: anonKey,
     Authorization: `Bearer ${anonKey}`,
-    Prefer: 'count=exact',
   };
+  if (!noCount) headers.Prefer = 'count=exact';
   if (range) {
     headers['Range-Unit'] = 'items';
     headers.Range = `${range[0]}-${range[1]}`;
@@ -116,8 +122,8 @@ async function doFetch(path, { range } = {}) {
   };
 }
 
-export async function restGet(path) {
-  return doFetch(path);
+export async function restGet(path, { noCount } = {}) {
+  return doFetch(path, { noCount });
 }
 
 export async function pagedFetch(pathWithFilters, { page = 1, pageSize = 50, order } = {}) {

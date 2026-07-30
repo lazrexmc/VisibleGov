@@ -335,6 +335,15 @@ test('migration 0018: SQL-shape assertions — three materialized views, party n
   assert.match(sql, /create or replace function refresh_vote_aggregates/);
   assert.doesNotMatch(sql, /\ncreate function refresh_vote_aggregates/, 'must be CREATE OR REPLACE, not a plain CREATE');
 
+  // N2-LOW(c) (fix round 3): `drop view if exists` precedes each of the two matviews that existed
+  // as PLAIN views in this migration's own round-1 draft — IF EXISTS suppresses "does not exist"
+  // but not a wrong-object-type error, so re-applying against that earlier shape needs this too.
+  // public_party_position_totals never existed as a plain view (new in round 2), so it does NOT
+  // need this extra guard.
+  assert.match(sql, /drop view if exists public_position_totals cascade;\s*\ndrop materialized view if exists public_position_totals cascade/);
+  assert.match(sql, /drop view if exists public_party_alignment cascade;\s*\ndrop materialized view if exists public_party_alignment cascade/);
+  assert.doesNotMatch(sql, /drop view if exists public_party_position_totals/, 'never existed as a plain view — this guard would be a no-op, not a fix');
+
   // Refresh function: security definer, search_path hardened, revoked from public/anon, granted
   // only to service_role, and refreshes all THREE matviews.
   assert.match(sql, /security definer/);
@@ -915,6 +924,69 @@ test('loadChartsSection: N-A — a lone Independent (party rollup returns only t
   assert.notEqual(comparisonSection, null);
   assert.match(comparisonSection.textContent, /not computable/i);
   assert.equal(comparisonSection.querySelector('.chart-bar-fill'), null, 'no bars at all — never two identical member-vs-himself bars');
+});
+
+// N2-A (re-review, MED-HIGH blocker, fix round 3 — "Executed repro" from the reviewer): the
+// group-of-one guard composed with chamber but NOT with year. A same-party colleague (leg-2) who
+// exists ONLY in a year OTHER than the one being viewed used to still satisfy the (year-blind)
+// existence check, so a legislator who is genuinely their party's only member in the FILTERED year
+// rendered a real (but false) comparison built from nobody but their own contribution — twin
+// member-vs-himself bars. Fixed by scoping the existence probe (and the rollup fetch) by year too,
+// exactly like chamber. This test WOULD FAIL under the pre-fix (fix round 2) behavior: the old
+// existence query carried no year predicate at all, so it always found leg-2 (present in 2023)
+// regardless of which year was filtered.
+test('loadChartsSection: N2-A — the group-of-one guard now composes with YEAR too: a same-party colleague who exists only in a DIFFERENT year must not satisfy the guard under a year filter (no-year-filter behavior unchanged)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const existenceUrls = [];
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=in.(')) {
+      // The member has votes in BOTH 2023 and 2024, so filtering to either year never hits the
+      // zero-distribution empty-state early return.
+      return okResponse([
+        totalsRow({
+          legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2023, position: 'yea', casts: 5,
+        }),
+        totalsRow({
+          legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2024, position: 'yea', casts: 5,
+        }),
+      ]);
+    }
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=not.in')) {
+      existenceUrls.push(u);
+      // leg-2 (the other Republican) exists ONLY in 2023 — a query scoped to year=eq.2024 must
+      // find nobody; any other scope (unscoped-by-year, or year=eq.2023) finds leg-2.
+      const foundOutsider = !u.includes('year=eq.2024');
+      return okResponse(foundOutsider ? [{ legislator_id: 'leg-2' }] : []);
+    }
+    if (u.includes('/public_party_position_totals')) {
+      return okResponse([{
+        party: 'Republican', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2024, position: 'yea', casts: 5,
+      }]);
+    }
+    if (u.includes('/public_party_alignment')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  const filters = { chamber: null, year: null };
+  const result = await loadChartsSection(container, {
+    legislatorIds: ['leg-1'], party: 'R', filters, onBarClick: () => {},
+  });
+  assert.notEqual(result, null);
+
+  // No year filter active -> N-F-style fallback derives year=in.(memberYears) — behavior unchanged
+  // from before this fix, a real comparison renders (leg-2 exists somewhere in that range).
+  assert.match(existenceUrls[existenceUrls.length - 1], /year=in\.\(2023,2024\)/);
+  assert.notEqual(container.querySelector('[data-bar="party-comparison-party"]'), null, 'no year filter -> a real comparison renders, unchanged');
+
+  // Filter to year 2024 specifically — the reviewer's repro scenario.
+  filters.year = 2024;
+  await result.rescope();
+  assert.match(existenceUrls[existenceUrls.length - 1], /year=eq\.2024/, 'year is now a SERVER-side scope on the existence probe, mirroring chamber');
+  const comparisonSection = container.querySelector('.chart-party-comparison');
+  assert.match(comparisonSection.textContent, /not computable/i, 'the year-2024-only scope has no outside member -> not computable, never a twin member-vs-himself render');
+  assert.equal(comparisonSection.querySelector('.chart-bar-fill'), null);
 });
 
 // N-B (re-review, HIGH, fix round 2): rescope() is async (it may re-fetch party scope on a

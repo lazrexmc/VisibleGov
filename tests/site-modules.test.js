@@ -45,6 +45,32 @@ test('restGet: returns {status, rows, total}, total parsed from content-range (c
   assert.equal(result.total, 2);
 });
 
+// N2-LOW(a) (task 6b review, fix round 3): a `limit=1` existence-style probe should not pay for an
+// exact count it never reads — `restGet(path, { noCount: true })` omits the `Prefer: count=exact`
+// header entirely. Default (no options / `noCount` omitted) is UNCHANGED — every other caller in
+// the codebase still gets `count=exact` exactly as before this option existed.
+test('restGet: { noCount: true } omits the Prefer: count=exact header (a cheap limit=1 probe never pays for an exact count)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  let capturedHeaders;
+  _setFetch(async (url, opts) => {
+    capturedHeaders = opts.headers;
+    return mockResponse({ status: 200, rows: [{ id: 1 }], contentRange: null });
+  });
+  await restGet('legislators?select=id&limit=1', { noCount: true });
+  assert.equal(capturedHeaders.Prefer, undefined);
+});
+
+test('restGet: with no options (or noCount omitted/false), the Prefer: count=exact header is sent exactly as before', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  let capturedHeaders;
+  _setFetch(async (url, opts) => {
+    capturedHeaders = opts.headers;
+    return mockResponse({ status: 200, rows: [], contentRange: null });
+  });
+  await restGet('legislators?select=id');
+  assert.equal(capturedHeaders.Prefer, 'count=exact');
+});
+
 test('restGet: throws a typed ConfigError (never a silent 401) when config is empty', async () => {
   _setConfig({ url: '', anonKey: '' });
   await assert.rejects(() => restGet('legislators?select=id'), ConfigError);

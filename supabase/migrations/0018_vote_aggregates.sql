@@ -57,6 +57,15 @@
 -- this profile's own ids, in this same party/jurisdiction/chamber scope" — a cheap, per-legislator
 -- `limit=1` query the party ROLLUP view below (public_party_position_totals) cannot answer on its
 -- own, since it has no legislator_id at all by design.
+--
+-- N2-LOW(c) (re-review, fix round 3): `drop view if exists` precedes `drop materialized view if
+-- exists` — IF EXISTS suppresses a "does not exist" error, but NOT a wrong-object-type error, and
+-- this migration's OWN earlier draft (round 1, before the review's materialized-view correction)
+-- created this exact name as a PLAIN view. Re-running this file against a database that still has
+-- that earlier draft's plain view would otherwise fail with "public_position_totals is not a
+-- materialized view" — this makes re-applying genuinely safe against either prior shape, not just
+-- against a from-scratch database.
+drop view if exists public_position_totals cascade;
 drop materialized view if exists public_position_totals cascade;
 create materialized view public_position_totals as
 select
@@ -109,6 +118,10 @@ grant select on public_position_totals to anon, authenticated;
 --   'Democratic', or 'Independent' after the CASE above) is excluded at the source
 --   (normalized_casts below) — such a member simply never appears in this view at all, for any
 --   year/chamber: no figure, never a fabricated one. METRIC_DEFINITIONS states this plainly.
+--
+-- N2-LOW(c): same reasoning as public_position_totals above — this name also existed as a PLAIN
+-- view in this migration's round-1 draft.
+drop view if exists public_party_alignment cascade;
 drop materialized view if exists public_party_alignment cascade;
 create materialized view public_party_alignment as
 with caster_casts as (

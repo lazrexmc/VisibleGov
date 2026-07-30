@@ -579,8 +579,8 @@ export async function loadVotesSection(container, { legislatorIds, filters, vote
 // identical bars, exactly the member-vs-member violation design spec §3 forbids ("never a fake
 // group of one"). fetchPartyScope below runs a SEPARATE, cheap `limit=1` existence check against
 // public_position_totals (still per-legislator) for this alone: does at least one row exist, in
-// the SAME party/jurisdiction/chamber scope, for a legislator OTHER than this profile's own ids?
-// A failed/uncertain check is treated conservatively as "no confirmed outside members" (never
+// the SAME party/jurisdiction/chamber/year scope, for a legislator OTHER than this profile's own
+// ids? A failed/uncertain check is treated conservatively as "no confirmed outside members" (never
 // computable) — the safe failure direction for a neutrality requirement.
 //
 // N-F (re-review, fix round 2): even with NO chamber filter selected, the party fetch (and the
@@ -588,19 +588,29 @@ export async function loadVotesSection(container, { legislatorIds, filters, vote
 // from memberRows) — never silently widened to every chamber under a shared jurisdiction id — so
 // the default (unfiltered) view stays "same scope both sides" too, not just the filtered one.
 //
-// Because chamber is a SERVER-side filter on the party-scope fetch (unlike year, which stays
-// client-side on both sides via summarizeTotals — chamber has far lower cardinality and this is
-// what the review's scoping language calls for), `rescope()` is async and re-fetches party scope
-// only when `filters.chamber` has actually changed since the last fetch.
+// N2-A (re-review, MED-HIGH blocker, fix round 3): the group-of-one guard composed with chamber
+// but NOT with year — the existence check had no year predicate, so a legislator who is their
+// party's ONLY member in the FILTERED year (a different member exists, but only in a different
+// year) could still pass it, because the check found that other-year member and reported "yes,
+// someone else exists" for a scope broader than what the rendered comparison actually narrows to.
+// Fixed by giving year the EXACT SAME treatment as chamber (see yearParams below): a server-side
+// scope on both the rollup fetch and the existence probe, and part of the party-scope cache key.
+//
+// Because chamber AND year are now BOTH server-side filters on the party-scope fetch (year stays
+// ALSO a redundant-but-harmless client-side narrowing via summarizeTotals, same relationship
+// chamber already had with it), `rescope()` is async and re-fetches party scope whenever EITHER
+// `filters.chamber` or `filters.year` has actually changed since the last fetch.
 //
 // N-B (re-review, HIGH, fix round 2): rescope() being async and re-fetched on every filter change
-// is a real race — two rapid chamber switches can resolve OUT OF ORDER (network responses do not
-// preserve request order), which without a guard would leave a STALE chamber's numbers rendered
-// under a page whose filter controls already show the NEWER chamber. Mirrors loadVotesSection's
-// own voteGeneration pattern exactly (see its own comment above): `generation` increments
+// is a real race — two rapid chamber/year switches can resolve OUT OF ORDER (network responses do
+// not preserve request order), which without a guard would leave a STALE scope's numbers rendered
+// under a page whose filter controls already show the NEWER one. Mirrors loadVotesSection's own
+// voteGeneration pattern exactly (see its own comment above): `generation` increments
 // synchronously as rescope()'s very first statement (before any await, so nothing can interleave
 // before this call's own generation number is captured), `isStale()` is checked after the async
-// work, and a superseded call stands down silently rather than render over a newer result.
+// work, and a superseded call stands down silently rather than render over a newer result. This
+// guard already covers N2-A's widened {chamber, year} trigger condition — no new race-guard logic
+// was needed for it.
 export async function loadChartsSection(container, {
   legislatorIds, party, filters, onBarClick, onReady,
 }) {
@@ -644,21 +654,48 @@ export async function loadChartsSection(container, {
   const jurisdictionIds = [...new Set(memberRows.map((row) => row.jurisdiction_id).filter(Boolean))];
   // N-F: the member's OWN chambers, used whenever no chamber filter is active — see chamberParams.
   const memberChambers = [...new Set(memberRows.map((row) => row.chamber).filter(Boolean))];
+  // N2-A (re-review, MED-HIGH blocker, fix round 3): mirrors memberChambers exactly, for the SAME
+  // reason — see yearParams below.
+  const memberYears = [...new Set(memberRows.map((row) => row.year).filter((y) => y != null))];
 
+  // N2-LOW(b) (re-review, fix round 3): every in.()/eq. value below is individually
+  // encodeURIComponent'd, matching the `party` value's own encoding — consistency, not a live bug
+  // fix (chamber/jurisdiction/year values are all internally-controlled enum-like strings/ints
+  // today, never raw user text), but the SAME discipline applied uniformly rather than encoding
+  // one value and not its neighbors.
   function chamberParams(chamber) {
-    if (chamber) return [`chamber=eq.${chamber}`];
-    if (memberChambers.length > 0) return [`chamber=in.(${memberChambers.join(',')})`];
+    if (chamber) return [`chamber=eq.${encodeURIComponent(chamber)}`];
+    if (memberChambers.length > 0) return [`chamber=in.(${memberChambers.map(encodeURIComponent).join(',')})`];
     return [];
   }
 
-  async function fetchPartyScope(chamber) {
+  // N2-A (re-review, MED-HIGH blocker, fix round 3 — "Executed repro" from the reviewer): the
+  // group-of-one guard composed with chamber (both the rollup fetch and the existence probe were
+  // already chamber-scoped) but NOT with year, while the RENDERED comparison narrows by
+  // filters.year client-side. Concretely: a legislator who is their party's ONLY member in the
+  // FILTERED year (a different member of the same party exists, but only in a DIFFERENT year) used
+  // to pass the existence check — because that check had no year predicate at all, it found the
+  // other-year member and reported "yes, someone else exists," even though the year-narrowed
+  // comparison the page actually renders would have been built from nobody but this legislator's
+  // own contribution to that one year's party-rollup row. Fixed by mirroring chamber exactly: year
+  // is now ALSO a server-side scope on both fetches (not just a client-side narrowing of
+  // already-fetched all-years data via summarizeTotals, which stays as a now-redundant-but-
+  // harmless double-check, same relationship chamber already has with summarizeTotals).
+  function yearParams(year) {
+    if (year != null) return [`year=eq.${encodeURIComponent(year)}`];
+    if (memberYears.length > 0) return [`year=in.(${memberYears.map(encodeURIComponent).join(',')})`];
+    return [];
+  }
+
+  async function fetchPartyScope(chamber, year) {
     if (!normalizedParty || jurisdictionIds.length === 0) {
       return { rows: [], hasOutsideMembers: false };
     }
     const baseParams = [
       `party=eq.${encodeURIComponent(normalizedParty)}`,
-      `jurisdiction_id=in.(${jurisdictionIds.join(',')})`,
+      `jurisdiction_id=in.(${jurisdictionIds.map(encodeURIComponent).join(',')})`,
       ...chamberParams(chamber),
+      ...yearParams(year),
     ];
     let rows = [];
     try {
@@ -671,10 +708,13 @@ export async function loadChartsSection(container, {
     }
     let hasOutsideMembers = false;
     try {
-      // N-A: a single limit=1 existence check, per-legislator view — answers "is anyone besides
-      // this profile's own legislator ids in this exact party/jurisdiction/chamber scope?"
+      // N-A/N2-A: a single limit=1 existence check, per-legislator view — answers "is anyone
+      // besides this profile's own legislator ids in this EXACT party/jurisdiction/chamber/year
+      // scope?" N2-LOW(a): `noCount` — this is a pure existence probe, `rows.length > 0` is the
+      // only thing ever read, so there is no reason to also pay for an exact total-match count.
       const existence = await restGet(
         `public_position_totals?${baseParams.join('&')}&legislator_id=not.in.(${legislatorIds.join(',')})&select=legislator_id&limit=1`,
+        { noCount: true },
       );
       hasOutsideMembers = existence.rows.length > 0;
     } catch {
@@ -683,8 +723,9 @@ export async function loadChartsSection(container, {
     return { rows, hasOutsideMembers };
   }
 
-  let partyScope = await fetchPartyScope(filters.chamber);
+  let partyScope = await fetchPartyScope(filters.chamber, filters.year);
   let partyScopeChamber = filters.chamber;
+  let partyScopeYear = filters.year;
 
   const generation = { current: 0 };
 
@@ -700,16 +741,21 @@ export async function loadChartsSection(container, {
       return;
     }
 
-    if (filters.chamber !== partyScopeChamber) {
-      const freshScope = await fetchPartyScope(filters.chamber);
-      // Check staleness BEFORE writing to the shared partyScope/partyScopeChamber cache — a
-      // stale call must never clobber what a newer, already-rendered call left behind. Without
-      // this ordering, a slow-to-resolve stale fetch could overwrite partyScopeChamber back to
-      // ITS OWN (stale) chamber even after skipping its own render below, which would then make
-      // the NEXT real call wrongly think a re-fetch is needed for a chamber that's already cached.
+    // N2-A (fix round 3): the cache key is now {chamber, year} — either dimension changing
+    // re-fetches party scope, mirroring how chamber alone triggered it before. The N-B generation
+    // guard already covers this widened trigger condition; no new race-guard logic needed.
+    if (filters.chamber !== partyScopeChamber || filters.year !== partyScopeYear) {
+      const freshScope = await fetchPartyScope(filters.chamber, filters.year);
+      // Check staleness BEFORE writing to the shared partyScope/partyScopeChamber/partyScopeYear
+      // cache — a stale call must never clobber what a newer, already-rendered call left behind.
+      // Without this ordering, a slow-to-resolve stale fetch could overwrite the cache key back to
+      // ITS OWN (stale) {chamber, year} even after skipping its own render below, which would then
+      // make the NEXT real call wrongly think a re-fetch is needed for a scope that's already
+      // cached.
       if (isStale()) return;
       partyScope = freshScope;
       partyScopeChamber = filters.chamber;
+      partyScopeYear = filters.year;
     }
     if (isStale()) return; // a newer rescope call has already superseded this one — stand down
 
