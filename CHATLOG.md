@@ -692,3 +692,17 @@ logged its own error: briefly misread flag timestamps as evidence of test pollut
 Playbook lesson 13 (surname is not identity; plans state MUST conditions) came out of this.
 Live state: 7 persons, 16 links, 0 open flags. Migrations 0012/0013 applied. jsdom approved
 (dev-only, third approved dependency). Final review + merge menu next.
+
+---
+
+## 2026-07-30 (overnight) — profile completeness: the $0 night
+
+While Lance slept: Missouri sponsorship landed in full (45,792 rows, exact dry-run match; Onder:
+179 sponsored bills), the federal enrichment pass began (sponsors/status/texts + 429 parties,
+437 terms in the member sweep; 428 bills continuing in background), attach-to-existing shipped
+with three execution-proven Criticals fixed (incl. the machine-endorsed-Bayh-trap), and the
+summary system went live on the subscription path: 8 bills authored by opus subagents, refuted
+by sonnet subagents, mechanically gated — 4 published with receipts, 4 flagged on genuine
+citation-precision catches, zero API dollars. The record gate rejected nothing incorrectly and
+published nothing unverified. Migrations 0014/0015 applied. Final whole-branch review next;
+merge menu awaits Lance's morning.
