@@ -1156,6 +1156,10 @@ function identityFakeClient({
   // itself passed.
   raceOnLegislatorUpdateFor = null,
   raceOnPersonLinksFor = null,
+  // failCleanupDelete (micro-round, re-review): makes the orphan-cleanup persons.delete() itself
+  // return an error, the exact scenario the re-reviewer proved by execution the route never
+  // checked for.
+  failCleanupDelete = false,
 } = {}, onCall) {
   const record = (table, method, args) => { if (onCall) onCall(table, method, args); };
   // Real Supabase generates a fresh uuid per insert; a fixed canned id would make every 'link'
@@ -1298,6 +1302,9 @@ function identityFakeClient({
             return {
               eq: (col, val) => {
                 record(table, 'eq', [col, val]);
+                if (failCleanupDelete) {
+                  return Promise.resolve({ error: { message: 'simulated cleanup delete failure' } });
+                }
                 if (col === 'id') deletedPersonIds.push(val);
                 return Promise.resolve({ error: null });
               },
@@ -1820,6 +1827,54 @@ test('POST /api/identity/decision link: double-submit interleave — the FIRST (
     assert.equal(legislatorsById.get('leg-b').person_id, null, 'never reached — the loop aborted on leg-a first');
     assert.deepEqual(client.insertedPersonIds, ['person-new-1']);
     assert.deepEqual(client.deletedPersonIds, ['person-new-1'], 'the orphaned person (zero links landed) is cleaned up rather than left stranded');
+  }, client);
+});
+
+// Micro-round (re-review, execution-proven): the orphan-cleanup persons.delete() call never
+// checked its own error return — a failed cleanup silently stranded an anon-readable orphaned
+// persons row while the client still got a clean, unremarkable 409. Fixed to surface it honestly
+// on BOTH sides: the 409 response body itself, and a server-side console.error (this file's own
+// established convention for an unexpected condition — sendServerError's `[review-server]
+// <context>:` prefix).
+test('POST /api/identity/decision link: the orphan-cleanup delete ITSELF failing -> 409 body carries the cleanup-failed notice, server logs it', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'X', bioguide_id: 'X1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Y', bioguide_id: 'Y1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const client = identityFakeClient({
+    flags: [flag], legislatorsById, raceOnLegislatorUpdateFor: 'leg-a', failCleanupDelete: true,
+  });
+  const originalConsoleError = console.error;
+  const loggedCalls = [];
+  console.error = (...args) => { loggedCalls.push(args); };
+  return withServer(async (base) => {
+    try {
+      const res = await fetch(`${base}/api/identity/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'] }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 409);
+      assert.equal(body.error, 'concurrent link detected');
+      assert.equal(body.cleanup, 'failed — orphaned person person-new-1 requires manual removal');
+      assert.deepEqual(client.deletedPersonIds, [], 'the delete call was attempted but itself failed — never recorded as succeeded');
+      assert.ok(
+        loggedCalls.some((call) => String(call[0]).includes('[review-server]') && String(call[0]).toLowerCase().includes('cleanup')),
+        'the cleanup failure is logged server-side, same [review-server] convention as every other unexpected condition in this file',
+      );
+    } finally {
+      console.error = originalConsoleError;
+    }
   }, client);
 });
 

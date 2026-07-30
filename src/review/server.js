@@ -975,7 +975,19 @@ async function handleIdentityDecision(client, req, res) {
       if (loopErr instanceof PersonLinkRaceError && linkedCount === 0) {
         // Nothing links to the just-created person yet — clean it up rather than leaving an
         // orphaned row with zero person_links pointing at it.
-        await client.from('persons').delete().eq('id', personId);
+        const { error: cleanupErr } = await client.from('persons').delete().eq('id', personId);
+        if (cleanupErr) {
+          // Micro-round (re-review, execution-proven): the cleanup delete's OWN error return was
+          // never checked — a failed cleanup silently stranded an anon-readable orphaned persons
+          // row while the client still got a clean 409, as if nothing were wrong. Logged the same
+          // way every other unexpected error in this file is (sendServerError's own
+          // `[review-server] <context>:` convention) AND surfaced honestly in the 409 body itself
+          // — the orphan is never invisible to the caller either, since it requires a human to
+          // actually go remove it.
+          console.error('[review-server] identity-decision cleanup:', cleanupErr);
+          loopErr.cleanupFailed = true;
+          loopErr.orphanedPersonId = personId;
+        }
       }
       throw loopErr;
     }
@@ -1003,6 +1015,16 @@ async function handleIdentityDecision(client, req, res) {
       return;
     }
     if (err instanceof PersonLinkRaceError) {
+      // Micro-round (re-review): if the orphan cleanup itself failed (flagged on the error above),
+      // the 409 body says so honestly — 'requires manual removal' is a literal, actionable fact,
+      // not just an internal detail swallowed by the generic race message below.
+      if (err.cleanupFailed) {
+        sendJson(res, 409, {
+          error: 'concurrent link detected',
+          cleanup: `failed — orphaned person ${err.orphanedPersonId} requires manual removal`,
+        });
+        return;
+      }
       sendJson(res, 409, { error: 'one or more selected legislators were linked by a concurrent request' });
       return;
     }
