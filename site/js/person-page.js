@@ -32,12 +32,22 @@ import {
 // URL contract: `/person/<uuid>[/<slug-ignored>]`. The uuid is authoritative; a trailing name
 // segment is cosmetic and ignored by lookup (design spec §2). Returns null on anything that
 // doesn't carry a real id after the given prefix — never throws on a malformed/foreign path.
+//
+// LOW-8 (task review, fix round 3): the id segment must actually BE uuid-shaped. Without this, a
+// non-uuid path segment (a REST filter-injection attempt, or just garbage) flowed straight into
+// PostgREST query strings built elsewhere (`persons?id=eq.<id>`, `legislators?person_id=eq.<id>`)
+// AND, on a not-found result, into an infinite self-retry loop (renderNotFound's retry re-runs
+// the exact same doomed lookup forever). Rejecting non-uuid shapes here, before either of those,
+// closes both at once.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function idFromPath(pathname, prefix) {
   if (typeof pathname !== 'string' || typeof prefix !== 'string') return null;
   if (!pathname.startsWith(prefix)) return null;
   const rest = pathname.slice(prefix.length);
   const [id] = rest.split('/');
-  return id ? id : null;
+  if (!id || !UUID_PATTERN.test(id)) return null;
+  return id;
 }
 
 // Step 4 of the brief's data flow: for the CURRENT page's distinct bill_ids, one summaries query
@@ -89,7 +99,9 @@ export function relevantFreshnessRows(freshnessRows, jurisdictionIds) {
 // never re-derived ad hoc at render time. total === null is a defensive fallback for a
 // malformed/missing content-range header, not an expected live path (rest.js's doFetch always
 // requests count=exact) — treated conservatively as "don't offer a next page into the unknown."
-export function paginationSummary({ page, pageSize, total }) {
+export function paginationSummary({
+  page, pageSize, total, rowsLength,
+}) {
   const p = Math.max(1, Number(page) || 1);
   const size = Math.max(1, Number(pageSize) || 50);
   const hasTotal = typeof total === 'number' && Number.isFinite(total);
@@ -102,7 +114,18 @@ export function paginationSummary({ page, pageSize, total }) {
   }
 
   const start = (p - 1) * size + 1;
-  const end = t === null ? p * size : Math.min(p * size, t);
+  let end;
+  if (t !== null) {
+    end = Math.min(p * size, t);
+  } else {
+    // LOW-12 (task review, fix round 3): total unknown (defensive — not an expected live path,
+    // see above) — `end` must reflect the rows ACTUALLY returned, not an assumed full page. A
+    // short final page must never be padded out to claim more rows exist than really came back.
+    // No rowsLength given (a caller that predates this param) falls back to the old full-page
+    // assumption — backward compatible.
+    const n = Number.isFinite(rowsLength) ? Math.max(0, rowsLength) : size;
+    end = start + n - 1;
+  }
   const pageCount = t === null ? null : Math.max(1, Math.ceil(t / size));
   const hasPrev = p > 1;
   const hasNext = t === null ? false : end < t;
@@ -157,13 +180,18 @@ function billHref(billId, identifierOrTitle) {
   return `/bill/${billId}/${slugify(identifierOrTitle)}`;
 }
 
-function renderPhoto(container, legislatorLike, displayName) {
+// Exported (fix round 3, LOW-11) for direct testing. render.js's src guard is https-only/no-
+// relative (see render.js's own comment) — if a stored image_url (or, in principle, a malformed
+// bioguide derivation) ever failed that guard, el() would THROW mid-render. Checked here, BEFORE
+// el() is ever called, rather than caught after the fact, so a bad photo URL degrades to the
+// honest no-photo state instead of taking the whole identity render down with it.
+export function renderPhoto(container, legislatorLike, displayName) {
   const url = photoUrl(legislatorLike);
-  if (url) {
+  if (url && /^https:\/\//i.test(url)) {
     container.appendChild(el('img', { class: 'profile-photo', src: url, alt: displayName || 'photo' }));
-  } else {
-    container.appendChild(el('p', { class: 'profile-no-photo' }, 'No photo on record.'));
+    return;
   }
+  container.appendChild(el('p', { class: 'profile-no-photo' }, 'No photo on record.'));
 }
 
 // Exported (fix round 1, finding 2) so tests/person-page.test.js can assert directly that a
@@ -223,7 +251,16 @@ function renderVoteRow(voteRow, oneLinerMap) {
 
   const receiptUrl = voteReceiptUrl(voteRow);
   if (receiptUrl) {
-    li.appendChild(el('a', { class: 'vote-receipt-link', href: receiptUrl }, 'source'));
+    // HIGH-1 "while there" (task review, fix round 3): a recorded-but-malformed/hostile
+    // source_url would trip render.js's href allowlist and throw — wrapped locally so ONE bad
+    // url degrades this ONE row to an honest notice instead of taking the other 49 rows on the
+    // page down with it (the outer containment below is the last-resort backstop, not the
+    // primary mechanism, for exactly this class of fault).
+    try {
+      li.appendChild(el('a', { class: 'vote-receipt-link', href: receiptUrl }, 'source'));
+    } catch {
+      li.appendChild(el('span', { class: 'vote-receipt-unavailable' }, 'source unavailable'));
+    }
   }
 
   if (voteRow.flagged) {
@@ -238,7 +275,9 @@ function renderVoteRow(voteRow, oneLinerMap) {
 // Prev/Next buttons, disabled at bounds. onPageChange is loadVotesSection's own reload, already
 // wrapped in the same error handling as everything else on this page.
 function renderPaginationControls(pageResult, onPageChange) {
-  const summary = paginationSummary({ page: pageResult.page, pageSize: pageResult.pageSize, total: pageResult.total });
+  const summary = paginationSummary({
+    page: pageResult.page, pageSize: pageResult.pageSize, total: pageResult.total, rowsLength: pageResult.rows.length,
+  });
   const nav = el('div', { class: 'vote-pagination' });
   const summaryText = summary.total !== null
     ? `Showing ${summary.start}–${summary.end} of ${summary.total}`
@@ -343,7 +382,9 @@ async function loadIdentitySection(container, { person, legislators, legislatorI
     sectionState(container, {
       state: 'failed',
       message: "Couldn't load this legislator's identity — retry",
-      onRetry: () => { loadIdentitySection(container, { person, legislators, legislatorIds }); },
+      // LOW-6 (task review, fix round 3): catch-wrapped like votes' `reload` — a retry-triggered
+      // network failure must never surface as an unhandled rejection.
+      onRetry: () => { loadIdentitySection(container, { person, legislators, legislatorIds }).catch(() => {}); },
     });
     throw err;
   }
@@ -354,11 +395,38 @@ async function loadIdentitySection(container, { person, legislators, legislatorI
 // Exported (fix round 1, finding 1) so tests/person-page.test.js can assert directly that a
 // rejecting fetch (rest.js's RestError on a non-2xx, e.g. the live statement-timeout 500) routes
 // to the FAILED state, never the empty one — the exact violation the live smoke caught.
-export async function loadVotesSection(container, { legislatorIds, filters }) {
-  // Reused by both the failed-state retry button and the pagination Prev/Next buttons below —
-  // one re-entry path, always error-swallowed the same way runVotes() is in mountProfile (a
-  // network failure while paginating must never surface as an unhandled rejection).
-  const reload = () => loadVotesSection(container, { legislatorIds, filters }).catch(() => {});
+//
+// voteGeneration (MED-5, task review, fix round 3): a filter/page change while a PRIOR call is
+// still in flight is a real race — network responses can resolve OUT OF ORDER, so without this,
+// whichever call resolves LAST wins the render even if it's the stale one, leaving the vote list
+// mismatched against the currently-selected filter controls. Every re-entry path (filter changes
+// via mountProfile's runVotes, retries and pagination via `reload` below) shares the SAME
+// voteGeneration object by reference, so incrementing it here — the one place every re-entry
+// funnels through — covers all of them uniformly. Incrementing happens synchronously as the
+// very first statement, before any await, so no other call can interleave before this call's own
+// "am I still current" checks are meaningful. A caller that omits voteGeneration (a direct/
+// isolated invocation, e.g. most tests) gets its own private counter and is never stale relative
+// to itself — fully backward compatible.
+export async function loadVotesSection(container, { legislatorIds, filters, voteGeneration }) {
+  const generation = voteGeneration || { current: 0 };
+  generation.current += 1;
+  const myGeneration = generation.current;
+  const isStale = () => generation.current !== myGeneration;
+
+  // Reused by the failed-state retry button and the pagination Prev/Next buttons below — one
+  // re-entry path, always error-swallowed the same way mountProfile's runVotes() is (a network
+  // failure while paginating/retrying must never surface as an unhandled rejection).
+  const reload = () => loadVotesSection(container, { legislatorIds, filters, voteGeneration: generation }).catch(() => {});
+
+  // LOW-10 (task review, fix round 3): no legislator ids at all -> nothing to honestly query. An
+  // empty in.() is either a PostgREST error or an accidental match-everything depending on exact
+  // syntax — never fire it; this is an honest empty result, not a fetch that needs to happen.
+  if (!legislatorIds || legislatorIds.length === 0) {
+    sectionState(container, { state: 'empty', message: 'No recorded votes for this filter.' });
+    return {
+      rows: [], total: 0, page: filters.page || 1, pageSize: 50,
+    };
+  }
 
   sectionState(container, { state: 'loading' });
   let page;
@@ -368,6 +436,7 @@ export async function loadVotesSection(container, { legislatorIds, filters }) {
       pageSize: 50,
     });
   } catch (err) {
+    if (isStale()) return null; // a newer call has already superseded this one — stand down silently
     sectionState(container, {
       state: 'failed',
       message: "Couldn't load votes — retry",
@@ -376,17 +445,26 @@ export async function loadVotesSection(container, { legislatorIds, filters }) {
     throw err;
   }
 
+  if (isStale()) return page;
+
   if (page.rows.length === 0) {
     sectionState(container, { state: 'empty', message: 'No recorded votes for this filter.' });
     return page;
   }
 
-  // Step 4: current page's distinct bill_ids -> one summaries query -> one-liner map.
+  // Step 4: current page's distinct bill_ids -> one summaries query -> one-liner map. LOW-7
+  // (task review, fix round 3, accepted deviation, documented): a plain restGet, not
+  // fetchAllRows/pagedFetch — this in.() list is bounded by <=50 distinct bill_ids (one per row
+  // on a 50-row page) and can never legitimately need pagination of its own.
   const billIds = [...new Set(page.rows.map((r) => r.bill_id).filter(Boolean))];
   let oneLinerMap = new Map();
   try {
     const summaryRows = billIds.length > 0
-      ? (await restGet(`summaries?bill_id=in.(${billIds.join(',')})&status=eq.published&select=bill_id,body_md,published_at&order=published_at.desc`)).rows
+      // LOW-9 (task review, fix round 3): published_at.desc.nullslast,created_at.desc — a tie (or
+      // a null published_at, which shouldn't occur on a status=eq.published row but costs
+      // nothing to guard) breaks on created_at, so buildOneLinerMap's "first per bill_id" always
+      // means the CURRENT published version, never an arbitrary/unordered row.
+      ? (await restGet(`summaries?bill_id=in.(${billIds.join(',')})&status=eq.published&select=bill_id,body_md,published_at&order=published_at.desc.nullslast,created_at.desc`)).rows
       : [];
     oneLinerMap = buildOneLinerMap(summaryRows);
   } catch {
@@ -396,27 +474,61 @@ export async function loadVotesSection(container, { legislatorIds, filters }) {
     oneLinerMap = new Map();
   }
 
-  // Step 5: current page's vote_ids -> reconciliation flags -> badge join.
+  if (isStale()) return page;
+
+  // Step 5: current page's vote_ids -> reconciliation flags -> badge join. LOW-7: bounded by
+  // <=50 vote_ids (one per row on a 50-row page), same accepted-deviation reasoning as above.
   const voteIds = [...new Set(page.rows.map((r) => r.vote_id).filter(Boolean))];
   let flaggedRows = page.rows;
+  let flagsUnavailable = false;
   try {
+    // MED-4 (CONTROLLER RULING, plan-level, task review fix round 3): resolved=is.false — an
+    // ADJUDICATED discrepancy is not an open dispute; only unresolved flags are worth surfacing
+    // as a live badge on a public profile page.
     const flagRows = voteIds.length > 0
-      ? (await restGet(`public_reconciliation_flags?vote_id=in.(${voteIds.join(',')})`)).rows
+      ? (await restGet(`public_reconciliation_flags?vote_id=in.(${voteIds.join(',')})&resolved=is.false`)).rows
       : [];
     flaggedRows = joinFlagBadges(page.rows, flagRows);
   } catch {
-    // Same reasoning as one-liners: flags are additive to an already-successful votes fetch.
+    // MED-3 (skip != empty, task review, fix round 3): unlike one-liners, silently defaulting
+    // every row to unflagged here would be an AFFIRMATIVE claim ("no known discrepancy") on data
+    // this fetch actually failed to load — absence of a flag badge IS a claim. flagsUnavailable
+    // renders a visible notice alongside the (still-successful) vote rows instead of pretending
+    // the flags fetch simply found nothing.
     flaggedRows = joinFlagBadges(page.rows, []);
+    flagsUnavailable = true;
   }
 
-  sectionState(container, { state: 'ready' });
-  const list = el('ul', { class: 'vote-list' });
-  for (const row of flaggedRows) list.appendChild(renderVoteRow(row, oneLinerMap));
-  container.appendChild(list);
-  container.appendChild(renderPaginationControls(page, (newPage) => {
-    Object.assign(filters, nextVoteFilters(filters, { page: newPage }));
-    reload();
-  }));
+  if (isStale()) return page;
+
+  // HIGH-1 (task review, fix round 3): the render phase itself can throw (a hostile/malformed
+  // value tripping render.js's attribute guard, or any other unforeseen fault) — if that escaped
+  // uncaught here, the section would be left in the CLEARED 'ready' state with a half-built or
+  // empty DOM and no failed/retry affordance at all: a blank section, worse than either honest
+  // state. Wrapped so any throw during rendering routes to the SAME failed-with-retry path as a
+  // fetch failure. (A single row's bad source_url is handled locally inside renderVoteRow — see
+  // its own try/catch — so it degrades that ONE row instead of ever reaching this backstop.)
+  try {
+    sectionState(container, { state: 'ready' });
+    if (flagsUnavailable) {
+      container.appendChild(el('p', { class: 'flags-unavailable-notice' }, 'Reconciliation-flag status unavailable for this page.'));
+    }
+    const list = el('ul', { class: 'vote-list' });
+    for (const row of flaggedRows) list.appendChild(renderVoteRow(row, oneLinerMap));
+    container.appendChild(list);
+    container.appendChild(renderPaginationControls(page, (newPage) => {
+      Object.assign(filters, nextVoteFilters(filters, { page: newPage }));
+      reload();
+    }));
+  } catch (err) {
+    sectionState(container, {
+      state: 'failed',
+      message: "Couldn't load votes — retry",
+      onRetry: reload,
+    });
+    throw err;
+  }
+
   return page;
 }
 
@@ -437,16 +549,37 @@ async function loadSponsorshipsSection(container, { legislatorIds }) {
     sectionState(container, {
       state: 'failed',
       message: "Couldn't load sponsorships — retry",
-      onRetry: () => { loadSponsorshipsSection(container, { legislatorIds }); },
+      // LOW-6 (task review, fix round 3): catch-wrapped like votes' `reload`.
+      onRetry: () => { loadSponsorshipsSection(container, { legislatorIds }).catch(() => {}); },
     });
     throw err;
   }
 }
 
-async function loadFreshnessSection(container, { terms }) {
+// MED-2 (skip != empty, task review, fix round 3): `terms` is null when identity's OWN fetch
+// failed (mountProfile's loadIdentityThenFreshness below), vs a real [] when the profile is
+// genuinely unlinked with zero recorded terms. Those are NOT the same fact: rendering "No
+// freshness data recorded" for the null case would be an AFFIRMATIVE claim about jurisdictions
+// this section never actually learned. `onTermsUnknownRetry` is the only way this specific
+// failure can ever recover (freshness owns no fetch of its own that could discover terms) — it
+// re-triggers identity's own fetch; an ordinary in-section fetch failure (terms known, but
+// public_freshness itself failed) retries just this section, unchanged from before. Exported so
+// tests/person-page.test.js can assert the tri-state directly.
+export async function loadFreshnessSection(container, { terms, onTermsUnknownRetry }) {
   sectionState(container, { state: 'loading' });
+  if (terms === null) {
+    sectionState(container, {
+      state: 'failed',
+      message: "Couldn't determine this profile's jurisdictions — retry",
+      onRetry: onTermsUnknownRetry,
+    });
+    return null;
+  }
   try {
     const jurisdictionIds = [...new Set((terms || []).map((t) => t.jurisdiction_id).filter(Boolean))];
+    // LOW-7 (task review, fix round 3, accepted deviation, documented): a plain restGet, not
+    // fetchAllRows — one row per source (a small, fixed-cardinality set of ingestion sources),
+    // never large enough to need pagination.
     const allRows = (await restGet('public_freshness?select=source,status,finished_at,quarantined_days')).rows;
     const rows = relevantFreshnessRows(allRows, jurisdictionIds);
     if (rows.length === 0) {
@@ -460,7 +593,7 @@ async function loadFreshnessSection(container, { terms }) {
     sectionState(container, {
       state: 'failed',
       message: "Couldn't load freshness data — retry",
-      onRetry: () => { loadFreshnessSection(container, { terms }); },
+      onRetry: () => { loadFreshnessSection(container, { terms, onTermsUnknownRetry }).catch(() => {}); },
     });
     throw err;
   }
@@ -471,17 +604,28 @@ async function loadFreshnessSection(container, { terms }) {
 // legislator.html single-row path (design spec §3).
 export async function mountProfile(sections, { person, legislators }) {
   const legislatorIds = (legislators || []).map((l) => l.id);
-  const { terms } = await loadIdentitySection(sections.identity, { person, legislators, legislatorIds }).catch(() => ({ terms: [] }));
+
+  // MED-2: bundled so freshness's own retry button can re-attempt BOTH identity and freshness —
+  // freshness alone has no fetch that could ever recover a null `terms` on its own.
+  async function loadIdentityThenFreshness() {
+    const identityResult = await loadIdentitySection(sections.identity, { person, legislators, legislatorIds }).catch(() => ({ terms: null }));
+    await loadFreshnessSection(sections.freshness, {
+      terms: identityResult.terms,
+      onTermsUnknownRetry: () => { loadIdentityThenFreshness().catch(() => {}); },
+    }).catch(() => {});
+    return identityResult.terms;
+  }
+  await loadIdentityThenFreshness();
 
   const filters = { chamber: null, year: null, missedOnly: false, page: 1 };
-  const runVotes = () => loadVotesSection(sections.votes, { legislatorIds, filters }).catch(() => {});
+  const voteGeneration = { current: 0 };
+  const runVotes = () => loadVotesSection(sections.votes, { legislatorIds, filters, voteGeneration }).catch(() => {});
   if (sections.voteFilters) {
     wireVoteFilters(sections.voteFilters, filters, runVotes);
   }
   await runVotes();
 
   await loadSponsorshipsSection(sections.sponsorships, { legislatorIds }).catch(() => {});
-  await loadFreshnessSection(sections.freshness, { terms }).catch(() => {});
 }
 
 // Wires the filter controls (chamber select, year select/input, missed-votes checkbox) to
