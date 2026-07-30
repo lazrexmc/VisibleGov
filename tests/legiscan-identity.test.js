@@ -255,7 +255,7 @@ test('findCandidateLegislatorRows: a term outside the session era window is excl
 
 // ---- resolveOrCreateLegiscanPerson: the three-outcome resolver ----
 
-test('resolveOrCreateLegiscanPerson: REAL Libla sponsor (people_id 14996, Sen, SD-025), zero candidates -> new row created, legiscan_people_id set', async () => {
+test('resolveOrCreateLegiscanPerson: REAL Libla sponsor (people_id 14996, Sen, SD-025), zero candidates -> new row created, legiscan_people_id set, nickname persisted (finding 8, final wave: "Doug" — Libla\'s real fixture nickname)', async () => {
   const { client, legislators } = makeFakeDb();
   const result = await resolveOrCreateLegiscanPerson(client, 'run-1', libla, { startDate: '2018-01-01', endDate: '2018-12-31' });
   assert.equal(result.matched, false);
@@ -263,7 +263,7 @@ test('resolveOrCreateLegiscanPerson: REAL Libla sponsor (people_id 14996, Sen, S
   assert.equal(result.reason, 'no_candidate');
   assert.equal(legislators.length, 1);
   assert.deepEqual(legislators[0], {
-    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', surname: 'Libla', party: 'R', run_id: 'run-1',
+    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', surname: 'Libla', nickname: 'Doug', party: 'R', run_id: 'run-1',
   });
 });
 
@@ -592,6 +592,80 @@ test('resolveOrCreateLegiscanPerson: surname stays null when last_name is absent
   }; // deliberately no last_name key at all
   const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
   assert.equal(legislators.find((l) => l.id === result.legislator_id).surname, null);
+});
+
+// ---- finding 8 (final wave): both insert sites persist the source-printed nickname AT INGEST
+// time now, dissolving the dependency on src/cli/backfill-nicknames.js running afterward for any
+// NEW row from here on (the backfill CLI remains the correction path for rows already ingested
+// before this fix). One test per insert site, plus the absent-on-source case. ----
+
+test('resolveOrCreateLegiscanPerson: finding 8 — the no_candidate insert site persists the REAL fixture nickname verbatim (Libla -> "Doug")', async () => {
+  const { client, legislators } = makeFakeDb();
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', libla, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.reason, 'no_candidate');
+  assert.equal(legislators.find((l) => l.id === result.legislator_id).nickname, 'Doug');
+});
+
+test('resolveOrCreateLegiscanPerson: finding 8 — the ambiguous (FAIL LOUD, >1 candidates) insert site ALSO persists a printed nickname verbatim, never dropped on the fail-loud path', async () => {
+  const { client, legislators } = makeFakeDb({
+    legislatorRows: [
+      {
+        id: 'leg-a', full_name: 'Jane Newperson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+      {
+        id: 'leg-b', full_name: 'Jane Newperson', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+    ],
+    termRows: [
+      {
+        legislator_id: 'leg-a', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2015-01-01', end_date: null,
+      },
+      {
+        legislator_id: 'leg-b', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2016-01-01', end_date: null,
+      },
+    ],
+  });
+  const person = {
+    people_id: 99008, name: 'Jane Newperson', last_name: 'Newperson', nickname: 'Janie', role: 'Sen', district: 'SD-007', party: null,
+  };
+  const result = await resolveOrCreateLegiscanPerson(client, 'run-1', person, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result.reason, 'ambiguous');
+  assert.equal(legislators.find((l) => l.id === result.legislator_id).nickname, 'Janie');
+});
+
+test('resolveOrCreateLegiscanPerson: finding 8 — nickname stays null (never guessed) when absent on the source record, at BOTH insert sites', async () => {
+  const { client: client1, legislators: legislators1 } = makeFakeDb();
+  const noNicknamePerson = {
+    people_id: 99009, name: 'No Nickname Field', last_name: 'Field', role: 'Sen', district: 'SD-012', party: null,
+  }; // deliberately no nickname key
+  const result1 = await resolveOrCreateLegiscanPerson(client1, 'run-1', noNicknamePerson, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result1.reason, 'no_candidate');
+  assert.equal(legislators1.find((l) => l.id === result1.legislator_id).nickname, null);
+
+  const { client: client2, legislators: legislators2 } = makeFakeDb({
+    legislatorRows: [
+      {
+        id: 'leg-c', full_name: 'Pat Multiple', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+      {
+        id: 'leg-d', full_name: 'Pat Multiple', party: null, legiscan_people_id: null, run_id: 'seed',
+      },
+    ],
+    termRows: [
+      {
+        legislator_id: 'leg-c', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '9', start_date: '2015-01-01', end_date: null,
+      },
+      {
+        legislator_id: 'leg-d', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '9', start_date: '2016-01-01', end_date: null,
+      },
+    ],
+  });
+  const noNicknameAmbiguousPerson = {
+    people_id: 99010, name: 'Pat Multiple', last_name: 'Multiple', role: 'Sen', district: 'SD-009', party: null,
+  };
+  const result2 = await resolveOrCreateLegiscanPerson(client2, 'run-1', noNicknameAmbiguousPerson, { startDate: '2018-01-01', endDate: '2018-12-31' });
+  assert.equal(result2.reason, 'ambiguous');
+  assert.equal(legislators2.find((l) => l.id === result2.legislator_id).nickname, null);
 });
 
 // ---- MINOR 2: nickname identical to first_name — Set-dedup makes this harmless, locked here ----

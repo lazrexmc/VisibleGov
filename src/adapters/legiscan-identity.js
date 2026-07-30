@@ -281,6 +281,13 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
       .insert({
         full_name: legiscanPerson.name,
         surname: legiscanSurname(legiscanPerson),
+        // finding 8 (final wave): persist the source-printed nickname AT INGEST time (migration
+        // 0013's own column) rather than relying solely on src/cli/backfill-nicknames.js to
+        // retroactively patch it in later — dissolves the backfill-ordering dependency for every
+        // NEW row from here on (a fresh LegiScan person with a printed nickname is immediately
+        // visible to the cluster pass, no separate backfill run required). `?? null`: absent on the
+        // source record -> null, never guessed, same convention as legiscanSurname above.
+        nickname: legiscanPerson.nickname ?? null,
         party: legiscanPerson.party ?? null,
         legiscan_people_id: legiscanPerson.people_id,
         run_id: runId,
@@ -345,6 +352,9 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
     .insert({
       full_name: legiscanPerson.name,
       surname: legiscanSurname(legiscanPerson),
+      // finding 8 (final wave): same reasoning as the no_candidate insert above — persist the
+      // source-printed nickname at ingest time, never guessed.
+      nickname: legiscanPerson.nickname ?? null,
       party: legiscanPerson.party ?? null,
       legiscan_people_id: legiscanPerson.people_id,
       run_id: runId,
