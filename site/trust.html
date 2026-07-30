@@ -33,13 +33,17 @@
         commentary about the bill. Before a summary publishes, a second, independent model reads
         the same official text and tries to find anything the summary claims that the text does
         not actually support — an adversarial check, not a second opinion that simply agrees.</p>
-      <p>A summary publishes automatically only after it clears mechanical completeness checks
-        (every required section present, every claim's citation resolves to real text in the
-        source) and the adversarial verification comes back clean. The system never trusts a
-        model's own report that it verified something; the check itself has to run and produce a
-        clean result. Anything the verification flags waits in a queue for this project's
-        maintainer to read personally before it can publish — a flagged item is never quietly
-        waved through, and the page says so wherever it applies.</p>
+      <p>A summary publishes automatically only after it clears mechanical completeness checks —
+        every required field present, the stated purpose verified as a verbatim excerpt of the
+        bill's own text, and every point carrying a citation that matches the section the verifier
+        actually checked — and the adversarial verification itself comes back clean: a second
+        model reading each point against its cited section and trying to refute it, never simply
+        agreeing. Neither model's own report is trusted directly; the completeness checks and the
+        "clean" result are both re-derived mechanically in code from what the models actually
+        produced, not read off a claim either model makes about itself. Anything the verification
+        flags waits in a queue for this project's maintainer to read personally before it can
+        publish — a flagged item is never quietly waved through, and the page says so wherever it
+        applies.</p>
       <p>Every published fact carries its own receipt: a link to the official source, and, where
         the fact is drawn from a larger document, the exact quoted excerpt it came from. Nothing
         here asks you to trust a rating or a label in place of the source.</p>
@@ -105,8 +109,9 @@
         should be traceable back to where it actually came from.</p>
       <ul class="attribution-list">
         <li><strong>LegiScan</strong> (<a href="https://legiscan.com">legiscan.com</a>) — Missouri
-          roll-call and bill data, used under LegiScan's CC BY 4.0 license, which requires this
-          attribution wherever the data is shown.</li>
+          roll-call and bill data, used under LegiScan's
+          <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> license, which
+          requires this attribution wherever the data is shown.</li>
         <li><strong>Congress.gov</strong> (<a href="https://www.congress.gov">congress.gov</a>) —
           federal bill text, status, and sponsor data.</li>
         <li><strong>U.S. Senate Legislative Information System (LIS)</strong>
@@ -118,15 +123,16 @@
         <li><strong>Missouri Senate</strong>
           (<a href="https://www.senate.mo.gov">senate.mo.gov</a>), including the Senate's own
           published journals — the primary source this project's Missouri Senate roll-call
-          reconciliation checks against. Same disclaimer as the bill page: "Bill text and status
-          shown are not official copies; the official record is at the linked source." The
-          journal data on this site is drawn from those published journals but is not itself an
-          official copy — the official record is the Missouri Senate's own published journal.</li>
+          reconciliation checks against. Same disclaimer as the bill page, rendered from the SAME
+          exported string (site/js/bill-page.js's <code>MO_DISCLAIMER_TEXT</code>) so the two can
+          never drift apart: "<span id="attribution-mo-disclaimer"></span>" The journal data on
+          this site is drawn from those published journals but is not itself an official copy —
+          the official record is the Missouri Senate's own published journal.</li>
         <li><strong>U.S. Census Bureau Geocoder</strong>
           (<a href="https://geocoding.geo.census.gov/geocoder/">geocoding.geo.census.gov/geocoder</a>),
           used by the "Find your representatives" address lookup. Restated verbatim from that
-          page: "Your address is sent to the U.S. Census Bureau geocoder to find your districts,
-          and is not stored or logged — not by us, not ever."</li>
+          page (the SAME <code>PRIVACY_CONTRACT_TEXT</code> constant, site/js/copy.js, that page
+          itself renders): "<span id="attribution-privacy-contract"></span>"</li>
         <li><strong>unitedstates/congress-legislators</strong>
           (<a href="https://github.com/unitedstates/congress-legislators">github.com/unitedstates/congress-legislators</a>),
           released under a CC0 (public domain) dedication. Adopted as this site's source for

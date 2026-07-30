@@ -17,8 +17,11 @@ import {
 } from '../scripts/serve-site.js';
 import { buildUpstreamUrl, onRequestPost } from '../site/functions/geocode.js';
 import { METRIC_DEFINITIONS } from '../site/js/vote-charts.js';
+import { MO_DISCLAIMER_TEXT } from '../site/js/bill-page.js';
+import { PRIVACY_CONTRACT_TEXT } from '../site/js/copy.js';
 import {
   COUNT_SPECS, renderMetricDefinitions, loadCountsSection, loadFreshnessSection,
+  renderAttributionCopy,
 } from '../site/js/trust-page.js';
 
 // render.js is a plain browser-native ES module — it reaches for the global `document`, exactly
@@ -916,4 +919,64 @@ test('loadFreshnessSection (trust page): a failed fetch renders FAILED with a wo
   await assert.rejects(() => loadFreshnessSection(container));
   assert.ok(container.textContent.includes("Couldn't load freshness data"));
   assert.ok(container.querySelector('button'), 'a retry button is rendered');
+});
+
+// Task-10 review, LOW-1: #attribution's two verbatim quotes render from their OWN single source
+// (bill-page.js's MO_DISCLAIMER_TEXT, copy.js's PRIVACY_CONTRACT_TEXT) rather than a hand-typed
+// second copy in trust.html — asserted here exactly, so a future wording change to either source
+// string is caught the moment this page's rendering falls out of sync with it.
+test('renderAttributionCopy: fills both verbatim-quote placeholders from their single-source constants', () => {
+  const moSpan = el('span', { id: 'attribution-mo-disclaimer' });
+  const privacySpan = el('span', { id: 'attribution-privacy-contract' });
+  document.body.appendChild(moSpan);
+  document.body.appendChild(privacySpan);
+  try {
+    renderAttributionCopy();
+    assert.equal(document.getElementById('attribution-mo-disclaimer').textContent, MO_DISCLAIMER_TEXT);
+    assert.equal(document.getElementById('attribution-privacy-contract').textContent, PRIVACY_CONTRACT_TEXT);
+  } finally {
+    document.body.removeChild(moSpan);
+    document.body.removeChild(privacySpan);
+  }
+});
+
+test('renderAttributionCopy: missing placeholders (e.g. a partial fixture) never throws', () => {
+  assert.doesNotThrow(() => renderAttributionCopy());
+});
+
+// ============================================================================
+// Footer regression test (Task 10 review, LOW-2): every real site page — driven through
+// createSiteServer's own routing (the SAME _redirects/applyRewrites rules production serves
+// through, not a hand-picked file list) — serves the shared footer mount point AND its own
+// bootstrap script. Catches the exact class of bug "four of five pages wire mountFooter, one was
+// missed" without relying on a human re-checking each page by hand.
+// ============================================================================
+test('Every page (index, trust, person, legislator, bill) serves the footer mount point + its own bootstrap script', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  const routes = [
+    { path: '/', module: '/js/directory-page.js', bootstrap: 'bootstrapDirectoryPage' },
+    { path: '/trust', module: '/js/trust-page.js', bootstrap: 'bootstrapTrustPage' },
+    { path: '/person/test-id', module: '/js/person-page.js', bootstrap: 'bootstrapPersonPage' },
+    { path: '/legislator/test-id', module: '/js/legislator-page.js', bootstrap: 'bootstrapLegislatorPage' },
+    { path: '/bill/test-id', module: '/js/bill-page.js', bootstrap: 'bootstrapBillPage' },
+  ];
+  try {
+    for (const { path, module, bootstrap } of routes) {
+      // eslint-disable-next-line no-await-in-loop -- sequential smoke over a small fixed route list
+      const html = await new Promise((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}${path}`, (res) => {
+          let data = '';
+          res.on('data', (c) => { data += c; });
+          res.on('end', () => resolve(data));
+        }).on('error', reject);
+      });
+      assert.ok(html.includes('<footer id="site-footer">'), `${path}: footer mount point present`);
+      assert.ok(html.includes(module), `${path}: imports its own bootstrap module (${module})`);
+      assert.ok(html.includes(bootstrap), `${path}: calls its own bootstrap function (${bootstrap})`);
+    }
+  } finally {
+    server.close();
+  }
 });

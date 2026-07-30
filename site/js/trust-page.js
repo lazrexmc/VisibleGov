@@ -19,6 +19,10 @@
 //     jurisdictions, this renders every row the view returns.
 //   - #counts: five live countOnly() numbers (vote casts, bills, legislators, published
 //     summaries, published glossary terms) — "live from the same database the site reads."
+//   - #attribution's two verbatim quotes (the MO not-official-copies disclaimer, the Census
+//     privacy contract) — imported from their OWN single source (bill-page.js, copy.js) rather
+//     than hand-typed a second time, so a future wording change can never leave one page's copy
+//     stale while the other one updates (task-10 review, LOW-1).
 //
 // Three-state discipline (plan law, same as every other page): #freshness and #counts are each
 // independently three-stated via sectionState() — loading / failed ('couldn't load — retry',
@@ -30,6 +34,8 @@ import {
   el, clearChildren, sectionState, mountFooter,
 } from './render.js';
 import { METRIC_DEFINITIONS } from './vote-charts.js';
+import { MO_DISCLAIMER_TEXT } from './bill-page.js';
+import { PRIVACY_CONTRACT_TEXT } from './copy.js';
 
 // ============================================================================
 // #metrics — renders METRIC_DEFINITIONS verbatim (Object.values preserves the module's own
@@ -145,11 +151,34 @@ export async function loadFreshnessSection(container) {
   }
 }
 
+// ============================================================================
+// #attribution — the two verbatim quotes fill their placeholder <span>s from their OWN single
+// source rather than a hand-typed second copy (task-10 review, LOW-1): MO_DISCLAIMER_TEXT is
+// bill-page.js's own export (already reused verbatim on the bill page itself); PRIVACY_CONTRACT_
+// TEXT is copy.js's export (the SAME string directory-page.js's renderPrivacyContract renders on
+// index.html). Both are static, hand-authored constants — not DB-sourced — but still routed
+// through el()'s text-node construction rather than a raw innerHTML/textContent assignment, same
+// convention as every other DOM write in this file.
+// ============================================================================
+export function renderAttributionCopy() {
+  const moContainer = document.getElementById('attribution-mo-disclaimer');
+  if (moContainer) {
+    clearChildren(moContainer);
+    moContainer.appendChild(el('span', {}, MO_DISCLAIMER_TEXT));
+  }
+  const privacyContainer = document.getElementById('attribution-privacy-contract');
+  if (privacyContainer) {
+    clearChildren(privacyContainer);
+    privacyContainer.appendChild(el('span', {}, PRIVACY_CONTRACT_TEXT));
+  }
+}
+
 // Entry point for site/trust.html — exported, never auto-run at module load (same convention as
 // every other page's bootstrap function).
 export async function bootstrapTrustPage() {
   mountFooter(document.getElementById('site-footer'));
   renderMetricDefinitions(document.getElementById('metrics-list'));
+  renderAttributionCopy();
   await Promise.all([
     loadFreshnessSection(document.getElementById('freshness-table')).catch(() => {}),
     loadCountsSection(document.getElementById('counts-list')).catch(() => {}),

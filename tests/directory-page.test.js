@@ -12,8 +12,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
-import { wireAddressForm } from '../site/js/directory-page.js';
+import { wireAddressForm, renderPrivacyContract } from '../site/js/directory-page.js';
 import { _setFetch, _setConfig } from '../site/js/rest.js';
+import { PRIVACY_CONTRACT_TEXT } from '../site/js/copy.js';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://127.0.0.1:8990/' });
 globalThis.document = dom.window.document;
@@ -439,4 +440,20 @@ test('N3: the failed message\'s own retry button reuses an already-recovered dat
     globalThis.fetch = originalFetch;
     _setFetch(null);
   }
+});
+
+// Task-10 review, LOW-1: index.html's static privacy-contract paragraph now renders from the SAME
+// PRIVACY_CONTRACT_TEXT constant (site/js/copy.js) trust.html's attribution section renders — one
+// wording, never a hand-typed second copy that could drift.
+test('renderPrivacyContract: fills the container with the exact PRIVACY_CONTRACT_TEXT constant', () => {
+  const container = document.createElement('p');
+  renderPrivacyContract(container);
+  assert.equal(container.textContent, PRIVACY_CONTRACT_TEXT);
+});
+
+test('renderPrivacyContract: clears any prior content before rendering (idempotent)', () => {
+  const container = document.createElement('p');
+  container.textContent = 'stale';
+  renderPrivacyContract(container);
+  assert.equal(container.textContent, PRIVACY_CONTRACT_TEXT);
 });

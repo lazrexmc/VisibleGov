@@ -17,6 +17,7 @@ import { slugify } from './slugs.js';
 import {
   parseGeographies, matchReps, termDateEvidence, isMOState,
 } from './districts.js';
+import { PRIVACY_CONTRACT_TEXT } from './copy.js';
 
 // ============================================================================
 // Pure model (TDD'd in tests/directory-model.test.js BEFORE any of the DOM code below existed)
@@ -474,6 +475,16 @@ async function loadAndRenderDirectory(dataState, { directoryListContainer, filte
   wireDirectoryFilter(filterInput, directoryListContainer, entries);
 }
 
+// renderPrivacyContract: fills index.html's #privacy-contract placeholder with the SAME
+// PRIVACY_CONTRACT_TEXT constant (site/js/copy.js) trust.html's attribution section renders —
+// task-10 review, LOW-1: one wording, never a hand-typed copy that could drift. Pure DOM, kept
+// independently testable from bootstrapDirectoryPage (same split as every other render* helper in
+// this file).
+export function renderPrivacyContract(container) {
+  clearChildren(container);
+  container.appendChild(el('span', {}, PRIVACY_CONTRACT_TEXT));
+}
+
 // Entry point for site/index.html — exported, never auto-run at module load (same convention as
 // bootstrapPersonPage/bootstrapLegislatorPage).
 export async function bootstrapDirectoryPage() {
@@ -483,6 +494,7 @@ export async function bootstrapDirectoryPage() {
   const addressInput = document.getElementById('address-input');
   const addressResults = document.getElementById('address-results');
   mountFooter(document.getElementById('site-footer'));
+  renderPrivacyContract(document.getElementById('privacy-contract'));
 
   // MAJOR-1: the address form is wired SYNCHRONOUSLY here, before the first `await` below —
   // never after the directory fetch settles, and never inside its own failure path (which used
