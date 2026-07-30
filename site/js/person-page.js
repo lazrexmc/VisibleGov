@@ -82,6 +82,65 @@ export function relevantFreshnessRows(freshnessRows, jurisdictionIds) {
   return (freshnessRows || []).filter((row) => row && rules.some((rule) => rule(row.source)));
 }
 
+// Fix round 2, finding 1 (controller re-smoke, IMPORTANT): exactly page 1 (50 rows) rendered with
+// no way to reach the rest of a ~1,650-cast career. pagedFetch() already returns
+// {rows, total, page, pageSize} (rest.js, count=exact on every request) — this is the pure
+// display math built from it, so "Showing X-Y of Z" and the Prev/Next buttons' disabled state are
+// never re-derived ad hoc at render time. total === null is a defensive fallback for a
+// malformed/missing content-range header, not an expected live path (rest.js's doFetch always
+// requests count=exact) — treated conservatively as "don't offer a next page into the unknown."
+export function paginationSummary({ page, pageSize, total }) {
+  const p = Math.max(1, Number(page) || 1);
+  const size = Math.max(1, Number(pageSize) || 50);
+  const hasTotal = typeof total === 'number' && Number.isFinite(total);
+  const t = hasTotal ? Math.max(0, total) : null;
+
+  if (t === 0) {
+    return {
+      start: 0, end: 0, total: 0, page: p, pageCount: 0, hasPrev: false, hasNext: false,
+    };
+  }
+
+  const start = (p - 1) * size + 1;
+  const end = t === null ? p * size : Math.min(p * size, t);
+  const pageCount = t === null ? null : Math.max(1, Math.ceil(t / size));
+  const hasPrev = p > 1;
+  const hasNext = t === null ? false : end < t;
+
+  return {
+    start, end, total: t, page: p, pageCount, hasPrev, hasNext,
+  };
+}
+
+// Fix round 2, finding 1: the pure "which page are we on" reducer both the filter controls
+// (chamber/year/missed-votes) and the Prev/Next buttons go through. A real filter change always
+// resets to page 1 (brief: "any filter change resets to page 1") — a stale page number surviving
+// a filter change could silently land past the new, smaller result set. A PURE page change
+// (patch is only `{ page }`, from a Prev/Next click) applies directly, clamped to a minimum of 1.
+// Pure: returns a new object, never mutates the caller's filters.
+export function nextVoteFilters(filters, patch) {
+  const current = filters || {};
+  const patchObj = patch || {};
+  const patchKeys = Object.keys(patchObj);
+  const isPurePageChange = patchKeys.length > 0 && patchKeys.every((k) => k === 'page');
+  if (isPurePageChange) {
+    return { ...current, page: Math.max(1, Number(patchObj.page) || 1) };
+  }
+  return { ...current, ...patchObj, page: 1 };
+}
+
+// Fix round 2, finding 2 (controller re-smoke, IMPORTANT): MO bill_sponsors.bills.status
+// currently stores LegiScan's NUMERIC status code for MO bills (a merged-backfill deviation from
+// the ingestion's own plan — a data correction is queued separately with Lance; federal statuses
+// are proper printed strings like 'Introduced'). Facts-only rule (CLAUDE.md): the fix belongs in
+// the DATA, never a client-side code->label map — that would be the client inventing a fact this
+// module has no authority to invent. Until the correction lands, a bare numeric code is
+// unintelligible, not informative, so it is simply omitted rather than shown or guessed at. This
+// predicate is TEMPORARY DISPLAY HONESTY, not a policy statement about what MO statuses mean.
+export function isNumericStatusCode(status) {
+  return typeof status === 'string' && /^\d+$/.test(status);
+}
+
 // ============================================================================
 // Small rendering helpers (DOM, not independently unit-tested — smoke-tested live per the
 // controller's Step 4; kept small and named so each does exactly one thing)
@@ -174,6 +233,37 @@ function renderVoteRow(voteRow, oneLinerMap) {
   return li;
 }
 
+// Fix round 2, finding 1: honest navigation over a partial page — "Showing X-Y of Z" (authored
+// UI text; X/Y/Z come from paginationSummary's pure math over the real pagedFetch() result) +
+// Prev/Next buttons, disabled at bounds. onPageChange is loadVotesSection's own reload, already
+// wrapped in the same error handling as everything else on this page.
+function renderPaginationControls(pageResult, onPageChange) {
+  const summary = paginationSummary({ page: pageResult.page, pageSize: pageResult.pageSize, total: pageResult.total });
+  const nav = el('div', { class: 'vote-pagination' });
+  const summaryText = summary.total !== null
+    ? `Showing ${summary.start}–${summary.end} of ${summary.total}`
+    : `Showing ${summary.start}–${summary.end}`;
+  nav.appendChild(el('span', { class: 'vote-pagination-summary' }, summaryText));
+
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'vote-pagination-prev';
+  prevBtn.textContent = 'Prev';
+  prevBtn.disabled = !summary.hasPrev;
+  prevBtn.addEventListener('click', () => onPageChange(summary.page - 1));
+
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'vote-pagination-next';
+  nextBtn.textContent = 'Next';
+  nextBtn.disabled = !summary.hasNext;
+  nextBtn.addEventListener('click', () => onPageChange(summary.page + 1));
+
+  nav.appendChild(prevBtn);
+  nav.appendChild(nextBtn);
+  return nav;
+}
+
 const SPONSOR_GROUP_LABELS = {
   primary: 'Primary sponsor',
   cosponsor: 'Cosponsor',
@@ -181,7 +271,9 @@ const SPONSOR_GROUP_LABELS = {
   unspecified: 'Sponsor (type unspecified by source)',
 };
 
-function renderSponsorships(container, sponsorRows) {
+// Exported (fix round 2, finding 2) so tests/person-page.test.js can assert directly that a
+// numeric MO status code renders no status span, while a real printed status string still does.
+export function renderSponsorships(container, sponsorRows) {
   clearChildren(container);
   const grouped = groupSponsorships(sponsorRows);
   let renderedAny = false;
@@ -200,7 +292,11 @@ function renderSponsorships(container, sponsorRows) {
         { href: billHref(bill.id, bill.identifier || bill.title || bill.id) },
         `${bill.identifier || '(no identifier)'} — ${bill.title || '(no title)'}`,
       ));
-      if (bill.status) li.appendChild(el('span', { class: 'bill-status' }, ` [${bill.status}]`));
+      // Numeric MO status codes omitted (see isNumericStatusCode's doc comment) — unintelligible
+      // is not informative, and the fix belongs in the data, never a client-side code->label map.
+      if (bill.status && !isNumericStatusCode(bill.status)) {
+        li.appendChild(el('span', { class: 'bill-status' }, ` [${bill.status}]`));
+      }
       list.appendChild(li);
     }
     section.appendChild(list);
@@ -259,6 +355,11 @@ async function loadIdentitySection(container, { person, legislators, legislatorI
 // rejecting fetch (rest.js's RestError on a non-2xx, e.g. the live statement-timeout 500) routes
 // to the FAILED state, never the empty one — the exact violation the live smoke caught.
 export async function loadVotesSection(container, { legislatorIds, filters }) {
+  // Reused by both the failed-state retry button and the pagination Prev/Next buttons below —
+  // one re-entry path, always error-swallowed the same way runVotes() is in mountProfile (a
+  // network failure while paginating must never surface as an unhandled rejection).
+  const reload = () => loadVotesSection(container, { legislatorIds, filters }).catch(() => {});
+
   sectionState(container, { state: 'loading' });
   let page;
   try {
@@ -270,7 +371,7 @@ export async function loadVotesSection(container, { legislatorIds, filters }) {
     sectionState(container, {
       state: 'failed',
       message: "Couldn't load votes — retry",
-      onRetry: () => { loadVotesSection(container, { legislatorIds, filters }); },
+      onRetry: reload,
     });
     throw err;
   }
@@ -312,6 +413,10 @@ export async function loadVotesSection(container, { legislatorIds, filters }) {
   const list = el('ul', { class: 'vote-list' });
   for (const row of flaggedRows) list.appendChild(renderVoteRow(row, oneLinerMap));
   container.appendChild(list);
+  container.appendChild(renderPaginationControls(page, (newPage) => {
+    Object.assign(filters, nextVoteFilters(filters, { page: newPage }));
+    reload();
+  }));
   return page;
 }
 
@@ -382,7 +487,9 @@ export async function mountProfile(sections, { person, legislators }) {
 // Wires the filter controls (chamber select, year select/input, missed-votes checkbox) to
 // re-query the server via the SAME path builder (voteFilterQuery) on every change — never a
 // client-side re-sort/filter of the page already in hand (brief: "filter controls re-query the
-// SERVER, never client-sort partial pages").
+// SERVER, never client-sort partial pages"). Every change goes through nextVoteFilters (fix
+// round 2, finding 1) — the same pure "reset to page 1 on a real filter change" reducer the
+// Prev/Next buttons use, so a stale page number never survives a filter change.
 function wireVoteFilters(container, filters, runVotes) {
   clearChildren(container);
 
@@ -394,8 +501,7 @@ function wireVoteFilters(container, filters, runVotes) {
     chamberSelect.appendChild(opt);
   }
   chamberSelect.addEventListener('change', () => {
-    filters.chamber = chamberSelect.value || null;
-    filters.page = 1;
+    Object.assign(filters, nextVoteFilters(filters, { chamber: chamberSelect.value || null }));
     runVotes();
   });
 
@@ -404,8 +510,7 @@ function wireVoteFilters(container, filters, runVotes) {
   yearInput.placeholder = 'Year (e.g. 2023)';
   yearInput.addEventListener('change', () => {
     const v = yearInput.value.trim();
-    filters.year = v ? Number(v) : null;
-    filters.page = 1;
+    Object.assign(filters, nextVoteFilters(filters, { year: v ? Number(v) : null }));
     runVotes();
   });
 
@@ -413,8 +518,7 @@ function wireVoteFilters(container, filters, runVotes) {
   const missedCheckbox = document.createElement('input');
   missedCheckbox.type = 'checkbox';
   missedCheckbox.addEventListener('change', () => {
-    filters.missedOnly = missedCheckbox.checked;
-    filters.page = 1;
+    Object.assign(filters, nextVoteFilters(filters, { missedOnly: missedCheckbox.checked }));
     runVotes();
   });
   missedLabel.appendChild(missedCheckbox);

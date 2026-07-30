@@ -4,7 +4,8 @@ import { JSDOM } from 'jsdom';
 
 import {
   idFromPath, buildOneLinerMap, joinFlagBadges, relevantFreshnessRows,
-  loadVotesSection, renderIdentity,
+  loadVotesSection, renderIdentity, paginationSummary, nextVoteFilters,
+  isNumericStatusCode, renderSponsorships,
 } from '../site/js/person-page.js';
 import { _setFetch, _setConfig } from '../site/js/rest.js';
 
@@ -269,4 +270,157 @@ test('renderIdentity: a single-affiliation (dated or date-unproven-but-unambiguo
     rowCount: 1,
   });
   assert.equal(container.querySelector('.profile-chamber').textContent, 'MO Senate, district 2');
+});
+
+// ============================================================================
+// Fix round 2 (controller re-smoke after fix round 1) — two more findings.
+// ============================================================================
+
+// Finding 1, IMPORTANT: exactly page 1 (50 rows) rendered with no way to reach the rest of
+// ~1,650 casts. pagedFetch already returns {rows, total, page, pageSize} — the missing piece was
+// honest navigation built from it. paginationSummary is the pure display math (never re-derived
+// inline, never client-side row slicing); nextVoteFilters is the pure "reset to page 1 on any
+// real filter change, but not on a page-only change" reducer both the filter controls and the
+// Prev/Next buttons go through.
+test('paginationSummary: a middle page reports correct bounds and both directions available', () => {
+  const s = paginationSummary({ page: 17, pageSize: 50, total: 1652 });
+  assert.equal(s.start, 801);
+  assert.equal(s.end, 850);
+  assert.equal(s.hasPrev, true);
+  assert.equal(s.hasNext, true);
+  assert.equal(s.pageCount, 34);
+});
+
+test('paginationSummary: page 1 of a real ~1,650-cast career — hasPrev false, hasNext true', () => {
+  const s = paginationSummary({ page: 1, pageSize: 50, total: 1652 });
+  assert.equal(s.start, 1);
+  assert.equal(s.end, 50);
+  assert.equal(s.hasPrev, false);
+  assert.equal(s.hasNext, true);
+});
+
+test('paginationSummary: the LAST page (a partial 2-row remainder) reports the true end, not a padded pageSize multiple, and hasNext false', () => {
+  const s = paginationSummary({ page: 34, pageSize: 50, total: 1652 });
+  assert.equal(s.start, 1651);
+  assert.equal(s.end, 1652);
+  assert.equal(s.hasNext, false);
+  assert.equal(s.hasPrev, true);
+});
+
+test('paginationSummary: total exactly divisible by pageSize — the last page still reports hasNext false', () => {
+  const s = paginationSummary({ page: 2, pageSize: 50, total: 100 });
+  assert.equal(s.start, 51);
+  assert.equal(s.end, 100);
+  assert.equal(s.hasNext, false);
+});
+
+test('paginationSummary: total 0 — a degenerate all-zero summary, never a false "hasNext"', () => {
+  const s = paginationSummary({ page: 1, pageSize: 50, total: 0 });
+  assert.equal(s.start, 0);
+  assert.equal(s.end, 0);
+  assert.equal(s.hasPrev, false);
+  assert.equal(s.hasNext, false);
+  assert.equal(s.pageCount, 0);
+});
+
+test('paginationSummary: an unknown/missing total (defensive — rest.js always requests count=exact so this is not an expected live path) never offers a next page into the unknown', () => {
+  const s = paginationSummary({ page: 1, pageSize: 50, total: null });
+  assert.equal(s.hasNext, false);
+  assert.equal(s.total, null);
+});
+
+test('nextVoteFilters: a real filter change (chamber/year/missedOnly) always resets page to 1, regardless of the current page', () => {
+  const current = {
+    chamber: null, year: null, missedOnly: false, page: 17,
+  };
+  const next = nextVoteFilters(current, { chamber: 'house' });
+  assert.deepEqual(next, {
+    chamber: 'house', year: null, missedOnly: false, page: 1,
+  });
+});
+
+test('nextVoteFilters: a pure page change (Prev/Next click) does NOT reset — it applies the given page directly', () => {
+  const current = {
+    chamber: 'senate', year: 2021, missedOnly: false, page: 3,
+  };
+  const next = nextVoteFilters(current, { page: 4 });
+  assert.deepEqual(next, {
+    chamber: 'senate', year: 2021, missedOnly: false, page: 4,
+  });
+});
+
+test('nextVoteFilters: a page change is clamped to a minimum of 1 (never negative/zero, even if a caller misbehaves)', () => {
+  const current = {
+    chamber: null, year: null, missedOnly: false, page: 1,
+  };
+  assert.equal(nextVoteFilters(current, { page: 0 }).page, 1);
+  assert.equal(nextVoteFilters(current, { page: -5 }).page, 1);
+});
+
+test('nextVoteFilters: never mutates the input filters object (pure)', () => {
+  const current = {
+    chamber: null, year: null, missedOnly: false, page: 5,
+  };
+  const snapshot = { ...current };
+  nextVoteFilters(current, { chamber: 'house' });
+  assert.deepEqual(current, snapshot);
+});
+
+test('nextVoteFilters: a patch carrying page ALONGSIDE another filter key is still treated as a real filter change (forces page 1, not the patched page value)', () => {
+  const current = {
+    chamber: null, year: null, missedOnly: false, page: 5,
+  };
+  const next = nextVoteFilters(current, { chamber: 'senate', page: 9 });
+  assert.equal(next.page, 1, 'a mixed patch is a filter change, not a pure page change');
+  assert.equal(next.chamber, 'senate');
+});
+
+// Finding 2, IMPORTANT: MO bill_sponsors.bills.status currently stores LegiScan's numeric status
+// code for MO bills (a merged-backfill deviation queued for a separate data correction; federal
+// statuses are proper printed strings). Facts-only rule: the fix belongs in the data, never a
+// client-side code->label map. Until corrected, a bare numeric code is omitted rather than shown
+// unintelligibly or guessed at.
+test('isNumericStatusCode: a bare digit-only string is numeric', () => {
+  assert.equal(isNumericStatusCode('1'), true);
+  assert.equal(isNumericStatusCode('42'), true);
+});
+
+test('isNumericStatusCode: a real printed status string is not numeric', () => {
+  assert.equal(isNumericStatusCode('Introduced'), false);
+  assert.equal(isNumericStatusCode('Passed House'), false);
+});
+
+test('isNumericStatusCode: non-digit-only and non-string inputs are all false (type-guarded, never throws)', () => {
+  assert.equal(isNumericStatusCode('1a'), false);
+  assert.equal(isNumericStatusCode(''), false);
+  assert.equal(isNumericStatusCode(null), false);
+  assert.equal(isNumericStatusCode(undefined), false);
+  assert.equal(isNumericStatusCode(1), false);
+});
+
+test('renderSponsorships: a numeric MO status code renders NO status span (unintelligible ≠ informative)', () => {
+  const container = document.createElement('section');
+  renderSponsorships(container, [
+    {
+      sponsor_type: 'primary', bills: {
+        id: 'bill-1', identifier: 'SB 5', title: 'A bill', status: '2',
+      },
+    },
+  ]);
+  assert.equal(container.querySelector('.bill-status'), null);
+  assert.equal(container.textContent.includes('[2]'), false);
+});
+
+test('renderSponsorships: a real printed status string still renders its status span', () => {
+  const container = document.createElement('section');
+  renderSponsorships(container, [
+    {
+      sponsor_type: 'primary', bills: {
+        id: 'bill-1', identifier: 'HR 1', title: 'A bill', status: 'Introduced',
+      },
+    },
+  ]);
+  const span = container.querySelector('.bill-status');
+  assert.notEqual(span, null);
+  assert.equal(span.textContent.includes('Introduced'), true);
 });
