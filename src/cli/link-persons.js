@@ -327,11 +327,25 @@ export function buildAttachCandidates(singletonRows, alreadyLinkedRows, keepSepa
   return results;
 }
 
-// buildAttachClusterKey — deterministic over (personId, candidate id SET), the same
+// buildAttachClusterKey — deterministic over (personId(s), candidate id SET), the same
 // buildClusterKey-shaped convention used everywhere else in this file, prefixed 'attach:' so it can
-// never collide with a normal surname-keyed cluster_key.
-function buildAttachClusterKey(personId, candidateIds) {
-  return `attach:${personId}:${[...candidateIds].sort().join(',')}`;
+// never collide with a normal surname-keyed cluster_key. Micro-round (re-review, information-gap
+// finding): `personIdOrIds` accepts EITHER a single personId string (buildAttachFlags' own call
+// shape — one flag always targets exactly one person there, by construction) OR an array of
+// personIds (applyAttachCrossCheck's own call shape, below, when a demoted cluster matches MORE
+// than one existing person) — sorted+joined either way, so a single-element array produces the
+// IDENTICAL string a bare string would (`['p1'].sort().join('+')` === `'p1'`), a deliberate
+// backward-compatible collapse, not a coincidence.
+function buildAttachClusterKey(personIdOrIds, candidateIds) {
+  const personPart = Array.isArray(personIdOrIds) ? [...personIdOrIds].sort().join('+') : personIdOrIds;
+  return `attach:${personPart}:${[...candidateIds].sort().join(',')}`;
+}
+
+// buildExistingPersonRefs — pure shaping helper: personIds -> [{personId, displayName}, ...],
+// display_name cited directly from loadPersons' own map, never re-derived. Shared by buildAttachFlags
+// and applyAttachCrossCheck so the two paths can never drift on how this shape is built.
+function buildExistingPersonRefs(personIds, personDisplayNameById) {
+  return personIds.map((personId) => ({ personId, displayName: personDisplayNameById.get(personId) ?? null }));
 }
 
 // buildAttachFlags — groups buildAttachCandidates' own (singleton, person) pairs BY person (one
@@ -344,6 +358,14 @@ function buildAttachClusterKey(personId, candidateIds) {
 // caller's full unlinked-rows-by-id map (the singleton rows live in there); `personDisplayNameById`:
 // loadPersons' own id->display_name map — "evidence carries the existing person_id + display_name"
 // per the brief, cited directly rather than re-derived.
+//
+// Micro-round (re-review, information-gap finding — non-blocking, closing a gap the re-reviewer
+// caught rather than a Critical): every flag here already targets exactly ONE person by
+// construction (grouped by personId above) — existingPersons is therefore always a 1-element array
+// here, added purely for SCHEMA UNIFORMITY with applyAttachCrossCheck's own (genuinely
+// multi-element) flags, so src/review/server.js's 'attach' validation can check
+// `person_id ∈ existingPersons' ids` the SAME way regardless of which path produced the flag —
+// existingPerson (singular) stays too, as existingPersons[0], for any consumer still reading it.
 export function buildAttachFlags(attachCandidates, rowsById, personDisplayNameById) {
   const byPerson = new Map();
   for (const c of attachCandidates ?? []) {
@@ -357,32 +379,41 @@ export function buildAttachFlags(attachCandidates, rowsById, personDisplayNameBy
       const row = rowsById.get(e.legislatorId);
       return { ...buildMemberEvidence(row, surnameKey(row)), matchedMembers: e.matchedMembers };
     });
+    const existingPersons = buildExistingPersonRefs([personId], personDisplayNameById);
     flags.push({
       clusterKey: buildAttachClusterKey(personId, candidateIds),
       candidateIds,
       evidence,
       reason: 'attach_candidate',
-      existingPerson: { personId, displayName: personDisplayNameById.get(personId) ?? null },
+      existingPerson: existingPersons[0],
+      existingPersons,
     });
   }
   return flags;
 }
 
-// findCompatibleExistingPerson — the pure lookup applyAttachCrossCheck (below) reduces to: the
-// FIRST already-linked person (Map iteration order — deterministic for a given input, not chosen
-// among ties by any stronger signal; see applyAttachCrossCheck's own comment on this) with at
-// least one member 'compatible' (finalPairStatus, fix round 1 CRITICAL 3's own tightening —
-// 'compatible' ONLY, never 'ambiguous') against ANY of the given member rows. Returns a personId
-// or null.
-function findCompatibleExistingPerson(memberRows, personGroups) {
+// personGroupIsCompatible — true iff ANY member row is 'compatible' (finalPairStatus, fix round 1
+// CRITICAL 3's own tightening — 'compatible' ONLY, never 'ambiguous') against ANY of a person
+// group's existing member rows.
+function personGroupIsCompatible(memberRows, existingMembers) {
+  return memberRows.some((memberRow) => existingMembers.some(
+    (existingMember) => finalPairStatus(memberRow, existingMember) === 'compatible',
+  ));
+}
+
+// findCompatibleExistingPersons — the pure lookup applyAttachCrossCheck (below) reduces to: EVERY
+// already-linked person (not just the first — micro-round, re-review information-gap finding: the
+// operator can't weigh what he can't see; if a cluster genuinely cross-matches two or more
+// existing persons, that is exactly the shape Lance most needs visibility into, not less) with at
+// least one member 'compatible' against ANY of the given member rows. Returns an array of
+// personIds, in personGroups' own iteration order (deterministic for a given input); empty if
+// none match.
+function findCompatibleExistingPersons(memberRows, personGroups) {
+  const matched = [];
   for (const [personId, existingMembers] of personGroups) {
-    for (const memberRow of memberRows) {
-      for (const existingMember of existingMembers) {
-        if (finalPairStatus(memberRow, existingMember) === 'compatible') return personId;
-      }
-    }
+    if (personGroupIsCompatible(memberRows, existingMembers)) matched.push(personId);
   }
-  return null;
+  return matched;
 }
 
 // applyAttachCrossCheck — FIX ROUND 1, CRITICAL 2 (reviewer execution-proven, finding-5 class,
@@ -402,13 +433,14 @@ function findCompatibleExistingPerson(memberRows, personGroups) {
 // cluster is compared (finalPairStatus, the SAME verbatim primitive the attach pass and
 // clusterLegislators itself use — no parallel matching logic) against EVERY member of EVERY
 // already-linked person. A single 'compatible' edge ANYWHERE demotes the WHOLE cluster to an
-// attach_candidate flag citing that person — never partially written, never auto-attached, Lance
-// decides, exactly the SAME flag shape (and the SAME review-tab 'Attach' action) buildAttachFlags
-// already produces. 'ambiguous' is deliberately NOT a demotion trigger here either (fix round 1,
-// CRITICAL 3's own tightening, applied identically on this side too) — a same-seat,
-// different-given-name pair (the dynasty shape) stays 'ambiguous', never treated as strong enough
-// to demote a cluster onto a specific existing person any more than it is to SUGGEST one.
-// Legitimately-distinct same-name people remain possible (the accepted residual, ledgered
+// attach_candidate flag citing EVERY person it matched (micro-round: not just the first — see
+// findCompatibleExistingPersons' own comment) — never partially written, never auto-attached,
+// Lance decides, exactly the SAME flag shape (and the SAME review-tab 'Attach' action)
+// buildAttachFlags already produces. 'ambiguous' is deliberately NOT a demotion trigger here
+// either (fix round 1, CRITICAL 3's own tightening, applied identically on this side too) — a
+// same-seat, different-given-name pair (the dynasty shape) stays 'ambiguous', never treated as
+// strong enough to demote a cluster onto a specific existing person any more than it is to SUGGEST
+// one. Legitimately-distinct same-name people remain possible (the accepted residual, ledgered
 // throughout this module) — which is exactly why this demotes to a human flag rather than
 // hard-blocking the cluster outright: missed-merge (an extra review item) is benign, wrong-merge
 // (a silent duplicate person) is not.
@@ -423,20 +455,22 @@ export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRow
   const demotedFlags = [];
   for (const cluster of clusters) {
     const memberRows = cluster.memberIds.map((id) => memberRowsById.get(id));
-    const matchedPersonId = findCompatibleExistingPerson(memberRows, personGroups);
-    if (matchedPersonId == null) {
+    const matchedPersonIds = findCompatibleExistingPersons(memberRows, personGroups);
+    if (matchedPersonIds.length === 0) {
       safeClusters.push(cluster);
       continue;
     }
     // cluster.evidence is ALREADY buildMemberEvidence-shaped (clusterLegislators' own construction
     // — see buildMemberEvidence's call site there) — the SAME shape buildAttachFlags produces, so
     // this demoted flag renders identically in the review tab with zero reason-specific branching.
+    const existingPersons = buildExistingPersonRefs(matchedPersonIds, personDisplayNameById);
     demotedFlags.push({
-      clusterKey: buildAttachClusterKey(matchedPersonId, cluster.memberIds),
+      clusterKey: buildAttachClusterKey(matchedPersonIds, cluster.memberIds),
       candidateIds: cluster.memberIds,
       evidence: cluster.evidence,
       reason: 'attach_candidate',
-      existingPerson: { personId: matchedPersonId, displayName: personDisplayNameById.get(matchedPersonId) ?? null },
+      existingPerson: existingPersons[0],
+      existingPersons,
     });
   }
   return { safeClusters, demotedFlags };
@@ -591,10 +625,14 @@ export async function writeIdentityFlag(client, runId, flag) {
         candidates: flag.evidence,
         ...(flag.keepSeparateRuling ? { keepSeparateRuling: flag.keepSeparateRuling } : {}),
         // existingPerson (Task 4, attach-to-existing): present only on an attach_candidate flag
-        // (buildAttachFlags) — the EXISTING person's own id + display_name, cited directly rather
-        // than re-derived, so the review tab and the 'attach' decision route both read the same
-        // fact off this one flag row.
+        // (buildAttachFlags/applyAttachCrossCheck) — the EXISTING person's own id + display_name,
+        // cited directly rather than re-derived, so the review tab and the 'attach' decision route
+        // both read the same fact off this one flag row. existingPersons (micro-round,
+        // re-review): the FULL list of every existing person this flag's candidates matched — the
+        // field src/review/server.js's 'attach' validation actually checks membership against;
+        // existingPerson is existingPersons[0], kept for any consumer still reading the singular.
         ...(flag.existingPerson ? { existingPerson: flag.existingPerson } : {}),
+        ...(flag.existingPersons ? { existingPersons: flag.existingPersons } : {}),
       },
       run_id: runId,
     })
@@ -730,9 +768,11 @@ async function main() {
         clusterKey: f.clusterKey,
         candidateIds: f.candidateIds,
         reason: f.reason,
-        // existingPerson (Task 4): the attach pass's own target person, surfaced to the operator
-        // right in the dry-run report — never dropped silently the way an ad-hoc field would be.
+        // existingPerson(s) (Task 4 + micro-round): the attach pass's own target person(s),
+        // surfaced to the operator right in the dry-run report — never dropped silently the way an
+        // ad-hoc field would be. existingPersons is the FULL list (1+ entries).
         ...(f.existingPerson ? { existingPerson: f.existingPerson } : {}),
+        ...(f.existingPersons ? { existingPersons: f.existingPersons } : {}),
       })),
       singletons: report.singletons,
     }, null, 2));

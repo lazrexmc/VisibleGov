@@ -464,3 +464,90 @@ test('identity tab: clicking Attach posts person_id from the flag\'s own existin
     flag_id: 'flag-2', action: 'attach', note: '', legislator_ids: ['leg-fifth'], person_id: 'person-onder-1',
   });
 });
+
+// ============================================================================
+// Identity tab — MICRO-ROUND (re-review, information-gap finding): a cross-check-demoted flag can
+// cite MULTIPLE existing persons (existing_persons); the queue UI must list every candidate and
+// let Lance pick which one to attach to via #identity-attach-target.
+// ============================================================================
+
+test('identity tab: a flag with TWO existing_persons shows the #identity-attach-target picker with both options and lists both in the meta line; a single-target flag keeps the picker hidden', async () => {
+  const multiItem = {
+    id: 'flag-3',
+    cluster_key: 'attach:person-onder-1+person-onder-2:leg-freshA,leg-freshB',
+    reason: 'attach_candidate',
+    created_at: '2026-01-01T00:00:00Z',
+    existing_person: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+    existing_persons: [
+      { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+      { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+    ],
+    candidates: [
+      {
+        legislator_id: 'leg-freshA', full_name: 'Robert Onder', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+      {
+        legislator_id: 'leg-freshB', full_name: 'Robert Onder', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+    ],
+  };
+  const { document, hooks } = loadPage(makeFetchMock(identityQueueMocks(multiItem)));
+  await hooks.loadIdentityQueue();
+
+  const select = document.getElementById('identity-attach-target');
+  assert.notEqual(select.style.display, 'none', 'the picker is SHOWN once a genuine 2+ target match exists');
+  assert.equal(select.options.length, 2);
+  assert.deepEqual(
+    Array.from(select.options).map((o) => o.value),
+    ['person-onder-1', 'person-onder-2'],
+  );
+  const metaText = document.getElementById('identity-meta').textContent;
+  assert.ok(metaText.includes('Robert F. Onder'), 'both targets are named in the meta line, not just the first');
+  assert.ok(metaText.includes('Robert Onder Jr.'));
+
+  // Single-target flag, loaded fresh: picker stays hidden — never a dropdown of one.
+  const singleItem = {
+    id: 'flag-4',
+    cluster_key: 'attach:person-onder-3:leg-sixth',
+    reason: 'attach_candidate',
+    created_at: '2026-01-01T00:00:00Z',
+    existing_persons: [{ personId: 'person-onder-3', displayName: 'Bob Onder III' }],
+    candidates: [{
+      legislator_id: 'leg-sixth', full_name: 'Bob Onder', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+    }],
+  };
+  const { document: doc2, hooks: hooks2 } = loadPage(makeFetchMock(identityQueueMocks(singleItem)));
+  await hooks2.loadIdentityQueue();
+  assert.equal(doc2.getElementById('identity-attach-target').style.display, 'none');
+});
+
+test('identity tab: with TWO existing_persons, selecting the SECOND option in the picker and clicking Attach posts THAT person_id, not the first', async () => {
+  const multiItem = {
+    id: 'flag-3',
+    cluster_key: 'attach:person-onder-1+person-onder-2:leg-freshA',
+    reason: 'attach_candidate',
+    created_at: '2026-01-01T00:00:00Z',
+    existing_person: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+    existing_persons: [
+      { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+      { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+    ],
+    candidates: [{
+      legislator_id: 'leg-freshA', full_name: 'Robert Onder', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+    }],
+  };
+  const mock = makeFetchMock([
+    ...identityQueueMocks(multiItem),
+    { match: (url) => url === '/api/identity/decision', respond: () => ({ body: { person_id: 'person-onder-2', resolved: true } }) },
+  ]);
+  const { document, hooks } = loadPage(mock);
+  await hooks.loadIdentityQueue();
+
+  document.querySelector('#identity-table-body input[type=checkbox]').click();
+  document.getElementById('identity-attach-target').value = 'person-onder-2';
+  await hooks.postIdentityDecision('attach');
+
+  const decisionCalls = postCallsTo(mock.calls, '/api/identity/decision');
+  assert.equal(decisionCalls.length, 1);
+  assert.equal(decisionCalls[0].body.person_id, 'person-onder-2', 'the SELECTED target, not existing_persons[0]');
+});

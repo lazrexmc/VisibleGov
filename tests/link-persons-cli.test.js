@@ -1998,3 +1998,113 @@ test('runLink FIX ROUND 1 CRITICAL 2: the reviewer\'s exact two-fresh-Onder-rows
   assert.equal(client.state.identity_flags[0].evidence.reason, 'attach_candidate');
   assert.deepEqual(client.state.identity_flags[0].candidate_legislator_ids.slice().sort(), ['leg-onder-freshA', 'leg-onder-freshB']);
 });
+
+// ============================================================================================
+// MICRO-ROUND (re-review, information-gap finding — non-blocking): findCompatibleExistingPerson
+// used to stop at the FIRST matching person; the sibling singleton attach pass already surfaces
+// every match (as separate per-person flags). This closes the same gap for the cross-check path:
+// collect ALL compatible existing persons into ONE flag's evidence.existingPersons array
+// (existingPerson stays as existingPersons[0], for back-compat).
+// ============================================================================================
+
+test('applyAttachCrossCheck: MICRO-ROUND — a clean cluster that genuinely cross-matches TWO different existing persons cites BOTH in existingPersons (not just the first), existingPerson stays the first entry for back-compat, and the cluster_key is deterministic over the FULL matched-person set', () => {
+  const cluster = {
+    key: 'onder:leg-onder-freshA,leg-onder-freshB',
+    memberIds: ['leg-onder-freshA', 'leg-onder-freshB'],
+    evidence: [{ legislatorId: 'leg-onder-freshA', fullName: 'Robert Onder' }, { legislatorId: 'leg-onder-freshB', fullName: 'Robert Onder' }],
+  };
+  const memberRowsById = new Map([
+    ['leg-onder-freshA', { id: 'leg-onder-freshA', full_name: 'Robert Onder', evidence: [] }],
+    ['leg-onder-freshB', { id: 'leg-onder-freshB', full_name: 'Robert Onder', evidence: [] }],
+  ]);
+  // Two REAL, DISTINCT already-linked persons, each with their own evidence-free 'Robert Onder'
+  // member — the accepted residual (identical full name, no comparable evidence) means the fresh
+  // cluster genuinely reads 'compatible' against BOTH, honestly: this is real ambiguity the
+  // operator must see and weigh, never silently collapsed to one guess.
+  const existingA = {
+    id: 'leg-onder-existingA', full_name: 'Robert Onder', person_id: 'person-onder-1', evidence: [],
+  };
+  const existingB = {
+    id: 'leg-onder-existingB', full_name: 'Robert Onder', person_id: 'person-onder-2', evidence: [],
+  };
+  const personDisplayNameById = new Map([
+    ['person-onder-1', 'Robert F. Onder'],
+    ['person-onder-2', 'Robert Onder Jr.'],
+  ]);
+  const { safeClusters, demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, [existingA, existingB], personDisplayNameById);
+  assert.deepEqual(safeClusters, [], 'demoted, not safe to write — same as the single-person case');
+  assert.equal(demotedFlags.length, 1, 'still ONE flag, not one per matched person');
+  const [flag] = demotedFlags;
+  assert.deepEqual(flag.existingPersons, [
+    { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+    { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+  ], 'BOTH matched persons cited — the operator can\'t weigh what he can\'t see');
+  assert.deepEqual(flag.existingPerson, { personId: 'person-onder-1', displayName: 'Robert F. Onder' }, 'back-compat: the first entry');
+  assert.equal(flag.clusterKey, 'attach:person-onder-1+person-onder-2:leg-onder-freshA,leg-onder-freshB');
+  assert.deepEqual(flag.candidateIds.slice().sort(), ['leg-onder-freshA', 'leg-onder-freshB']);
+});
+
+test('applyAttachCrossCheck: MICRO-ROUND regression — a single-person match still produces the SAME clusterKey format as before (a 1-element array sorts/joins to the identical string a bare personId would)', () => {
+  const cluster = {
+    key: 'onder:leg-a,leg-b', memberIds: ['leg-a', 'leg-b'], evidence: [{ legislatorId: 'leg-a', fullName: 'Robert Onder' }, { legislatorId: 'leg-b', fullName: 'Robert Onder' }],
+  };
+  const memberRowsById = new Map([
+    ['leg-a', { id: 'leg-a', full_name: 'Robert Onder', evidence: [] }],
+    ['leg-b', { id: 'leg-b', full_name: 'Robert Onder', evidence: [] }],
+  ]);
+  const existingMember = {
+    id: 'leg-existing', full_name: 'Robert Onder', person_id: 'person-onder-1', evidence: [],
+  };
+  const { demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, [existingMember], new Map([['person-onder-1', 'Robert F. Onder']]));
+  assert.equal(demotedFlags[0].clusterKey, 'attach:person-onder-1:leg-a,leg-b');
+  assert.deepEqual(demotedFlags[0].existingPersons, [{ personId: 'person-onder-1', displayName: 'Robert F. Onder' }]);
+});
+
+test('buildAttachFlags: MICRO-ROUND — every flag also carries existingPersons as a 1-element array matching existingPerson (schema uniformity with applyAttachCrossCheck, for the server\'s own validation to check membership the same way regardless of origin)', () => {
+  const fifthRow = {
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+  };
+  const rowsById = new Map([['leg-onder-fifth', fifthRow]]);
+  const attachCandidates = [{
+    legislatorId: 'leg-onder-fifth', personId: 'person-onder-1', matchedMembers: [],
+  }];
+  const flags = buildAttachFlags(attachCandidates, rowsById, new Map([['person-onder-1', 'Robert F. Onder']]));
+  assert.deepEqual(flags[0].existingPersons, [{ personId: 'person-onder-1', displayName: 'Robert F. Onder' }]);
+  assert.deepEqual(flags[0].existingPerson, flags[0].existingPersons[0]);
+});
+
+test('runLink MICRO-ROUND: the reviewer\'s two-fresh-Onder-rows scenario extended — TWO different already-linked Onder persons both genuinely match the fresh cluster; the resulting attach_candidate flag cites BOTH, end-to-end through the real DB-shaped load', async () => {
+  const legislatorRows = [
+    {
+      id: 'leg-onder-existingA', full_name: 'Robert Onder', surname: 'Onder', legiscan_people_id: 16351, person_id: 'person-onder-1',
+    },
+    {
+      id: 'leg-onder-existingB', full_name: 'Robert Onder', surname: 'Onder', openstates_id: 'ocd-person/other', person_id: 'person-onder-2',
+    },
+    {
+      id: 'leg-onder-freshA', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: 'O000177', person_id: null,
+    },
+    {
+      id: 'leg-onder-freshB', full_name: 'Robert Onder', surname: 'Onder', mo_senate_id: '2', person_id: null,
+    },
+  ];
+  const personsRows = [
+    { id: 'person-onder-1', display_name: 'Robert F. Onder', display_name_source: 'bioguide' },
+    { id: 'person-onder-2', display_name: 'Robert Onder Jr.', display_name_source: 'openstates' },
+  ];
+  const client = makeFakeClient({ legislatorRows, termRows: [], personsRows });
+
+  const dryReport = await runLink(client, { dryRun: true });
+  const attachFlag = dryReport.flagged.find((f) => f.reason === 'attach_candidate');
+  assert.ok(attachFlag);
+  assert.deepEqual(
+    attachFlag.existingPersons.map((p) => p.personId).sort(),
+    ['person-onder-1', 'person-onder-2'],
+    'BOTH already-linked persons are cited, never just the first',
+  );
+
+  const liveReport = await runLink(client, { dryRun: false, runId: 'run-crosscheck-multi' });
+  assert.equal(liveReport.counts.personsCreated, 0);
+  assert.equal(client.state.persons.length, 2, 'only the two PRE-EXISTING persons — no third person ever created');
+  assert.deepEqual(client.state.identity_flags[0].evidence.existingPersons.map((p) => p.personId).sort(), ['person-onder-1', 'person-onder-2']);
+});

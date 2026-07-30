@@ -165,6 +165,11 @@
     <label for="identity-note">Note (required for Keep Separate; optional context for Link/Attach)</label>
     <textarea id="identity-note" rows="3"></textarea>
     <div class="actions">
+      <!-- Micro-round (re-review, information-gap finding): a cross-check-demoted flag can cite
+           MORE than one existing person (evidence.existingPersons) — this selector lists every
+           one so Lance can pick which (if any) to attach to; hidden (and defaulted to the sole
+           entry) when there is only one, per updateIdentityAttachTargetSelect's own logic. -->
+      <select id="identity-attach-target" style="display:none"></select>
       <button id="identity-btn-attach" type="button" disabled>Attach to existing person</button>
       <button id="identity-btn-link" type="button" disabled>Link selected as one person</button>
       <button id="identity-btn-keep-separate" type="button" disabled>Keep whole flag separate</button>
@@ -934,10 +939,13 @@
   let identitySelectedIds = new Set(); // legislator_ids Lance has checked, for the NEXT link decision
   let identitySortCol = null;
   let identitySortDir = 1;
-  // currentIdentityExistingPerson (Task 4, attach-to-existing): the current flag's own
-  // existing_person ({personId, displayName}), or null for every non-attach flag — gates the
-  // 'Attach' button and supplies the person_id an 'attach' decision posts.
-  let currentIdentityExistingPerson = null;
+  // currentIdentityExistingPersons (Task 4, attach-to-existing; micro-round, re-review — renamed
+  // from the singular currentIdentityExistingPerson, ARRAY now): the current flag's own
+  // existing_persons ([{personId, displayName}, ...]), empty for every non-attach flag — gates the
+  // 'Attach' button and supplies the person_id an 'attach' decision posts. A cross-check-demoted
+  // flag can genuinely list 2+ entries (src/cli/link-persons.js's applyAttachCrossCheck) — Lance
+  // picks one via #identity-attach-target when there is more than one.
+  let currentIdentityExistingPersons = [];
 
   var SOURCE_KEY_LABELS = {
     bioguide_id: 'bioguide', openstates_id: 'openstates', mo_house_id: 'mo_house', mo_senate_id: 'mo_senate', legiscan_people_id: 'legiscan',
@@ -985,12 +993,31 @@
   }
 
   // updateIdentityAttachButton — Task 4 (attach-to-existing): 'Attach' is only ever legal on an
-  // attach_candidate flag (currentIdentityExistingPerson set from item.existing_person, the target
-  // EXISTING person src/cli/link-persons.js's attach pass named) and needs only 1+ selected
-  // candidates (contrast 'Link's 2+ minimum — attach joins into something that already exists, so
-  // even a lone candidate is a complete decision).
+  // attach_candidate flag (currentIdentityExistingPersons set from item.existing_persons, the
+  // target EXISTING person(s) src/cli/link-persons.js's attach pass or cross-check named) and
+  // needs only 1+ selected candidates (contrast 'Link's 2+ minimum — attach joins into something
+  // that already exists, so even a lone candidate is a complete decision).
   function updateIdentityAttachButton() {
-    document.getElementById('identity-btn-attach').disabled = !currentIdentityExistingPerson || identitySelectedIds.size < 1;
+    document.getElementById('identity-btn-attach').disabled = currentIdentityExistingPersons.length === 0 || identitySelectedIds.size < 1;
+  }
+
+  // updateIdentityAttachTargetSelect — micro-round (re-review, information-gap finding): renders
+  // the #identity-attach-target dropdown from currentIdentityExistingPersons. Hidden (and simply
+  // unused — postIdentityDecision falls back to the sole entry) when there are 0 or 1 targets, the
+  // overwhelmingly common case; shown, populated with every candidate's displayName + personId,
+  // ONLY when a genuine multi-person match exists — so Lance sees exactly the choice that exists,
+  // never a dropdown of one.
+  function updateIdentityAttachTargetSelect() {
+    var select = document.getElementById('identity-attach-target');
+    select.textContent = '';
+    if (currentIdentityExistingPersons.length > 1) {
+      currentIdentityExistingPersons.forEach(function (p) {
+        select.appendChild(new Option(p.displayName + ' (' + p.personId + ')', p.personId));
+      });
+      select.style.display = '';
+    } else {
+      select.style.display = 'none';
+    }
   }
 
   // Builds every row with DOM APIs + textContent only (escaping discipline, controller ruling 5's
@@ -1060,13 +1087,22 @@
     identitySelectedIds = new Set();
     identitySortCol = null;
     identitySortDir = 1;
-    currentIdentityExistingPerson = item.existing_person || null;
+    // existing_persons is the authoritative list (micro-round); existing_person (singular) is
+    // tolerated as a fallback for any response shape that only ever carries the one field.
+    currentIdentityExistingPersons = (item.existing_persons && item.existing_persons.length)
+      ? item.existing_persons.slice()
+      : (item.existing_person ? [item.existing_person] : []);
     document.getElementById('identity-heading').textContent = item.cluster_key;
-    // Task 4: an attach_candidate flag's meta line names its target person explicitly — Lance
-    // needs to see WHICH existing person this row is being proposed to join before deciding.
+    // Task 4: an attach_candidate flag's meta line names its target person(s) explicitly — Lance
+    // needs to see WHO this row is being proposed to join before deciding. Micro-round: when more
+    // than one existing person genuinely matches, the meta line lists ALL of them (real, mechanical
+    // ambiguity the operator must weigh) and #identity-attach-target becomes the actual picker.
     var metaText = '[' + item.reason + '] ' + item.candidates.length + ' candidate(s)';
-    if (currentIdentityExistingPerson) {
-      metaText += ' — attach target: ' + currentIdentityExistingPerson.displayName + ' (' + currentIdentityExistingPerson.personId + ')';
+    if (currentIdentityExistingPersons.length === 1) {
+      metaText += ' — attach target: ' + currentIdentityExistingPersons[0].displayName + ' (' + currentIdentityExistingPersons[0].personId + ')';
+    } else if (currentIdentityExistingPersons.length > 1) {
+      metaText += ' — ' + currentIdentityExistingPersons.length + ' possible attach targets: '
+        + currentIdentityExistingPersons.map(function (p) { return p.displayName + ' (' + p.personId + ')'; }).join(', ');
     }
     document.getElementById('identity-meta').textContent = metaText;
     document.getElementById('identity-note').value = '';
@@ -1074,6 +1110,7 @@
     renderIdentityTableBody();
     updateIdentityLinkButton();
     updateIdentityAttachButton();
+    updateIdentityAttachTargetSelect();
     updateIdentitySortHeaders();
   }
 
@@ -1081,7 +1118,8 @@
     currentIdentityFlagId = null;
     currentIdentityCandidates = [];
     identitySelectedIds = new Set();
-    currentIdentityExistingPerson = null;
+    currentIdentityExistingPersons = [];
+    updateIdentityAttachTargetSelect();
     document.getElementById('identity-heading').textContent = heading;
     document.getElementById('identity-meta').textContent = meta;
     document.getElementById('identity-table-body').textContent = '';
@@ -1143,13 +1181,18 @@
       payload.legislator_ids = Array.from(identitySelectedIds);
     }
     // Task 4 (attach-to-existing): needs only 1+ selected candidates (contrast link's 2+) plus the
-    // target person_id — pulled from currentIdentityExistingPerson, set by renderIdentityFlag from
-    // this flag's own existing_person (never typed by hand, never guessed).
+    // target person_id — pulled from currentIdentityExistingPersons, set by renderIdentityFlag from
+    // this flag's own existing_persons (never typed by hand, never guessed). Micro-round: with 2+
+    // possible targets, the operator's own #identity-attach-target selection wins; with exactly one,
+    // it's used directly (the dropdown stays hidden and unused in that — overwhelmingly common —
+    // case).
     if (action === 'attach') {
       if (identitySelectedIds.size < 1) { setStatus('Select at least 1 candidate to attach.'); return; }
-      if (!currentIdentityExistingPerson) { setStatus('This flag has no attach target.'); return; }
+      if (!currentIdentityExistingPersons.length) { setStatus('This flag has no attach target.'); return; }
       payload.legislator_ids = Array.from(identitySelectedIds);
-      payload.person_id = currentIdentityExistingPerson.personId;
+      payload.person_id = currentIdentityExistingPersons.length > 1
+        ? document.getElementById('identity-attach-target').value
+        : currentIdentityExistingPersons[0].personId;
     }
     // Disable all three decision buttons for the duration of this request (final wave, item 3) — a
     // double-click or an operator retrying against a slow response must never fire the same

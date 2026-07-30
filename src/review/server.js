@@ -852,6 +852,10 @@ async function handleIdentityQueue(client, res) {
         // the EXISTING person's id + display_name (buildAttachFlags, src/cli/link-persons.js),
         // cited directly so the review tab's 'Attach' action can target it without a second lookup.
         existing_person: (flag.evidence && flag.evidence.existingPerson) || null,
+        // existing_persons (micro-round, re-review): the FULL list — a cross-check-demoted cluster
+        // (applyAttachCrossCheck) can genuinely match MORE than one existing person; the queue UI
+        // must list every candidate so Lance can weigh them, not just the first.
+        existing_persons: (flag.evidence && Array.isArray(flag.evidence.existingPersons)) ? flag.evidence.existingPersons : [],
       });
     }
 
@@ -936,11 +940,24 @@ async function handleIdentityDecision(client, req, res) {
       // legislator_ids against the flag's own candidate_legislator_ids) — this route did not: it
       // trusted a client-supplied person_id in isolation, so a plain ambiguous_era flag plus an
       // UNRELATED person_id previously produced real writes (HTTP 200). RULING: the flag itself
-      // must BE an attach_candidate flag, AND person_id must be EXACTLY the person that flag's own
-      // attach pass named — flag.evidence.existingPerson.personId — never a value trusted from the
-      // request alone. Checked FIRST, before any other work in this branch.
-      if (flag.evidence?.reason !== 'attach_candidate' || person_id !== flag.evidence?.existingPerson?.personId) {
-        sendJson(res, 400, { error: 'attach is only valid for an attach_candidate flag targeting its own existing person' });
+      // must BE an attach_candidate flag, AND person_id must be one of the persons that flag's own
+      // attach pass named — never a value trusted from the request alone. Checked FIRST, before
+      // any other work in this branch.
+      //
+      // MICRO-ROUND (re-review, information-gap finding): a cross-check-demoted cluster
+      // (src/cli/link-persons.js's applyAttachCrossCheck) can genuinely match MORE than one
+      // existing person — the flag's evidence.existingPersons carries the FULL list (existingPerson
+      // singular is existingPersons[0], kept for back-compat with anything still reading it); the
+      // valid target set is membership in existingPersons' ids, not exact-equality against a single
+      // one. Falls back to wrapping the singular existingPerson only if existingPersons is somehow
+      // absent (defensive — every flag this route can ever see is written with both fields by the
+      // current writer, src/cli/link-persons.js's writeIdentityFlag).
+      const existingPersons = (Array.isArray(flag.evidence?.existingPersons) && flag.evidence.existingPersons.length > 0)
+        ? flag.evidence.existingPersons
+        : (flag.evidence?.existingPerson ? [flag.evidence.existingPerson] : []);
+      const validTargetPersonIds = new Set(existingPersons.map((p) => p?.personId));
+      if (flag.evidence?.reason !== 'attach_candidate' || !validTargetPersonIds.has(person_id)) {
+        sendJson(res, 400, { error: 'attach is only valid for an attach_candidate flag targeting one of its own existing persons' });
         return;
       }
 

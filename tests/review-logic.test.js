@@ -1504,6 +1504,39 @@ test('GET /api/identity/queue: an attach_candidate flag surfaces existing_person
     const item = body.items[0];
     assert.equal(item.reason, 'attach_candidate');
     assert.deepEqual(item.existing_person, { personId: 'person-onder-1', displayName: 'Robert F. Onder' });
+    assert.deepEqual(item.existing_persons, [], 'no existingPersons array on this legacy-shaped fixture -> honest empty array, never invented');
+  }, client);
+});
+
+test('GET /api/identity/queue: MICRO-ROUND — a cross-check-demoted flag citing TWO existing persons surfaces existing_persons with BOTH entries, so the review tab can list every candidate', () => {
+  const flag = {
+    id: 'flag-1', cluster_key: 'attach:person-onder-1+person-onder-2:leg-freshA,leg-freshB', resolved: false, created_at: '2026-07-29T00:00:00Z',
+    evidence: {
+      reason: 'attach_candidate',
+      existingPerson: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+      existingPersons: [
+        { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+        { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+      ],
+      candidates: [
+        { legislatorId: 'leg-freshA', fullName: 'Robert Onder', sourceKeys: {}, chamberDistrictEra: [] },
+        { legislatorId: 'leg-freshB', fullName: 'Robert Onder', sourceKeys: {}, chamberDistrictEra: [] },
+      ],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-freshA', { id: 'leg-freshA', person_id: null }],
+    ['leg-freshB', { id: 'leg-freshB', person_id: null }],
+  ]);
+  const client = identityFakeClient({ flags: [flag], legislatorsById });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/queue`);
+    const body = await res.json();
+    const item = body.items[0];
+    assert.deepEqual(item.existing_persons, [
+      { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+      { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+    ]);
   }, client);
 });
 
@@ -2098,6 +2131,97 @@ test('POST /api/identity/decision attach: FIX ROUND 1 CRITICAL 1 — a genuine a
     assert.ok(!calls.some((c) => c.table === 'legislators' && c.method === 'update'));
     assert.ok(!calls.some((c) => c.table === 'person_links'));
     assert.equal(legislatorsById.get('leg-fifth').person_id, null);
+  }, client);
+});
+
+// ---- MICRO-ROUND (re-review, information-gap finding): a cross-check-demoted flag can genuinely
+// cite MULTIPLE existing persons (evidence.existingPersons) — the 'attach' route must accept
+// EITHER one Lance picks, and still reject anything outside that set. ----
+
+test('POST /api/identity/decision attach: MICRO-ROUND — a flag citing TWO existing persons (evidence.existingPersons) accepts the SECOND one, not just existingPerson (the first)', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'attach:person-onder-1+person-onder-2:leg-freshA,leg-freshB', resolved: false,
+    candidate_legislator_ids: ['leg-freshA', 'leg-freshB'],
+    evidence: {
+      reason: 'attach_candidate',
+      existingPerson: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+      existingPersons: [
+        { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+        { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+      ],
+      candidates: [{ legislatorId: 'leg-freshA' }, { legislatorId: 'leg-freshB' }],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-freshA', {
+      id: 'leg-freshA', full_name: 'Robert Onder', bioguide_id: 'O000177', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-freshB', {
+      id: 'leg-freshB', full_name: 'Robert Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: '2', legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient(
+    { flags: [flag], legislatorsById, existingPersonIds: ['person-onder-1', 'person-onder-2'] },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        // person-onder-2 — the SECOND entry, not existingPerson's own person-onder-1 — proves the
+        // route validates membership in the full list, not exact-equality against the first.
+        flag_id: 'f1', action: 'attach', legislator_ids: ['leg-freshA'], person_id: 'person-onder-2',
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.person_id, 'person-onder-2');
+    const linkInsert = calls.find((c) => c.table === 'person_links' && c.method === 'insert');
+    assert.equal(linkInsert.args[0].person_id, 'person-onder-2');
+    assert.equal(legislatorsById.get('leg-freshA').person_id, 'person-onder-2');
+    assert.equal(legislatorsById.get('leg-freshB').person_id, null, 'the other candidate, untouched by this decision');
+  }, client);
+});
+
+test('POST /api/identity/decision attach: MICRO-ROUND — a flag citing TWO existing persons still 400s a person_id that is neither of them, zero writes', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'attach:person-onder-1+person-onder-2:leg-freshA', resolved: false,
+    candidate_legislator_ids: ['leg-freshA'],
+    evidence: {
+      reason: 'attach_candidate',
+      existingPerson: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+      existingPersons: [
+        { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+        { personId: 'person-onder-2', displayName: 'Robert Onder Jr.' },
+      ],
+      candidates: [{ legislatorId: 'leg-freshA' }],
+    },
+  };
+  const legislatorsById = new Map([
+    ['leg-freshA', {
+      id: 'leg-freshA', full_name: 'Robert Onder', bioguide_id: 'O000177', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient(
+    // person-third genuinely EXISTS (proves this is the listed-set check, not the person-not-found path)
+    { flags: [flag], legislatorsById, existingPersonIds: ['person-onder-1', 'person-onder-2', 'person-third'] },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        flag_id: 'f1', action: 'attach', legislator_ids: ['leg-freshA'], person_id: 'person-third',
+      }),
+    });
+    assert.equal(res.status, 400);
+    assert.ok(!calls.some((c) => c.table === 'legislators' && c.method === 'update'));
+    assert.ok(!calls.some((c) => c.table === 'person_links'));
+    assert.equal(legislatorsById.get('leg-freshA').person_id, null);
   }, client);
 });
 
