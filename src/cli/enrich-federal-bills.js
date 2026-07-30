@@ -53,11 +53,15 @@ const JURISDICTION = 'us-congress';
 const SOURCE = 'enrich-federal-bills';
 
 export function parseArgs(argv) {
-  const out = { dryRun: false, limit: null };
+  const out = { dryRun: false, limit: null, skipMembers: false };
   let i = 0;
   while (i < argv.length) {
     const key = argv[i];
     if (key === '--dry-run') { out.dryRun = true; i += 1; continue; }
+    // --skip-members (review fix round 1 MINOR 3): skips ensureFederalMemberMetadata's full
+    // roster re-page entirely — see that function's own header comment for why a Task-6 operator
+    // chunking bill work across many invocations wants this on every chunk after the first.
+    if (key === '--skip-members') { out.skipMembers = true; i += 1; continue; }
     if (key === '--limit') { out.limit = Number(argv[i + 1]); i += 2; continue; }
     throw new Error(`unknown flag: ${key}`);
   }
@@ -129,6 +133,19 @@ export async function loadTextIndex(client) {
 // planBillWork -> { needsWork: [{billId, bill, needsSponsors, needsStatus, needsText, needsDetail}],
 // skippedComplete, billRowNotFound }. A bill with all three already satisfied costs zero further
 // I/O this run (the DB-keyed resumability this file relies on instead of a progress artifact).
+//
+// KNOWN TRADEOFF (review fix round 1, documented not silently accepted): `needsSponsors` is an
+// "AT LEAST ONE sponsor recorded" gate, not an "ALL of this bill's sponsors recorded" gate — once
+// a single sponsor write lands for a bill, `billsWithAnySponsorFrom` marks the bill done and no
+// future run's `planBillWork` will ever re-fetch its detail for sponsors again. On a bill with
+// MULTIPLE sponsors where some resolve/write and others don't in the same run (an unmatched
+// bioguide, or the 0014-missing-relation gate tripping mid-list), the unwritten ones are
+// permanently abandoned by this bill-level gate — never retried automatically. `processBillLive`
+// below compensates by naming exactly which bioguide(s) were left unresolved in `failures[]`
+// (counted `sponsorsUnresolved`) so an operator can find and manually re-run/investigate them;
+// this does NOT make the gate retry them itself. Both real captured fixtures (HR 498, HR 845)
+// carry exactly one sponsor — Congress.gov's `sponsors[]` is typically a single introducing
+// sponsor — so this is believed rare in practice, not proven absent.
 export function planBillWork(billIds, billIndex, billsWithAnySponsor, textIndex) {
   const needsWork = [];
   let skippedComplete = 0;
@@ -202,6 +219,7 @@ function emptyBillCounts() {
     sponsorAlreadyExists: 0,
     sponsorLegislatorNotFound: 0,
     sponsorGated: 0,
+    sponsorsUnresolved: 0,
     textFetched: 0,
     textOversizeRefused: 0,
     textFormatMissing: 0,
@@ -250,11 +268,26 @@ export async function processBillLive(client, runId, work, {
       }
 
       if (needsSponsors) {
+        // unresolvedBioguides — review fix round 1 (IMPORTANT finding): the bill-level
+        // needsSponsors gate (planBillWork, see its KNOWN TRADEOFF comment) will never revisit
+        // this bill once ANY sponsor exists for it, so a sponsor that fails to resolve/write HERE
+        // is otherwise silently lost forever. Collected per-bill and reported as ONE named
+        // failures[] entry below so an operator can find and manually investigate/re-run it —
+        // this does not make the gate itself retry automatically.
+        const unresolvedBioguides = [];
         for (const sponsor of detail.sponsors) {
           counts.sponsorsSeen += 1;
           const legislator = legislatorIndex.get(sponsor.bioguide_id);
-          if (!legislator) { counts.sponsorLegislatorNotFound += 1; continue; }
-          if (sponsorGatedRef.gated) { counts.sponsorGated += 1; continue; }
+          if (!legislator) {
+            counts.sponsorLegislatorNotFound += 1;
+            unresolvedBioguides.push(sponsor.bioguide_id);
+            continue;
+          }
+          if (sponsorGatedRef.gated) {
+            counts.sponsorGated += 1;
+            unresolvedBioguides.push(sponsor.bioguide_id);
+            continue;
+          }
           const key = `${billId}|${legislator.id}`;
           if (sponsorIndex.has(key)) { counts.sponsorAlreadyExists += 1; continue; }
           // eslint-disable-next-line no-await-in-loop
@@ -268,12 +301,22 @@ export async function processBillLive(client, runId, work, {
             if (isMissingRelationError(error, 'bill_sponsors')) {
               sponsorGatedRef.gated = true;
               counts.sponsorGated += 1;
+              unresolvedBioguides.push(sponsor.bioguide_id);
               continue;
             }
             throw new Error(`enrich-federal-bills: sponsor insert failed for bill_id=${billId}: ${error.message}`);
           }
           sponsorIndex.set(key, { id: null }); // keep the in-memory index consistent for the rest of this run
           counts.sponsorInserted += 1;
+        }
+        if (unresolvedBioguides.length > 0) {
+          counts.sponsorsUnresolved += unresolvedBioguides.length;
+          failures.push({
+            step: `sponsors ${bill.identifier}`,
+            message: `${unresolvedBioguides.length} sponsor(s) unresolved/unwritten this run — the `
+              + 'bill-level completion gate will NOT retry these automatically once any sponsor '
+              + `exists for this bill: ${unresolvedBioguides.join(', ')}`,
+          });
         }
       }
     }
@@ -311,11 +354,20 @@ function emptyMemberCounts() {
     legislatorCreated: 0,
     partyPatched: 0,
     partyAlreadySet: 0,
+    partyMissingInSource: 0,
     termCreated: 0,
     termAlreadyExists: 0,
   };
 }
 
+// ensureFederalMemberMetadata re-pages the FULL current House+Senate roster (~2,694 members /
+// 250 per page ~= 11 congress.gov requests, review fix round 1 MINOR 3) EVERY invocation,
+// regardless of --limit — --limit only slices the bill worklist in runEnrichFederalBills below,
+// never this pagination loop. A Task-6 operator chunking the bill worklist across many
+// invocations would otherwise redundantly re-page the roster on every single chunk (~11 requests
+// x N chunks, ~40s x N chunks against the shared 3.6s/request congressLimiter). Pass
+// --skip-members on every chunk after the first to skip this step entirely — see parseArgs /
+// runEnrichFederalBills.
 export async function ensureFederalMemberMetadata(client, runId, {
   fetchMemberPageFn = us.fetchMemberPage,
   loadLegislatorIndexFn = loadLegislatorIndexByBioguide,
@@ -375,13 +427,23 @@ export async function ensureFederalMemberMetadata(client, runId, {
       continue;
     }
 
-    if (m.party != null && existing.party == null) {
-      // eslint-disable-next-line no-await-in-loop
-      const { error } = await client.from('legislators').update({ party: m.party, run_id: runId }).eq('id', existing.id);
-      if (error) throw new Error(`enrich-federal-bills: party patch failed for legislators.id=${existing.id}: ${error.message}`);
-      counts.partyPatched += 1;
-    } else if (existing.party != null) {
-      counts.partyAlreadySet += 1;
+    // additivePatch (review fix round 1 MINOR 2 — mirrors the bills.status pattern above exactly,
+    // same fills-null-only semantics): the prior hand-rolled `if/else if` silently dropped the
+    // m.party==null && existing.party==null case out of every count entirely. Source-missing is
+    // now its own honest bucket, distinct from already-set.
+    if (m.party == null) {
+      counts.partyMissingInSource += 1;
+    } else {
+      const partyPatch = additivePatch(existing, { party: m.party });
+      if (Object.keys(partyPatch).length === 0) {
+        counts.partyAlreadySet += 1;
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        const { error } = await client.from('legislators').update({ party: partyPatch.party, run_id: runId }).eq('id', existing.id);
+        if (error) throw new Error(`enrich-federal-bills: party patch failed for legislators.id=${existing.id}: ${error.message}`);
+        existing.party = partyPatch.party; // keep the in-memory index consistent for the rest of this run
+        counts.partyPatched += 1;
+      }
     }
 
     const district = m.chamber === 'senate' ? stateAbbreviation(m.state) : m.district;
@@ -403,7 +465,7 @@ export async function ensureFederalMemberMetadata(client, runId, {
 
 // ---- orchestration: live ----
 
-export async function runEnrichFederalBills(client, runId, { limit = null, deps = {} } = {}) {
+export async function runEnrichFederalBills(client, runId, { limit = null, skipMembers = false, deps = {} } = {}) {
   const {
     loadVotedBillIdsFn = loadVotedBillIds,
     loadFederalBillIndexFn = loadFederalBillIndex,
@@ -417,8 +479,12 @@ export async function runEnrichFederalBills(client, runId, { limit = null, deps 
 
   // Member-metadata first: sponsor resolution below benefits from a freshly-ensured legislators
   // table (a current member who has never yet appeared in any ingested roll call would otherwise
-  // be unresolvable as a sponsor this same run).
-  const memberResult = await ensureFederalMemberMetadataFn(client, runId);
+  // be unresolvable as a sponsor this same run). skipMembers (review fix round 1 MINOR 3) lets a
+  // Task-6 operator chunking the bill worklist across many invocations skip this ~11-request
+  // roster re-page on every chunk after the first — see ensureFederalMemberMetadata's own header.
+  const memberResult = skipMembers
+    ? { counts: null, failures: [] }
+    : await ensureFederalMemberMetadataFn(client, runId);
 
   const billIds = await loadVotedBillIdsFn(client);
   const billIndex = await loadFederalBillIndexFn(client);
@@ -452,6 +518,7 @@ export async function runEnrichFederalBills(client, runId, { limit = null, deps 
       billsSkippedComplete: skippedComplete,
       sponsorTableGated: sponsorGatedRef.gated,
       ...counts,
+      memberMetadataSkipped: skipMembers,
       memberMetadata: memberResult.counts,
     },
     failures: [...memberResult.failures, ...failures],
@@ -527,7 +594,7 @@ async function main() {
 
   const runId = await openRun(client, SOURCE);
   try {
-    const result = await runEnrichFederalBills(client, runId, { limit: args.limit });
+    const result = await runEnrichFederalBills(client, runId, { limit: args.limit, skipMembers: args.skipMembers });
     const totalFailures = result.failures.length;
     const status = totalFailures === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, { counts: result.counts, failures: result.failures });

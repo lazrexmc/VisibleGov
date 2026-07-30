@@ -37,6 +37,15 @@ test('parseArgs accepts --dry-run and --limit at any position', () => {
   assert.equal(both.limit, 10);
 });
 
+test('parseArgs defaults skipMembers to false and accepts --skip-members (MINOR 3 fix)', () => {
+  assert.equal(parseArgs([]).skipMembers, false);
+  assert.equal(parseArgs(['--skip-members']).skipMembers, true);
+  const combined = parseArgs(['--limit', '5', '--skip-members', '--dry-run']);
+  assert.equal(combined.skipMembers, true);
+  assert.equal(combined.limit, 5);
+  assert.equal(combined.dryRun, true);
+});
+
 test('parseArgs rejects unknown flags', () => {
   assert.throws(() => parseArgs(['--bogus']), /unknown flag/);
 });
@@ -313,6 +322,7 @@ function baseDeps(overrides = {}) {
     counts: {
       billDetailFetched: 0, billDetailFailed: 0, statusPatched: 0, statusAlreadySet: 0, statusMissingInSource: 0,
       sponsorsSeen: 0, sponsorInserted: 0, sponsorAlreadyExists: 0, sponsorLegislatorNotFound: 0, sponsorGated: 0,
+      sponsorsUnresolved: 0,
       textFetched: 0, textOversizeRefused: 0, textFormatMissing: 0, textFetchFailed: 0,
     },
     failures: [],
@@ -399,6 +409,12 @@ test('processBillLive: an unmatched sponsor bioguide_id is an honest count, neve
   assert.equal(deps.counts.sponsorLegislatorNotFound, 1);
   assert.equal(deps.counts.sponsorInserted, 0);
   assert.deepEqual(client.calls.filter((c) => c.table === 'bill_sponsors'), []);
+  // Review fix round 1 (IMPORTANT finding): an unresolved sponsor is named in failures[], since
+  // planBillWork's bill-level gate will never revisit this bill for sponsors once it has ANY.
+  assert.equal(deps.counts.sponsorsUnresolved, 1);
+  assert.equal(deps.failures.length, 1);
+  assert.match(deps.failures[0].step, /sponsors HR 1/);
+  assert.match(deps.failures[0].message, /Z999999/);
 });
 
 test('processBillLive: a sponsor already recorded (sponsorIndex hit) is sponsorAlreadyExists, never a duplicate upsert', async () => {
@@ -442,6 +458,40 @@ test('processBillLive: migration 0014 unapplied — sponsor upsert 42P01s, sets 
   assert.equal(deps.counts.sponsorGated, 2, 'both sponsors gated — the second never even attempts a live upsert');
   const sponsorUpserts = client.calls.filter((c) => c.table === 'bill_sponsors');
   assert.equal(sponsorUpserts.length, 1, 'exactly one live attempt: the first, which discovers the gate');
+  assert.equal(deps.counts.sponsorsUnresolved, 2, 'both gated sponsors count as unresolved too');
+  assert.equal(deps.failures.length, 1, 'one grouped failures[] entry per bill, not one per sponsor');
+  assert.match(deps.failures[0].message, /C1/);
+  assert.match(deps.failures[0].message, /C2/);
+});
+
+test('processBillLive: IMPORTANT fix — a multi-sponsor bill where one resolves+writes and one does not is the exact scenario the bill-level completion gate can silently abandon; the unresolved one is named in failures[] and counted', async () => {
+  const client = makeProcessWriteClient();
+  const deps = baseDeps({
+    legislatorIndex: new Map([['C001120', { id: 'leg-1' }]]), // only the first sponsor resolves
+    fetchTextFn: async () => ({}),
+  });
+  const detailJson = {
+    bill: {
+      type: 'HR',
+      number: '1',
+      congress: 119,
+      title: 'A Bill',
+      latestAction: { text: 'x' },
+      sponsors: [{ bioguideId: 'C001120' }, { bioguideId: 'GHOST01' }],
+    },
+  };
+  await processBillLive(client, 'run-1', makeWork({ needsStatus: false }), {
+    ...deps, fetchBillDetailFn: async () => detailJson,
+  });
+  assert.equal(deps.counts.sponsorInserted, 1, 'the resolvable sponsor still writes normally');
+  assert.equal(deps.counts.sponsorLegislatorNotFound, 1);
+  assert.equal(deps.counts.sponsorsUnresolved, 1, 'only the genuinely-unresolved one counts here, not the successful write');
+  assert.equal(deps.failures.length, 1);
+  assert.match(deps.failures[0].step, /sponsors HR 1/);
+  assert.match(deps.failures[0].message, /GHOST01/);
+  assert.doesNotMatch(deps.failures[0].message, /C001120/, 'the successfully-written sponsor is not named as unresolved');
+  const sponsorUpserts = client.calls.filter((c) => c.table === 'bill_sponsors');
+  assert.equal(sponsorUpserts.length, 1, 'exactly one live write — for the resolvable sponsor only');
 });
 
 test('processBillLive: text oversize is counted textOversizeRefused with a failure entry, never thrown out of the function', async () => {
@@ -637,6 +687,23 @@ test('ensureFederalMemberMetadata: an existing legislator with a null party gets
   assert.equal(partyUpdate.val, 'leg-x');
 });
 
+test('ensureFederalMemberMetadata: MINOR 2 fix — source party null AND existing party null is its own honest partyMissingInSource bucket, not silently dropped from every count', async () => {
+  const client = makeMemberWriteClient();
+  const page0 = { members: [rawMember({ bioguideId: 'X002', name: 'Roe, Jane', party: null, state: 'Ohio', district: 6 })] };
+  const fetchMemberPageFn = async () => page0;
+  const loadLegislatorIndexFn = async () => new Map([['X002', { id: 'leg-y', party: null }]]);
+  const upsertTermFn = async () => ({ created: true });
+
+  const { counts } = await ensureFederalMemberMetadata(client, 'run-1', {
+    fetchMemberPageFn, loadLegislatorIndexFn, upsertTermFn,
+  });
+
+  assert.equal(counts.partyMissingInSource, 1);
+  assert.equal(counts.partyPatched, 0);
+  assert.equal(counts.partyAlreadySet, 0);
+  assert.deepEqual(client.calls.filter((c) => c.op === 'update' && c.table === 'legislators'), []);
+});
+
 test('ensureFederalMemberMetadata: a member-page fetch failure is a typed, counted failure — pagination stops, not a crash', async () => {
   const client = makeMemberWriteClient();
   const fetchMemberPageFn = async () => { throw new SourceFetchError('HTTP 500', { source: 'us-congress' }); };
@@ -722,6 +789,28 @@ test('runEnrichFederalBills: failures from member-metadata and bill processing a
   assert.equal(result.failures.length, 2);
   assert.ok(result.failures.some((f) => f.message === 'boom'));
   assert.ok(result.failures.some((f) => /bill detail HR 1/.test(f.step)));
+});
+
+test('runEnrichFederalBills: MINOR 3 fix — skipMembers:true never calls ensureFederalMemberMetadataFn at all and reports memberMetadataSkipped:true / memberMetadata:null', async () => {
+  const client = { from: () => ({}) };
+  let memberFnCalled = false;
+  const deps = {
+    ensureFederalMemberMetadataFn: async () => { memberFnCalled = true; return { counts: { membersCurrent: 5 }, failures: [] }; },
+    loadVotedBillIdsFn: async () => new Set(['b1']),
+    loadFederalBillIndexFn: async () => new Map([['b1', {
+      id: 'b1', identifier: 'HR 1', status: 'Passed', congress: '119',
+    }]]),
+    loadLegislatorIndexFn: async () => new Map(),
+    loadSponsorIndexFn: async () => ({ gated: false, index: new Map([['b1|leg-x', {}]]) }),
+    loadTextIndexFn: async () => new Set(['b1']), // fully enriched — zero bill-side work either
+  };
+
+  const result = await runEnrichFederalBills(client, 'run-1', { skipMembers: true, deps });
+
+  assert.equal(memberFnCalled, false, 'ensureFederalMemberMetadataFn must never be invoked when skipMembers is true');
+  assert.equal(result.counts.memberMetadataSkipped, true);
+  assert.equal(result.counts.memberMetadata, null);
+  assert.deepEqual(result.failures, []);
 });
 
 // ---- dryRunFederalBillPlan ----
