@@ -497,3 +497,28 @@ test('runBackfillMoTerms: real cache dir end-to-end — resolves the real 2026 s
   assert.equal(report.counts.noMatchingLegislator, report.counts.peopleSeen - report.counts.skippedNonLegislator);
   assert.equal(inserted.length, 0);
 });
+
+// Informational note (task-8b review): the smoke test above injects an EMPTY legislator index, so
+// it never actually exercises district normalization against a real decoded person — every
+// candidate short-circuits at noMatchingLegislator before normalizeLegiscanDistrict's output ever
+// reaches an insert call. This test closes that gap with one real person (Hardy Billington,
+// people_id 20696, real district 'HD-152' in the live 2026 cache) mapped to a fake legislator id,
+// verifying the FULL real-decode -> chamber/district-resolution -> insert path end to end.
+test('runBackfillMoTerms: real cache dir end-to-end — a real person WITH a legislator match inserts with the district correctly normalized from the source\'s own "HD-152" shape to bare digits "152"', async () => {
+  const inserted = [];
+  const report = await runBackfillMoTerms(null, {
+    dryRun: false,
+    runId: 'run-1',
+    cacheDir: REAL_CACHE_DIR,
+    readDatasetFn: readCachedDatasetPeople,
+    loadLegislatorIndexFn: async () => new Map([[20696, 'leg-billington']]), // Hardy Billington, real 2026 roster
+    findExistingTermFn: async () => null,
+    insertTermFn: async (client, runId, args) => { inserted.push(args); return { stateColumnMissing: false }; },
+  });
+  assert.equal(report.session.legiscanSessionId, 2239);
+  assert.equal(report.counts.termsInserted, 1);
+  assert.equal(inserted.length, 1);
+  assert.deepEqual(inserted[0], {
+    legislatorId: 'leg-billington', chamber: 'house', district: '152', party: 'R', includeState: true,
+  });
+});

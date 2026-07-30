@@ -142,7 +142,9 @@ function emptyCounts() {
 // ---- D3: at-large fills-null (reuses loadTermIndex verbatim — see header comment) ----
 
 function emptyAtLargeCounts() {
-  return { candidatesSeen: 0, filled: 0, gatedMissingColumn: 0 };
+  return {
+    candidatesSeen: 0, filled: 0, alreadyFilled: 0, gatedMissingColumn: 0,
+  };
 }
 
 function isAtLargeCandidateShape(term) {
@@ -174,11 +176,18 @@ export async function runAtLargeBackfill(client, {
 
     // eslint-disable-next-line no-await-in-loop -- sequential, same "small/infrequent backlog"
     // precedent as every other batch CLI in this codebase.
-    const { error } = await client.from('terms')
+    const { data, error } = await client.from('terms')
       .update({ district: '0', run_id: runId })
       .eq('id', term.id)
-      .is('district', null); // TOCTOU guard: only writes if district is STILL null at write time.
+      .is('district', null) // TOCTOU guard: only writes if district is STILL null at write time.
+      .select('id'); // Micro-fix (task-8b review, MODERATE): without .select(), a zero-rows-affected
+      // response (the .is() guard filtering everything out under a race) is INDISTINGUISHABLE from
+      // success — both come back error:null. Checking the returned row count is what actually
+      // confirms the write happened, same shape as D2's own `.eq('full_name', bioguide_id)
+      // .select('id')` race-guard above and src/review/server.js's `.update(...).eq(...).is(...)
+      // .select('id')` precedent this mirrors.
     if (error) throw new Error(`backfill-federal-names: at-large district patch failed for terms.id=${term.id}: ${error.message}`);
+    if (!data || data.length === 0) { counts.alreadyFilled += 1; continue; }
     counts.filled += 1;
   }
 

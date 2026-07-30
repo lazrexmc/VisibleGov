@@ -172,19 +172,25 @@ test('loadFederalMemberIndex: a member with zero term items is skipped (never re
 
 // ---- runAtLargeBackfill (D3) ----
 
-function makeFakeTermWriteClient() {
+// updateResults, keyed by the term's id (the `.eq('id', term.id)` value) — mirrors
+// makeFakeLegislatorUpdateClient's own keyed-by-id override convention below. Default (no
+// override) simulates the normal case: the guard matched and one row was updated.
+function makeFakeTermWriteClient(updateResults = {}) {
   const calls = [];
   return {
     calls,
     from: (table) => ({
       update: (patch) => ({
         eq: (col, val) => ({
-          is: async (col2, val2) => {
-            calls.push({
-              table, patch, eq: { col, val }, is: { col: col2, val: val2 },
-            });
-            return { error: null };
-          },
+          is: (col2, val2) => ({
+            select: async (cols) => {
+              calls.push({
+                table, patch, eq: { col, val }, is: { col: col2, val: val2 }, select: cols,
+              });
+              const result = updateResults[val];
+              return result ?? { data: [{ id: val }], error: null };
+            },
+          }),
         }),
       }),
     }),
@@ -207,6 +213,21 @@ test('runAtLargeBackfill: a house term with null district and an at-large-set st
   assert.equal(client.calls[0].patch.run_id, 'run-1');
   assert.deepEqual(client.calls[0].eq, { col: 'id', val: 'term-1' });
   assert.deepEqual(client.calls[0].is, { col: 'district', val: null });
+});
+
+test('runAtLargeBackfill: a zero-rows-affected update (the .is(district, null) guard matched nothing at write time — a race with something else that already filled it) is honestly counted alreadyFilled, never filled', async () => {
+  const client = makeFakeTermWriteClient({ 'term-1': { data: [], error: null } });
+  const loadTermIndexFn = async () => ({
+    gated: false,
+    rows: [{
+      id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'house', district: null, state: 'WY',
+    }],
+  });
+  const { counts } = await runAtLargeBackfill(client, { dryRun: false, runId: 'run-1', loadTermIndexFn });
+  assert.equal(counts.candidatesSeen, 1);
+  assert.equal(counts.filled, 0);
+  assert.equal(counts.alreadyFilled, 1);
+  assert.equal(client.calls.length, 1);
 });
 
 test('runAtLargeBackfill: a house term with null district but a NON-at-large state is left untouched', async () => {
