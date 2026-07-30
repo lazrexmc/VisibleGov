@@ -8,5 +8,5 @@
 // value. Until Lance pastes real values, these stay empty strings on purpose: site/js/rest.js
 // fails loud with a typed ConfigError on an empty config rather than silently sending an empty
 // apikey header and getting back a 401 that would look identical to "the anon policy denies this."
-export const SUPABASE_URL = '';
-export const SUPABASE_ANON_KEY = '';
+export const SUPABASE_URL = 'https://bplxjbhlyyeucuwfqcbp.supabase.co';
+export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwbHhqYmhseXlldWN1d2ZxY2JwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNzkzODYsImV4cCI6MjEwMDc1NTM4Nn0.OYjf4-smhec_6kzfQ6FmrxOcf-duEglJ3Az9Fyb2T2I';
