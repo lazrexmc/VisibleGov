@@ -739,3 +739,10 @@ legacy flags default toward blocking (recoverable) never toward merging (not). A
 
 **Where that leaves it:** branch profile-completeness, 16 commits, suite 1220/0, final review
 clean, every residual ledgered with rationale. Merge menu goes to Lance next — his decision.
+
+## 2026-07-30 — Lance: "1" — profile-completeness MERGED to main
+
+Menu presented after the clean final review; Lance chose local merge. Fast-forward to 522bd40,
+full suite re-run on the merged tree (1220/1220), pushed, branch deleted. TODO NOW advanced to
+Plan 3 (public site, profile-first) — interactive brainstorm with Lance is the next step, no
+code before it.

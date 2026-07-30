@@ -36,13 +36,21 @@
 - [ ] **Deprioritized (Lance, 2026-07-28): the 22 summary drafts** (17 clean, 5 flagged) were
   pipeline-proving test artifacts — important later when publishing that batch matters, not a
   central focus now. No dependency: glossary extraction reads summaries in any status.
-- [ ] **Next: Plan 3 — the public site, profile-first** (Lance: "the politician profile is the
+- [x] ~~Profile-completeness plan~~ **COMPLETE + MERGED TO MAIN 2026-07-30** (522bd40, 1220/1220,
+  final whole-branch review clean after 2 verified fix waves). Live: 46,268 bill_sponsors
+  (45,792 MO exact + federal), 476/478 federal statuses, 465 bill_texts, attach-to-existing
+  hardened (origin-marked flags, all-member vetoes, keep-separate binding on every path),
+  summary queue + record gate proven at $0 (8 bills: 4 published / 4 flagged). Trail:
+  `.superpowers/sdd/2026-07-29-profile-completeness/progress.md` + CHATLOG 2026-07-30.
+- [ ] **NOW: Plan 3 — the public site, profile-first** (Lance: "the politician profile is the
   product"). Onder's page = who he is + votes cast/missed with plain-language bill one-liners +
   sponsored bills + MO history; bill pages as click-through support; directory + address lookup;
-  static pre-render on publish; freshness footer (filter view to ingestion sources). Pre-work
-  carried from slice-2 final review: id-based markStale, "current published summary per bill"
-  convention, published-goes-stale UX treatment, run_id on summary_verifications (next
-  migration), sponsored-bills ingestion.
+  static pre-render on publish; freshness footer. Walked-back requirements (2026-07-29 ruling):
+  per-fact receipts rendering, reconciliation-flags surface, address-lookup privacy
+  (geocode-and-discard, never log), attribution footer (LegiScan CC-BY + MO not-official-copies
+  disclaimer), rollover-aware freshness. Brainstorm with Lance before any code.
+- [ ] Lance review queue (independent of Plan 3): 4 flagged summaries from the $0 night +
+  earlier flagged drafts; attach-candidate flags in the identity queue.
 
 ## 🛠 BUILD QUEUE
 
