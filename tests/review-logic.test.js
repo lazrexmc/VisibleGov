@@ -17,7 +17,7 @@ import {
 // the consumer that must be able to read a pair-keyed "X is not P" fact back out of it. Asserting
 // the round trip (rather than just the stored JSON shape) is the only way the test can fail if the
 // two sides ever drift.
-import { buildKeepSeparatePairs } from '../src/cli/link-persons.js';
+import { buildKeepSeparatePairs, findKeepSeparateConflict } from '../src/cli/link-persons.js';
 
 const OWN_ORIGIN = `http://${HOST}:${PORT}`;
 
@@ -2718,8 +2718,9 @@ test('POST /api/identity/decision keep-separate on a 1-CANDIDATE attach flag: FI
   }, client);
 });
 
-test('POST /api/identity/decision keep-separate on a MULTI-CANDIDATE attach flag: FINAL REVIEW FINDING 3 — records candidate x member pairs but NEVER a candidate x candidate pair (the decision was about P, and says nothing about whether the two candidates are each other)', () => {
+test('POST /api/identity/decision keep-separate on a MULTI-CANDIDATE SINGLETON-origin attach flag: FINAL REVIEW FINDING 3 — records candidate x member pairs but NEVER a candidate x candidate pair (the decision was about P, and says nothing about whether the two candidates are each other; round 2 R2-1 scopes this to the singleton producer, whose candidates were never paired with each other)', () => {
   const flag = attachFlagFixture(['leg-x', 'leg-y']);
+  flag.evidence.origin = 'singleton';
   const client = identityFakeClient({ flags: [flag], legislatorsById: attachDecisionLegislators(['leg-x', 'leg-y']) });
   return withServer(async (base) => {
     const res = await fetch(`${base}/api/identity/decision`, {
@@ -2763,5 +2764,77 @@ test('POST /api/identity/decision keep-separate on a NON-attach flag: FINAL REVI
     assert.equal(res.status, 200);
     const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
     assert.deepEqual(pairSetOf(pairs), new Set(['leg-b|leg-c']));
+  }, client);
+});
+
+// ---- FINAL REVIEW ROUND 2, R2-1: keep-separate on a cross-check-DEMOTED attach flag ----
+// Round 1 recorded only candidate x member pairs on every attach flag. For a DEMOTED flag that
+// silently un-blocked the cluster's own internal merge: person P = leg-E; fresh leg-A + leg-B
+// cluster -> demoted -> one flag over [leg-A, leg-B]; "keep whole flag separate" recorded [A,E] and
+// [B,E] but no A|B, so the next run auto-created a person merging A+B with no flag and no review
+// (pre-wave it stayed flagged, citing the ruling). The two producers are now distinguishable by
+// evidence.origin and the route treats them differently.
+
+function demotedAttachFlagFixture(candidateIds) {
+  const flag = attachFlagFixture(candidateIds);
+  flag.evidence.origin = 'cross_check_demotion';
+  return flag;
+}
+
+test('POST /api/identity/decision keep-separate on a CROSS-CHECK-DEMOTED attach flag: R2-1 — records the candidate x candidate pairs IN ADDITION to the candidate x member pairs, so the cluster stays in the flag queue instead of silently auto-merging on the next run', () => {
+  const flag = demotedAttachFlagFixture(['leg-x', 'leg-y']);
+  const client = identityFakeClient({ flags: [flag], legislatorsById: attachDecisionLegislators(['leg-x', 'leg-y']) });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f-attach', action: 'keep-separate', note: 'none of these are the same man' }),
+    });
+    assert.equal(res.status, 200);
+    const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
+    assert.deepEqual(
+      pairSetOf(pairs),
+      new Set(['leg-pm1|leg-x', 'leg-pm2|leg-x', 'leg-pm1|leg-y', 'leg-pm2|leg-y', 'leg-x|leg-y']),
+      'the candidates of a DEMOTED flag formed a real cluster with each other, so "keep whole flag separate" must cover that pair too — the machine never resolves that ambiguity toward a merge',
+    );
+    // The consequence, asserted directly rather than inferred: this is the exact lookup
+    // applyKeepSeparateRulings runs on the next link-persons pass, so a non-null conflict here IS
+    // "the A+B cluster is downgraded to a flag instead of silently auto-linking".
+    const conflict = findKeepSeparateConflict(['leg-x', 'leg-y'], pairs);
+    assert.ok(conflict, 'the next run must find a conflict on the cluster\'s OWN internal pair');
+    assert.equal(conflict.note, 'none of these are the same man', 'and it cites Lance\'s own words back to him');
+  }, client);
+});
+
+test('POST /api/identity/decision keep-separate on a SINGLETON-origin attach flag: R2-1 — still records NO candidate x candidate pair (round 1\'s ruling stands for this producer: those candidates were deliberately never paired with each other)', () => {
+  const flag = attachFlagFixture(['leg-x', 'leg-y']);
+  flag.evidence.origin = 'singleton';
+  const client = identityFakeClient({ flags: [flag], legislatorsById: attachDecisionLegislators(['leg-x', 'leg-y']) });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f-attach', action: 'keep-separate', note: 'neither belongs to Robert F. Onder' }),
+    });
+    assert.equal(res.status, 200);
+    const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
+    assert.deepEqual(pairSetOf(pairs), new Set(['leg-pm1|leg-x', 'leg-pm2|leg-x', 'leg-pm1|leg-y', 'leg-pm2|leg-y']));
+    assert.equal(pairSetOf(pairs).has('leg-x|leg-y'), false);
+  }, client);
+});
+
+test('POST /api/identity/decision keep-separate on an attach flag with NO origin marker (written before R2-1 existed): R2-1 — defaults to recording the candidate x candidate pairs, because an unknown producer might be the demotion one and missed-merge is the benign direction', () => {
+  const flag = attachFlagFixture(['leg-x', 'leg-y']);
+  assert.equal(flag.evidence.origin, undefined, 'premise: this fixture carries no origin, exactly like a flag already sitting in the live queue');
+  const client = identityFakeClient({ flags: [flag], legislatorsById: attachDecisionLegislators(['leg-x', 'leg-y']) });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f-attach', action: 'keep-separate', note: 'not this person' }),
+    });
+    assert.equal(res.status, 200);
+    const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
+    assert.equal(pairSetOf(pairs).has('leg-x|leg-y'), true);
   }, client);
 });

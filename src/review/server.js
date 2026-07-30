@@ -951,6 +951,26 @@ async function handleIdentityDecision(client, req, res) {
       // flag named. Deliberately NOT candidate x candidate — this decision is about the person, and
       // says nothing about whether two candidates are each other; mis-recording that would
       // permanently block a merge Lance never ruled on.
+      //
+      // ROUND 2, R2-1 (re-review, execution-proven): recording ONLY those pairs silently un-blocked
+      // a demoted cluster's own internal merge. src/cli/link-persons.js has two attach-flag
+      // producers, and evidence.origin now says which one made this flag:
+      //   'singleton'            — each candidate arrived ALONE; clusterLegislators never paired
+      //                            them with each other, so this ruling says nothing about whether
+      //                            they are each other. No candidate-x-candidate pairs (round 1's
+      //                            ruling, unchanged for this producer).
+      //   'cross_check_demotion' — the candidates DID form one coherent cluster and only the
+      //                            cross-check pulled them apart to ask about the person. Here
+      //                            "keep whole flag separate" is genuinely ambiguous between "these
+      //                            are not P" and "these are all different people" — and per the
+      //                            plan's asymmetric-cost law the machine must NEVER resolve that
+      //                            ambiguity toward a silent merge. Recording the
+      //                            candidate-x-candidate pairs too keeps the cluster in the flag
+      //                            queue (the next run re-flags it citing this very ruling), where
+      //                            Lance decides. Missed-merge is the benign direction.
+      // A flag carrying NO origin (written before this marker existed, and possibly already sitting
+      // in the live queue) is treated as the demotion case for the same reason: an unknown producer
+      // might be that one, and only one of the two possible mistakes is silent.
       const targetPersonIds = readExistingPersons(flag.evidence).map((p) => p?.personId).filter(Boolean);
       const isAttachFlag = flag.evidence?.reason === 'attach_candidate' && targetPersonIds.length > 0;
       let legislatorIdPairs = null;
@@ -959,6 +979,13 @@ async function handleIdentityDecision(client, req, res) {
         legislatorIdPairs = [];
         for (const candidateId of stillUnlinkedIds) {
           for (const memberId of memberIds) legislatorIdPairs.push([candidateId, memberId]);
+        }
+        if (flag.evidence?.origin !== 'singleton') {
+          for (let a = 0; a < stillUnlinkedIds.length; a += 1) {
+            for (let b = a + 1; b < stillUnlinkedIds.length; b += 1) {
+              legislatorIdPairs.push([stillUnlinkedIds[a], stillUnlinkedIds[b]]);
+            }
+          }
         }
       }
 

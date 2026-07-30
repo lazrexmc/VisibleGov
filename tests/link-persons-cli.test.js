@@ -20,6 +20,7 @@ import {
   buildAttachCandidates,
   buildAttachFlags,
   applyAttachCrossCheck,
+  MissingMemberRowError,
 } from '../src/cli/link-persons.js';
 
 // Task 1 (docs/superpowers/plans/2026-07-29-identity-merge.md) — cluster pass + linker CLI.
@@ -2312,5 +2313,216 @@ test('runLink FINAL REVIEW FINDING 2: the existing singleton-suppression scenari
     report.flagged.some((f) => f.reason === 'attach_candidate'),
     false,
     'the ruling vetoes person-onder-1 on the demotion path too — the exact merge Lance rejected is never re-proposed',
+  );
+});
+
+// ============================================================================================
+// FINAL REVIEW ROUND 2 (scoped re-review of the round-1 fix wave): two Importants introduced by
+// the wave itself, plus one Minor.
+//   R2-1 a keep-separate on a cross-check-DEMOTED attach flag silently un-blocked the cluster's
+//        own internal merge, because round 1 recorded only candidate x member pairs. The two
+//        attach-flag producers are now distinguishable via evidence.origin so the server can treat
+//        them differently.
+//   R2-2 BOTH attach vetoes were surname-key-scoped, so a person's differently-surnamed member
+//        could not veto at all.
+//   R2-3 a memberRowsById lookup miss degraded to a silent "no verdict" (surnameKey(undefined)
+//        === ''), on the one path where a wrong merge is the failure mode.
+// ============================================================================================
+
+// ---- R2-1: origin marker on both attach-flag producers ----
+
+test('buildAttachFlags: R2-1 — every singleton-origin attach flag is stamped origin "singleton", the marker the review server needs to know these candidates were NEVER paired with each other', () => {
+  const fifthRow = {
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+  };
+  const flags = buildAttachFlags(
+    [{ legislatorId: 'leg-onder-fifth', personId: 'person-onder-1', matchedMembers: [] }],
+    new Map([['leg-onder-fifth', fifthRow]]),
+    new Map([['person-onder-1', 'Robert F. Onder']]),
+  );
+  assert.equal(flags[0].origin, 'singleton');
+});
+
+test('applyAttachCrossCheck: R2-1 — every demoted flag is stamped origin "cross_check_demotion": its candidates DID form a real, coherent cluster with each other, which is exactly what makes "keep whole flag separate" ambiguous', () => {
+  const existingMember = {
+    id: 'leg-onder-existing', full_name: 'Robert Onder', surname: 'Onder', person_id: 'person-onder-1', evidence: [],
+  };
+  const cluster = {
+    key: 'onder:leg-a,leg-b',
+    memberIds: ['leg-a', 'leg-b'],
+    evidence: [{ legislatorId: 'leg-a', fullName: 'Robert Onder' }, { legislatorId: 'leg-b', fullName: 'Robert Onder' }],
+  };
+  const memberRowsById = new Map([
+    ['leg-a', { id: 'leg-a', full_name: 'Robert Onder', surname: 'Onder', evidence: [] }],
+    ['leg-b', { id: 'leg-b', full_name: 'Robert Onder', surname: 'Onder', evidence: [] }],
+  ]);
+  const { demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, [existingMember], new Map(), new Map());
+  assert.equal(demotedFlags[0].origin, 'cross_check_demotion');
+});
+
+test('writeIdentityFlag: R2-1 — evidence.origin is persisted verbatim, so the review server reads the producer off the stored row rather than re-deriving it', async () => {
+  const client = makeFakeClient({});
+  await writeIdentityFlag(client, 'run-1', {
+    clusterKey: 'attach:person-1:leg-a,leg-b',
+    candidateIds: ['leg-a', 'leg-b'],
+    evidence: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }],
+    reason: 'attach_candidate',
+    origin: 'cross_check_demotion',
+    existingPersons: [{ personId: 'person-1', displayName: 'Robert F. Onder' }],
+  });
+  assert.equal(client.state.identity_flags[0].evidence.origin, 'cross_check_demotion');
+});
+
+test('runLink R2-1: the reviewer\'s next-run shape — once Lance has kept a DEMOTED flag separate, the ruling covers the cluster\'s own internal pair too, so the A+B cluster never auto-links: zero clusters, ONE flag, Lance\'s own words cited', async () => {
+  // person P holds leg-E; leg-A and leg-B are the two fresh rows that were demoted onto P and then
+  // ruled keep-separate. The ruling's legislatorIdPairs (written by src/review/server.js) carry the
+  // candidate x member pairs AND the candidate x candidate pair — the latter is what R2-1 restores.
+  const legislatorRows = [
+    {
+      id: 'leg-E', full_name: 'Robert Onder', surname: 'Onder', legiscan_people_id: 16351, person_id: 'person-P',
+    },
+    {
+      id: 'leg-A', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: 'O000177', person_id: null,
+    },
+    {
+      id: 'leg-B', full_name: 'Robert Onder', surname: 'Onder', mo_senate_id: '2', person_id: null,
+    },
+  ];
+  const identityFlagsRows = [{
+    id: 'flag-demoted',
+    cluster_key: 'attach:person-P:leg-A,leg-B',
+    evidence: {
+      reason: 'attach_candidate',
+      origin: 'cross_check_demotion',
+      resolutions: [{
+        action: 'keep-separate',
+        legislatorIds: ['leg-A', 'leg-B'],
+        legislatorIdPairs: [['leg-A', 'leg-E'], ['leg-B', 'leg-E'], ['leg-A', 'leg-B']],
+        note: 'Lance: none of these are the same man',
+        decidedAt: '2026-02-01T00:00:00Z',
+      }],
+    },
+  }];
+  const personsRows = [{ id: 'person-P', display_name: 'Robert F. Onder', display_name_source: 'legiscan' }];
+  const client = makeFakeClient({
+    legislatorRows, termRows: [], identityFlagsRows, personsRows,
+  });
+
+  const report = await runLink(client, { dryRun: true });
+  assert.equal(report.counts.clusters, 0, 'A+B must NEVER auto-link after that ruling — this is the silent merge R2-1 closes');
+  assert.equal(report.flagged.length, 1, 'exactly one flag: the downgraded A+B cluster');
+  const [flag] = report.flagged;
+  assert.equal(flag.reason, 'conflicts_with_keep_separate_ruling');
+  assert.equal(flag.keepSeparateRuling.note, 'Lance: none of these are the same man');
+  assert.deepEqual(flag.candidateIds.slice().sort(), ['leg-A', 'leg-B']);
+});
+
+// ---- R2-2: the vetoes must consult EVERY member of a person, not just same-surname-key ones ----
+
+// bonoFixture — the reviewer's execution-proven repro. A real, common shape: a legislator whose
+// printed name gained a second surname mid-career (Mary Bono -> Mary Bono Mack), so the SAME person
+// has two members whose surnameKey differs ('bono' vs 'mack'). The differently-surnamed member holds
+// the hard seat fact, and the surname prefilter was filtering her out of the veto set entirely.
+function bonoFixture({ mackEvidence = true } = {}) {
+  const seat = (district) => [{
+    source: 'terms', jurisdiction_id: 'us-congress', chamber: 'house', district, start_date: null, end_date: null,
+  }];
+  const personMembers = [
+    {
+      id: 'leg-bono', full_name: 'Mary Bono', surname: 'Bono', person_id: 'person-bono', evidence: [],
+    },
+    {
+      id: 'leg-bono-mack', full_name: 'Mary Bono Mack', surname: null, person_id: 'person-bono', evidence: mackEvidence ? seat('CA-44') : [],
+    },
+  ];
+  const freshOne = {
+    id: 'leg-fresh-1', full_name: 'Mary Bono', surname: 'Bono', person_id: null, evidence: [],
+  };
+  const freshTwo = {
+    id: 'leg-fresh-2', full_name: 'Mary Bono', surname: 'Bono', person_id: null, evidence: mackEvidence ? seat('CA-45') : [],
+  };
+  const cluster = {
+    key: 'bono:leg-fresh-1,leg-fresh-2',
+    memberIds: ['leg-fresh-1', 'leg-fresh-2'],
+    evidence: [{ legislatorId: 'leg-fresh-1', fullName: 'Mary Bono' }, { legislatorId: 'leg-fresh-2', fullName: 'Mary Bono' }],
+  };
+  return {
+    personMembers,
+    freshOne,
+    freshTwo,
+    cluster,
+    memberRowsById: new Map([['leg-fresh-1', freshOne], ['leg-fresh-2', freshTwo]]),
+  };
+}
+
+test('surnameKey/finalPairStatus sanity check (R2-2 premise): "Mary Bono Mack" keys to "mack", NOT "bono" — yet she hard-CONTRADICTS the fresh CA-45 row, which is exactly the veto the surname prefilter was discarding', () => {
+  const { personMembers, freshTwo } = bonoFixture();
+  assert.equal(surnameKey(personMembers[1]), 'mack');
+  assert.equal(surnameKey(freshTwo), 'bono');
+  assert.equal(finalPairStatus(freshTwo, personMembers[1]), 'contradiction');
+});
+
+test('buildAttachCandidates: R2-2 — a contradiction against a DIFFERENTLY-SURNAMED member of the person vetoes the whole person; the surname prefilter narrows match qualification only, never the veto', () => {
+  const { personMembers, freshTwo } = bonoFixture();
+  // Premise: the compatible edge that used to carry this suggestion is real (evidence-free
+  // 'Mary Bono' member, same printed name) — so the empty result below is the veto, not a coincidence.
+  assert.equal(finalPairStatus(freshTwo, personMembers[0]), 'compatible');
+  assert.deepEqual(
+    buildAttachCandidates([freshTwo], personMembers, new Map()),
+    [],
+    'CA-44 vs CA-45 is a recorded fact about the same person; a surname-key mismatch must never hide it',
+  );
+});
+
+test('applyAttachCrossCheck: R2-2 — same widening on the demotion path (fixed once in the shared helper, so both callers get it): the Bono cluster is not demoted onto the Bono/Bono Mack person', () => {
+  const { personMembers, cluster, memberRowsById } = bonoFixture();
+  const { safeClusters, demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, personMembers, new Map(), new Map());
+  assert.deepEqual(demotedFlags, []);
+  assert.deepEqual(safeClusters, [cluster], 'fails toward a duplicate person — the safe direction');
+});
+
+test('buildAttachCandidates / applyAttachCrossCheck: R2-2 — a keep-separate ruling recorded against ONLY the differently-surnamed member still vetoes the whole person on both paths', () => {
+  const {
+    personMembers, freshOne, cluster, memberRowsById,
+  } = bonoFixture({ mackEvidence: false });
+  // Premise: with no ruling, both paths engage this person.
+  assert.equal(buildAttachCandidates([freshOne], personMembers, new Map()).length, 1);
+  assert.equal(applyAttachCrossCheck([cluster], memberRowsById, personMembers, new Map(), new Map()).demotedFlags.length, 1);
+
+  const keepSeparatePairs = buildKeepSeparatePairs([{
+    id: 'flag-prior',
+    cluster_key: 'bono:prior',
+    evidence: {
+      resolutions: [{
+        action: 'keep-separate', legislatorIds: ['leg-fresh-1', 'leg-bono-mack'], note: 'Lance: not the same woman', decidedAt: '2026-01-01T00:00:00Z',
+      }],
+    },
+  }]);
+  assert.deepEqual(buildAttachCandidates([freshOne], personMembers, keepSeparatePairs), [], 'the ruling names a member whose surnameKey differs — it still binds');
+  const { safeClusters, demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, personMembers, new Map(), keepSeparatePairs);
+  assert.deepEqual(demotedFlags, []);
+  assert.deepEqual(safeClusters, [cluster]);
+});
+
+// ---- R2-3: a missing member row fails loud ----
+
+test('applyAttachCrossCheck: R2-3 — a cluster member id with no row in the snapshot throws MissingMemberRowError instead of silently contributing no verdict (surnameKey(undefined) === "" used to swallow it) — this is the one path where the failure mode is a wrong merge', () => {
+  const cluster = {
+    key: 'onder:leg-a,leg-missing',
+    memberIds: ['leg-a', 'leg-missing'],
+    evidence: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-missing' }],
+  };
+  const memberRowsById = new Map([['leg-a', { id: 'leg-a', full_name: 'Robert Onder', surname: 'Onder', evidence: [] }]]);
+  const existingMember = {
+    id: 'leg-existing', full_name: 'Robert Onder', surname: 'Onder', person_id: 'person-1', evidence: [],
+  };
+  assert.throws(
+    () => applyAttachCrossCheck([cluster], memberRowsById, [existingMember], new Map(), new Map()),
+    (err) => {
+      assert.ok(err instanceof MissingMemberRowError);
+      assert.equal(err.legislatorId, 'leg-missing');
+      assert.equal(err.clusterKey, 'onder:leg-a,leg-missing');
+      return true;
+    },
   );
 });

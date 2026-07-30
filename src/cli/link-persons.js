@@ -316,6 +316,20 @@ export function groupAlreadyLinkedByPerson(alreadyLinkedRows) {
 // keep-separate ruling existing at all. 'ambiguous' and 'no-pair' both fall through silently below:
 // neither blocks the person (unlike 'contradiction') nor contributes a qualifying edge (unlike
 // 'compatible').
+// MissingMemberRowError — ROUND 2, R2-3: a legislator id with no row in the caller's snapshot.
+// Previously this degraded silently: `surnameKey(undefined)` returns '' (the function is defensively
+// tolerant), so evaluateRowAgainstPerson's own no-derivable-name branch swallowed the miss and the
+// row contributed neither a veto nor a match — on the ONE path in this module whose failure mode is
+// a wrong merge. A snapshot that cannot produce a row for a cluster member it is currently
+// clustering is a bug in the caller, not a data condition to tolerate; it fails loud.
+export class MissingMemberRowError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'MissingMemberRowError';
+    Object.assign(this, meta);
+  }
+}
+
 // evaluateRowAgainstPerson — FINAL WHOLE-BRANCH REVIEW, findings 1 & 2 (.superpowers/sdd/
 // 2026-07-29-profile-completeness/final-review-findings.md): the ONE shared (candidate row × one
 // already-linked person's members) verdict. It was previously inlined here and NOT in
@@ -331,23 +345,47 @@ export function groupAlreadyLinkedByPerson(alreadyLinkedRows) {
 // `matchedMembers` are the 'compatible' edges (empty unless the row qualifies on its own).
 // 'ambiguous'/'no-pair' fall through silently: neither blocks the person nor contributes an edge
 // (fix round 1 CRITICAL 3's compatible-only doctrine, unchanged).
+//
+// ROUND 2, R2-2 (re-review, execution-proven with the real Mary Bono / Mary Bono Mack shape): the
+// surname-key prefilter is now applied to MATCH QUALIFICATION ONLY. Both VETOES consult EVERY member
+// of the person, unfiltered. The prefilter is a name-shaped heuristic, and a person's own members
+// routinely do NOT share a surname key — a legislator whose printed name gained a second surname
+// mid-career ('Mary Bono' + 'Mary Bono Mack') keys to 'bono' on one row and 'mack' on the other. The
+// differently-surnamed row is still, by construction, the SAME PERSON, so a hard seat contradiction
+// against it ('Mary Bono Mack' holds CA-44; the fresh row holds CA-45) is exactly as disqualifying
+// as one against a same-keyed member, and a keep-separate ruling naming it is exactly as binding.
+// Filtering those out was hiding recorded facts from the veto. Widening the veto set can only ever
+// produce FEWER suggestions and FEWER demotions — it fails toward flags and duplicate persons, the
+// safe direction. Match qualification keeps the prefilter because there it is a permissive gate on
+// finding a reason to pair (the same role it plays in clusterLegislators' own grouping), not a gate
+// on hearing a reason not to.
 function evaluateRowAgainstPerson(row, members, keepSeparatePairs) {
-  const none = { ruling: null, contradicted: false, matchedMembers: [] };
-  const key = surnameKey(row);
-  if (!key) return none; // no derivable name at all -> never a candidate, same as clusterLegislators' own singleton sweep
-  const sameKeyMembers = members.filter((m) => surnameKey(m) === key);
-  if (sameKeyMembers.length === 0) return none;
+  if (!row) {
+    // R2-3: never silently degrade here — see MissingMemberRowError's own comment.
+    throw new MissingMemberRowError(
+      'evaluateRowAgainstPerson was handed no row — a legislator id with no row in the caller\'s '
+        + 'snapshot cannot be compared against anything, and silently returning "no verdict" would '
+        + 'drop both of this row\'s vetoes on a wrong-merge-adjacent path',
+    );
+  }
 
-  for (const member of sameKeyMembers) {
+  // ---- vetoes: EVERY member, unfiltered (R2-2) ----
+  for (const member of members) {
     const ruling = keepSeparatePairs.get(pairKey(row.id, member.id));
     if (ruling) return { ruling, contradicted: false, matchedMembers: [] };
   }
 
+  // ---- one pass: contradiction vetoes on any member; compatible edges count only for
+  // same-surname-key members (the retained match-qualification prefilter) ----
+  const key = surnameKey(row);
   const matchedMembers = [];
-  for (const member of sameKeyMembers) {
+  for (const member of members) {
     const status = finalPairStatus(row, member);
     if (status === 'contradiction') return { ruling: null, contradicted: true, matchedMembers: [] };
-    if (status === 'compatible') {
+    // `key &&`: a row with no derivable name at all can never qualify as a candidate (same as
+    // clusterLegislators' own singleton sweep) — but it can still be vetoed above, which is why the
+    // name check no longer short-circuits the whole function.
+    if (status === 'compatible' && key && surnameKey(member) === key) {
       matchedMembers.push({ legislatorId: member.id, fullName: member.full_name, status });
     }
   }
@@ -425,6 +463,13 @@ export function buildAttachFlags(attachCandidates, rowsById, personDisplayNameBy
       candidateIds,
       evidence,
       reason: 'attach_candidate',
+      // origin (ROUND 2, R2-1): which producer made this flag. 'singleton' means every candidate
+      // arrived ALONE — clusterLegislators found no same-run partner for any of them, so they were
+      // deliberately never paired with each other, and a keep-separate resolution here must NOT
+      // record candidate-x-candidate pairs. Contrast applyAttachCrossCheck's 'cross_check_demotion'
+      // below, where the candidates DID form a coherent cluster. src/review/server.js reads this off
+      // the stored row rather than re-deriving it.
+      origin: 'singleton',
       existingPerson: existingPersons[0],
       existingPersons,
     });
@@ -520,7 +565,19 @@ export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRow
   const safeClusters = [];
   const demotedFlags = [];
   for (const cluster of clusters) {
-    const memberRows = cluster.memberIds.map((id) => memberRowsById.get(id));
+    const memberRows = cluster.memberIds.map((id) => {
+      const row = memberRowsById.get(id);
+      // R2-3: fail loud, naming the id and the cluster — the shared helper backstops this too, but
+      // only here are both known, and a caller debugging a snapshot gap needs both.
+      if (!row) {
+        throw new MissingMemberRowError(
+          `cluster ${cluster.key} names legislator_id=${id}, which has no row in the caller's snapshot `
+            + '— refusing to cross-check a cluster it cannot fully see',
+          { legislatorId: id, clusterKey: cluster.key },
+        );
+      }
+      return row;
+    });
     const { personIds: matchedPersonIds, blockingRuling } = findDemotionTargetPersons(memberRows, personGroups, keepSeparatePairs);
     if (matchedPersonIds.length === 0) {
       safeClusters.push(cluster);
@@ -535,6 +592,14 @@ export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRow
       candidateIds: cluster.memberIds,
       evidence: cluster.evidence,
       reason: 'attach_candidate',
+      // origin (ROUND 2, R2-1): these candidates ARE a real, coherent cluster with each other —
+      // clusterLegislators built them into one group and only this cross-check pulled them back out.
+      // That is precisely what makes Lance's "keep whole flag separate" ambiguous here: it could mean
+      // "these are not P" or "these are all different people". src/review/server.js resolves that
+      // ambiguity toward MORE blocking (recording the candidate-x-candidate pairs too), which keeps
+      // the cluster in the flag queue for Lance instead of letting the next run auto-merge it —
+      // missed-merge is the benign direction, a silent merge is the unacceptable one.
+      origin: 'cross_check_demotion',
       existingPerson: existingPersons[0],
       existingPersons,
       // keepSeparateRuling: present only when a ruling vetoed some OTHER person while this
@@ -703,6 +768,10 @@ export async function writeIdentityFlag(client, runId, flag) {
         // existingPerson is existingPersons[0], kept for any consumer still reading the singular.
         ...(flag.existingPerson ? { existingPerson: flag.existingPerson } : {}),
         ...(flag.existingPersons ? { existingPersons: flag.existingPersons } : {}),
+        // origin (ROUND 2, R2-1): which attach producer made this flag — 'singleton' or
+        // 'cross_check_demotion'. src/review/server.js's keep-separate branch reads it to decide
+        // whether the candidates' OWN internal pairs are part of what Lance just ruled on.
+        ...(flag.origin ? { origin: flag.origin } : {}),
       },
       run_id: runId,
     })
@@ -843,6 +912,9 @@ async function main() {
         // ad-hoc field would be. existingPersons is the FULL list (1+ entries).
         ...(f.existingPerson ? { existingPerson: f.existingPerson } : {}),
         ...(f.existingPersons ? { existingPersons: f.existingPersons } : {}),
+        // origin (round 2, R2-1): surfaced in the dry-run report too — the two attach producers now
+        // behave differently on resolution, so the operator can see which one proposed each flag.
+        ...(f.origin ? { origin: f.origin } : {}),
       })),
       singletons: report.singletons,
     }, null, 2));
