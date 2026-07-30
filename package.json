@@ -19,6 +19,7 @@
     "auto-publish:glossary": "node --env-file=.env src/cli/auto-publish-glossary.js",
     "golden": "node --env-file=.env src/cli/golden.js",
     "link:persons": "node --env-file=.env src/cli/link-persons.js",
+    "refresh:aggregates": "node --env-file=.env scripts/refresh-aggregates.js",
     "review": "node --env-file=.env src/review/server.js"
   },
   "dependencies": {

@@ -379,6 +379,58 @@ test('voteFilterQuery: page is accepted per the interface signature but never al
 });
 
 // ============================================================================
+// H2 (task 6b review, fix round 1): the chart bar-click position filter — 'yea'/'nay' map to an
+// exact single-value match, 'other' maps to the SAME (present,other) grouping summarizeTotals'
+// own 'other' bucket uses (site/js/vote-charts.js), and missedOnly stays a special case that wins
+// outright whenever both happen to be set (defensive only — vote-charts.js's BAR_CLICK_PATCH
+// always clears the other lever on every click).
+// ============================================================================
+
+test('voteFilterQuery: position=yea appends an exact position=eq.yea clause', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'], position: 'yea' });
+  assert.equal(
+    path,
+    'public_vote_feed?legislator_id=in.(leg-1)&position=eq.yea&order=vote_date.desc.nullslast,cast_id.desc',
+  );
+});
+
+test('voteFilterQuery: position=nay appends an exact position=eq.nay clause', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'], position: 'nay' });
+  assert.match(path, /position=eq\.nay/);
+});
+
+test('voteFilterQuery: position=other appends position=in.(present,other) — the SAME grouping summarizeTotals\' own "other" bucket uses', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'], position: 'other' });
+  assert.match(path, /position=in\.\(present,other\)/);
+});
+
+test('voteFilterQuery: an unrecognized position value is ignored (no clause appended, never a malformed filter)', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'], position: 'not_voting' });
+  assert.doesNotMatch(path, /position=/);
+});
+
+test('voteFilterQuery: position combines with chamber + year, all filters present in order', () => {
+  const path = voteFilterQuery({
+    legislatorIds: ['leg-1'], chamber: 'house', year: 2021, position: 'yea',
+  });
+  assert.equal(
+    path,
+    'public_vote_feed?legislator_id=in.(leg-1)&chamber=eq.house&vote_date=gte.2021-01-01&vote_date=lt.2022-01-01&position=eq.yea&order=vote_date.desc.nullslast,cast_id.desc',
+  );
+});
+
+test('voteFilterQuery: missedOnly wins outright when BOTH missedOnly and position are set (defensive — the real callers never set both at once)', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'], missedOnly: true, position: 'yea' });
+  assert.match(path, /position=in\.\(not_voting,absent\)/);
+  assert.doesNotMatch(path, /position=eq\.yea/);
+});
+
+test('voteFilterQuery: no position, no missedOnly -> no position clause at all, unchanged from before H2', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'] });
+  assert.doesNotMatch(path, /position=/);
+});
+
+// ============================================================================
 // groupSponsorships
 // ============================================================================
 

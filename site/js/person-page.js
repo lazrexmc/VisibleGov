@@ -25,7 +25,7 @@ import {
   buildIdentity, voteFilterQuery, groupSponsorships, chamberLabel,
 } from './profile-model.js';
 import {
-  summarizeTotals, cohesionFromAlignment, partyComparisonModel, renderChartSection,
+  summarizeTotals, cohesionFromAlignment, partyComparisonModel, renderChartSection, normalizePartyLabel,
 } from './vote-charts.js';
 
 // ============================================================================
@@ -558,13 +558,24 @@ export async function loadVotesSection(container, { legislatorIds, filters, vote
 // read-only probe against the real anon surface during this task — renders THIS section's honest
 // failed state while votes/sponsorships/freshness keep rendering normally below it.
 //
-// Fetches public_position_totals / public_party_alignment rows ONCE, unfiltered by chamber/year
-// (brief: "the profile sums/filters client-side — rows per legislator are tiny"), then returns a
-// `rescope()` closure that recomputes summarizeTotals/cohesionFromAlignment/partyComparisonModel
-// from the SAME already-fetched rows against a NEW filters object — no re-fetch on every filter
-// change, which is what makes "charts re-scope" alongside the vote list cheap.
+// Fetches the member's own public_position_totals / public_party_alignment rows ONCE, unfiltered
+// by chamber/year (brief: "the profile sums/filters client-side — rows per legislator are tiny"),
+// then returns a `rescope()` closure that recomputes summarizeTotals/cohesionFromAlignment/
+// partyComparisonModel against a NEW filters object on every call.
+//
+// H1 (review, fix round 1): the PARTY side is no longer a `legislators!inner(party)` PostgREST
+// embed through an aggregate view (fragile, unverifiable pre-apply) — migration 0018 now carries
+// a normalized `party` column directly on public_position_totals, so the party aggregate is ONE
+// indexed query filtered by normalized party + the member's own jurisdiction set (derived from
+// memberRows — every jurisdiction this legislator has actually cast votes in, never a guess) +
+// the active chamber filter. Because chamber is now a SERVER-side filter on the party fetch
+// (unlike year, which stays client-side on both sides via summarizeTotals — chamber has far lower
+// cardinality and this is what the review's scoping language calls for), `rescope()` is async and
+// re-fetches the party rows only when `filters.chamber` has actually changed since the last fetch
+// — every other filter change (year, missedOnly, position) still re-scopes for free from rows
+// already in hand.
 export async function loadChartsSection(container, {
-  legislatorIds, party, filters, onBarClick,
+  legislatorIds, party, filters, onBarClick, onReady,
 }) {
   sectionState(container, { state: 'loading' });
 
@@ -573,8 +584,12 @@ export async function loadChartsSection(container, {
     return null;
   }
 
+  // M1 (review, fix round 1): `onReady` is threaded through every recursive `reload` call too, so
+  // a SUCCESSFUL retry (after an initial failure) fires it again with a fresh `{rescope}` —
+  // without this, mountProfile's own `rescopeCharts` reference would permanently stay pointed at
+  // the no-op fallback after a retry, since the retry's result would never reach it.
   const reload = () => loadChartsSection(container, {
-    legislatorIds, party, filters, onBarClick,
+    legislatorIds, party, filters, onBarClick, onReady,
   }).catch(() => {});
 
   let memberRows;
@@ -596,43 +611,53 @@ export async function loadChartsSection(container, {
     return null;
   }
 
-  // Party comparison (design spec §3, metric 2) — the member's own party's aggregate rows over
-  // the SAME public_position_totals view, filtered via a legislators!inner(party) embed.
-  // vote_casts.legislator_id -> legislators.id is a real FK (migration 0001), and this view
-  // selects vc.legislator_id as a direct passthrough column — the shape PostgREST needs to infer
-  // a relationship THROUGH an aggregate view. UNVERIFIED PRE-APPLY (the view does not exist yet
-  // to test the embed against; flagged as a task-6b report concern for the controller's Step-4
-  // live smoke) — best-effort regardless: a party-fetch failure, or no recorded party at all,
-  // degrades to "party comparison not computable" without failing the whole charts section, since
-  // distribution and cohesion remain independently good data either way.
-  let partyRows = [];
-  if (party) {
+  // M3 (review, RULING): a null/unrecognized party never gets a comparison group — no fetch, no
+  // figure. normalizePartyLabel mirrors migration 0018's SQL CASE exactly (vote-charts.js).
+  const normalizedParty = normalizePartyLabel(party);
+  const jurisdictionIds = [...new Set(memberRows.map((row) => row.jurisdiction_id).filter(Boolean))];
+
+  async function fetchPartyRows(chamber) {
+    if (!normalizedParty || jurisdictionIds.length === 0) return [];
+    const params = [
+      `party=eq.${encodeURIComponent(normalizedParty)}`,
+      `jurisdiction_id=in.(${jurisdictionIds.join(',')})`,
+    ];
+    if (chamber) params.push(`chamber=eq.${chamber}`);
     try {
-      partyRows = await fetchAllRows(
-        `public_position_totals?select=legislator_id,jurisdiction_id,chamber,year,position,casts,legislators!inner(party)&legislators.party=eq.${encodeURIComponent(party)}`,
-      );
+      return await fetchAllRows(`public_position_totals?${params.join('&')}`);
     } catch {
-      partyRows = [];
+      // Best-effort: distribution/cohesion remain independently good data even if this one
+      // fetch fails — degrades to "party comparison not computable," never fails the section.
+      return [];
     }
   }
 
-  const rescope = () => {
+  let partyRows = await fetchPartyRows(filters.chamber);
+  let partyRowsChamber = filters.chamber;
+
+  const rescope = async () => {
     const distribution = summarizeTotals(memberRows, filters);
     if (distribution.total === 0) {
       sectionState(container, { state: 'empty', message: 'No recorded votes for this filter.' });
       return;
     }
-    const partyTotals = party ? summarizeTotals(partyRows, filters) : null;
+    if (filters.chamber !== partyRowsChamber) {
+      partyRows = await fetchPartyRows(filters.chamber);
+      partyRowsChamber = filters.chamber;
+    }
+    const partyTotals = normalizedParty ? summarizeTotals(partyRows, filters) : null;
     const comparison = partyTotals ? partyComparisonModel(distribution, partyTotals) : null;
     const cohesion = cohesionFromAlignment(alignmentRows, filters);
     sectionState(container, { state: 'ready' });
     renderChartSection(container, {
-      distribution, partyComparison: comparison, cohesion, partyLabel: party,
+      distribution, partyComparison: comparison, cohesion, partyLabel: normalizedParty,
     }, onBarClick);
   };
 
-  rescope();
-  return { rescope };
+  await rescope();
+  const result = { rescope };
+  if (typeof onReady === 'function') onReady(result);
+  return result;
 }
 
 async function loadSponsorshipsSection(container, { legislatorIds }) {
@@ -759,19 +784,39 @@ export async function mountProfile(sections, { person, legislators }) {
     runVotes();
     rescopeCharts();
   };
+  // L1 (review, fix round 1): a bar click that would produce the SAME resulting filter state (no
+  // non-page key actually changes — e.g. clicking the already-active bar a second time) is a
+  // no-op: filters stay untouched, including `page` — no reset, no re-fetch, no re-render.
+  // Compares nextVoteFilters' own candidate result against the current filters, ignoring `page`
+  // itself (which nextVoteFilters always forces to 1 on any non-page patch — suppressing exactly
+  // that forced reset when nothing else actually changed is the whole point of this check).
+  //
   // Bar clicks carry a filter PATCH (they don't mutate `filters` themselves, unlike
   // wireVoteFilters' own controls below) — apply it through the SAME nextVoteFilters reducer,
-  // then refresh both sections exactly like any other filter change.
+  // then refresh both sections exactly like any other real filter change.
   const onBarClick = (patch) => {
-    Object.assign(filters, nextVoteFilters(filters, patch));
+    const candidate = nextVoteFilters(filters, patch);
+    const unchanged = Object.keys(candidate)
+      .filter((key) => key !== 'page')
+      .every((key) => candidate[key] === filters[key]);
+    if (unchanged) return;
+    Object.assign(filters, candidate);
     refresh();
   };
 
+  // H4 (review, fix round 1): the charts fetch must not block votes (the page's centerpiece) —
+  // STARTED here, not awaited, same NEW-B pattern freshness already uses below; awaited once, at
+  // the very end, alongside freshness. `onReady` (M1) keeps `rescopeCharts` pointed at whichever
+  // load's rescope function most recently succeeded, including a post-failure retry.
+  let chartsLoad = Promise.resolve();
   if (sections.charts) {
-    const chartsResult = await loadChartsSection(sections.charts, {
-      legislatorIds, party: identity ? identity.party : null, filters, onBarClick,
-    }).catch(() => null);
-    if (chartsResult) rescopeCharts = chartsResult.rescope;
+    chartsLoad = loadChartsSection(sections.charts, {
+      legislatorIds,
+      party: identity ? identity.party : null,
+      filters,
+      onBarClick,
+      onReady: (result) => { rescopeCharts = result.rescope; },
+    }).catch(() => {});
   }
 
   if (sections.voteFilters) {
@@ -781,6 +826,7 @@ export async function mountProfile(sections, { person, legislators }) {
 
   await loadSponsorshipsSection(sections.sponsorships, { legislatorIds }).catch(() => {});
   await freshnessLoad;
+  await chartsLoad;
 }
 
 // Wires the filter controls (chamber select, year select/input, missed-votes checkbox) to

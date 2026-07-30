@@ -210,8 +210,25 @@ export function buildIdentity({ person, legislators, terms }) {
 // public_vote_feed columns (migration 0016, verified live): cast_id, legislator_id, position,
 // vote_id, vote_date, chamber, question, result, source_url, jurisdiction_id, bill_id,
 // bill_identifier, bill_title, session_id.
+//
+// H2 (task 6b review, fix round 1): `position` — a chart-bar-click filter (site/js/vote-charts.js
+// dispatches 'yea'/'nay'/'other' through the SAME nextVoteFilters reducer the chamber/year/
+// missedOnly controls already use). `missedOnly` stays a SPECIAL CASE and wins outright when both
+// are somehow set (defensive only — vote-charts.js's own BAR_CLICK_PATCH always clears the other
+// lever on every click/checkbox change, so in practice they never coexist): it is the pre-existing
+// not_voting+absent toggle, unchanged. `position` maps 'yea'/'nay' to an exact single-value match
+// and 'other' to the SAME (present,other) grouping summarizeTotals' own 'other' bucket uses
+// (site/js/vote-charts.js) — not_voting/absent are deliberately NOT valid `position` values here,
+// since clicking either of those two bars goes through `missedOnly` instead (an exact match: that
+// bucket IS the missed-votes set already).
+const POSITION_FILTER_CLAUSES = {
+  yea: 'position=eq.yea',
+  nay: 'position=eq.nay',
+  other: 'position=in.(present,other)',
+};
+
 export function voteFilterQuery({
-  legislatorIds, chamber, year, missedOnly, page,
+  legislatorIds, chamber, year, missedOnly, position, page,
 } = {}) {
   // `page` is accepted for signature symmetry with the caller's full filter state (task-5
   // brief's interface line lists it), but pagination is Range-header driven by rest.js's
@@ -229,7 +246,11 @@ export function voteFilterQuery({
   // Task 6 extension: the missed-votes toggle (design spec §3) — a SERVER filter appended to this
   // same path builder, never a client-side re-filter of an already-fetched partial page. Renders
   // the printed positions as-is (no percentage, no peer comparison — that would be a scorecard).
-  if (missedOnly) params.push('position=in.(not_voting,absent)');
+  if (missedOnly) {
+    params.push('position=in.(not_voting,absent)');
+  } else if (position && POSITION_FILTER_CLAUSES[position]) {
+    params.push(POSITION_FILTER_CLAUSES[position]);
+  }
   params.push('order=vote_date.desc.nullslast,cast_id.desc');
   return `public_vote_feed?${params.join('&')}`;
 }
