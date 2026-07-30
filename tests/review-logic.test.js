@@ -2032,6 +2032,75 @@ test('POST /api/identity/decision link: a legislator_id that no longer resolves 
 // decision and already carries its other members' links).
 // ============================================================================
 
+// ---- FIX ROUND 1, CRITICAL 1 (reviewer execution-proven exploit, "SERVER-SIDE VALIDATION GAP"):
+// the route must never trust a client-supplied person_id in isolation — it must be re-derived
+// from server-held state (the flag's own attach_candidate evidence) before any write. ----
+
+test('POST /api/identity/decision attach: FIX ROUND 1 CRITICAL 1 — the reviewer\'s exact exploit shape: a plain (non-attach_candidate) flag + an UNRELATED person_id -> 400, zero writes. The target person_id genuinely exists (existingPersonIds includes it) so a pass here would prove the new reason/personId check, not just the pre-existing person-not-found 404, is what closes this', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'jones:leg-a,leg-b', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'ambiguous_era', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'Robert Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient(
+    { flags: [flag], legislatorsById, existingPersonIds: ['person-unrelated'] },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        flag_id: 'f1', action: 'attach', legislator_ids: ['leg-a'], person_id: 'person-unrelated',
+      }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /attach_candidate/);
+    assert.ok(!calls.some((c) => c.table === 'legislators' && c.method === 'update'), 'zero writes');
+    assert.ok(!calls.some((c) => c.table === 'person_links'), 'zero writes');
+    assert.ok(!calls.some((c) => c.table === 'identity_flags' && c.method === 'update'), 'zero writes');
+    assert.equal(legislatorsById.get('leg-a').person_id, null, 'untouched');
+  }, client);
+});
+
+test('POST /api/identity/decision attach: FIX ROUND 1 CRITICAL 1 — a genuine attach_candidate flag, but person_id does NOT match ITS OWN existingPerson.personId (a different real person is named instead) -> 400, zero writes', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'attach:person-onder-1:leg-fifth', resolved: false,
+    candidate_legislator_ids: ['leg-fifth'],
+    evidence: { reason: 'attach_candidate', existingPerson: { personId: 'person-onder-1', displayName: 'Robert F. Onder' }, candidates: [{ legislatorId: 'leg-fifth' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-fifth', {
+      id: 'leg-fifth', full_name: 'Robert Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+    }],
+  ]);
+  const calls = [];
+  const client = identityFakeClient(
+    { flags: [flag], legislatorsById, existingPersonIds: ['person-onder-1', 'person-other'] },
+    (table, method, args) => calls.push({ table, method, args }),
+  );
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        flag_id: 'f1', action: 'attach', legislator_ids: ['leg-fifth'], person_id: 'person-other',
+      }),
+    });
+    assert.equal(res.status, 400);
+    assert.ok(!calls.some((c) => c.table === 'legislators' && c.method === 'update'));
+    assert.ok(!calls.some((c) => c.table === 'person_links'));
+    assert.equal(legislatorsById.get('leg-fifth').person_id, null);
+  }, client);
+});
+
 test('POST /api/identity/decision attach: writes legislators.person_id + person_links (decided_by lance, attachedToPersonId) into the EXISTING person, creates NO new persons row, resolves the flag when its single candidate is the whole candidate set', () => {
   const flag = {
     id: 'f1', cluster_key: 'attach:person-onder-1:leg-fifth', resolved: false,

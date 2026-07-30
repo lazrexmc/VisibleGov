@@ -269,13 +269,34 @@ export function groupAlreadyLinkedByPerson(alreadyLinkedRows) {
 // narrowing); a person P qualifies as an attach TARGET for singleton row X iff: (a) NO member of P
 // returns 'contradiction' against X (a hard structural fact vetoes the whole person outright, never
 // partially — the same doctrine as a cluster-internal contradiction flagging the whole group); (b)
-// at least one member of P returns 'compatible' or 'ambiguous' against X (a real, non-vacuous
-// name+evidence edge — every member returning 'no-pair' means nothing licenses the suggestion at
-// all); and (c) no keep-separate ruling (buildKeepSeparatePairs) exists between X and ANY member of
-// P — final-wave item 2's own binding, extended to gate this new path exactly as it already gates
-// the auto-cluster path. A ruling against even ONE member vetoes the whole person, never just that
-// member: every member of an already-linked person is, by construction, the SAME person, so "X is
-// not Y" is transitively "X is not P" regardless of how X compares to P's OTHER members.
+// at least one member of P returns 'compatible' against X; and (c) no keep-separate ruling
+// (buildKeepSeparatePairs) exists between X and ANY member of P — final-wave item 2's own binding,
+// extended to gate this new path exactly as it already gates the auto-cluster path. A ruling
+// against even ONE member vetoes the whole person, never just that member: every member of an
+// already-linked person is, by construction, the SAME person, so "X is not Y" is transitively "X
+// is not P" regardless of how X compares to P's OTHER members.
+//
+// FIX ROUND 1, CRITICAL 3 (reviewer execution-proven, "DYNASTY ATTACH TRAP" — executed with the
+// real Bayh shape; the operator already mis-clicked this exact family once, in the live
+// identity-merge adjudication this module's own ledger records): 'ambiguous' used to ALSO qualify
+// as a matched edge here — but 'ambiguous' is finalPairStatus's own verdict for EXACTLY the
+// same-seat, different-given-name dynasty shape (real comparable seat evidence, names do NOT
+// match — see finalPairStatus's own doc comment) as well as the same-name-but-non-overlapping-era
+// shape. Treating either as license for a person-TARGETED suggestion (pointing Lance at one
+// specific family member's person) is the trap: a fresh dynasty singleton (a new "Evan Bayh" row)
+// would get suggested as "attach to [Birch Bayh's person]" on nothing but a shared surname/seat,
+// exactly the wrong-merge risk this module exists to prevent, just moved one layer up from
+// auto-cluster into the suggestion itself. RULING (unambiguous): attach candidacy requires
+// 'compatible' ONLY — never 'ambiguous'. Because 'compatible' is only ever reachable when
+// finalPairStatus's own unconditional full-name-variant gate is satisfied (rowNameVariantMatch),
+// this ALSO structurally closes the "new row id has no keep-separate ruling on file yet" gap for
+// the dynasty class for free: a fresh row nobody has ever adjudicated before (so keepSeparatePairs
+// has nothing to block on) still can never generate a targeted suggestion against a differently-
+// given-named family member, because differing given names can never produce 'compatible' in the
+// first place (they read 'ambiguous' or 'no-pair', both excluded here) — no reliance on a
+// keep-separate ruling existing at all. 'ambiguous' and 'no-pair' both fall through silently below:
+// neither blocks the person (unlike 'contradiction') nor contributes a qualifying edge (unlike
+// 'compatible').
 export function buildAttachCandidates(singletonRows, alreadyLinkedRows, keepSeparatePairs) {
   const personGroups = groupAlreadyLinkedByPerson(alreadyLinkedRows);
   const results = [];
@@ -294,7 +315,7 @@ export function buildAttachCandidates(singletonRows, alreadyLinkedRows, keepSepa
       for (const member of sameKeyMembers) {
         const status = finalPairStatus(singleton, member);
         if (status === 'contradiction') { hasContradiction = true; break; }
-        if (status === 'compatible' || status === 'ambiguous') {
+        if (status === 'compatible') {
           matchedMembers.push({ legislatorId: member.id, fullName: member.full_name, status });
         }
       }
@@ -345,6 +366,80 @@ export function buildAttachFlags(attachCandidates, rowsById, personDisplayNameBy
     });
   }
   return flags;
+}
+
+// findCompatibleExistingPerson — the pure lookup applyAttachCrossCheck (below) reduces to: the
+// FIRST already-linked person (Map iteration order — deterministic for a given input, not chosen
+// among ties by any stronger signal; see applyAttachCrossCheck's own comment on this) with at
+// least one member 'compatible' (finalPairStatus, fix round 1 CRITICAL 3's own tightening —
+// 'compatible' ONLY, never 'ambiguous') against ANY of the given member rows. Returns a personId
+// or null.
+function findCompatibleExistingPerson(memberRows, personGroups) {
+  for (const [personId, existingMembers] of personGroups) {
+    for (const memberRow of memberRows) {
+      for (const existingMember of existingMembers) {
+        if (finalPairStatus(memberRow, existingMember) === 'compatible') return personId;
+      }
+    }
+  }
+  return null;
+}
+
+// applyAttachCrossCheck — FIX ROUND 1, CRITICAL 2 (reviewer execution-proven, finding-5 class,
+// executed with a real Onder shape): clusterLegislators' own clean clusters are compared ONLY
+// against OTHER unlinked rows in the SAME batch — the attach pass (above) closes the gap for a
+// LONE fresh row (a singleton), but TWO fresh same-person rows arriving in the same run (e.g. two
+// new session/source rows for one returning legislator, ingested together) form a clean,
+// name-coherent cluster on their OWN, with each other, and would sail straight through
+// writeAutoCluster untouched by the attach pass at all (neither row is ever a singleton) —
+// silently minting a SECOND persons row for someone already linked, with ZERO flag and ZERO
+// review. This is the exact class the whole identity-merge system exists to prevent, just reached
+// through a gap the singleton-only scoping left open.
+//
+// RULING (unambiguous): runLink calls this on EVERY clean cluster, immediately before any cluster
+// is ever handed to writeAutoCluster (dry-run and live alike, same "computed in the shared
+// planning phase" discipline as coherenceAudit/applyKeepSeparateRulings). Every member of the
+// cluster is compared (finalPairStatus, the SAME verbatim primitive the attach pass and
+// clusterLegislators itself use — no parallel matching logic) against EVERY member of EVERY
+// already-linked person. A single 'compatible' edge ANYWHERE demotes the WHOLE cluster to an
+// attach_candidate flag citing that person — never partially written, never auto-attached, Lance
+// decides, exactly the SAME flag shape (and the SAME review-tab 'Attach' action) buildAttachFlags
+// already produces. 'ambiguous' is deliberately NOT a demotion trigger here either (fix round 1,
+// CRITICAL 3's own tightening, applied identically on this side too) — a same-seat,
+// different-given-name pair (the dynasty shape) stays 'ambiguous', never treated as strong enough
+// to demote a cluster onto a specific existing person any more than it is to SUGGEST one.
+// Legitimately-distinct same-name people remain possible (the accepted residual, ledgered
+// throughout this module) — which is exactly why this demotes to a human flag rather than
+// hard-blocking the cluster outright: missed-merge (an extra review item) is benign, wrong-merge
+// (a silent duplicate person) is not.
+//
+// `memberRowsById`: the SAME id->row map runLink already threads through to writeAutoCluster (the
+// full unlinked-rows snapshot; every cluster member is guaranteed present). `alreadyLinkedRows`:
+// buildEvidenceRows-shaped already-linked rows (the SAME snapshot the attach pass itself
+// compares against). `personDisplayNameById`: loadPersons' own map, reused rather than re-fetched.
+export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRows, personDisplayNameById) {
+  const personGroups = groupAlreadyLinkedByPerson(alreadyLinkedRows);
+  const safeClusters = [];
+  const demotedFlags = [];
+  for (const cluster of clusters) {
+    const memberRows = cluster.memberIds.map((id) => memberRowsById.get(id));
+    const matchedPersonId = findCompatibleExistingPerson(memberRows, personGroups);
+    if (matchedPersonId == null) {
+      safeClusters.push(cluster);
+      continue;
+    }
+    // cluster.evidence is ALREADY buildMemberEvidence-shaped (clusterLegislators' own construction
+    // — see buildMemberEvidence's call site there) — the SAME shape buildAttachFlags produces, so
+    // this demoted flag renders identically in the review tab with zero reason-specific branching.
+    demotedFlags.push({
+      clusterKey: buildAttachClusterKey(matchedPersonId, cluster.memberIds),
+      candidateIds: cluster.memberIds,
+      evidence: cluster.evidence,
+      reason: 'attach_candidate',
+      existingPerson: { personId: matchedPersonId, displayName: personDisplayNameById.get(matchedPersonId) ?? null },
+    });
+  }
+  return { safeClusters, demotedFlags };
 }
 
 // ---- conflict guard (Global Constraints: "a non-null person_id is NEVER overwritten — conflict
@@ -549,7 +644,7 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
   const evidenceRows = buildEvidenceRows(unlinked, termRows);
   const { clusters: rawClusters, flagged: matcherFlagged, singletons } = clusterLegislators(evidenceRows);
   const keepSeparatePairs = buildKeepSeparatePairs(identityFlagRows);
-  const { cleanClusters, downgradedFlags } = applyKeepSeparateRulings(rawClusters, keepSeparatePairs);
+  const { cleanClusters: keepSeparateCleanClusters, downgradedFlags } = applyKeepSeparateRulings(rawClusters, keepSeparatePairs);
 
   // Task 4 (attach-to-existing): the attach pass — scoped to clusterLegislators' own `singletons`
   // output (see buildAttachCandidates' own comment for why), compared against EVERY already-linked
@@ -564,7 +659,14 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
   const personDisplayNameById = await loadPersons(client);
   const attachFlags = buildAttachFlags(attachCandidates, rowsById, personDisplayNameById);
 
-  const flagged = [...matcherFlagged, ...downgradedFlags, ...attachFlags];
+  // Fix round 1, CRITICAL 2: the cross-check — every clean cluster (post keep-separate downgrade)
+  // is re-checked against every already-linked person BEFORE it is treated as safe to write at
+  // all. `cleanClusters` from here on is the FINAL, cross-checked set writeAutoCluster ever sees.
+  const { safeClusters: cleanClusters, demotedFlags: crossCheckFlags } = applyAttachCrossCheck(
+    keepSeparateCleanClusters, rowsById, alreadyLinkedEvidenceRows, personDisplayNameById,
+  );
+
+  const flagged = [...matcherFlagged, ...downgradedFlags, ...attachFlags, ...crossCheckFlags];
   const coherenceAudit = auditClusterCoherence(cleanClusters);
 
   const counts = {

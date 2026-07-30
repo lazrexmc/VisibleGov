@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence, nameSetEdgeBasis, normalizePersonName,
+  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence, nameSetEdgeBasis, normalizePersonName, finalPairStatus,
 } from '../src/lib/person-identity.js';
 import {
   parseArgs,
@@ -19,6 +19,7 @@ import {
   groupAlreadyLinkedByPerson,
   buildAttachCandidates,
   buildAttachFlags,
+  applyAttachCrossCheck,
 } from '../src/cli/link-persons.js';
 
 // Task 1 (docs/superpowers/plans/2026-07-29-identity-merge.md) — cluster pass + linker CLI.
@@ -1844,4 +1845,156 @@ test('loadPersons: returns id->display_name for every persons row', async () => 
   assert.equal(map.size, 2);
   assert.equal(map.get('p1'), 'Robert F. Onder');
   assert.equal(map.get('p2'), 'Jane Smith');
+});
+
+// ============================================================================================
+// FIX ROUND 1 (review findings, all execution-proven against the code above): 3 CRITICALs.
+// ============================================================================================
+
+// ---- CRITICAL 3: the DYNASTY ATTACH TRAP — 'ambiguous' must NEVER qualify as an attach edge ----
+
+test('finalPairStatus sanity check: the real Bayh shape (same dateless Indiana Senate seat, DIFFERENT given names) is "ambiguous", never "compatible" — the premise buildAttachCandidates\' fix depends on', () => {
+  const birch = {
+    full_name: 'Birch Bayh', evidence: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null }],
+  };
+  const evan = {
+    full_name: 'Evan Bayh', evidence: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null }],
+  };
+  assert.equal(finalPairStatus(evan, birch), 'ambiguous');
+});
+
+test('buildAttachCandidates: FIX ROUND 1 CRITICAL 3 — the DYNASTY ATTACH TRAP (real Bayh shape, execution-proven live once already) — a fresh "Evan Bayh" singleton at the SAME dateless Indiana Senate seat as the already-linked "Birch Bayh" person is NEVER suggested, with ZERO keep-separate ruling on file — proving the block is structural (compatible-only), not dependent on Lance having already ruled on THIS brand-new row id', () => {
+  const members = [{
+    id: 'leg-bayh-birch', full_name: 'Birch Bayh', surname: 'Bayh', person_id: 'person-bayh-1', evidence: [{
+      source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null,
+    }],
+  }];
+  const singleton = {
+    id: 'leg-bayh-evan', full_name: 'Evan Bayh', surname: 'Bayh', person_id: null, evidence: [{
+      source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null,
+    }],
+  };
+  assert.deepEqual(
+    buildAttachCandidates([singleton], members, new Map()),
+    [],
+    'no keep-separate ruling exists for leg-bayh-evan at all — the empty result must come from the compatible-only gate, not the ruling gate',
+  );
+});
+
+test('buildAttachCandidates: FIX ROUND 1 CRITICAL 3 — a same-name-but-non-overlapping-era pair (the OTHER "ambiguous" shape finalPairStatus produces: names DO match, but eras provably do not overlap) is also excluded — compatible-only means compatible-only, regardless of which of the two "ambiguous" paths produced it', () => {
+  const members = [{
+    id: 'leg-smith-early', full_name: 'Jane Smith', surname: 'Smith', person_id: 'person-smith-1', evidence: [{
+      source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2001-01-01', end_date: '2005-12-31',
+    }],
+  }];
+  const singleton = {
+    id: 'leg-smith-later', full_name: 'Jane Smith', surname: 'Smith', person_id: null, evidence: [{
+      source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: '2018-01-01', end_date: '2022-12-31',
+    }],
+  };
+  assert.equal(finalPairStatus(singleton, members[0]), 'ambiguous', 'sanity check: same name, provably non-overlapping eras -> ambiguous, not compatible');
+  assert.deepEqual(buildAttachCandidates([singleton], members, new Map()), []);
+});
+
+// ---- CRITICAL 2: the cross-check — clean clusters must never silently mint a duplicate person ----
+
+test('applyAttachCrossCheck: a clean cluster whose members are ALL "compatible" with a real already-linked person\'s member is DEMOTED wholesale to one attach_candidate flag citing that person — the reviewer\'s exact two-fresh-Onder-rows exploit shape', () => {
+  const existingMember = {
+    id: 'leg-onder-existing', full_name: 'Robert Onder', surname: 'Onder', person_id: 'person-onder-1', evidence: [],
+  };
+  const freshA = {
+    id: 'leg-onder-freshA', full_name: 'Robert Onder', surname: 'Onder', evidence: [],
+  };
+  const freshB = {
+    id: 'leg-onder-freshB', full_name: 'Robert Onder', surname: 'Onder', evidence: [],
+  };
+  const cluster = {
+    key: 'onder:leg-onder-freshA,leg-onder-freshB',
+    memberIds: ['leg-onder-freshA', 'leg-onder-freshB'],
+    evidence: [{ legislatorId: 'leg-onder-freshA', fullName: 'Robert Onder' }, { legislatorId: 'leg-onder-freshB', fullName: 'Robert Onder' }],
+  };
+  const memberRowsById = new Map([['leg-onder-freshA', freshA], ['leg-onder-freshB', freshB]]);
+  const personDisplayNameById = new Map([['person-onder-1', 'Robert F. Onder']]);
+  const { safeClusters, demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, [existingMember], personDisplayNameById);
+  assert.deepEqual(safeClusters, [], 'the cluster is NEVER safe to auto-write once it cross-matches an existing person');
+  assert.equal(demotedFlags.length, 1);
+  const [flag] = demotedFlags;
+  assert.equal(flag.clusterKey, 'attach:person-onder-1:leg-onder-freshA,leg-onder-freshB');
+  assert.deepEqual(flag.candidateIds.slice().sort(), ['leg-onder-freshA', 'leg-onder-freshB']);
+  assert.equal(flag.reason, 'attach_candidate');
+  assert.deepEqual(flag.existingPerson, { personId: 'person-onder-1', displayName: 'Robert F. Onder' });
+});
+
+test('applyAttachCrossCheck: a clean cluster with NO compatible edge to any already-linked person is left completely untouched (safe to write)', () => {
+  const cluster = {
+    key: 'smith:leg-a,leg-b', memberIds: ['leg-a', 'leg-b'], evidence: [{ legislatorId: 'leg-a', fullName: 'Jane Smith' }, { legislatorId: 'leg-b', fullName: 'Jane Smith' }],
+  };
+  const memberRowsById = new Map([
+    ['leg-a', { id: 'leg-a', full_name: 'Jane Smith', evidence: [] }],
+    ['leg-b', { id: 'leg-b', full_name: 'Jane Smith', evidence: [] }],
+  ]);
+  const { safeClusters, demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, [], new Map());
+  assert.deepEqual(safeClusters, [cluster]);
+  assert.deepEqual(demotedFlags, []);
+});
+
+test('applyAttachCrossCheck: an "ambiguous" cross-match (the dynasty shape) does NOT demote — same compatible-only doctrine as buildAttachCandidates, applied identically here', () => {
+  const cluster = {
+    key: 'bayh:leg-bayh-evan,leg-bayh-donnelly',
+    memberIds: ['leg-bayh-evan'],
+    evidence: [{ legislatorId: 'leg-bayh-evan', fullName: 'Evan Bayh' }],
+  };
+  const memberRowsById = new Map([
+    ['leg-bayh-evan', {
+      id: 'leg-bayh-evan', full_name: 'Evan Bayh', evidence: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null }],
+    }],
+  ]);
+  const existingMember = {
+    id: 'leg-bayh-birch', full_name: 'Birch Bayh', person_id: 'person-bayh-1', evidence: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null }],
+  };
+  const { safeClusters, demotedFlags } = applyAttachCrossCheck([cluster], memberRowsById, [existingMember], new Map());
+  assert.deepEqual(safeClusters, [cluster], 'ambiguous never demotes — the cluster stays safe to write (a real, if imperfect, decision the pre-existing matcher already makes)');
+  assert.deepEqual(demotedFlags, []);
+});
+
+test('runLink FIX ROUND 1 CRITICAL 2: the reviewer\'s exact two-fresh-Onder-rows scenario — TWO brand-new unlinked rows that would otherwise auto-cluster together are cross-checked against the already-linked Onder person and DEMOTED — zero persons written, one attach_candidate flag covering both rows citing the existing person', async () => {
+  const legislatorRows = [
+    {
+      id: 'leg-onder-existing', full_name: 'Robert Onder', surname: 'Onder', legiscan_people_id: 16351, person_id: 'person-onder-1',
+    },
+    {
+      id: 'leg-onder-freshA', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: 'O000177', person_id: null,
+    },
+    {
+      id: 'leg-onder-freshB', full_name: 'Robert Onder', surname: 'Onder', mo_senate_id: '2', person_id: null,
+    },
+  ];
+  const personsRows = [{ id: 'person-onder-1', display_name: 'Robert F. Onder', display_name_source: 'bioguide' }];
+  const client = makeFakeClient({ legislatorRows, termRows: [], personsRows });
+
+  // Sanity check the premise: WITHOUT the cross-check, freshA+freshB form a clean, would-be-written
+  // cluster (proving this is genuinely the "2-cluster never a singleton" shape the cross-check
+  // exists for, not something the pre-existing singleton-only attach pass would have caught).
+  const rawCluster = clusterLegislators(buildEvidenceRows(
+    legislatorRows.filter((r) => r.person_id == null),
+    [],
+  ));
+  assert.equal(rawCluster.clusters.length, 1, 'premise check: freshA/freshB DO form a clean cluster on their own, with zero singletons');
+  assert.equal(rawCluster.singletons.length, 0);
+
+  const dryReport = await runLink(client, { dryRun: true });
+  assert.equal(dryReport.counts.clusters, 0, 'the would-be cluster is demoted before it is ever counted as safe to write');
+  const attachFlag = dryReport.flagged.find((f) => f.reason === 'attach_candidate');
+  assert.ok(attachFlag, 'demoted to an attach_candidate flag');
+  assert.deepEqual(attachFlag.candidateIds.slice().sort(), ['leg-onder-freshA', 'leg-onder-freshB']);
+  assert.deepEqual(attachFlag.existingPerson, { personId: 'person-onder-1', displayName: 'Robert F. Onder' });
+
+  const liveReport = await runLink(client, { dryRun: false, runId: 'run-crosscheck-1' });
+  assert.equal(liveReport.counts.personsCreated, 0, 'ZERO new persons written — this is the exact silent-duplicate-person write the finding closes');
+  assert.equal(client.state.persons.length, 1, 'only the pre-existing person — no second Onder person ever created');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-freshA').person_id, null, 'never auto-attached either — Lance decides');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-freshB').person_id, null);
+  assert.equal(client.state.identity_flags.length, 1);
+  assert.equal(client.state.identity_flags[0].evidence.reason, 'attach_candidate');
+  assert.deepEqual(client.state.identity_flags[0].candidate_legislator_ids.slice().sort(), ['leg-onder-freshA', 'leg-onder-freshB']);
 });

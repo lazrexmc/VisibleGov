@@ -929,6 +929,21 @@ async function handleIdentityDecision(client, req, res) {
       // other identity path uses). Lance decides which, if any, actually join that person. NEVER
       // creates a new persons row (contrast the 'link' branch below, which always mints one) —
       // person_id must name a real, already-existing person, validated before any write.
+      //
+      // FIX ROUND 1, CRITICAL 1 (reviewer execution-proven exploit, "SERVER-SIDE VALIDATION GAP"):
+      // every OTHER identity write path re-derives its target from server-held state before ever
+      // writing (writeAutoCluster's own structural BELT; 'link'/'keep-separate' validate
+      // legislator_ids against the flag's own candidate_legislator_ids) — this route did not: it
+      // trusted a client-supplied person_id in isolation, so a plain ambiguous_era flag plus an
+      // UNRELATED person_id previously produced real writes (HTTP 200). RULING: the flag itself
+      // must BE an attach_candidate flag, AND person_id must be EXACTLY the person that flag's own
+      // attach pass named — flag.evidence.existingPerson.personId — never a value trusted from the
+      // request alone. Checked FIRST, before any other work in this branch.
+      if (flag.evidence?.reason !== 'attach_candidate' || person_id !== flag.evidence?.existingPerson?.personId) {
+        sendJson(res, 400, { error: 'attach is only valid for an attach_candidate flag targeting its own existing person' });
+        return;
+      }
+
       const candidateIdSet = new Set(flag.candidate_legislator_ids ?? []);
       const outsiders = legislator_ids.filter((id) => !candidateIdSet.has(id));
       if (outsiders.length > 0) { sendJson(res, 400, { error: 'legislator_ids must all belong to this flag' }); return; }
