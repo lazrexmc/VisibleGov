@@ -12,6 +12,9 @@ import {
   runLink,
   PersonLinkConflictError,
   ClusterNameVariantViolationError,
+  buildKeepSeparatePairs,
+  findKeepSeparateConflict,
+  applyKeepSeparateRulings,
 } from '../src/cli/link-persons.js';
 
 // Task 1 (docs/superpowers/plans/2026-07-29-identity-merge.md) — cluster pass + linker CLI.
@@ -1026,6 +1029,12 @@ function makeFakeClient({
   // whole row anyway. Now a column not named in the select string genuinely comes back missing
   // (`undefined`), so any test whose behavior actually depends on a specific selected column will
   // fail loud if that column is ever silently dropped from the real query.
+  // selectAllBuilder now supports BOTH query shapes this file's code actually chains off
+  // .select(cols): the selectAll pagination shape (.order().range(), used by loadLegislators/
+  // loadTerms/loadIdentityFlags) AND the single-row lookup shape (.eq().maybeSingle(), used by
+  // writeIdentityFlag's own check-then-insert) — unified into one builder (final wave, item 2)
+  // now that identity_flags needs BOTH shapes in the same test run (runLink's own keep-separate
+  // load uses selectAll; writeIdentityFlag's dedup check uses eq/maybeSingle).
   function selectAllBuilder(table, cols) {
     const columns = typeof cols === 'string'
       ? cols.split(',').map((c) => c.trim()).filter(Boolean)
@@ -1045,6 +1054,15 @@ function makeFakeClient({
           resolve({ data: rows.slice(from, to + 1).map(project), error: null });
         },
       }),
+      eq: (col, val) => ({
+        maybeSingle: async () => {
+          calls.push({
+            op: 'select', table, col, val,
+          });
+          const row = (state[table] ?? []).find((r) => r[col] === val);
+          return { data: row ? project(row) : null, error: null };
+        },
+      }),
     };
     return builder;
   }
@@ -1055,20 +1073,7 @@ function makeFakeClient({
     from(table) {
       return {
         select(cols) {
-          if (table === 'legislators' || table === 'terms') return selectAllBuilder(table, cols);
-          if (table === 'identity_flags') {
-            return {
-              eq: (col, val) => ({
-                maybeSingle: async () => {
-                  calls.push({
-                    op: 'select', table, col, val,
-                  });
-                  const row = state.identity_flags.find((r) => r[col] === val);
-                  return { data: row ? { ...row } : null, error: null };
-                },
-              }),
-            };
-          }
+          if (table === 'legislators' || table === 'terms' || table === 'identity_flags') return selectAllBuilder(table, cols);
           throw new Error(`fake client: unexpected select on table "${table}"`);
         },
         update(patch) {
@@ -1336,6 +1341,138 @@ test('runLink FINDING 9: a persisted nickname flowing through the REAL loadLegis
   assert.equal(report.flagged[0].reason, 'internal_no_name_variant');
   assert.deepEqual(report.flagged[0].candidateIds.slice().sort(), ['leg-barebob', 'leg-barerob', 'leg-hub1', 'leg-hub2']);
   assert.equal(report.counts.singletons, 0, 'if nickname were NOT wired through, barebob/barerob would be stranded as two singletons instead of joining this flag');
+});
+
+// ---- ITEM 2 (final wave): keep-separate rulings bind the auto path ----
+
+test('buildKeepSeparatePairs: extracts a pair from a keep-separate resolution, ignores link resolutions on the same/other flags', () => {
+  const flags = [
+    {
+      id: 'flag-1',
+      cluster_key: 'jones:leg-x,leg-y',
+      evidence: {
+        resolutions: [
+          { action: 'link', legislatorIds: ['leg-p', 'leg-q'], personId: 'person-1', decidedAt: '2026-01-01T00:00:00Z' },
+          {
+            action: 'keep-separate', legislatorIds: ['leg-x', 'leg-y'], note: 'confirmed different people', decidedAt: '2026-01-02T00:00:00Z',
+          },
+        ],
+      },
+    },
+    { id: 'flag-2', cluster_key: 'smith:leg-m,leg-n', evidence: { resolutions: [{ action: 'link', legislatorIds: ['leg-m', 'leg-n'], personId: 'person-2', decidedAt: '2026-01-01T00:00:00Z' }] } },
+  ];
+  const pairs = buildKeepSeparatePairs(flags);
+  assert.equal(pairs.size, 1);
+  const ruling = pairs.get('leg-x|leg-y');
+  assert.equal(ruling.flagId, 'flag-1');
+  assert.equal(ruling.note, 'confirmed different people');
+  assert.equal(ruling.decidedAt, '2026-01-02T00:00:00Z');
+});
+
+test('buildKeepSeparatePairs: a keep-separate on 3+ candidates produces EVERY pair among them', () => {
+  const flags = [{
+    id: 'flag-1', cluster_key: 'brown:a,b,c', evidence: { resolutions: [{ action: 'keep-separate', legislatorIds: ['leg-a', 'leg-b', 'leg-c'], note: 'all different', decidedAt: '2026-01-01T00:00:00Z' }] },
+  }];
+  const pairs = buildKeepSeparatePairs(flags);
+  assert.equal(pairs.size, 3);
+  assert.ok(pairs.has('leg-a|leg-b'));
+  assert.ok(pairs.has('leg-a|leg-c'));
+  assert.ok(pairs.has('leg-b|leg-c'));
+});
+
+test('buildKeepSeparatePairs: tolerant of malformed/absent evidence.resolutions, never throws', () => {
+  assert.deepEqual([...buildKeepSeparatePairs([{ id: 'f1', evidence: null }, { id: 'f2', evidence: {} }, { id: 'f3' }]).keys()], []);
+  assert.deepEqual([...buildKeepSeparatePairs(undefined).keys()], []);
+});
+
+test('findKeepSeparateConflict: finds a conflict among a cluster\'s member ids regardless of order/position', () => {
+  const pairs = buildKeepSeparatePairs([{
+    id: 'flag-1', cluster_key: 'x', evidence: { resolutions: [{ action: 'keep-separate', legislatorIds: ['leg-y', 'leg-z'], note: 'n', decidedAt: 't' }] },
+  }]);
+  const conflict = findKeepSeparateConflict(['leg-a', 'leg-y', 'leg-z'], pairs);
+  assert.ok(conflict);
+  assert.equal(conflict.flagId, 'flag-1');
+});
+
+test('findKeepSeparateConflict: no conflict -> null', () => {
+  const pairs = buildKeepSeparatePairs([]);
+  assert.equal(findKeepSeparateConflict(['leg-a', 'leg-b'], pairs), null);
+});
+
+test('applyKeepSeparateRulings: downgrades ONLY the conflicting cluster, leaves an unrelated clean cluster untouched', () => {
+  const clusters = [
+    { key: 'jones:leg-x,leg-y', memberIds: ['leg-x', 'leg-y'], evidence: [{ legislatorId: 'leg-x', fullName: 'Robert Jones' }, { legislatorId: 'leg-y', fullName: 'Robert Jones' }] },
+    { key: 'smith:leg-m,leg-n', memberIds: ['leg-m', 'leg-n'], evidence: [{ legislatorId: 'leg-m', fullName: 'Jane Smith' }, { legislatorId: 'leg-n', fullName: 'Jane Smith' }] },
+  ];
+  const pairs = buildKeepSeparatePairs([{
+    id: 'flag-1', cluster_key: 'jones:leg-x,leg-y', evidence: { resolutions: [{ action: 'keep-separate', legislatorIds: ['leg-x', 'leg-y'], note: 'confirmed different people', decidedAt: '2026-01-02T00:00:00Z' }] },
+  }]);
+  const { cleanClusters, downgradedFlags } = applyKeepSeparateRulings(clusters, pairs);
+  assert.equal(cleanClusters.length, 1);
+  assert.equal(cleanClusters[0].key, 'smith:leg-m,leg-n');
+  assert.equal(downgradedFlags.length, 1);
+  assert.equal(downgradedFlags[0].reason, 'conflicts_with_keep_separate_ruling');
+  assert.deepEqual(downgradedFlags[0].candidateIds.slice().sort(), ['leg-x', 'leg-y']);
+  assert.equal(downgradedFlags[0].keepSeparateRuling.note, 'confirmed different people');
+  assert.equal(downgradedFlags[0].keepSeparateRuling.flagId, 'flag-1');
+});
+
+// The headline scenario: a pair Lance PREVIOUSLY ruled keep-separate later becomes matcher-
+// compatible (a same-full-name, dateless pair — the exact accepted-residual shape that WOULD
+// auto-cluster on its own) — this must flag, never auto-write, with Lance's own ruling cited.
+test('runLink ITEM 2: a keep-separated pair that later becomes name+evidence compatible -> flagged (never auto-written), Lance\'s ruling cited verbatim in the flag evidence', async () => {
+  const legislatorRows = [
+    {
+      id: 'leg-jones-x', full_name: 'Robert Jones', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 501, person_id: null,
+    },
+    {
+      id: 'leg-jones-y', full_name: 'Robert Jones', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 502, person_id: null,
+    },
+  ];
+  const identityFlagsRows = [{
+    id: 'flag-jones-1',
+    cluster_key: 'jones:leg-jones-x,leg-jones-y',
+    evidence: {
+      reason: 'ambiguous_era',
+      candidates: [],
+      resolutions: [{
+        action: 'keep-separate', legislatorIds: ['leg-jones-x', 'leg-jones-y'], note: 'Lance: confirmed these are two different Robert Joneses, not a re-election', decidedBy: 'lance', decidedAt: '2026-07-29T12:00:00Z',
+      }],
+    },
+  }];
+  const client = makeFakeClient({ legislatorRows, identityFlagsRows });
+
+  // Sanity check the premise: WITHOUT the ruling, this exact pair auto-clusters (the accepted
+  // residual — same full name, dateless, no seat evidence).
+  const withoutRuling = await runLink(makeFakeClient({ legislatorRows }), { dryRun: true });
+  assert.equal(withoutRuling.counts.clusters, 1, 'premise check: this pair WOULD auto-cluster without the keep-separate ruling');
+
+  const report = await runLink(client, { dryRun: true });
+  assert.equal(report.counts.clusters, 0, 'the keep-separate ruling downgrades this cluster — never auto-written');
+  assert.equal(report.counts.flagged, 1);
+  assert.equal(report.flagged[0].reason, 'conflicts_with_keep_separate_ruling');
+  assert.deepEqual(report.flagged[0].candidateIds.slice().sort(), ['leg-jones-x', 'leg-jones-y']);
+  assert.equal(report.flagged[0].keepSeparateRuling.note, 'Lance: confirmed these are two different Robert Joneses, not a re-election');
+  assert.equal(report.flagged[0].keepSeparateRuling.flagId, 'flag-jones-1');
+
+  // Live mode: writeAutoCluster is never called for this pair (no person/links written for it —
+  // the whole point). The downgraded flag's cluster_key is deterministically the SAME as the
+  // pre-existing flag-jones-1's (same surname group, same member id set — buildClusterKey), so
+  // writeIdentityFlag's own check-then-insert correctly DEDUPES against it rather than writing a
+  // redundant second row — flag-jones-1 already durably records Lance's ruling; nothing new needs
+  // writing. The important thing this proves is the NEGATIVE: person/person_links/legislators.
+  // person_id all stay completely untouched for this pair, live, not just in the dry-run report.
+  const liveClient = makeFakeClient({ legislatorRows, identityFlagsRows });
+  const liveReport = await runLink(liveClient, { dryRun: false, runId: 'run-1' });
+  assert.equal(liveReport.counts.clusters, 0);
+  assert.equal(liveReport.counts.personsCreated, 0);
+  assert.equal(liveReport.flaggedDeduped, 1, 'deduped against the pre-existing flag-jones-1, same cluster_key');
+  assert.equal(liveReport.flaggedWritten, 0);
+  assert.equal(liveClient.state.persons.length, 0, 'no person ever created for this pair');
+  assert.equal(liveClient.state.person_links.length, 0);
+  assert.equal(liveClient.state.identity_flags.length, 1, 'no duplicate flag row written — deduped against the existing one');
+  assert.equal(liveClient.state.legislators.find((l) => l.id === 'leg-jones-x').person_id, null);
+  assert.equal(liveClient.state.legislators.find((l) => l.id === 'leg-jones-y').person_id, null);
 });
 
 // ---- runLink: the orchestration seam — dry-run zero-write, live writes + honest counts ----

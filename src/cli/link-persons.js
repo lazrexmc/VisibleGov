@@ -66,6 +66,18 @@ export async function loadTerms(client) {
   return data ?? [];
 }
 
+// loadIdentityFlags — final wave item 2: EVERY identity_flags row (resolved or not; a
+// keep-separate resolution only ever exists on a resolved flag — src/review/server.js's
+// handleIdentityDecision sets resolved:true unconditionally on that action — but this reads all of
+// them anyway rather than adding a resolved-only filter, since the resolutions HISTORY is what
+// matters, not the flag's current top-level state). No filter needed — whole-table by design, the
+// same convention as loadLegislators/loadTerms.
+export async function loadIdentityFlags(client) {
+  const { data, error } = await selectAll(client, IDENTITY_FLAGS_TABLE, 'id,cluster_key,evidence');
+  if (error) throw new Error(`${IDENTITY_FLAGS_TABLE} lookup failed: ${error.message}`);
+  return data ?? [];
+}
+
 // ---- pure-ish assembly: legislators rows + terms rows -> clusterLegislators's own `rows` input ----
 
 // partitionByLinkStatus — "already-linked skip", honestly counted (Global Constraints: "skip !=
@@ -118,6 +130,95 @@ export function buildEvidenceRows(legislatorRows, termRows) {
     }
   }
   return legislatorRows.map((row) => ({ ...row, evidence: evidenceByLegislator.get(row.id) ?? [] }));
+}
+
+// ---- keep-separate ruling enforcement (final wave, item 2): binds the AUTO path to Lance's own
+// prior review-tab decisions, not just the matcher's own current verdict ----
+
+function pairKey(idA, idB) {
+  return idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`;
+}
+
+// buildKeepSeparatePairs — scans every identity_flags row's `evidence.resolutions` (the append-
+// only per-decision audit trail src/review/server.js's handleIdentityDecision writes via its own
+// appendResolution) for 'keep-separate' entries, and returns a Map keyed on every LEGISLATOR-ID
+// PAIR named in that resolution's own `legislatorIds` array — deliberately NOT keyed on
+// cluster_key. A flag's cluster_key is derived from the candidate id SET at the moment it was
+// created (buildClusterKey, src/lib/person-identity.js) and can drift across runs (the ledgered
+// cluster_key-drift note, progress.md) — the actual ruling Lance made was about SPECIFIC ROWS,
+// never a cluster_key string, so keying on cluster_key would silently stop protecting the exact
+// pair Lance ruled on the moment anything about the surrounding group's membership changed. This
+// binds unconditionally: even if a LATER run's matcher verdict changes (e.g. a newly-backfilled
+// nickname makes a previously name-incompatible pair suddenly read 'compatible'), Lance's own
+// keep-separate ruling on that specific pair still overrides it.
+export function buildKeepSeparatePairs(identityFlagsRows) {
+  const pairs = new Map();
+  for (const flag of identityFlagsRows ?? []) {
+    const resolutions = flag?.evidence?.resolutions;
+    if (!Array.isArray(resolutions)) continue;
+    for (const resolution of resolutions) {
+      if (resolution?.action !== 'keep-separate') continue;
+      const ids = Array.isArray(resolution.legislatorIds) ? resolution.legislatorIds : [];
+      for (let a = 0; a < ids.length; a += 1) {
+        for (let b = a + 1; b < ids.length; b += 1) {
+          const key = pairKey(ids[a], ids[b]);
+          if (!pairs.has(key)) {
+            pairs.set(key, {
+              flagId: flag.id,
+              clusterKey: flag.cluster_key ?? null,
+              note: resolution.note ?? null,
+              decidedAt: resolution.decidedAt ?? null,
+              legislatorIdA: ids[a],
+              legislatorIdB: ids[b],
+            });
+          }
+        }
+      }
+    }
+  }
+  return pairs;
+}
+
+// findKeepSeparateConflict — the first member pair of a proposed cluster's memberIds that matches
+// a keep-separate ruling, or null. Only the first is ever cited — a cluster hitting more than one
+// conflicting pair is still exactly one downgrade decision (flag the whole cluster), never a
+// per-pair one.
+export function findKeepSeparateConflict(memberIds, keepSeparatePairs) {
+  for (let a = 0; a < memberIds.length; a += 1) {
+    for (let b = a + 1; b < memberIds.length; b += 1) {
+      const key = pairKey(memberIds[a], memberIds[b]);
+      if (keepSeparatePairs.has(key)) return keepSeparatePairs.get(key);
+    }
+  }
+  return null;
+}
+
+// applyKeepSeparateRulings — runs BEFORE writeAutoCluster ever sees a cluster (runLink calls this
+// immediately after clusterLegislators, ahead of both the dry-run report and the live write loop):
+// partitions clusterLegislators' own `clusters` output into ones still safe to auto-write and ones
+// a keep-separate ruling now vetoes. A vetoed cluster is downgraded to a flag — never silently
+// dropped, never silently written — carrying the SAME per-member evidence clusterLegislators
+// already built, reason 'conflicts_with_keep_separate_ruling', plus the specific ruling that
+// blocked it (flagId/clusterKey/note/decidedAt/the exact pair): Lance's own prior words are cited
+// directly in what Lance sees next, never just a bare reason code.
+export function applyKeepSeparateRulings(clusters, keepSeparatePairs) {
+  const cleanClusters = [];
+  const downgradedFlags = [];
+  for (const cluster of clusters) {
+    const conflict = findKeepSeparateConflict(cluster.memberIds, keepSeparatePairs);
+    if (conflict) {
+      downgradedFlags.push({
+        clusterKey: cluster.key,
+        candidateIds: cluster.memberIds,
+        evidence: cluster.evidence,
+        reason: 'conflicts_with_keep_separate_ruling',
+        keepSeparateRuling: conflict,
+      });
+    } else {
+      cleanClusters.push(cluster);
+    }
+  }
+  return { cleanClusters, downgradedFlags };
 }
 
 // ---- conflict guard (Global Constraints: "a non-null person_id is NEVER overwritten — conflict
@@ -256,7 +357,15 @@ export async function writeIdentityFlag(client, runId, flag) {
     .insert({
       cluster_key: flag.clusterKey,
       candidate_legislator_ids: flag.candidateIds,
-      evidence: { reason: flag.reason, candidates: flag.evidence },
+      // keepSeparateRuling (final wave, item 2): present only on a flag applyKeepSeparateRulings
+      // downgraded from a would-be auto-cluster — cites the specific PRIOR ruling (flagId/note/
+      // decidedAt/the exact pair) that blocked it, so Lance sees his own earlier words directly
+      // rather than a bare 'conflicts_with_keep_separate_ruling' reason code.
+      evidence: {
+        reason: flag.reason,
+        candidates: flag.evidence,
+        ...(flag.keepSeparateRuling ? { keepSeparateRuling: flag.keepSeparateRuling } : {}),
+      },
       run_id: runId,
     })
     .select('id,cluster_key')
@@ -278,26 +387,39 @@ export async function writeIdentityFlag(client, runId, flag) {
 
 // ---- orchestration (the testable seam between argv/env-parsing main() and the actual work) ----
 
-// runLink — dry-run mode does ONLY the three loads/pure-planning calls above and returns the full
+// runLink — dry-run mode does ONLY the loads/pure-planning calls below and returns the full
 // proposed clustering + honest counts; ZERO writes are even reachable from this branch (writeAutoCluster/
 // writeIdentityFlag are never called). Live mode performs the writes and returns the same honest
 // counts shape the plan's Global Constraints specify verbatim: {clusters, personsCreated, linked,
 // flagged, alreadyLinked, singletons}. `coherenceAudit` (fix round 2): auditClusterCoherence run
-// over the proposed clusters, on EVERY call (dry-run and live alike) — the permanent, visible
-// mechanical double-check that every proposed cluster's member pairs share a full-name variant,
-// independent of writeAutoCluster's own structural throw. Computed BEFORE any write, so a live run
-// with coherenceAudit.ok === false would still hit writeAutoCluster's per-cluster throw on the
-// offending cluster specifically — this audit is reported for every cluster at once, up front.
+// over the SURVIVING (post-keep-separate-downgrade — item 2) proposed clusters, on EVERY call
+// (dry-run and live alike) — the permanent, visible mechanical double-check that every proposed
+// cluster's member pairs share a full-name variant, independent of writeAutoCluster's own
+// structural throw. Computed BEFORE any write, so a live run with coherenceAudit.ok === false would
+// still hit writeAutoCluster's per-cluster throw on the offending cluster specifically — this audit
+// is reported for every cluster at once, up front.
+//
+// Item 2 (final wave): keep-separate rulings bind the auto path. Immediately after
+// clusterLegislators, EVERY proposed cluster is checked against every legislator-id pair Lance has
+// ever ruled 'keep-separate' (buildKeepSeparatePairs/applyKeepSeparateRulings, both pure —
+// src/lib/person-identity.js stays untouched, DB-shaped concerns like identity_flags.evidence stay
+// here) — a hit downgrades that cluster to a flag BEFORE writeAutoCluster ever sees it, in BOTH
+// dry-run and live mode, so the operator sees the downgrade in the dry-run report too, not just
+// live behavior.
 export async function runLink(client, { dryRun = false, runId = null } = {}) {
   const legislatorRows = await loadLegislators(client);
   const termRows = await loadTerms(client);
+  const identityFlagRows = await loadIdentityFlags(client);
   const { unlinked, alreadyLinked } = partitionByLinkStatus(legislatorRows);
   const evidenceRows = buildEvidenceRows(unlinked, termRows);
-  const { clusters, flagged, singletons } = clusterLegislators(evidenceRows);
-  const coherenceAudit = auditClusterCoherence(clusters);
+  const { clusters: rawClusters, flagged: matcherFlagged, singletons } = clusterLegislators(evidenceRows);
+  const keepSeparatePairs = buildKeepSeparatePairs(identityFlagRows);
+  const { cleanClusters, downgradedFlags } = applyKeepSeparateRulings(rawClusters, keepSeparatePairs);
+  const flagged = [...matcherFlagged, ...downgradedFlags];
+  const coherenceAudit = auditClusterCoherence(cleanClusters);
 
   const counts = {
-    clusters: clusters.length,
+    clusters: cleanClusters.length,
     personsCreated: 0,
     linked: 0,
     flagged: flagged.length,
@@ -307,14 +429,14 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
 
   if (dryRun) {
     return {
-      mode: 'dry-run', counts, clusters, flagged, singletons, coherenceAudit,
+      mode: 'dry-run', counts, clusters: cleanClusters, flagged, singletons, coherenceAudit,
     };
   }
 
   const rowsById = new Map(evidenceRows.map((r) => [r.id, r]));
   let flaggedWritten = 0;
   let flaggedDeduped = 0;
-  for (const cluster of clusters) {
+  for (const cluster of cleanClusters) {
     // eslint-disable-next-line no-await-in-loop -- sequential by design, same precedent as
     // selectAll's own page loop: this is a batch CLI, not a request handler.
     await writeAutoCluster(client, runId, cluster, rowsById);
