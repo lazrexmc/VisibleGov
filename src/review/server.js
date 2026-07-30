@@ -790,6 +790,30 @@ async function fetchPersonIdsForCandidates(client, candidateIds) {
   return new Map((data ?? []).map((r) => [r.id, r.person_id]));
 }
 
+// readExistingPersons — the attach_candidate flag's own target-person list, read the SAME way by
+// both branches that need it ('attach' validates person_id against it; 'keep-separate' needs the
+// persons' members to record the ruling against — finding 3 below). existingPersons is the full
+// list; existingPerson (singular) is existingPersons[0], still honored defensively for any flag
+// written before both fields existed.
+function readExistingPersons(evidence) {
+  if (Array.isArray(evidence?.existingPersons) && evidence.existingPersons.length > 0) return evidence.existingPersons;
+  return evidence?.existingPerson ? [evidence.existingPerson] : [];
+}
+
+// fetchPersonMemberLegislatorIds — every legislator row currently linked to any of the given
+// persons. selectAll + filter-in-JS, NOT `.in('person_id', ...)`: the same fetch-all-then-filter
+// convention handleIdentityQueue documents above (the undici 16KB header cap found live the day
+// 0007 shipped), and legislators is the authoritative membership column the auto path's own
+// groupAlreadyLinkedByPerson reads — so a ruling recorded here is keyed on exactly the rows
+// src/cli/link-persons.js will compare against on the next run.
+async function fetchPersonMemberLegislatorIds(client, personIds) {
+  if (!personIds.length) return [];
+  const { data, error } = await selectAll(client, 'legislators', 'id,person_id');
+  if (error) throw error;
+  const wanted = new Set(personIds);
+  return (data ?? []).filter((r) => wanted.has(r.person_id)).map((r) => r.id);
+}
+
 async function handleIdentityQueue(client, res) {
   if (!client) { sendJson(res, 500, { error: 'internal error' }); return; }
   try {
@@ -915,8 +939,34 @@ async function handleIdentityDecision(client, req, res) {
       const allCandidateIds = flag.candidate_legislator_ids ?? [];
       const personIdById = await fetchPersonIdsForCandidates(client, allCandidateIds);
       const stillUnlinkedIds = allCandidateIds.filter((id) => (personIdById.get(id) ?? null) == null);
+
+      // FINAL WHOLE-BRANCH REVIEW, finding 3: on an ATTACH flag, "keep separate" means "these
+      // candidates are NOT this person" — but legislatorIds alone can never express that. The
+      // target person's members are already linked, so they are filtered out of stillUnlinkedIds by
+      // construction, and a 1-candidate attach flag therefore yielded ZERO pairs from
+      // buildKeepSeparatePairs: the ruling had no pair-keyed representation at all, leaving only
+      // cluster_key dedup to suppress re-suggestion — which membership drift defeats (one more
+      // compatible row mints a fresh cluster_key and re-proposes the same merge). So the pairs are
+      // recorded EXPLICITLY here: each still-unlinked candidate x each member of every person the
+      // flag named. Deliberately NOT candidate x candidate — this decision is about the person, and
+      // says nothing about whether two candidates are each other; mis-recording that would
+      // permanently block a merge Lance never ruled on.
+      const targetPersonIds = readExistingPersons(flag.evidence).map((p) => p?.personId).filter(Boolean);
+      const isAttachFlag = flag.evidence?.reason === 'attach_candidate' && targetPersonIds.length > 0;
+      let legislatorIdPairs = null;
+      if (isAttachFlag) {
+        const memberIds = await fetchPersonMemberLegislatorIds(client, targetPersonIds);
+        legislatorIdPairs = [];
+        for (const candidateId of stillUnlinkedIds) {
+          for (const memberId of memberIds) legislatorIdPairs.push([candidateId, memberId]);
+        }
+      }
+
       const patchedEvidence = appendResolution(flag.evidence, {
-        action: 'keep-separate', legislatorIds: stillUnlinkedIds, note,
+        action: 'keep-separate',
+        legislatorIds: stillUnlinkedIds,
+        note,
+        ...(legislatorIdPairs ? { legislatorIdPairs } : {}),
       });
       const { error: uErr } = await client.from('identity_flags')
         .update({ resolved: true, evidence: patchedEvidence }).eq('id', flag_id);
@@ -952,9 +1002,7 @@ async function handleIdentityDecision(client, req, res) {
       // one. Falls back to wrapping the singular existingPerson only if existingPersons is somehow
       // absent (defensive — every flag this route can ever see is written with both fields by the
       // current writer, src/cli/link-persons.js's writeIdentityFlag).
-      const existingPersons = (Array.isArray(flag.evidence?.existingPersons) && flag.evidence.existingPersons.length > 0)
-        ? flag.evidence.existingPersons
-        : (flag.evidence?.existingPerson ? [flag.evidence.existingPerson] : []);
+      const existingPersons = readExistingPersons(flag.evidence);
       const validTargetPersonIds = new Set(existingPersons.map((p) => p?.personId));
       if (flag.evidence?.reason !== 'attach_candidate' || !validTargetPersonIds.has(person_id)) {
         sendJson(res, 400, { error: 'attach is only valid for an attach_candidate flag targeting one of its own existing persons' });

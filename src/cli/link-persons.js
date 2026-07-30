@@ -1,4 +1,4 @@
-import {
+﻿import {
   getClient, openRun, closeRun, selectAll, additivePatch,
 } from '../lib/db.js';
 import {
@@ -165,27 +165,46 @@ function pairKey(idA, idB) {
 // binds unconditionally: even if a LATER run's matcher verdict changes (e.g. a newly-backfilled
 // nickname makes a previously name-incompatible pair suddenly read 'compatible'), Lance's own
 // keep-separate ruling on that specific pair still overrides it.
+//
+// FINAL WHOLE-BRANCH REVIEW, finding 3: a resolution may instead carry an EXPLICIT
+// `legislatorIdPairs` array ([[a, b], ...]) — written by src/review/server.js when the flag being
+// resolved is an attach_candidate flag. That case cannot be expressed as a cross-product over one
+// flat id list: the ruling is "each still-unlinked candidate is NOT a member of person P", which
+// pairs candidates against the TARGET PERSON'S members (rows that are already linked and therefore
+// never appear in legislatorIds at all) while saying nothing whatever about whether two candidates
+// are each other. When the explicit list is present it is AUTHORITATIVE and the cross-product is
+// not applied — recording a candidate-x-candidate pair as a side effect of a decision about P
+// would permanently block a merge Lance never ruled on.
 export function buildKeepSeparatePairs(identityFlagsRows) {
   const pairs = new Map();
+  const record = (flag, resolution, idA, idB) => {
+    const key = pairKey(idA, idB);
+    if (pairs.has(key)) return;
+    pairs.set(key, {
+      flagId: flag.id,
+      clusterKey: flag.cluster_key ?? null,
+      note: resolution.note ?? null,
+      decidedAt: resolution.decidedAt ?? null,
+      legislatorIdA: idA,
+      legislatorIdB: idB,
+    });
+  };
   for (const flag of identityFlagsRows ?? []) {
     const resolutions = flag?.evidence?.resolutions;
     if (!Array.isArray(resolutions)) continue;
     for (const resolution of resolutions) {
       if (resolution?.action !== 'keep-separate') continue;
+      if (Array.isArray(resolution.legislatorIdPairs)) {
+        for (const pair of resolution.legislatorIdPairs) {
+          if (!Array.isArray(pair) || pair.length !== 2 || pair[0] == null || pair[1] == null) continue;
+          record(flag, resolution, pair[0], pair[1]);
+        }
+        continue;
+      }
       const ids = Array.isArray(resolution.legislatorIds) ? resolution.legislatorIds : [];
       for (let a = 0; a < ids.length; a += 1) {
         for (let b = a + 1; b < ids.length; b += 1) {
-          const key = pairKey(ids[a], ids[b]);
-          if (!pairs.has(key)) {
-            pairs.set(key, {
-              flagId: flag.id,
-              clusterKey: flag.cluster_key ?? null,
-              note: resolution.note ?? null,
-              decidedAt: resolution.decidedAt ?? null,
-              legislatorIdA: ids[a],
-              legislatorIdB: ids[b],
-            });
-          }
+          record(flag, resolution, ids[a], ids[b]);
         }
       }
     }
@@ -297,30 +316,51 @@ export function groupAlreadyLinkedByPerson(alreadyLinkedRows) {
 // keep-separate ruling existing at all. 'ambiguous' and 'no-pair' both fall through silently below:
 // neither blocks the person (unlike 'contradiction') nor contributes a qualifying edge (unlike
 // 'compatible').
+// evaluateRowAgainstPerson — FINAL WHOLE-BRANCH REVIEW, findings 1 & 2 (.superpowers/sdd/
+// 2026-07-29-profile-completeness/final-review-findings.md): the ONE shared (candidate row × one
+// already-linked person's members) verdict. It was previously inlined here and NOT in
+// applyAttachCrossCheck's own demotion path — which is exactly how the demotion path ended up
+// qualifying a person on a single 'compatible' edge while never testing for 'contradiction'
+// (finding 1) and never seeing keepSeparatePairs at all (finding 2). Both attach paths now call
+// THIS function and nothing else, so "a contradiction against ANY member vetoes the whole person"
+// and "a ruling against ANY member vetoes the whole person" can never again be true on one path
+// and false on the other. Returns, for one candidate row against one person:
+//   { ruling, contradicted, matchedMembers }
+// where `ruling` is the specific keep-separate ruling that blocks this person (null if none),
+// `contradicted` is true iff any same-surname-key member hard-contradicts the row, and
+// `matchedMembers` are the 'compatible' edges (empty unless the row qualifies on its own).
+// 'ambiguous'/'no-pair' fall through silently: neither blocks the person nor contributes an edge
+// (fix round 1 CRITICAL 3's compatible-only doctrine, unchanged).
+function evaluateRowAgainstPerson(row, members, keepSeparatePairs) {
+  const none = { ruling: null, contradicted: false, matchedMembers: [] };
+  const key = surnameKey(row);
+  if (!key) return none; // no derivable name at all -> never a candidate, same as clusterLegislators' own singleton sweep
+  const sameKeyMembers = members.filter((m) => surnameKey(m) === key);
+  if (sameKeyMembers.length === 0) return none;
+
+  for (const member of sameKeyMembers) {
+    const ruling = keepSeparatePairs.get(pairKey(row.id, member.id));
+    if (ruling) return { ruling, contradicted: false, matchedMembers: [] };
+  }
+
+  const matchedMembers = [];
+  for (const member of sameKeyMembers) {
+    const status = finalPairStatus(row, member);
+    if (status === 'contradiction') return { ruling: null, contradicted: true, matchedMembers: [] };
+    if (status === 'compatible') {
+      matchedMembers.push({ legislatorId: member.id, fullName: member.full_name, status });
+    }
+  }
+  return { ruling: null, contradicted: false, matchedMembers };
+}
+
 export function buildAttachCandidates(singletonRows, alreadyLinkedRows, keepSeparatePairs) {
   const personGroups = groupAlreadyLinkedByPerson(alreadyLinkedRows);
   const results = [];
   for (const singleton of singletonRows ?? []) {
-    const key = surnameKey(singleton);
-    if (!key) continue; // no derivable name at all -> never a candidate, same as clusterLegislators' own singleton sweep
     for (const [personId, members] of personGroups) {
-      const sameKeyMembers = members.filter((m) => surnameKey(m) === key);
-      if (sameKeyMembers.length === 0) continue;
-
-      const blockedByRuling = sameKeyMembers.some((m) => keepSeparatePairs.has(pairKey(singleton.id, m.id)));
-      if (blockedByRuling) continue;
-
-      let hasContradiction = false;
-      const matchedMembers = [];
-      for (const member of sameKeyMembers) {
-        const status = finalPairStatus(singleton, member);
-        if (status === 'contradiction') { hasContradiction = true; break; }
-        if (status === 'compatible') {
-          matchedMembers.push({ legislatorId: member.id, fullName: member.full_name, status });
-        }
-      }
-      if (hasContradiction || matchedMembers.length === 0) continue;
-
+      const { ruling, contradicted, matchedMembers } = evaluateRowAgainstPerson(singleton, members, keepSeparatePairs);
+      if (ruling || contradicted || matchedMembers.length === 0) continue;
       results.push({ legislatorId: singleton.id, personId, matchedMembers });
     }
   }
@@ -392,28 +432,40 @@ export function buildAttachFlags(attachCandidates, rowsById, personDisplayNameBy
   return flags;
 }
 
-// personGroupIsCompatible — true iff ANY member row is 'compatible' (finalPairStatus, fix round 1
-// CRITICAL 3's own tightening — 'compatible' ONLY, never 'ambiguous') against ANY of a person
-// group's existing member rows.
-function personGroupIsCompatible(memberRows, existingMembers) {
-  return memberRows.some((memberRow) => existingMembers.some(
-    (existingMember) => finalPairStatus(memberRow, existingMember) === 'compatible',
-  ));
-}
-
-// findCompatibleExistingPersons — the pure lookup applyAttachCrossCheck (below) reduces to: EVERY
+// findDemotionTargetPersons — the pure lookup applyAttachCrossCheck (below) reduces to: EVERY
 // already-linked person (not just the first — micro-round, re-review information-gap finding: the
 // operator can't weigh what he can't see; if a cluster genuinely cross-matches two or more
-// existing persons, that is exactly the shape Lance most needs visibility into, not less) with at
-// least one member 'compatible' against ANY of the given member rows. Returns an array of
-// personIds, in personGroups' own iteration order (deterministic for a given input); empty if
-// none match.
-function findCompatibleExistingPersons(memberRows, personGroups) {
-  const matched = [];
+// existing persons, that is exactly the shape Lance most needs visibility into, not less) that
+// SURVIVES both vetoes and still has at least one 'compatible' edge to some member of the cluster.
+//
+// FINAL WHOLE-BRANCH REVIEW, findings 1 & 2: every (cluster member × person) pair now goes through
+// evaluateRowAgainstPerson — the SAME function buildAttachCandidates calls — so a person is
+// disqualified outright by a seat contradiction against ANY member (finding 1) or by a
+// keep-separate ruling against ANY member (finding 2), regardless of how many OTHER edges read
+// 'compatible'. Every member row is evaluated before the verdict (no early break on the first
+// veto) so `blockingRuling` reports the first ruling that actually blocked a person, not merely
+// the first one encountered before some unrelated contradiction short-circuited the scan. Returns
+// { personIds, blockingRuling }: personIds in personGroups' own iteration order (deterministic for
+// a given input), blockingRuling the first keep-separate ruling that vetoed any person (null if
+// none did) — carried onto the resulting flag exactly as applyKeepSeparateRulings carries its own.
+function findDemotionTargetPersons(memberRows, personGroups, keepSeparatePairs) {
+  const personIds = [];
+  let blockingRuling = null;
   for (const [personId, existingMembers] of personGroups) {
-    if (personGroupIsCompatible(memberRows, existingMembers)) matched.push(personId);
+    let vetoed = false;
+    let matched = false;
+    for (const memberRow of memberRows) {
+      const { ruling, contradicted, matchedMembers } = evaluateRowAgainstPerson(memberRow, existingMembers, keepSeparatePairs);
+      if (ruling) {
+        vetoed = true;
+        if (!blockingRuling) blockingRuling = ruling;
+      }
+      if (contradicted) vetoed = true;
+      if (matchedMembers.length > 0) matched = true;
+    }
+    if (!vetoed && matched) personIds.push(personId);
   }
-  return matched;
+  return { personIds, blockingRuling };
 }
 
 // applyAttachCrossCheck — FIX ROUND 1, CRITICAL 2 (reviewer execution-proven, finding-5 class,
@@ -434,7 +486,7 @@ function findCompatibleExistingPersons(memberRows, personGroups) {
 // clusterLegislators itself use — no parallel matching logic) against EVERY member of EVERY
 // already-linked person. A single 'compatible' edge ANYWHERE demotes the WHOLE cluster to an
 // attach_candidate flag citing EVERY person it matched (micro-round: not just the first — see
-// findCompatibleExistingPersons' own comment) — never partially written, never auto-attached,
+// findDemotionTargetPersons' own comment) — never partially written, never auto-attached,
 // Lance decides, exactly the SAME flag shape (and the SAME review-tab 'Attach' action)
 // buildAttachFlags already produces. 'ambiguous' is deliberately NOT a demotion trigger here
 // either (fix round 1, CRITICAL 3's own tightening, applied identically on this side too) — a
@@ -445,17 +497,31 @@ function findCompatibleExistingPersons(memberRows, personGroups) {
 // hard-blocking the cluster outright: missed-merge (an extra review item) is benign, wrong-merge
 // (a silent duplicate person) is not.
 //
+// FINAL WHOLE-BRANCH REVIEW, findings 1 & 2: this path used to qualify a person on a single
+// 'compatible' edge and nothing else — no contradiction veto (finding 1: a fresh cluster whose
+// member is seated at a district the person's member provably does NOT hold was still demoted onto
+// that person, so one endorsed click merged two people the recorded data proves are different) and
+// no keepSeparatePairs argument at all (finding 2: a row Lance had already ruled keep-separate from
+// a member of person P was correctly suppressed when it arrived ALONE, but demoted onto P the
+// moment it arrived with a same-name partner — re-proposing the exact merge Lance rejected). Both
+// vetoes now run through the shared evaluateRowAgainstPerson, so this path and buildAttachCandidates
+// enforce identical doctrine by construction. When EVERY matching person is vetoed the cluster is
+// left safe to write as its own NEW person — fail-toward-duplicates, the module's asymmetric-cost
+// rule (a duplicate person is a benign missed merge; a wrong merge is the unacceptable error class).
+//
 // `memberRowsById`: the SAME id->row map runLink already threads through to writeAutoCluster (the
 // full unlinked-rows snapshot; every cluster member is guaranteed present). `alreadyLinkedRows`:
 // buildEvidenceRows-shaped already-linked rows (the SAME snapshot the attach pass itself
 // compares against). `personDisplayNameById`: loadPersons' own map, reused rather than re-fetched.
-export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRows, personDisplayNameById) {
+// `keepSeparatePairs`: buildKeepSeparatePairs' own map — REQUIRED, deliberately not defaulted, so a
+// caller that forgets it throws loudly here rather than silently re-proposing rejected merges.
+export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRows, personDisplayNameById, keepSeparatePairs) {
   const personGroups = groupAlreadyLinkedByPerson(alreadyLinkedRows);
   const safeClusters = [];
   const demotedFlags = [];
   for (const cluster of clusters) {
     const memberRows = cluster.memberIds.map((id) => memberRowsById.get(id));
-    const matchedPersonIds = findCompatibleExistingPersons(memberRows, personGroups);
+    const { personIds: matchedPersonIds, blockingRuling } = findDemotionTargetPersons(memberRows, personGroups, keepSeparatePairs);
     if (matchedPersonIds.length === 0) {
       safeClusters.push(cluster);
       continue;
@@ -471,6 +537,10 @@ export function applyAttachCrossCheck(clusters, memberRowsById, alreadyLinkedRow
       reason: 'attach_candidate',
       existingPerson: existingPersons[0],
       existingPersons,
+      // keepSeparateRuling: present only when a ruling vetoed some OTHER person while this
+      // demotion still fired — the same citation applyKeepSeparateRulings attaches to its own
+      // downgrades, so Lance sees his own earlier words rather than an unexplained absence.
+      ...(blockingRuling ? { keepSeparateRuling: blockingRuling } : {}),
     });
   }
   return { safeClusters, demotedFlags };
@@ -701,7 +771,7 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
   // is re-checked against every already-linked person BEFORE it is treated as safe to write at
   // all. `cleanClusters` from here on is the FINAL, cross-checked set writeAutoCluster ever sees.
   const { safeClusters: cleanClusters, demotedFlags: crossCheckFlags } = applyAttachCrossCheck(
-    keepSeparateCleanClusters, rowsById, alreadyLinkedEvidenceRows, personDisplayNameById,
+    keepSeparateCleanClusters, rowsById, alreadyLinkedEvidenceRows, personDisplayNameById, keepSeparatePairs,
   );
 
   const flagged = [...matcherFlagged, ...downgradedFlags, ...attachFlags, ...crossCheckFlags];

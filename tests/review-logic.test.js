@@ -12,6 +12,12 @@ import {
   buildLanceLinkEvidence, buildLanceAttachEvidence, appendResolution, validateIdentityDecisionInput,
   HOST, PORT,
 } from '../src/review/server.js';
+// Final whole-branch review, finding 3: the keep-separate-on-an-attach-flag fix is a ROUND TRIP —
+// this route writes the ruling's evidence, and src/cli/link-persons.js's buildKeepSeparatePairs is
+// the consumer that must be able to read a pair-keyed "X is not P" fact back out of it. Asserting
+// the round trip (rather than just the stored JSON shape) is the only way the test can fail if the
+// two sides ever drift.
+import { buildKeepSeparatePairs } from '../src/cli/link-persons.js';
 
 const OWN_ORIGIN = `http://${HOST}:${PORT}`;
 
@@ -2637,5 +2643,125 @@ test('14-candidate flag: queue render (all 14, real per-candidate data) -> link 
     const finalQueueRes = await fetch(`${base}/api/identity/queue`);
     const finalQueueBody = await finalQueueRes.json();
     assert.deepEqual(finalQueueBody.items, [], 'a resolved:true flag is excluded by the queue\'s own resolved=false filter');
+  }, client);
+});
+
+// ============================================================================================
+// FINAL WHOLE-BRANCH REVIEW (.superpowers/sdd/2026-07-29-profile-completeness/
+// final-review-findings.md), finding 3: a keep-separate resolution on an ATTACH flag recorded no
+// durable "X is not P" fact. legislatorIds is only the still-unlinked CANDIDATES — the target
+// person's own members are, by construction, already linked and therefore never in that list — so
+// a 1-candidate attach flag produced ZERO pairs from buildKeepSeparatePairs and the ruling had no
+// pair-keyed representation at all. Only cluster_key dedup suppressed re-suggestion, and
+// membership drift defeats that (one more compatible row mints a fresh key -> a fresh unresolved
+// flag re-proposing the very merge Lance just rejected). The round trip below is the actual
+// contract, so it is asserted as a round trip: the route WRITES the evidence, src/cli/link-
+// persons.js's buildKeepSeparatePairs READS it.
+// ============================================================================================
+
+// pairSetOf — the ruling's pair-keyed representation as a comparable set of "a|b" strings
+// (order-independent, matching buildKeepSeparatePairs' own order-independent pair keying).
+function pairSetOf(pairs) {
+  return new Set([...pairs.values()].map((p) => [p.legislatorIdA, p.legislatorIdB].sort().join('|')));
+}
+
+function attachFlagFixture(candidateIds) {
+  return {
+    id: 'f-attach',
+    cluster_key: `attach:person-P:${candidateIds.join(',')}`,
+    resolved: false,
+    candidate_legislator_ids: candidateIds,
+    evidence: {
+      reason: 'attach_candidate',
+      candidates: candidateIds.map((id) => ({ legislatorId: id, fullName: 'Robert Onder' })),
+      existingPerson: { personId: 'person-P', displayName: 'Robert F. Onder' },
+      existingPersons: [{ personId: 'person-P', displayName: 'Robert F. Onder' }],
+    },
+  };
+}
+
+// person-P holds TWO already-linked members; person-Q is an unrelated person whose member must
+// never appear in a ruling about P.
+function attachDecisionLegislators(candidateIds) {
+  const entries = candidateIds.map((id) => [id, { id, person_id: null }]);
+  entries.push(['leg-pm1', { id: 'leg-pm1', person_id: 'person-P' }]);
+  entries.push(['leg-pm2', { id: 'leg-pm2', person_id: 'person-P' }]);
+  entries.push(['leg-qm1', { id: 'leg-qm1', person_id: 'person-Q' }]);
+  return new Map(entries);
+}
+
+test('POST /api/identity/decision keep-separate on a 1-CANDIDATE attach flag: FINAL REVIEW FINDING 3 — records a durable candidate x member pair for EVERY member of every person the flag named, so buildKeepSeparatePairs (and therefore blockedByRuling + the cross-check veto) enforce the ruling regardless of cluster_key drift', () => {
+  const flag = attachFlagFixture(['leg-x']);
+  const client = identityFakeClient({ flags: [flag], legislatorsById: attachDecisionLegislators(['leg-x']) });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f-attach', action: 'keep-separate', note: 'leg-x is NOT Robert F. Onder' }),
+    });
+    assert.equal(res.status, 200);
+    const [resolution] = flag.evidence.resolutions;
+    assert.equal(resolution.action, 'keep-separate');
+    assert.deepEqual(resolution.legislatorIds, ['leg-x'], 'the audit entry still names the actual still-unlinked candidates, unchanged');
+
+    const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
+    assert.deepEqual(
+      pairSetOf(pairs),
+      new Set(['leg-pm1|leg-x', 'leg-pm2|leg-x']),
+      'one pair per member of person-P — before this fix a 1-candidate attach keep-separate produced ZERO pairs and the ruling was invisible to the auto path',
+    );
+    assert.equal(
+      [...pairs.values()].some((p) => p.legislatorIdA === 'leg-qm1' || p.legislatorIdB === 'leg-qm1'),
+      false,
+      'person-Q was never named by this flag — its members are untouched by a decision about P',
+    );
+  }, client);
+});
+
+test('POST /api/identity/decision keep-separate on a MULTI-CANDIDATE attach flag: FINAL REVIEW FINDING 3 — records candidate x member pairs but NEVER a candidate x candidate pair (the decision was about P, and says nothing about whether the two candidates are each other)', () => {
+  const flag = attachFlagFixture(['leg-x', 'leg-y']);
+  const client = identityFakeClient({ flags: [flag], legislatorsById: attachDecisionLegislators(['leg-x', 'leg-y']) });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f-attach', action: 'keep-separate', note: 'neither belongs to Robert F. Onder' }),
+    });
+    assert.equal(res.status, 200);
+    const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
+    assert.deepEqual(
+      pairSetOf(pairs),
+      new Set(['leg-pm1|leg-x', 'leg-pm2|leg-x', 'leg-pm1|leg-y', 'leg-pm2|leg-y']),
+    );
+    assert.equal(
+      pairSetOf(pairs).has('leg-x|leg-y'),
+      false,
+      'mis-recording "leg-x is not leg-y" from a decision about person-P would permanently block a merge Lance never ruled on',
+    );
+  }, client);
+});
+
+test('POST /api/identity/decision keep-separate on a NON-attach flag: FINAL REVIEW FINDING 3 regression — the pre-existing candidate x candidate cross-product is unchanged (there is no target person here; the ruling really is about the candidates themselves)', () => {
+  const flag = {
+    id: 'f1',
+    cluster_key: 'brown:b,c',
+    resolved: false,
+    candidate_legislator_ids: ['leg-b', 'leg-c'],
+    evidence: { reason: 'ambiguous_era', candidates: [{ legislatorId: 'leg-b' }, { legislatorId: 'leg-c' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-b', { id: 'leg-b', person_id: null }],
+    ['leg-c', { id: 'leg-c', person_id: null }],
+  ]);
+  const client = identityFakeClient({ flags: [flag], legislatorsById });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'keep-separate', note: 'unrelated Browns' }),
+    });
+    assert.equal(res.status, 200);
+    const pairs = buildKeepSeparatePairs([{ id: flag.id, cluster_key: flag.cluster_key, evidence: flag.evidence }]);
+    assert.deepEqual(pairSetOf(pairs), new Set(['leg-b|leg-c']));
   }, client);
 });
