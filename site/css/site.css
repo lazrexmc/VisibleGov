@@ -135,3 +135,57 @@ main#app {
   color: var(--muted);
   font-size: 0.9em;
 }
+
+/* Task 6b — vote aggregate charts (design spec §3, "Vote aggregates"). Deliberately ONE neutral
+   fill color for every bar, regardless of which position/side it represents — color-coding
+   "yea=good/nay=bad" (or a party color) would read as a value judgment, which the neutrality wall
+   forbids. Bar widths are set via element.style.width in JS (see vote-charts.js), never inline in
+   this file — this stylesheet only owns the static box/track look. */
+
+.vote-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.chart-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1em;
+}
+
+.chart-bar-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  cursor: pointer;
+}
+
+.chart-bar-label {
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
+.chart-bar-track {
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+  border-radius: 2px;
+  height: 0.6rem;
+  overflow: hidden;
+}
+
+.chart-bar-fill {
+  background: var(--link);
+  height: 100%;
+}
+
+.chart-bar-value {
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.chart-not-computable {
+  color: var(--muted);
+  font-style: italic;
+}

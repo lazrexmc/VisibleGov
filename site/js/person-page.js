@@ -24,6 +24,9 @@ import { extractOneLiner } from './summary-parse.js';
 import {
   buildIdentity, voteFilterQuery, groupSponsorships, chamberLabel,
 } from './profile-model.js';
+import {
+  summarizeTotals, cohesionFromAlignment, partyComparisonModel, renderChartSection,
+} from './vote-charts.js';
 
 // ============================================================================
 // Pure helpers (TDD'd in tests/person-page.test.js BEFORE any of the DOM code below existed)
@@ -546,6 +549,92 @@ export async function loadVotesSection(container, { legislatorIds, filters, vote
   return page;
 }
 
+// Task 6b (design spec §3, "Vote aggregates"; task-6b-brief.md) — the profile's mechanical vote-
+// aggregate charts, mounted ABOVE the vote list and driven by the SAME filter state (a bar click
+// dispatches through the same nextVoteFilters reducer the vote-list filter controls already use —
+// see wireVoteFilters/mountProfile below). Its own independent three-state section (design spec
+// §8: a failed fetch never blocks another section): an aggregates fetch failing — including the
+// PRE-APPLY state, migration 0018 not yet applied, both views 404 PGRST205, verified live via a
+// read-only probe against the real anon surface during this task — renders THIS section's honest
+// failed state while votes/sponsorships/freshness keep rendering normally below it.
+//
+// Fetches public_position_totals / public_party_alignment rows ONCE, unfiltered by chamber/year
+// (brief: "the profile sums/filters client-side — rows per legislator are tiny"), then returns a
+// `rescope()` closure that recomputes summarizeTotals/cohesionFromAlignment/partyComparisonModel
+// from the SAME already-fetched rows against a NEW filters object — no re-fetch on every filter
+// change, which is what makes "charts re-scope" alongside the vote list cheap.
+export async function loadChartsSection(container, {
+  legislatorIds, party, filters, onBarClick,
+}) {
+  sectionState(container, { state: 'loading' });
+
+  if (!legislatorIds || legislatorIds.length === 0) {
+    sectionState(container, { state: 'empty', message: 'No legislator records are linked to this profile.' });
+    return null;
+  }
+
+  const reload = () => loadChartsSection(container, {
+    legislatorIds, party, filters, onBarClick,
+  }).catch(() => {});
+
+  let memberRows;
+  let alignmentRows;
+  try {
+    [memberRows, alignmentRows] = await Promise.all([
+      fetchAllRows(`public_position_totals?legislator_id=in.(${legislatorIds.join(',')})`),
+      fetchAllRows(`public_party_alignment?legislator_id=in.(${legislatorIds.join(',')})`),
+    ]);
+  } catch {
+    // Covers BOTH the pre-apply state (migration 0018 not yet applied — PGRST205, "Could not
+    // find the table") and any live fetch failure (statement timeout, network) with the SAME
+    // honest message: the aggregates genuinely are not available right now, whatever the cause.
+    sectionState(container, {
+      state: 'failed',
+      message: 'Aggregates unavailable until the next data update.',
+      onRetry: reload,
+    });
+    return null;
+  }
+
+  // Party comparison (design spec §3, metric 2) — the member's own party's aggregate rows over
+  // the SAME public_position_totals view, filtered via a legislators!inner(party) embed.
+  // vote_casts.legislator_id -> legislators.id is a real FK (migration 0001), and this view
+  // selects vc.legislator_id as a direct passthrough column — the shape PostgREST needs to infer
+  // a relationship THROUGH an aggregate view. UNVERIFIED PRE-APPLY (the view does not exist yet
+  // to test the embed against; flagged as a task-6b report concern for the controller's Step-4
+  // live smoke) — best-effort regardless: a party-fetch failure, or no recorded party at all,
+  // degrades to "party comparison not computable" without failing the whole charts section, since
+  // distribution and cohesion remain independently good data either way.
+  let partyRows = [];
+  if (party) {
+    try {
+      partyRows = await fetchAllRows(
+        `public_position_totals?select=legislator_id,jurisdiction_id,chamber,year,position,casts,legislators!inner(party)&legislators.party=eq.${encodeURIComponent(party)}`,
+      );
+    } catch {
+      partyRows = [];
+    }
+  }
+
+  const rescope = () => {
+    const distribution = summarizeTotals(memberRows, filters);
+    if (distribution.total === 0) {
+      sectionState(container, { state: 'empty', message: 'No recorded votes for this filter.' });
+      return;
+    }
+    const partyTotals = party ? summarizeTotals(partyRows, filters) : null;
+    const comparison = partyTotals ? partyComparisonModel(distribution, partyTotals) : null;
+    const cohesion = cohesionFromAlignment(alignmentRows, filters);
+    sectionState(container, { state: 'ready' });
+    renderChartSection(container, {
+      distribution, partyComparison: comparison, cohesion, partyLabel: party,
+    }, onBarClick);
+  };
+
+  rescope();
+  return { rescope };
+}
+
 async function loadSponsorshipsSection(container, { legislatorIds }) {
   sectionState(container, { state: 'loading' });
   try {
@@ -614,7 +703,9 @@ export async function loadFreshnessSection(container, { terms, onTermsUnknownRet
 }
 
 // The shared entry point. `sections` is an object of DOM containers:
-// { identity, votes, sponsorships, freshness, voteFilters }. `person` is null for the
+// { identity, votes, sponsorships, freshness, voteFilters, charts }. `charts` is optional (task
+// 6b, additive — omitting it, as every pre-existing test in tests/person-page.test.js does, skips
+// chart mounting entirely; nothing else about the page changes). `person` is null for the
 // legislator.html single-row path (design spec §3).
 export async function mountProfile(sections, { person, legislators }) {
   const legislatorIds = (legislators || []).map((l) => l.id);
@@ -626,7 +717,7 @@ export async function mountProfile(sections, { person, legislators }) {
   async function loadIdentity() {
     return loadIdentitySection(sections.identity, {
       person, legislators, legislatorIds, reload: () => { loadIdentityThenFreshness().catch(() => {}); },
-    }).catch(() => ({ terms: null }));
+    }).catch(() => ({ terms: null, identity: null }));
   }
   async function loadFreshness(terms) {
     return loadFreshnessSection(sections.freshness, {
@@ -651,14 +742,40 @@ export async function mountProfile(sections, { person, legislators }) {
   // concurrently with votes/sponsorships below (still gets exactly terms-or-null, same tri-state
   // semantics as always; only the ordering relative to votes changed) and is awaited once, at
   // the very end, so mountProfile's own returned promise still reflects every section settling.
-  const { terms } = await loadIdentity();
+  const { terms, identity } = await loadIdentity();
   const freshnessLoad = loadFreshness(terms);
 
   const filters = { chamber: null, year: null, missedOnly: false, page: 1 };
   const voteGeneration = { current: 0 };
   const runVotes = () => loadVotesSection(sections.votes, { legislatorIds, filters, voteGeneration }).catch(() => {});
+
+  // Task 6b: the charts section mounts ABOVE the vote list, driven by the SAME filters object —
+  // the filter controls below AND a chart bar click both end up here, so a filter change always
+  // resets votes to page 1 AND re-scopes the charts together (design spec §3, "Context beyond the
+  // brief"). `rescopeCharts` starts as a no-op so `refresh` is safe to wire into the filter
+  // controls even before the charts fetch itself resolves (or when sections.charts is absent).
+  let rescopeCharts = () => {};
+  const refresh = () => {
+    runVotes();
+    rescopeCharts();
+  };
+  // Bar clicks carry a filter PATCH (they don't mutate `filters` themselves, unlike
+  // wireVoteFilters' own controls below) — apply it through the SAME nextVoteFilters reducer,
+  // then refresh both sections exactly like any other filter change.
+  const onBarClick = (patch) => {
+    Object.assign(filters, nextVoteFilters(filters, patch));
+    refresh();
+  };
+
+  if (sections.charts) {
+    const chartsResult = await loadChartsSection(sections.charts, {
+      legislatorIds, party: identity ? identity.party : null, filters, onBarClick,
+    }).catch(() => null);
+    if (chartsResult) rescopeCharts = chartsResult.rescope;
+  }
+
   if (sections.voteFilters) {
-    wireVoteFilters(sections.voteFilters, filters, runVotes);
+    wireVoteFilters(sections.voteFilters, filters, refresh);
   }
   await runVotes();
 
@@ -671,8 +788,10 @@ export async function mountProfile(sections, { person, legislators }) {
 // client-side re-sort/filter of the page already in hand (brief: "filter controls re-query the
 // SERVER, never client-sort partial pages"). Every change goes through nextVoteFilters (fix
 // round 2, finding 1) — the same pure "reset to page 1 on a real filter change" reducer the
-// Prev/Next buttons use, so a stale page number never survives a filter change.
-function wireVoteFilters(container, filters, runVotes) {
+// Prev/Next buttons use, so a stale page number never survives a filter change. `onChange` (task
+// 6b rename from `runVotes`) now also re-scopes the charts section above, via the SAME reducer —
+// existing behavior (nextVoteFilters/the reset-to-page-1 rule) hooked, not new plumbing.
+function wireVoteFilters(container, filters, onChange) {
   clearChildren(container);
 
   const chamberSelect = document.createElement('select');
@@ -684,7 +803,7 @@ function wireVoteFilters(container, filters, runVotes) {
   }
   chamberSelect.addEventListener('change', () => {
     Object.assign(filters, nextVoteFilters(filters, { chamber: chamberSelect.value || null }));
-    runVotes();
+    onChange();
   });
 
   const yearInput = document.createElement('input');
@@ -693,7 +812,7 @@ function wireVoteFilters(container, filters, runVotes) {
   yearInput.addEventListener('change', () => {
     const v = yearInput.value.trim();
     Object.assign(filters, nextVoteFilters(filters, { year: v ? Number(v) : null }));
-    runVotes();
+    onChange();
   });
 
   const missedLabel = document.createElement('label');
@@ -701,7 +820,7 @@ function wireVoteFilters(container, filters, runVotes) {
   missedCheckbox.type = 'checkbox';
   missedCheckbox.addEventListener('change', () => {
     Object.assign(filters, nextVoteFilters(filters, { missedOnly: missedCheckbox.checked }));
-    runVotes();
+    onChange();
   });
   missedLabel.appendChild(missedCheckbox);
   missedLabel.appendChild(document.createTextNode('Missed votes only (not voting / absent)'));
@@ -767,6 +886,7 @@ export async function bootstrapPersonPage() {
   await mountProfile({
     identity: identityContainer,
     voteFilters: document.getElementById('vote-filters'),
+    charts: document.getElementById('charts'),
     votes: document.getElementById('votes'),
     sponsorships: document.getElementById('sponsorships'),
     freshness: document.getElementById('freshness'),

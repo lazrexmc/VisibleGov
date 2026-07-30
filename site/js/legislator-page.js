@@ -50,6 +50,7 @@ export async function bootstrapLegislatorPage() {
   await mountProfile({
     identity: identityContainer,
     voteFilters: document.getElementById('vote-filters'),
+    charts: document.getElementById('charts'),
     votes: document.getElementById('votes'),
     sponsorships: document.getElementById('sponsorships'),
     freshness: document.getElementById('freshness'),
