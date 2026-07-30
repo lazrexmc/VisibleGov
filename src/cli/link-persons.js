@@ -1,4 +1,4 @@
-﻿import {
+import {
   getClient, openRun, closeRun, selectAll, additivePatch,
 } from '../lib/db.js';
 import {

@@ -1,4 +1,4 @@
-﻿import { test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence, nameSetEdgeBasis, normalizePersonName, finalPairStatus,

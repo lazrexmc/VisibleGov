@@ -1,4 +1,4 @@
-﻿import { test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs, PASSAGE_QUESTION_RE, isPassageVote, planQueue, pickCurrentTextRow, loadPlanState,
