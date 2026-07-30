@@ -7,6 +7,9 @@ import {
   loadPlaceholderLegislators,
   loadFederalMemberIndex,
   runAtLargeBackfill,
+  resolveTermDates,
+  loadTermDateIndex,
+  runFederalTermDatesBackfill,
   runBackfillFederalNames,
 } from '../src/cli/backfill-federal-names.js';
 import { SourceFetchError } from '../src/lib/errors.js';
@@ -109,9 +112,18 @@ test('loadFederalMemberIndex: real member-page-unfiltered.json fixture — BOTH 
 
   assert.equal(failures.length, 0);
   assert.equal(index.size, 20);
-  assert.deepEqual(index.get('P000604'), { full_name: 'Payne, Donald M.', party: 'Democratic' }, 'Payne — endYear 2024, departed, MUST still be found');
-  assert.deepEqual(index.get('S001154'), { full_name: 'Shuster, Bill', party: 'Republican' }, 'Shuster — endYear 2019, departed');
+  assert.deepEqual(index.get('P000604'), {
+    full_name: 'Payne, Donald M.',
+    party: 'Democratic',
+    service: { house: [{ startYear: 2012, endYear: 2024 }], senate: [] },
+  }, 'Payne — endYear 2024, departed, MUST still be found, with the T8c per-chamber service range attached');
+  assert.deepEqual(index.get('S001154'), {
+    full_name: 'Shuster, Bill',
+    party: 'Republican',
+    service: { house: [{ startYear: 2001, endYear: 2019 }], senate: [] },
+  }, 'Shuster — endYear 2019, departed');
   assert.equal(index.get('G000607').full_name, 'Gallagher, James', 'a current member is still found too');
+  assert.deepEqual(index.get('G000607').service.house, [{ startYear: 2026, endYear: null }], 'Gallagher is still serving — no endYear');
 });
 
 test('loadFederalMemberIndex: passes the requested congress through to fetchMemberPageFn on every page', async () => {
@@ -321,6 +333,372 @@ test('runAtLargeBackfill: --dry-run performs the same resolution but never write
   assert.deepEqual(client.calls, []);
 });
 
+// ---- T8c: resolveTermDates (pure) ----
+
+test('resolveTermDates: a house term with a bioguide match and a CLOSED service range fills both start_date and end_date via the January-3rd congressional-turnover convention', () => {
+  const legislatorBioguideIndex = new Map([['leg-1', 'P000604']]);
+  const memberIndex = new Map([['P000604', {
+    full_name: 'Payne, Donald M.', party: 'Democratic', service: { house: [{ startYear: 2012, endYear: 2024 }], senate: [] },
+  }]]);
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'house', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex, memberIndex },
+  );
+  assert.deepEqual(result, { start_date: '2012-01-03', end_date: '2024-01-03' });
+});
+
+test('resolveTermDates: an OPEN (current) service range — no endYear on file — fills start_date only, end_date stays null', () => {
+  const legislatorBioguideIndex = new Map([['leg-1', 'H000273']]);
+  const memberIndex = new Map([['H000273', {
+    full_name: 'Josh Hawley', party: 'Republican', service: { house: [], senate: [{ startYear: 2019, endYear: null }] },
+  }]]);
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'senate', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex, memberIndex },
+  );
+  assert.deepEqual(result, { start_date: '2019-01-03', end_date: null });
+});
+
+test('resolveTermDates: a non-us-congress (mo-legislature) term is never resolved — null, no bioguide identity applies there at all', () => {
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'mo-legislature', chamber: 'house', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex: new Map([['leg-1', 'X000001']]), memberIndex: new Map([['X000001', { service: { house: [{ startYear: 2020, endYear: null }] } }]]) },
+  );
+  assert.equal(result, null);
+});
+
+test('resolveTermDates: a legislator with no bioguide_id on file resolves to null, never guessed', () => {
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'house', legislator_id: 'leg-mo-only',
+    },
+    { legislatorBioguideIndex: new Map(), memberIndex: new Map() },
+  );
+  assert.equal(result, null);
+});
+
+test('resolveTermDates: a bioguide_id not present in the fetched 119th-Congress roster resolves to null (a truly historical/pre-119th member — honestly out of reach for this pass)', () => {
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'senate', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex: new Map([['leg-1', 'B000000']]), memberIndex: new Map() },
+  );
+  assert.equal(result, null);
+});
+
+test('resolveTermDates: a member found in the roster but with NO service range for THIS specific chamber resolves to null (never borrows the other chamber\'s range)', () => {
+  const legislatorBioguideIndex = new Map([['leg-1', 'W000812']]);
+  const memberIndex = new Map([['W000812', { service: { house: [{ startYear: 2013, endYear: null }], senate: [] } }]]);
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'senate', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex, memberIndex },
+  );
+  assert.equal(result, null, 'Wagner has a House range but no Senate range — a senate term row must not borrow it');
+});
+
+test('resolveTermDates: multiple stints in the same chamber — the range covering the 119th Congress (2025-2027) wins, not the first/last in array order', () => {
+  const legislatorBioguideIndex = new Map([['leg-1', 'M000001']]);
+  const memberIndex = new Map([['M000001', {
+    service: {
+      house: [
+        { startYear: 1999, endYear: 2003 }, // an old, unrelated stint
+        { startYear: 2023, endYear: null }, // covers the 119th — this one wins
+      ],
+      senate: [],
+    },
+  }]]);
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'house', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex, memberIndex },
+  );
+  assert.deepEqual(result, { start_date: '2023-01-03', end_date: null });
+});
+
+test('resolveTermDates: multiple stints, NONE covering the 119th Congress — falls back to the most-recently-started range rather than guessing an arbitrary one', () => {
+  const legislatorBioguideIndex = new Map([['leg-1', 'M000001']]);
+  const memberIndex = new Map([['M000001', {
+    service: {
+      house: [
+        { startYear: 1989, endYear: 1993 },
+        { startYear: 1999, endYear: 2003 },
+      ],
+      senate: [],
+    },
+  }]]);
+  const result = resolveTermDates(
+    {
+      id: 'term-1', jurisdiction_id: 'us-congress', chamber: 'house', legislator_id: 'leg-1',
+    },
+    { legislatorBioguideIndex, memberIndex },
+  );
+  assert.deepEqual(result, { start_date: '1999-01-03', end_date: '2003-01-03' });
+});
+
+// ---- T8c: loadTermDateIndex (ungated — start_date/end_date exist since migration 0001) ----
+
+function makeSelectAllTermsFakeClient(rows) {
+  return {
+    from: (table) => {
+      assert.equal(table, 'terms');
+      return {
+        select: () => ({
+          order: () => ({
+            range: async (from, to) => ({ data: rows.slice(from, to + 1), error: null }),
+          }),
+        }),
+      };
+    },
+  };
+}
+
+test('loadTermDateIndex: bulk-reads the full terms table including start_date/end_date, ungated', async () => {
+  const client = makeSelectAllTermsFakeClient([
+    {
+      id: 't1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', start_date: null, end_date: null,
+    },
+  ]);
+  const rows = await loadTermDateIndex(client);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 't1');
+});
+
+test('loadTermDateIndex: an unrelated bulk-load error is thrown, never silently swallowed', async () => {
+  const client = { from: () => ({ select: () => ({ order: () => ({ range: async () => ({ data: null, error: { message: 'connection reset' } }) }) }) }) };
+  await assert.rejects(() => loadTermDateIndex(client), /connection reset/);
+});
+
+// ---- T8c: runFederalTermDatesBackfill (orchestration) ----
+
+function makeFakeTermDateWriteClient(updateResults = {}) {
+  const calls = [];
+  return {
+    calls,
+    from: (table) => ({
+      update: (patch) => ({
+        eq: (col, val) => {
+          const guard = { conditions: [] };
+          const chain = {
+            is: (col2, val2) => {
+              guard.conditions.push({ col: col2, val: val2 });
+              return {
+                is: chain.is, // supports a SECOND chained .is() (start_date AND end_date both null)
+                select: async (cols) => {
+                  calls.push({
+                    table, patch, eq: { col, val }, is: [...guard.conditions], select: cols,
+                  });
+                  const result = updateResults[val];
+                  return result ?? { data: [{ id: val }], error: null };
+                },
+              };
+            },
+          };
+          return chain;
+        },
+      }),
+    }),
+  };
+}
+
+test('runFederalTermDatesBackfill: a null-start_date term with a bioguide match and a CLOSED range fills both dates and is counted datesFilled', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'house', start_date: null, end_date: null,
+  }];
+  const loadLegislatorBioguideIndexFn = async () => new Map([['leg-1', 'P000604']]);
+  const loadFederalMemberIndexFn = async () => ({
+    index: new Map([['P000604', { service: { house: [{ startYear: 2012, endYear: 2024 }], senate: [] } }]]),
+    failures: [],
+  });
+
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false, runId: 'run-1', loadTermDateIndexFn, loadLegislatorBioguideIndexFn, loadFederalMemberIndexFn,
+  });
+
+  assert.equal(report.counts.termsSeen, 1);
+  assert.equal(report.counts.datesFilled, 1);
+  assert.equal(client.calls.length, 1);
+  const call = client.calls[0];
+  assert.equal(call.patch.start_date, '2012-01-03');
+  assert.equal(call.patch.end_date, '2024-01-03');
+  assert.equal(call.patch.run_id, 'run-1');
+  assert.deepEqual(call.eq, { col: 'id', val: 'term-1' });
+  assert.deepEqual(call.is, [{ col: 'start_date', val: null }, { col: 'end_date', val: null }], 'both columns guarded .is(col, null)');
+});
+
+test('runFederalTermDatesBackfill: an OPEN service range fills start_date only — counted partialFilled, end_date never written or guarded', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', start_date: null, end_date: null,
+  }];
+  const loadLegislatorBioguideIndexFn = async () => new Map([['leg-1', 'H000273']]);
+  const loadFederalMemberIndexFn = async () => ({
+    index: new Map([['H000273', { service: { house: [], senate: [{ startYear: 2019, endYear: null }] } }]]),
+    failures: [],
+  });
+
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false, runId: 'run-1', loadTermDateIndexFn, loadLegislatorBioguideIndexFn, loadFederalMemberIndexFn,
+  });
+
+  assert.equal(report.counts.partialFilled, 1);
+  assert.equal(report.counts.datesFilled, 0);
+  const call = client.calls[0];
+  assert.equal(call.patch.start_date, '2019-01-03');
+  assert.ok(!Object.prototype.hasOwnProperty.call(call.patch, 'end_date'));
+  assert.deepEqual(call.is, [{ col: 'start_date', val: null }], 'end_date is never guarded since it is never written');
+});
+
+test('runFederalTermDatesBackfill: a term with start_date already set is counted alreadyDated and never touched', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'house', start_date: '2013-01-03', end_date: null,
+  }];
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false,
+    runId: 'run-1',
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn: async () => new Map(),
+    loadFederalMemberIndexFn: async () => { throw new Error('must not be called — already dated'); },
+  });
+  assert.equal(report.counts.alreadyDated, 1);
+  assert.deepEqual(client.calls, []);
+});
+
+test('runFederalTermDatesBackfill: a non-us-congress undated term is counted noMemberFound, never resolved', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'house', start_date: null, end_date: null,
+  }];
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false,
+    runId: 'run-1',
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn: async () => new Map(),
+    loadFederalMemberIndexFn: async () => { throw new Error('must not be called — not us-congress'); },
+  });
+  assert.equal(report.counts.noMemberFound, 1);
+  assert.deepEqual(client.calls, []);
+});
+
+test('runFederalTermDatesBackfill: an undated us-congress term whose legislator has no bioguide_id is counted noMemberFound; the roster fetch is never worth paying for when it is the ONLY candidate', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-mo-only', jurisdiction_id: 'us-congress', chamber: 'house', start_date: null, end_date: null,
+  }];
+  let rosterCalled = false;
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false,
+    runId: 'run-1',
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn: async () => new Map(),
+    loadFederalMemberIndexFn: async () => { rosterCalled = true; return { index: new Map(), failures: [] }; },
+  });
+  assert.equal(report.counts.noMemberFound, 1);
+  assert.equal(rosterCalled, false);
+});
+
+test('runFederalTermDatesBackfill: a bioguide match with no roster entry at all (pre-119th departure) is counted noMemberFound', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', start_date: null, end_date: null,
+  }];
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false,
+    runId: 'run-1',
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn: async () => new Map([['leg-1', 'B000000']]),
+    loadFederalMemberIndexFn: async () => ({ index: new Map(), failures: [] }),
+  });
+  assert.equal(report.counts.noMemberFound, 1);
+  assert.deepEqual(client.calls, []);
+});
+
+test('runFederalTermDatesBackfill: a zero-rows-affected update (raced by something else that already dated the row) is honestly counted alreadyDated, never datesFilled/partialFilled', async () => {
+  const client = makeFakeTermDateWriteClient({ 'term-1': { data: [], error: null } });
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'house', start_date: null, end_date: null,
+  }];
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false,
+    runId: 'run-1',
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn: async () => new Map([['leg-1', 'P000604']]),
+    loadFederalMemberIndexFn: async () => ({
+      index: new Map([['P000604', { service: { house: [{ startYear: 2012, endYear: 2024 }], senate: [] } }]]),
+      failures: [],
+    }),
+  });
+  assert.equal(report.counts.alreadyDated, 1);
+  assert.equal(report.counts.datesFilled, 0);
+  assert.equal(report.counts.partialFilled, 0);
+});
+
+test('runFederalTermDatesBackfill: --dry-run performs the same resolution but never writes; plan carries the would-fill rows', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-1', legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'house', start_date: null, end_date: null,
+  }];
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: true,
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn: async () => new Map([['leg-1', 'P000604']]),
+    loadFederalMemberIndexFn: async () => ({
+      index: new Map([['P000604', { service: { house: [{ startYear: 2012, endYear: 2024 }], senate: [] } }]]),
+      failures: [],
+    }),
+  });
+  assert.equal(report.counts.datesFilled, 0, 'dry-run performs zero writes');
+  assert.equal(report.plan.length, 1);
+  assert.equal(report.plan[0].start_date, '2012-01-03');
+  assert.equal(report.plan[0].end_date, '2024-01-03');
+  assert.deepEqual(client.calls, []);
+});
+
+// ---- T8c: real-fixture end-to-end (real member-page-unfiltered.json, fake terms/legislator layer) ----
+
+test('runFederalTermDatesBackfill: real fixture end-to-end — Payne (closed House stint) fills both dates; a current member with no endYear fills start_date only', async () => {
+  const client = makeFakeTermDateWriteClient();
+  const page = loadFixture('member-page-unfiltered.json');
+  const fetchMemberPageFn = async () => page;
+  const loadTermDateIndexFn = async () => [
+    {
+      id: 'term-payne', legislator_id: 'leg-payne', jurisdiction_id: 'us-congress', chamber: 'house', start_date: null, end_date: null,
+    },
+    {
+      id: 'term-gallagher', legislator_id: 'leg-gallagher', jurisdiction_id: 'us-congress', chamber: 'house', start_date: null, end_date: null,
+    },
+  ];
+  const loadLegislatorBioguideIndexFn = async () => new Map([
+    ['leg-payne', 'P000604'],
+    ['leg-gallagher', 'G000607'],
+  ]);
+  const loadFederalMemberIndexFn = async () => loadFederalMemberIndex({ fetchMemberPageFn });
+
+  const report = await runFederalTermDatesBackfill(client, {
+    dryRun: false, runId: 'run-1', loadTermDateIndexFn, loadLegislatorBioguideIndexFn, loadFederalMemberIndexFn,
+  });
+
+  assert.equal(report.counts.datesFilled, 1, 'Payne — closed stint');
+  assert.equal(report.counts.partialFilled, 1, 'Gallagher — currently serving, no endYear');
+  const payneCall = client.calls.find((c) => c.eq.val === 'term-payne');
+  assert.equal(payneCall.patch.start_date, '2012-01-03');
+  assert.equal(payneCall.patch.end_date, '2024-01-03');
+  const gallagherCall = client.calls.find((c) => c.eq.val === 'term-gallagher');
+  assert.equal(gallagherCall.patch.start_date, '2026-01-03');
+  assert.ok(!Object.prototype.hasOwnProperty.call(gallagherCall.patch, 'end_date'));
+});
+
 // ---- runBackfillFederalNames (D2 orchestration + D3 folded in) ----
 
 function makeFakeLegislatorUpdateClient(updateResults = {}) {
@@ -360,7 +738,13 @@ test('runBackfillFederalNames: a placeholder legislator found in the roster gets
   const loadTermIndexFn = async () => ({ gated: false, rows: [] });
 
   const report = await runBackfillFederalNames(client, {
-    dryRun: false, runId: 'run-1', loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn,
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn,
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
 
   assert.equal(report.counts.placeholdersSeen, 1);
@@ -386,7 +770,13 @@ test('runBackfillFederalNames: a placeholder with an already-set party keeps its
     failures: [],
   });
   const report = await runBackfillFederalNames(client, {
-    dryRun: false, runId: 'run-1', loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
   assert.equal(report.counts.filled, 1);
   assert.equal(client.calls[0].patch.full_name, 'Ann Wagner');
@@ -402,7 +792,13 @@ test('runBackfillFederalNames: a placeholder with no roster match is counted noM
   ];
   const loadFederalMemberIndexFn = async () => ({ index: new Map(), failures: [] });
   const report = await runBackfillFederalNames(client, {
-    dryRun: false, runId: 'run-1', loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
   assert.equal(report.counts.noMemberFound, 1);
   assert.equal(report.counts.filled, 0);
@@ -421,7 +817,13 @@ test('runBackfillFederalNames: a TOCTOU race (row no longer matches the eq(full_
     failures: [],
   });
   const report = await runBackfillFederalNames(client, {
-    dryRun: false, runId: 'run-1', loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
   assert.equal(report.counts.alreadyReal, 1);
   assert.equal(report.counts.filled, 0);
@@ -433,7 +835,13 @@ test('runBackfillFederalNames: zero placeholders never triggers the federal rost
   let rosterCalled = false;
   const loadFederalMemberIndexFn = async () => { rosterCalled = true; return { index: new Map(), failures: [] }; };
   const report = await runBackfillFederalNames(client, {
-    dryRun: false, runId: 'run-1', loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn: async () => ({ gated: false, rows: [] }),
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
   assert.equal(report.counts.placeholdersSeen, 0);
   assert.equal(rosterCalled, false, 'no placeholders -> the (relatively expensive) federal roster fetch is never worth paying for');
@@ -459,7 +867,12 @@ test('runBackfillFederalNames: --dry-run performs the same resolution but never 
   });
 
   const report = await runBackfillFederalNames(client, {
-    dryRun: true, loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn,
+    dryRun: true,
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn,
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
 
   assert.equal(report.mode, 'dry-run');
@@ -468,6 +881,7 @@ test('runBackfillFederalNames: --dry-run performs the same resolution but never 
   assert.equal(report.plan.fills[0].fullName, 'Ann Wagner');
   assert.equal(report.atLarge.candidatesSeen, 1);
   assert.equal(report.atLarge.filled, 0, 'dry-run performs zero at-large writes either');
+  assert.equal(report.dates.termsSeen, 0, 'zero term-date rows injected for this test');
   assert.deepEqual(client.calls, []);
 });
 
@@ -494,10 +908,66 @@ test('runBackfillFederalNames: a live run combines D2 fills and D3 at-large fill
   });
 
   const report = await runBackfillFederalNames(combinedClient, {
-    dryRun: false, runId: 'run-1', loadPlaceholderLegislatorsFn, loadFederalMemberIndexFn, loadTermIndexFn,
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn,
+    loadTermDateIndexFn: async () => [],
+    loadLegislatorBioguideIndexFn: async () => new Map(),
   });
 
   assert.equal(report.counts.filled, 1);
   assert.equal(report.atLarge.filled, 1);
   assert.equal(atLargeClient.calls[0].patch.district, '0');
+});
+
+test('runBackfillFederalNames: a live run combines D2 fills, D3 at-large fills, AND T8c date fills into one report', async () => {
+  const client = makeFakeLegislatorUpdateClient();
+  const dateClient = makeFakeTermWriteClient(); // reused verbatim: same .update().eq().is().select() shape
+  const combinedClient = {
+    from: (table) => (table === 'terms' ? dateClient.from(table) : client.from(table)),
+  };
+  const loadPlaceholderLegislatorsFn = async () => [
+    {
+      id: 'leg-1', full_name: 'W000812', bioguide_id: 'W000812', party: null,
+    },
+  ];
+  // ONE roster stub serves BOTH D2's name-fill (bioguide W000812) and T8c's date-fill (bioguide
+  // H000273) — the orchestrator passes the SAME `loadFederalMemberIndexFn` into both sub-passes,
+  // exactly mirroring how a real congress.gov response would carry every bioguide either pass
+  // might need.
+  const loadFederalMemberIndexFn = async () => ({
+    index: new Map([
+      ['W000812', {
+        full_name: 'Ann Wagner', party: 'Republican', service: { house: [{ startYear: 2013, endYear: null }], senate: [] },
+      }],
+      ['H000273', {
+        full_name: 'Josh Hawley', party: 'Republican', service: { house: [], senate: [{ startYear: 2019, endYear: null }] },
+      }],
+    ]),
+    failures: [],
+  });
+  const loadTermIndexFn = async () => ({ gated: false, rows: [] }); // D3: nothing at-large-shaped in this test
+  const loadTermDateIndexFn = async () => [{
+    id: 'term-date-1', legislator_id: 'leg-2', jurisdiction_id: 'us-congress', chamber: 'senate', start_date: null, end_date: null,
+  }];
+  const loadLegislatorBioguideIndexFn = async () => new Map([['leg-2', 'H000273']]);
+
+  const report = await runBackfillFederalNames(combinedClient, {
+    dryRun: false,
+    runId: 'run-1',
+    loadPlaceholderLegislatorsFn,
+    loadFederalMemberIndexFn,
+    loadTermIndexFn,
+    loadTermDateIndexFn,
+    loadLegislatorBioguideIndexFn,
+  });
+
+  assert.equal(report.counts.filled, 1, 'D2: Ann Wagner\'s placeholder name filled');
+  assert.equal(report.atLarge.candidatesSeen, 0);
+  assert.equal(report.dates.partialFilled, 1, 'T8c: Hawley\'s open Senate service fills start_date only');
+  assert.equal(dateClient.calls.length, 1);
+  assert.equal(dateClient.calls[0].patch.start_date, '2019-01-03');
+  assert.ok(!Object.prototype.hasOwnProperty.call(dateClient.calls[0].patch, 'end_date'), 'open service never writes end_date');
 });
