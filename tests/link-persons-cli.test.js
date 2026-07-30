@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence, nameSetEdgeBasis,
+  clusterLegislators, surnameKey, reorderCommaName, pickDisplayName, NoDisplayNameSourceError, fullNameVariantMatch, auditClusterCoherence, nameSetEdgeBasis, normalizePersonName,
 } from '../src/lib/person-identity.js';
 import {
   parseArgs,
@@ -671,6 +671,35 @@ test('fullNameVariantMatch: BOTH sides printing a DIFFERENT suffix is a disquali
   assert.equal(fullNameVariantMatch('John Duncan Jr.', 'John Duncan Sr.'), false);
 });
 
+// ---- CRITICAL fix (final wave, execution-proven by review): the comma-form suffix defeat.
+// normalizePersonName used to reorder on the FIRST comma only, so 'Duncan, John J., Jr.' carried
+// its suffix mid-string ('John J., Jr. Duncan') and splitGivenFamilySuffix (last-token-only) parsed
+// suffix=null on BOTH comma-form sides — the printed Jr./Sr. disqualifier NEVER fired for a
+// comma-form name, and a comma-form dynasty pair could auto-merge through the matcher, the
+// writeAutoCluster BELT, and auditClusterCoherence alike (all three share this one parse). These
+// mirror the space-form suffix tests above, exactly, but printed in the comma form real bioguide
+// rows actually use. ----
+
+test('fullNameVariantMatch: CRITICAL fix (final wave) — comma-form suffix mismatch ("Duncan, John J., Jr." vs "Duncan, John J., Sr.") is a disqualifying signal, same as the space form', () => {
+  assert.equal(fullNameVariantMatch('Duncan, John J., Jr.', 'Duncan, John J., Sr.'), false);
+});
+
+test('fullNameVariantMatch: CRITICAL fix (final wave) — comma-form suffix omitted on one side still matches (suffix-omission semantics apply identically in comma form)', () => {
+  assert.equal(fullNameVariantMatch('Duncan, John J., Jr.', 'John J. Duncan'), true);
+});
+
+test('fullNameVariantMatch: CRITICAL fix (final wave) — comma-form BOTH sides printing the SAME suffix still matches', () => {
+  assert.equal(fullNameVariantMatch('Duncan, John J., Jr.', 'Duncan, John J., Jr.'), true);
+});
+
+test('normalizePersonName: CRITICAL fix (final wave) — a comma-form suffix segment relocates to the true END of the string, not stranded mid-string', () => {
+  assert.equal(normalizePersonName('Duncan, John J., Jr.'), 'john j duncan jr');
+});
+
+test('surnameKey: CRITICAL fix (final wave) — a comma-form suffix name still derives the FAMILY name, never the suffix, as its fallback key', () => {
+  assert.equal(surnameKey({ surname: null, full_name: 'Duncan, John J., Jr.' }), 'duncan');
+});
+
 // FIX ROUND 2: the match key is "given+family" (the ruling's own words) — a middle name/initial is
 // deliberately NOT part of it, a structural extraction of the row's own printed parts (first token
 // = given, last non-suffix token = family), never an invented equivalence. This is what still lets
@@ -817,6 +846,33 @@ test('clusterLegislators CRITICAL fix: printed suffix mismatch ("John Duncan Jr.
   assert.equal(result.clusters.length, 0);
   assert.equal(result.flagged.length, 1);
   assert.equal(result.flagged[0].reason, 'ambiguous_era');
+});
+
+test('clusterLegislators CRITICAL fix (final wave): the SAME suffix mismatch printed in COMMA form ("Duncan, John J., Jr." vs "Duncan, John J., Sr.") — the real bioguide printed shape — is caught identically: flagged, NEVER clustered', () => {
+  // Explicit surname:null (not the literal 'Duncan' column value) so this ALSO exercises the fixed
+  // surnameKey fallback derivation (splitGivenFamilySuffix('duncan john j jr') -> family 'duncan')
+  // — a bare last-token read would have derived 'jr'/'sr' instead, and the two rows would never
+  // even have been grouped together at all (a missed-pairing regression, not a wrong-merge one, but
+  // still wrong).
+  const mkDuncan = (id, fullName) => ({
+    id,
+    full_name: fullName,
+    surname: null,
+    bioguide_id: `bg-${id}`,
+    openstates_id: null,
+    mo_house_id: null,
+    mo_senate_id: null,
+    legiscan_people_id: null,
+    evidence: [{
+      source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '20', start_date: null, end_date: null,
+    }],
+  });
+  const rows = [mkDuncan('leg-duncan-jr-comma', 'Duncan, John J., Jr.'), mkDuncan('leg-duncan-sr-comma', 'Duncan, John J., Sr.')];
+  const result = clusterLegislators(rows);
+  assert.equal(result.clusters.length, 0, 'CRITICAL: the old bug would have silently auto-clustered this comma-form dynasty pair');
+  assert.equal(result.flagged.length, 1);
+  assert.equal(result.flagged[0].reason, 'ambiguous_era');
+  assert.deepEqual(result.flagged[0].candidateIds.slice().sort(), ['leg-duncan-jr-comma', 'leg-duncan-sr-comma']);
 });
 
 test('clusterLegislators: a unique surname with no evidence at all is a plain singleton', () => {

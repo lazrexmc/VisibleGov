@@ -14,21 +14,51 @@
 // zero -> 'no_match' (a benign duplicate row is created by the caller, never guessed); more than
 // one -> 'ambiguous' (NEVER pick one, no matter how tempting the tiebreak looks).
 
+// splitCommaNameSegments — the ONE place a comma-separated printed name is parsed into its parts,
+// shared by normalizePersonName (below) and reorderCommaName (further down, display-name
+// formatting) — extracted here (final wave, CRITICAL fix) so the two can never drift apart on
+// this again (they briefly did: reorderCommaName was fixed in an earlier round to handle a
+// trailing suffix segment correctly; normalizePersonName was not, see the CRITICAL note below).
+// 'Family, Given [Middle...][, Suffix]' — segment 0 is the family name, segment 1 is the given
+// name(s), and any further segments (there is normally at most one, e.g. ', Jr.') are suffix
+// segments. Returns null for a name with no comma (or nothing but stray/empty commas) — the
+// caller's cue to leave the input exactly as printed.
+function splitCommaNameSegments(raw) {
+  const segments = raw.split(',').map((seg) => seg.trim()).filter((seg) => seg !== '');
+  if (segments.length <= 1) return null;
+  const [family, given, ...suffixSegments] = segments;
+  return { family, given, suffixSegments };
+}
+
 // normalizePersonName — CONTROLLER RULING 3: conservative ONLY. Case/whitespace/punctuation
 // folding and 'Last, First' <-> 'First Last' reordering. Deliberately NO nickname table, NO fuzzy
 // distance. Asymmetric costs, per the ruling: a miss creates a benign duplicate row (fixable
 // later by TODO item 8's real cross-source merge); a wrong merge corrupts vote attribution to a
 // real person (the mo-senate bug's exact failure mode) and may never be caught. Fail toward
 // duplicates, always.
+//
+// CRITICAL fix (final wave, execution-proven by review): the original implementation reordered on
+// the FIRST comma only ('Duncan, John J., Jr.' -> last='Duncan', first='John J., Jr.' ->
+// 'John J., Jr. Duncan') — a trailing suffix segment ended up stranded MID-STRING instead of at
+// the end. splitGivenFamilySuffix (further below) only ever looks at the LAST token to recognize a
+// suffix, so it silently parsed suffix=null for BOTH 'Duncan, John J., Jr.' and 'Duncan, John J.,
+// Sr.' — the printed Jr./Sr. disqualifier in fullNameVariantMatch/rowNameVariantMatch NEVER fired
+// for a comma-form name, and a comma-form dynasty pair could auto-merge through the matcher, the
+// writeAutoCluster BELT, and auditClusterCoherence alike (all three share this one parse). Fixed by
+// splitting on EVERY comma (splitCommaNameSegments) and re-appending any suffix segment(s) at the
+// very END of the reordered string, SPACE-joined (not comma-joined — this is the matching form, not
+// the display form; a comma here would get stripped by the punctuation fold below anyway, but the
+// point is the suffix token must land at the true end of the string so the last-token check that
+// already existed keeps working, for free, on this now-correctly-shaped input): 'Duncan, John J.,
+// Jr.' -> 'John J. Duncan Jr.' -> folded 'john j duncan jr' -> splitGivenFamilySuffix correctly
+// finds suffix='jr'. The plain two-segment case (no suffix segment) is byte-for-byte unchanged:
+// 'Onder, Robert F.' -> still exactly 'robert f onder'.
 export function normalizePersonName(fullName) {
   let s = String(fullName ?? '').trim();
-  // 'Last, First [Middle...]' -> 'First [Middle...] Last' — reordering only, structural, not a
-  // name-content change. A name with no comma is already 'First Last' and passes through as-is.
-  const commaIdx = s.indexOf(',');
-  if (commaIdx !== -1) {
-    const last = s.slice(0, commaIdx).trim();
-    const first = s.slice(commaIdx + 1).trim();
-    s = `${first} ${last}`;
+  const parsed = splitCommaNameSegments(s);
+  if (parsed) {
+    const { family, given, suffixSegments } = parsed;
+    s = suffixSegments.length ? `${given} ${family} ${suffixSegments.join(' ')}` : `${given} ${family}`;
   }
   return s
     .toLowerCase()
@@ -144,10 +174,17 @@ export function matchLegislator(candidate, existingRows) {
 // populates it for already-ingested LegiScan people from the cached dataset ZIPs; the section below
 // headed "nickname amendment" is where clusterLegislators now consumes it, as an additional
 // exact-match given-name variant, scoped to one surname group at a time (never a cross-surname
-// nickname table) — see buildGivenNicknameEquivalence's own comment for the mechanics. WITHOUT a
-// persisted nickname (still the live-DB state as of this writing — the backfill has not run live
-// yet), the four-Onder split into two clusters described throughout this file's comments remains
-// exactly correct and is regression-locked in tests/link-persons-cli.test.js.
+// nickname table) — see nameSetEdgeBasis/buildRowNameSet's own comments for the mechanics (STALE
+// REFERENCE fixed, final wave: this originally named buildGivenNicknameEquivalence, a token-
+// union-find implementation removed entirely in the nickname amendment's own fix round 1 for
+// fabricating unsourced equivalences — replaced by the pairwise printed-name-set intersection those
+// two functions now implement; see the "nickname amendment" section below for the full ruling).
+// Migration 0013 is applied live and the backfill HAS run (52 nicknames patched from cached ZIPs,
+// source-printed data — see progress.md); Lance's own live adjudication has since linked the real
+// Onder rows by hand regardless. The two-cluster split this comment describes is the behavior
+// WITHOUT a persisted nickname on a given row — still real and still regression-locked in
+// tests/link-persons-cli.test.js for any row the backfill never reached (or a future source that
+// prints no nickname at all), just no longer the live state for Onder specifically.
 //
 // FIX ROUND 2 (CRITICAL, execution-proven against the live run — a real wrong-merge, not a
 // theoretical one): round 1's name-variant gate only applied to the "same-seat, can't rule out
@@ -177,8 +214,13 @@ export function matchLegislator(candidate, existingRows) {
 // either row), is mechanically indistinguishable from one re-elected person — `fullNameVariantMatch`
 // is (correctly, per its own contract) true either way, so a genuine dynastic Jr./Sr. succession in
 // that exact shape still auto-links. The durable fix is term-date backfill (Task 3+); until then,
-// Lance's review-tab unlink (Task 2) is the correction path. Both fix rounds are strict NARROWINGS
-// of the false-'compatible' surface — neither ever widens it.
+// the correction path is a controller-executed SQL runbook (ledgered in
+// .superpowers/sdd/2026-07-29-identity-merge/progress.md — this is what Lance's live Bayh
+// mis-adjudication correction actually used: person deleted, links deleted, person_ids nulled, by
+// hand) — NOT a review-tab unlink route, which does not exist yet (STALE CLAIM fixed, final wave:
+// this comment previously named one; a proper unlink route is a scheduled fast-follow, not yet
+// built). Both fix rounds are strict NARROWINGS of the false-'compatible' surface — neither ever
+// widens it.
 //
 // RESIDUAL WIDENING (IMPORTANT, nickname amendment fix round 1 — reviewer-mandated disclosure,
 // beside this SAME accepted residual, not a new one): the identical-full-name residual above does
@@ -204,28 +246,30 @@ export function matchLegislator(candidate, existingRows) {
 // populated (MO-driver rows via migration 0006, AND legiscan-identity.js's own legiscanSurname —
 // live-verified: the real legiscan-sourced Onder row carries surname='Onder' too; only the
 // bioguide/openstates drivers leave it null); otherwise derives it structurally from the row's OWN
-// printed full_name — the reordered form's LAST token (normalizePersonName already turns 'Onder,
-// Robert F.' into 'robert f onder', so its last token is 'onder', the same as 'Bob Onder' ->
-// 'bob onder' -> 'onder'). This is deliberately NOT the same guarded-against move as legiscan-
-// identity.js's legiscanSurname comment (never split a full name to WRITE a `surname` column
-// value — that overwrote real data with a guess, twice). Nothing is written here; a
-// coincidentally-wrong derived key only ever costs a MISSED pairing (two rows that share no key
-// never get compared at all) — never a wrong merge on its own, because a shared key is only step
-// one of the pairing predicate below, still gated by chamber/district/era compatibility and the
-// asymmetric-cost doctrine throughout. Empty/unparseable input yields '' (never guessed). NOTE
-// (fix round 2): because this key is structural (not a verified given-name match), the pool of
-// same-key candidates it admits can be broad — surnameKey alone is deliberately permissive; it is
-// finalPairStatus's unconditional full-name-variant requirement (below) that actually keeps a
-// same-surname, different-person pairing from ever auto-linking, not this key.
-function lastToken(normalized) {
-  const parts = normalized.split(' ').filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : '';
-}
-
+// printed full_name via splitGivenFamilySuffix's own `.family` (defined further below, referenced
+// here by hoisting — a plain `function` declaration, safe regardless of textual order): the
+// reordered, folded form's family token, WITH any trailing suffix correctly stripped first
+// ('Onder, Robert F.' -> 'robert f onder' -> family 'onder', same as 'Bob Onder' -> 'bob onder' ->
+// family 'onder'). CRITICAL fix, final wave: this used to be a bare last-token grab, which broke
+// the moment normalizePersonName was fixed to correctly relocate a comma-form suffix to the true
+// end of the string ('Duncan, John J., Jr.' -> 'john j duncan jr') — a bare last-token read would
+// then derive the surname key as 'jr' instead of 'duncan', a real (missed-pairing, never a wrong-
+// merge) regression this fix closes by reusing the SAME suffix-aware split already used everywhere
+// else. This is deliberately NOT the same guarded-against move as legiscan-identity.js's
+// legiscanSurname comment (never split a full name to WRITE a `surname` column value — that
+// overwrote real data with a guess, twice). Nothing is written here; a coincidentally-wrong derived
+// key only ever costs a MISSED pairing (two rows that share no key never get compared at all) —
+// never a wrong merge on its own, because a shared key is only step one of the pairing predicate
+// below, still gated by chamber/district/era compatibility and the asymmetric-cost doctrine
+// throughout. Empty/unparseable input yields '' (never guessed). NOTE (fix round 2): because this
+// key is structural (not a verified given-name match), the pool of same-key candidates it admits
+// can be broad — surnameKey alone is deliberately permissive; it is finalPairStatus's unconditional
+// full-name-variant requirement (below) that actually keeps a same-surname, different-person
+// pairing from ever auto-linking, not this key.
 export function surnameKey(row) {
   const surname = row?.surname;
   if (surname != null && String(surname).trim() !== '') return normalizePersonName(surname);
-  return lastToken(normalizePersonName(row?.full_name ?? ''));
+  return splitGivenFamilySuffix(normalizePersonName(row?.full_name ?? '')).family;
 }
 
 // fullNameVariantMatch — the SINGLE gate finalPairStatus (below) applies unconditionally to every
@@ -458,8 +502,12 @@ function buildClusterKey(nameKeyValue, ids) {
 
 // buildMemberEvidence — nickname amendment: now also carries `nickname` verbatim (null when the
 // row has none, e.g. every row before migration 0013/backfill-nicknames.js ever runs) so
-// auditClusterCoherence (below) can independently rebuild the SAME given-name equivalence used to
-// form this cluster, purely from this evidence snapshot, without re-touching the original `rows`.
+// auditClusterCoherence (below) can independently RE-DERIVE the same pairwise printed-name-set
+// match (nameSetEdgeBasis/rowNameVariantMatch) used to form this cluster, purely from this
+// evidence snapshot, without re-touching the original `rows` (STALE WORDING fixed, final wave:
+// "rebuild the SAME given-name equivalence" described the removed token-union-find design; there
+// is no equivalence STRUCTURE left to rebuild — matching is pure pairwise comparison now, so this
+// recomputes fresh per pair rather than reconstructing any shared state).
 function buildMemberEvidence(row, nameKeyValue) {
   const sourceKeys = {};
   for (const col of SOURCE_KEY_COLUMNS) sourceKeys[col] = row[col] ?? null;
@@ -686,18 +734,22 @@ export function auditClusterCoherence(clusters) {
 // IMPORTANT fix round 1: the original two-way split (first comma only) corrupted a real bioguide
 // suffix name — 'Duncan, John J., Jr.' (family, given, suffix — THREE comma-separated segments)
 // produced 'John J., Jr. Duncan', dragging the suffix into the middle of the printed name. Fixed
-// to split on EVERY comma: segment 0 is the family name, segment 1 is the given name(s), and any
-// further segments are suffixes, re-appended AFTER the family name with their own comma (the
-// conventional printed form) — 'John J. Duncan, Jr.'. The plain two-segment case (segment 0 =
-// family, segment 1 = given, no suffix segment) is unaffected: 'Onder, Robert F.' -> still exactly
+// to split on EVERY comma (splitCommaNameSegments, shared with normalizePersonName above — the
+// CRITICAL fix, final wave, extracted this exact splitting logic into one place after the two
+// functions drifted apart on it once already): segment 0 is the family name, segment 1 is the
+// given name(s), and any further segments are suffixes, re-appended AFTER the family name with
+// their own comma (the conventional PRINTED form — contrast normalizePersonName's own
+// space-joined-at-the-end form, which exists purely so its downstream last-token suffix check
+// keeps working) — 'John J. Duncan, Jr.'. The plain two-segment case (segment 0 = family, segment
+// 1 = given, no suffix segment) is unaffected: 'Onder, Robert F.' -> still exactly
 // 'Robert F. Onder'.
 export function reorderCommaName(name) {
   const s = String(name ?? '').trim();
-  const segments = s.split(',').map((seg) => seg.trim()).filter((seg) => seg !== '');
-  if (segments.length <= 1) return s; // no comma (or nothing but stray commas) -> unchanged
-  const [family, given, ...suffixes] = segments;
+  const parsed = splitCommaNameSegments(s);
+  if (!parsed) return s; // no comma (or nothing but stray commas) -> unchanged
+  const { family, given, suffixSegments } = parsed;
   const reordered = `${given} ${family}`;
-  return suffixes.length ? `${reordered}, ${suffixes.join(', ')}` : reordered;
+  return suffixSegments.length ? `${reordered}, ${suffixSegments.join(', ')}` : reordered;
 }
 
 export class NoDisplayNameSourceError extends Error {
