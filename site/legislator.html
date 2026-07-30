@@ -6,7 +6,7 @@
   <title>VisibleGov — legislator profile</title>
   <!-- Fix round 1, finding 3 (minor): trivial authored asset (not DB content), just to stop the
        favicon 404 console noise the live smoke flagged. -->
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b5fff'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='18' font-weight='700' fill='%23fff' text-anchor='middle'%3EV%3C/text%3E%3C/svg%3E" />
+  <link rel="icon" href="/favicon.svg" />
   <link rel="stylesheet" href="/css/site.css" />
 </head>
 <body>
@@ -27,9 +27,6 @@
     <section id="freshness" aria-label="Data freshness"></section>
   </main>
   <footer id="site-footer"></footer>
-  <script type="module">
-    import { bootstrapLegislatorPage } from '/js/legislator-page.js';
-    bootstrapLegislatorPage();
-  </script>
+  <script type="module" src="/js/boot-legislator.js"></script>
 </body>
 </html>

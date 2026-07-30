@@ -13,7 +13,7 @@ import {
 import { voteReceiptUrl, photoUrl, officialBillUrl } from '../site/js/receipts.js';
 import {
   resolveSitePath, applyRewrites, createSiteServer, contentTypeFor, SITE_ROOT, PathTraversalError,
-  _setGeocodeFetch,
+  _setGeocodeFetch, parseHeadersFile, loadSiteHeaders,
 } from '../scripts/serve-site.js';
 import { buildUpstreamUrl, onRequestPost } from '../site/functions/geocode.js';
 import { METRIC_DEFINITIONS } from '../site/js/vote-charts.js';
@@ -261,6 +261,93 @@ test('el: href guard rejects protocol-relative hrefs ("//host/path") — resolve
 
 test('el: href guard still accepts a genuine single-slash same-site path ("/person/x")', () => {
   assert.equal(el('a', { href: '/person/x' }, 'x').getAttribute('href'), '/person/x');
+});
+
+// ---------------------------------------------------------------------------
+// FINAL REVIEW, finding 1 (CRITICAL, proven by execution in Chromium): the strip set was \t\r\n
+// ONLY — three of the thirty-three codepoints a URL parser removes. WHATWG's URL parser removes
+// leading AND trailing C0 controls and space (U+0000–U+0020) before anything else, so a href of
+// '\u0001javascript:alert(1)' parses to a real javascript: URL and EXECUTES on click, while this
+// guard saw a string whose first scheme-position token was '\u0001javascript' — no SCHEME_PATTERN
+// match, therefore "relative", therefore allowed. The earlier ledger line claiming the strip
+// "mirrored WHATWG" was simply false. Every C0 codepoint is pinned below (boundaries + interior
+// samples), leading and embedded, for javascript: and data: and the protocol-relative form.
+// ---------------------------------------------------------------------------
+
+const C0_CODEPOINTS = Array.from({ length: 0x21 }, (_, i) => i); // U+0000..U+0020 inclusive (space)
+
+test('el: EVERY C0 control (U+0000–U+0020) LEADING a javascript: href is rejected — the full WHATWG strip range, not just \\t\\r\\n', () => {
+  for (const cp of C0_CODEPOINTS) {
+    const href = `${String.fromCharCode(cp)}javascript:alert(1)`;
+    assert.throws(
+      () => el('a', { href }, 'click'),
+      UnsafeAttributeError,
+      `leading U+${cp.toString(16).padStart(4, '0').toUpperCase()} must not smuggle a javascript: scheme past the guard`,
+    );
+  }
+});
+
+test('el: EVERY C0 control (U+0000–U+0020) EMBEDDED mid-scheme in javascript: is rejected', () => {
+  for (const cp of C0_CODEPOINTS) {
+    const href = `jav${String.fromCharCode(cp)}ascript:alert(1)`;
+    assert.throws(
+      () => el('a', { href }, 'click'),
+      UnsafeAttributeError,
+      `embedded U+${cp.toString(16).padStart(4, '0').toUpperCase()} must not smuggle a javascript: scheme past the guard`,
+    );
+  }
+});
+
+test('el: the four named bypass constructions from the final review (\\u0000, \\u0001, \\u0008, \\u001F + javascript:/data:) all throw', () => {
+  for (const c of ['\u0000', '\u0001', '\u0008', '\u001F']) {
+    assert.throws(() => el('a', { href: `${c}javascript:alert(1)` }, 'x'), UnsafeAttributeError);
+    assert.throws(() => el('a', { href: `${c}data:text/html,<script>alert(1)</script>` }, 'x'), UnsafeAttributeError);
+    assert.throws(() => el('a', { href: `java${c}script:alert(1)` }, 'x'), UnsafeAttributeError);
+  }
+});
+
+test('el: a C0-prefixed PROTOCOL-RELATIVE href ("\\u0001//evil.com/x") is still rejected — the strip runs before the // check', () => {
+  assert.throws(() => el('a', { href: '\u0001//evil.com/x' }, 'x'), UnsafeAttributeError);
+  assert.throws(() => el('a', { href: '\u0000\u0009\u001F//evil.com/x' }, 'x'), UnsafeAttributeError);
+});
+
+test('el: the same C0 bypasses are rejected on <img src> too (one guard, both attributes)', () => {
+  for (const c of ['\u0000', '\u0001', '\u0008', '\u001F']) {
+    assert.throws(() => el('img', { src: `${c}javascript:alert(1)` }), UnsafeAttributeError);
+    assert.throws(() => el('img', { src: `${c}//evil.com/x.jpg` }), UnsafeAttributeError);
+  }
+  assert.equal(isSafeSrc('\u0001javascript:alert(1)'), false);
+  assert.equal(isSafeSrc('\u0001//evil.com/x.jpg'), false);
+});
+
+// FINAL REVIEW, finding 1 (second half): after stripping, "no ALLOWLISTED scheme matched" must not
+// silently mean "relative". A colon sitting in scheme position — before any '/', '?' or '#' — is a
+// scheme the browser will try to resolve even when the token before it isn't a well-formed scheme
+// per our own pattern (percent-encoded, digit-leading, etc.). Those are REFUSED, never treated as
+// a site-internal path.
+test('el: a colon in scheme position with no allowlisted scheme match is REJECTED, never treated as relative', () => {
+  assert.throws(() => el('a', { href: 'jav%61script:alert(1)' }, 'x'), UnsafeAttributeError, 'percent-encoded scheme char');
+  assert.throws(() => el('a', { href: '1javascript:alert(1)' }, 'x'), UnsafeAttributeError, 'digit-leading token is not a SCHEME_PATTERN match');
+  assert.throws(() => el('a', { href: '_vbscript:msgbox(1)' }, 'x'), UnsafeAttributeError, 'underscore-leading token');
+});
+
+test('el: a colon AFTER the first /, ? or # is a real relative path and is still accepted', () => {
+  assert.equal(el('a', { href: '/bill/abc:def' }, 'x').getAttribute('href'), '/bill/abc:def');
+  assert.equal(el('a', { href: '/search?q=a:b' }, 'x').getAttribute('href'), '/search?q=a:b');
+  assert.equal(el('a', { href: '/trust#a:b' }, 'x').getAttribute('href'), '/trust#a:b');
+  assert.equal(el('a', { href: 'person/x' }, 'x').getAttribute('href'), 'person/x', 'schemeless relative, no colon at all');
+});
+
+// FINAL REVIEW, finding 1 (third half): the `typeof value !== 'string'` early RETURN meant a
+// non-string href was set on the element completely unchecked (setAttribute stringifies it) — a
+// silent bypass of every rule above for any caller that ever hands this a non-string. Fails loud
+// instead; `isSafeSrc` keeps its own non-throwing false (it is the predicate form, by contract).
+test('el: a NON-STRING href/src throws a typed error instead of being silently set unchecked', () => {
+  assert.throws(() => el('a', { href: null }, 'x'), UnsafeAttributeError);
+  assert.throws(() => el('a', { href: undefined }, 'x'), UnsafeAttributeError);
+  assert.throws(() => el('a', { href: 42 }, 'x'), UnsafeAttributeError);
+  assert.throws(() => el('a', { href: { toString: () => 'javascript:alert(1)' } }, 'x'), UnsafeAttributeError);
+  assert.throws(() => el('img', { src: null }), UnsafeAttributeError);
 });
 
 test('el: rejects any attribute outside the {class, href, id, dataset} allowlist', () => {
@@ -525,6 +612,114 @@ test('createSiteServer: end-to-end smoke — serves index.html with the right co
     assert.equal(response.status, 200);
     assert.match(response.contentType, /text\/html/);
     assert.ok(response.data.includes('<html'));
+  } finally {
+    server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// site/_headers (the production CSP) + scripts/serve-site.js serving the SAME file's headers.
+// Final-review fix wave, finding 1 (defense in depth). The dev server PARSES site/_headers rather
+// than carrying a second hand-written copy — one source of truth, no drift possible.
+// ---------------------------------------------------------------------------
+
+test('parseHeadersFile: reads the /* rule\'s headers, ignoring comments and blank lines', () => {
+  const parsed = parseHeadersFile([
+    '# a comment',
+    '',
+    '/*',
+    '  Content-Security-Policy: default-src \'self\'',
+    '  X-Content-Type-Options: nosniff',
+    '',
+    '/only-here/*',
+    '  X-Scoped: yes',
+  ].join('\n'));
+  assert.deepEqual(parsed['/*'], {
+    'Content-Security-Policy': "default-src 'self'",
+    'X-Content-Type-Options': 'nosniff',
+  });
+  assert.deepEqual(parsed['/only-here/*'], { 'X-Scoped': 'yes' });
+});
+
+test('loadSiteHeaders: the real site/_headers carries a CSP with the exact directive set the site needs', () => {
+  const headers = loadSiteHeaders(SITE_ROOT);
+  const csp = headers['Content-Security-Policy'];
+  assert.ok(csp, 'site/_headers must define a Content-Security-Policy for /*');
+  for (const directive of [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' https:",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ]) {
+    assert.ok(csp.includes(directive), `CSP must contain "${directive}" — got: ${csp}`);
+  }
+  assert.ok(!csp.includes('unsafe-inline'), "no 'unsafe-inline' anywhere — that would re-open the class the CSP exists to close");
+  assert.ok(!csp.includes('unsafe-eval'), "no 'unsafe-eval' anywhere");
+});
+
+test("loadSiteHeaders: connect-src names the SAME Supabase origin site/config.js points at (hardcoded header vs config drift)", async () => {
+  const { SUPABASE_URL } = await import('../site/config.js');
+  const csp = loadSiteHeaders(SITE_ROOT)['Content-Security-Policy'];
+  const connectSrc = csp.split(';').map((s) => s.trim()).find((s) => s.startsWith('connect-src'));
+  assert.ok(connectSrc, 'CSP must define connect-src explicitly (default-src would block the Supabase fetch)');
+  assert.ok(connectSrc.includes("'self'"), 'connect-src must allow our own origin (the /geocode function)');
+  const origin = new URL(SUPABASE_URL).origin;
+  assert.ok(
+    connectSrc.includes(origin),
+    `connect-src must name site/config.js's Supabase origin (${origin}) — got: ${connectSrc}`,
+  );
+});
+
+test('every page shell loads its bootstrap from an EXTERNAL module — no inline <script>, which script-src \'self\' would block', async () => {
+  const { readFile } = await import('node:fs/promises');
+  for (const page of ['index.html', 'person.html', 'legislator.html', 'bill.html', 'trust.html']) {
+    // eslint-disable-next-line no-await-in-loop
+    const html = await readFile(`${SITE_ROOT}/${page}`, 'utf8');
+    assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/.test(html), `${page} still has an inline <script> block`);
+    assert.match(html, /<script type="module" src="\/js\/boot-[a-z]+\.js"><\/script>/, `${page} must load an external boot module`);
+    assert.ok(!html.includes('href="data:'), `${page} must not use a data: URL (img-src has no data: allowance)`);
+  }
+});
+
+test('createSiteServer: serves the site/_headers CSP on a real response (dev mirrors production)', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  try {
+    const headers = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/`, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.headers));
+      }).on('error', reject);
+    });
+    assert.equal(headers['content-security-policy'], loadSiteHeaders(SITE_ROOT)['Content-Security-Policy']);
+    assert.equal(headers['x-content-type-options'], 'nosniff');
+  } finally {
+    server.close();
+  }
+});
+
+test('createSiteServer: the security headers ride on 404 and 400 responses too, not just 200s', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  const get = (path) => new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}${path}`, (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
+    }).on('error', reject);
+  });
+  try {
+    const missing = await get('/does-not-exist.html');
+    assert.equal(missing.status, 404);
+    assert.ok(missing.headers['content-security-policy']);
+    const traversal = await get('/..%2f..%2f..%2fpackage.json');
+    assert.equal(traversal.status, 400);
+    assert.ok(traversal.headers['content-security-policy']);
   } finally {
     server.close();
   }
@@ -951,30 +1146,42 @@ test('renderAttributionCopy: missing placeholders (e.g. a partial fixture) never
 // bootstrap script. Catches the exact class of bug "four of five pages wire mountFooter, one was
 // missed" without relying on a human re-checking each page by hand.
 // ============================================================================
+// Final-review fix wave (CSP): the bootstrap is no longer inline in the page shell, so this now
+// follows the chain the browser follows — page shell -> external /js/boot-*.js -> the page module
+// and its bootstrap call. Both hops are fetched through the SAME server, so a boot module that
+// 404s (a typo in the src, a file never committed) fails this test instead of shipping a page
+// whose script silently never runs.
 test('Every page (index, trust, person, legislator, bill) serves the footer mount point + its own bootstrap script', async () => {
   const server = createSiteServer(SITE_ROOT);
   await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
   const { port } = server.address();
   const routes = [
-    { path: '/', module: '/js/directory-page.js', bootstrap: 'bootstrapDirectoryPage' },
-    { path: '/trust', module: '/js/trust-page.js', bootstrap: 'bootstrapTrustPage' },
-    { path: '/person/test-id', module: '/js/person-page.js', bootstrap: 'bootstrapPersonPage' },
-    { path: '/legislator/test-id', module: '/js/legislator-page.js', bootstrap: 'bootstrapLegislatorPage' },
-    { path: '/bill/test-id', module: '/js/bill-page.js', bootstrap: 'bootstrapBillPage' },
+    { path: '/', boot: '/js/boot-directory.js', module: './directory-page.js', bootstrap: 'bootstrapDirectoryPage' },
+    { path: '/trust', boot: '/js/boot-trust.js', module: './trust-page.js', bootstrap: 'bootstrapTrustPage' },
+    { path: '/person/test-id', boot: '/js/boot-person.js', module: './person-page.js', bootstrap: 'bootstrapPersonPage' },
+    { path: '/legislator/test-id', boot: '/js/boot-legislator.js', module: './legislator-page.js', bootstrap: 'bootstrapLegislatorPage' },
+    { path: '/bill/test-id', boot: '/js/boot-bill.js', module: './bill-page.js', bootstrap: 'bootstrapBillPage' },
   ];
+  const get = (p) => new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}${p}`, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    }).on('error', reject);
+  });
   try {
-    for (const { path, module, bootstrap } of routes) {
+    for (const {
+      path, boot, module, bootstrap,
+    } of routes) {
       // eslint-disable-next-line no-await-in-loop -- sequential smoke over a small fixed route list
-      const html = await new Promise((resolve, reject) => {
-        http.get(`http://127.0.0.1:${port}${path}`, (res) => {
-          let data = '';
-          res.on('data', (c) => { data += c; });
-          res.on('end', () => resolve(data));
-        }).on('error', reject);
-      });
-      assert.ok(html.includes('<footer id="site-footer">'), `${path}: footer mount point present`);
-      assert.ok(html.includes(module), `${path}: imports its own bootstrap module (${module})`);
-      assert.ok(html.includes(bootstrap), `${path}: calls its own bootstrap function (${bootstrap})`);
+      const html = await get(path);
+      assert.ok(html.body.includes('<footer id="site-footer">'), `${path}: footer mount point present`);
+      assert.ok(html.body.includes(`src="${boot}"`), `${path}: loads its own boot module (${boot})`);
+      // eslint-disable-next-line no-await-in-loop
+      const bootJs = await get(boot);
+      assert.equal(bootJs.status, 200, `${boot}: must actually be served (a 404 here = a page whose script never runs)`);
+      assert.ok(bootJs.body.includes(module), `${boot}: imports its page module (${module})`);
+      assert.ok(bootJs.body.includes(`${bootstrap}()`), `${boot}: calls its own bootstrap function (${bootstrap})`);
     }
   } finally {
     server.close();

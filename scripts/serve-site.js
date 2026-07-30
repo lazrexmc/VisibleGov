@@ -11,6 +11,7 @@
 // either way (no logging of the address, ever — see this passthrough's own body below).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildUpstreamUrl } from '../site/functions/geocode.js';
@@ -32,6 +33,50 @@ const CONTENT_TYPES = {
 
 export function contentTypeFor(filePath) {
   return CONTENT_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+// ---- site/_headers (the production CSP), parsed and mirrored here ----
+//
+// Final-review fix wave, finding 1 (defense in depth). Cloudflare Pages serves site/_headers in
+// production; this dev server PARSES THAT SAME FILE rather than carrying a hand-copied second
+// set of header values, so the two can never drift (the failure mode a lookalike copy invites:
+// tightening the real CSP, finding the page broken only after deploy, because dev was still
+// serving the old permissive one — or the reverse, dev refusing what production allows).
+//
+// Deliberately a MINIMAL parser for the one shape this file actually uses: an unindented rule
+// path line, then indented `Name: value` lines, `#` comments and blank lines ignored. Cloudflare's
+// own format has more (placeholders, `! Name` removals) that this file does not use; a future
+// _headers that needs them must extend this parser rather than let dev silently serve less.
+export function parseHeadersFile(text) {
+  const rules = {};
+  let current = null;
+  for (const rawLine of String(text).split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    if (!/^\s/.test(line)) {
+      current = line.trim();
+      rules[current] = rules[current] || {};
+      continue;
+    }
+    if (!current) continue; // an indented header line before any rule path — nothing to attach to
+    const idx = line.indexOf(':');
+    if (idx === -1) continue;
+    rules[current][line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return rules;
+}
+
+// The headers that apply to every path (`/*`). Read fresh per call — this is a dev server, and a
+// stale cached copy after editing _headers would be its own small drift.
+export function loadSiteHeaders(siteRoot = SITE_ROOT) {
+  try {
+    return parseHeadersFile(readFileSync(path.join(siteRoot, '_headers'), 'utf8'))['/*'] || {};
+  } catch {
+    // A missing _headers is a dev-only convenience gap, not a reason to refuse to serve the site;
+    // production reads the file from the deployed output, where its absence would be visible as a
+    // missing CSP on the real site (and is pinned by tests/site-modules.test.js either way).
+    return {};
+  }
 }
 
 export class PathTraversalError extends Error {
@@ -102,9 +147,9 @@ async function readJsonBody(req) {
 // site/functions/geocode.js's own onRequestPost exactly — the address never rides a GET request
 // line (query string) to our own origin, where it would land in Cloudflare's own edge logging
 // (ClientRequestURI) regardless of anything either passthrough does itself.
-async function handleGeocodeRequest(req, res) {
+async function handleGeocodeRequest(req, res, securityHeaders = {}) {
   const respond = (status, body) => {
-    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+    res.writeHead(status, { ...securityHeaders, 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(body));
   };
   let address;
@@ -137,25 +182,30 @@ async function handleGeocodeRequest(req, res) {
 
 export function createSiteServer(siteRoot = SITE_ROOT) {
   return createServer(async (req, res) => {
+    // Every response — 200, 404, 400, and the /geocode JSON below — carries the same security
+    // headers Cloudflare Pages applies in production. An error page is still a page a browser
+    // renders, so leaving them off the non-200 paths would mean the CSP is absent on exactly the
+    // responses an attacker is most likely to be able to provoke.
+    const securityHeaders = loadSiteHeaders(siteRoot);
     const urlPath = String(req.url || '').split('?')[0];
     if (urlPath === '/geocode' && req.method === 'POST') {
-      await handleGeocodeRequest(req, res);
+      await handleGeocodeRequest(req, res, securityHeaders);
       return;
     }
     let filePath;
     try {
       filePath = resolveSitePath(siteRoot, req.url);
     } catch {
-      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+      res.writeHead(400, { ...securityHeaders, 'content-type': 'text/plain; charset=utf-8' });
       res.end('Bad request');
       return;
     }
     try {
       const body = await readFile(filePath);
-      res.writeHead(200, { 'content-type': contentTypeFor(filePath) });
+      res.writeHead(200, { ...securityHeaders, 'content-type': contentTypeFor(filePath) });
       res.end(body);
     } catch {
-      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, { ...securityHeaders, 'content-type': 'text/plain; charset=utf-8' });
       res.end('Not found');
     }
   });

@@ -35,6 +35,38 @@ const ALLOWED_HREF_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 const ALLOWED_SRC_SCHEMES = new Set(['https:']);
 const SCHEME_PATTERN = /^([a-z][a-z0-9+\-.]*:)/i;
 
+// FINAL REVIEW, finding 1 (CRITICAL, proven by execution in Chromium). The strip set used to be
+// /[\t\r\n]/ — three of the THIRTY-THREE codepoints a URL parser removes, and an earlier ledger
+// line claiming it "mirrored WHATWG" was simply wrong. WHATWG's URL parser (§"basic URL parser",
+// step 1) removes any leading AND trailing C0 control or space (U+0000 through U+0020 inclusive)
+// from the input before it does anything else, and removes ASCII tab/LF/CR from ANYWHERE inside
+// it. So `\u0001javascript:alert(1)` is a real javascript: URL to a browser (it executes on
+// click) while this guard saw a scheme-position token of '\u0001javascript' — no SCHEME_PATTERN
+// match, therefore "no scheme", therefore treated as a relative site path and ALLOWED.
+//
+// This strips the WHOLE range from EVERYWHERE (leading, trailing, embedded) before any check
+// runs. That is deliberately BROADER than the parser's own asymmetry (interior non-tab/CR/LF C0
+// chars are percent-encoded by a real parser, not removed) — over-stripping can only ever make
+// this guard reject MORE, never less, which is the only safe direction for a security check:
+// the value written to the DOM is always the caller's ORIGINAL string, so a construction that
+// browsers would treat as an inert relative path stays inert either way.
+const URL_STRIP_PATTERN = /[\u0000-\u0020]/g;
+
+// Which characters end the scheme-position region: once one of these appears, any later ':' is
+// part of a path/query/fragment, not a scheme (WHATWG's own scheme-start state ends at the first
+// of these). Used by the no-match branch below.
+const SCHEME_TERMINATORS = ['/', '?', '#'];
+
+function hasColonInSchemePosition(stripped) {
+  const colonIndex = stripped.indexOf(':');
+  if (colonIndex === -1) return false;
+  const delimiterIndexes = SCHEME_TERMINATORS
+    .map((c) => stripped.indexOf(c))
+    .filter((i) => i !== -1);
+  if (delimiterIndexes.length === 0) return true;
+  return colonIndex < Math.min(...delimiterIndexes);
+}
+
 // Shared by both href and src (task 6): strip control chars everywhere first (not just the ends
 // — see the fix-round-1 note below), reject protocol-relative outright, then check the scheme
 // against a caller-supplied allowlist. `allowRelative` is href's own "no scheme at all ->
@@ -53,8 +85,21 @@ const SCHEME_PATTERN = /^([a-z][a-z0-9+\-.]*:)/i;
 // `allowRelative`) or one of the caller's allowlisted schemes — everything else throws the same
 // typed error.
 function assertSafeUrlAttr(tag, attr, value, allowedSchemes, { allowRelative }) {
-  if (typeof value !== 'string') return;
-  const stripped = value.replace(/[\t\r\n]/g, '').trim();
+  // FINAL REVIEW, finding 1 (third part): this used to be `if (typeof value !== 'string') return;`
+  // — a silent BYPASS of every rule below for any non-string, which el() would then hand straight
+  // to setAttribute (which stringifies it). Nothing in this codebase legitimately passes a
+  // non-string href/src (every call site guards on truthiness first and passes a real string), so
+  // a non-string here means a caller bug or a hostile object with a toString — either way it is
+  // refused loudly rather than set unchecked. isSafeSrc keeps its own non-throwing `false` for the
+  // non-string case: that function is the PREDICATE form by contract, and never sets anything.
+  if (typeof value !== 'string') {
+    throw new UnsafeAttributeError(
+      `el(): ${attr} must be a string on <${tag}> (got ${value === null ? 'null' : typeof value}) — a `
+        + 'non-string URL cannot be checked against the scheme allowlist, so it is refused, never set unchecked',
+      { tag, attr, value },
+    );
+  }
+  const stripped = value.replace(URL_STRIP_PATTERN, '');
   // Micro-round (re-review, pre-existing LOW-MEDIUM): a protocol-relative URL ('//host/path') has
   // no scheme token either, so it would fall through to the "no scheme -> relative" branch below
   // — but browsers resolve it against the CURRENT page's scheme, i.e. it still goes cross-origin.
@@ -68,6 +113,21 @@ function assertSafeUrlAttr(tag, attr, value, allowedSchemes, { allowRelative }) 
   }
   const match = stripped.match(SCHEME_PATTERN);
   if (!match) {
+    // FINAL REVIEW, finding 1 (second part): "SCHEME_PATTERN didn't match" is NOT the same fact as
+    // "there is no scheme here." A colon still sitting in scheme position — before any '/', '?' or
+    // '#' — is a scheme the browser will try to resolve, even when the token in front of it isn't
+    // well-formed by our own pattern (percent-encoded scheme chars, a digit- or underscore-leading
+    // token, anything a future browser quirk normalizes). Treating that as "relative" is exactly
+    // the failure mode this whole finding is about, so it is REFUSED here rather than falling
+    // through to the allowRelative branch. A real relative path keeps its colon AFTER the first
+    // delimiter ('/bill/abc:def', '/search?q=a:b') and is unaffected.
+    if (hasColonInSchemePosition(stripped)) {
+      throw new UnsafeAttributeError(
+        `el(): ${attr} carries a colon in scheme position on <${tag}> but matches no allowlisted `
+          + 'scheme — refused rather than treated as a relative path',
+        { tag, attr, value },
+      );
+    }
     if (allowRelative) return; // no scheme -> relative, site-internal path; allowed for href only
     throw new UnsafeAttributeError(
       `el(): ${attr} must be an absolute URL with an allowlisted scheme on <${tag}> (no scheme found, and relative ${attr} is not allowed)`,

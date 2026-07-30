@@ -1,0 +1,39 @@
+# site/_headers — Cloudflare Pages response headers for every path (Pages reads this file from
+# the build output root; the repo's Pages "root directory" is `site`, per the Task 7 gate note).
+#
+# Final-review fix wave, finding 1: DEFENSE IN DEPTH behind site/js/render.js's own scheme
+# allowlist, never instead of it. The guard in render.js is the wall — it refuses a hostile URL
+# before it ever reaches the DOM. This file is the second wall: if a URL guard is ever bypassed
+# again (that finding was exactly such a bypass, live in Chromium), the browser still refuses to
+# execute the injected script, load the off-origin resource, or send data anywhere we didn't name.
+#
+# scripts/serve-site.js PARSES THIS EXACT FILE and serves the same headers under local dev, so
+# there is one source of truth and no hand-kept second copy to drift (tests/site-modules.test.js
+# asserts the dev server actually returns the CSP from here).
+#
+# Directive notes — each one is the narrowest value the real site can actually run under:
+#   default-src 'self'  — the floor for everything not named below (font-src, media-src, ...).
+#   connect-src         — the ONLY two network destinations the browser itself talks to: our own
+#                         origin (the /geocode Pages Function, which does the Census call
+#                         server-side so a typed address never leaves the origin from the client)
+#                         and the Supabase REST endpoint. The Supabase origin is hardcoded here
+#                         because a static header file cannot read site/config.js — it MUST be
+#                         updated by hand if SUPABASE_URL in site/config.js ever changes
+#                         (tests/site-modules.test.js pins the two together so a change to one
+#                         without the other fails the suite).
+#   img-src 'self' https: — legislator photos come from third-party https hosts
+#                         (unitedstates.github.io and legislators.image_url); no data: needed —
+#                         the favicon is a real same-origin /favicon.svg.
+#   script-src 'self'   — no 'unsafe-inline', no 'unsafe-eval': every page shell loads its
+#                         bootstrap from /js/boot-*.js rather than an inline block.
+#   style-src 'self'    — one external stylesheet (/css/site.css) and zero inline styles: el()'s
+#                         attrs allowlist has no `style` key, and vote-charts.js sets bar widths
+#                         through the CSSOM (element.style.width), which CSP does not govern. So
+#                         'unsafe-inline' is genuinely not needed here.
+#   frame-ancestors 'none' / base-uri 'none' / object-src 'none' / form-action 'self' — no
+#                         clickjacking frame, no <base> href rewrite of every relative link, no
+#                         plugin embeds, and the address-lookup form can only ever post to us.
+/*
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https://bplxjbhlyyeucuwfqcbp.supabase.co; img-src 'self' https:; script-src 'self'; style-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
