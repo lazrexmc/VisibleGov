@@ -670,3 +670,25 @@ Migration 0011 (flag idempotency) drafted for Lance. Separately: Lance's first g
 adjudication session hit a UX trap (edits not saved before decisions) — all 8 flagged glosses
 administratively reverted to draft with full audit notes for a proper second pass; reject-
 confirmation UX queued.
+
+---
+
+## 2026-07-29 (identity merge complete)
+
+The hardest design problem of the project — one person across five key systems — converged
+after real iteration: two matcher fix rounds (dateless-same-seat gate; then the unconditional
+full-name requirement after a live run wrongly merged the Symingtons/Adams/Walkers on surname
+alone — caught by the mandatory post-run spot-check, fully rolled back in minutes thanks to the
+virtual-merge design), a nickname-persistence amendment (0013 + 52 source-printed nicknames
+backfilled from cached LegiScan archives at zero query cost) with its own two fix rounds
+(pairwise printed-name-set semantics replacing transitive token bridging; writer belt aligned
+to the identical function), and an audit that now shows per-cluster edge bases. Final
+convergence: 6 auto-clusters (every one exhaustively human-verified same-person), 11 flags to
+Lance. His adjudication: Onder LINKED (all four rows — one person, ~1,650 casts, the plan's
+whole point, decided by the human as designed); 10 dynasties kept separate (one initial
+mis-link of Evan+Birch Bayh, corrected on the spot and reverted — Lance's verbatim correction
+is the ledgered ruling; fittingly, Evan's legal name is Birch Evans Bayh III). Controller also
+logged its own error: briefly misread flag timestamps as evidence of test pollution.
+Playbook lesson 13 (surname is not identity; plans state MUST conditions) came out of this.
+Live state: 7 persons, 16 links, 0 open flags. Migrations 0012/0013 applied. jsdom approved
+(dev-only, third approved dependency). Final review + merge menu next.
