@@ -7,6 +7,9 @@ import {
 import {
   verifyBill, VERIFIER_MODEL, VERIFY_PROMPT_VERSION, assessVerdicts, VerificationIncompleteError,
 } from '../lib/verifier.js';
+import { parseBullets } from '../../site/js/summary-parse.js';
+
+export { parseBullets };
 
 const FAILURE_TYPES = [OversizeTextError, SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError];
 // Same target set as summarize.js's staleness handling: a draft is the normal unreviewed state,
@@ -28,26 +31,6 @@ export function parseArgs(argv) {
     throw new Error(`unknown flag: ${key}`);
   }
   return out;
-}
-
-// The renderer's inverse (summarizer.js's renderMarkdown): bullets render as
-// `- <point> (<section>)`. Section strings can themselves contain parentheses (e.g. "Sec. 2(b)"),
-// so the point/section split point is the LAST ' (' before the line end, not the first
-// (controller ruling #2) — that's the one renderMarkdown itself always inserts as the wrapper.
-export function parseBullets(bodyMd) {
-  const lines = String(bodyMd || '').split('\n');
-  const bullets = [];
-  let index = 0;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line.startsWith('- ') || !line.endsWith(')')) continue;
-    const rest = line.slice(2);
-    const splitAt = rest.lastIndexOf(' (');
-    if (splitAt === -1) continue;
-    bullets.push({ index, point: rest.slice(0, splitAt), section: rest.slice(splitAt + 2, -1) });
-    index += 1;
-  }
-  return bullets;
 }
 
 // Raw '- ' line count, independent of parseBullets' stricter well-formedness requirement (must
