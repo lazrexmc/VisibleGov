@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   normalizeBillIdentifier, billTypeSlug, parseMemberList, parseHouseRollCall, parseBillDetail,
+  fetchMemberPage,
 } from '../src/adapters/us-congress.js';
 
 const cfg = JSON.parse(readFileSync('slice.config.json', 'utf8'));
@@ -99,4 +100,97 @@ test('parseMemberList extracts party/state/district for every member on a real u
   assert.equal(gallagher.state, 'California');
   assert.equal(gallagher.district, '1');
   assert.equal(gallagher.chamber, 'house');
+});
+
+// ---- Task 8b (public-site plan, D3): at-large House members yield district '0', not null ----
+//
+// MAJOR-2 (task-8 review, live-verified): congress.gov omits `district` entirely for the six
+// single-seat states (AK, DE, ND, SD, VT, WY — source: states with exactly one congressional
+// district in the 119th Congress, same list documented at site/js/districts.js's matchReps
+// at-large bridge). Neither committed fixture contains a real at-large member (verified: no
+// member-page-unfiltered.json/members-mo.json entry has state in that set), so this is a
+// synthetic-but-real-shaped construction (same style as backfill-term-states.test.js's own
+// rawMember() helper), mirroring exactly what congress.gov's real response omits.
+function atLargeRawMember(bioguideId, stateName, { district } = {}) {
+  const member = {
+    bioguideId, name: `Member, ${bioguideId}`, partyName: 'Republican', state: stateName,
+    terms: { item: [{ chamber: 'House of Representatives', startYear: 2025 }] },
+  };
+  if (district !== undefined) member.district = district;
+  return member;
+}
+
+test('parseMemberList: an at-large House member (no district field at all) from each of the six single-seat states yields district "0"', () => {
+  const states = ['Alaska', 'Delaware', 'North Dakota', 'South Dakota', 'Vermont', 'Wyoming'];
+  const members = parseMemberList({
+    members: states.map((s, i) => atLargeRawMember(`X${String(i).padStart(6, '0')}`, s)),
+  });
+  assert.equal(members.length, 6);
+  for (const m of members) {
+    assert.equal(m.district, '0', `${m.state} at-large member must get district '0'`);
+    assert.equal(m.chamber, 'house');
+  }
+});
+
+test('parseMemberList: an at-large House member whose district arrives as literal null also yields "0"', () => {
+  const members = parseMemberList({ members: [atLargeRawMember('X000009', 'Wyoming', { district: null })] });
+  assert.equal(members[0].district, '0');
+});
+
+test('parseMemberList: a NON-at-large House member with no district field stays null — the bridge is narrow, not a blanket house default', () => {
+  const members = parseMemberList({ members: [atLargeRawMember('X000010', 'Missouri')] });
+  assert.equal(members[0].district, null);
+});
+
+test('parseMemberList: a Senate member from an at-large-list state is untouched (never given district "0" — the bridge is House-only)', () => {
+  const member = {
+    bioguideId: 'X000011', name: 'Member, X000011', partyName: 'Republican', state: 'Wyoming',
+    terms: { item: [{ chamber: 'Senate', startYear: 2023 }] },
+  };
+  const members = parseMemberList({ members: [member] });
+  assert.equal(members[0].chamber, 'senate');
+  assert.equal(members[0].district, null);
+});
+
+test('parseMemberList: an at-large state member who DOES carry a real district value is left unchanged (never overwritten by the bridge)', () => {
+  // Defensive: if congress.gov ever DOES print a district for one of these states (edge case,
+  // not observed in any real fixture), the bridge must never override real source data.
+  const members = parseMemberList({ members: [atLargeRawMember('X000012', 'Wyoming', { district: 5 })] });
+  assert.equal(members[0].district, '5');
+});
+
+// ---- Task 8b (public-site plan, D2): fetchMemberPage accepts an optional congress override ----
+
+const NOOP_LIMITER = { take: async () => {} }; // avoids the real 3.6s congressLimiter in tests
+
+test('fetchMemberPage: with no congress argument, hits the unfiltered /member endpoint (unchanged from every existing caller)', async () => {
+  const originalFetch = globalThis.fetch;
+  const seenUrls = [];
+  globalThis.fetch = async (url) => {
+    seenUrls.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ members: [] }) };
+  };
+  try {
+    await fetchMemberPage(0, 250, NOOP_LIMITER);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(seenUrls.length, 1);
+  assert.match(seenUrls[0], /^https:\/\/api\.congress\.gov\/v3\/member\?limit=250&offset=0$/);
+});
+
+test('fetchMemberPage: a congress argument routes to /member/congress/{congress} (covers departed members, per task-8b-brief.md D2)', async () => {
+  const originalFetch = globalThis.fetch;
+  const seenUrls = [];
+  globalThis.fetch = async (url) => {
+    seenUrls.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ members: [] }) };
+  };
+  try {
+    await fetchMemberPage(250, 250, NOOP_LIMITER, 119);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(seenUrls.length, 1);
+  assert.match(seenUrls[0], /^https:\/\/api\.congress\.gov\/v3\/member\/congress\/119\?limit=250&offset=250$/);
 });

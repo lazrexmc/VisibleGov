@@ -31,6 +31,19 @@ export function mapHousePosition(raw) {
   return POSITION_MAP.get(String(raw).trim().toLowerCase()) ?? 'other';
 }
 
+// AT_LARGE_STATE_NAMES — task-8b-brief.md D3: states with exactly one, statewide congressional
+// district in the 119th Congress (source: the same six states documented at site/js/districts.js's
+// matchReps at-large bridge comment — AK, DE, ND, SD, VT, WY). Congress.gov's own member list
+// prints NO `district` field at all for these members (live-verified per Task 8's review, MAJOR-2)
+// rather than a printed '0' or '00' — the Census Geocoder's OWN at-large convention (CD='00',
+// normalized to '0' by site/js/districts.js's normalizeDistrict) is what this bridges toward.
+// Matched against the member's own full state name as congress.gov prints it (e.g. 'Wyoming'),
+// not a 2-letter abbreviation — avoids importing us-senate.js's stateAbbreviation, which itself
+// imports normalizeBillIdentifier FROM this module (a circular import).
+const AT_LARGE_STATE_NAMES = new Set([
+  'alaska', 'delaware', 'north dakota', 'south dakota', 'vermont', 'wyoming',
+]);
+
 export function parseMemberList(json) {
   return (json.members ?? []).map((m) => {
     const items = m.terms?.item ?? [];
@@ -39,12 +52,17 @@ export function parseMemberList(json) {
     if (/senate/i.test(latest.chamber ?? '')) chamber = 'senate';
     else if (/house/i.test(latest.chamber ?? '')) chamber = 'house';
     else throw new Error(`unknown chamber for member ${m.bioguideId}`);
+    // At-large bridge (D3): House-only, and only when the source printed no real district value —
+    // a genuinely-printed district (even on an at-large-list state, defensive/never observed) is
+    // never overwritten.
+    const isAtLarge = chamber === 'house' && m.district == null
+      && AT_LARGE_STATE_NAMES.has(String(m.state ?? '').trim().toLowerCase());
     return {
       bioguide_id: m.bioguideId,
       full_name: m.name,
       party: m.partyName ?? null,
       chamber,
-      district: m.district != null ? String(m.district) : null,
+      district: isAtLarge ? '0' : (m.district != null ? String(m.district) : null),
       // Full state name as congress.gov returns it (e.g. 'Missouri'), not an abbreviation.
       // Unused by the House delegation path; added for us-senate.js's ensureSenateMembers
       // (Task 2), which needs it to match against Senate roll-call XML's 2-letter state codes.
@@ -137,7 +155,16 @@ export function fetchMemberList(stateCode, limiter = congressLimiter) {
 // Full-chamber paging (unfiltered by state) — used by us-senate.js's ensureSenateMembers
 // (Task 2) to build the whole current-Senate roster. Caller loops offset by 250 until a page
 // comes back shorter than the requested limit.
-export function fetchMemberPage(offset, limit = 250, limiter = congressLimiter) {
-  const url = `https://api.congress.gov/v3/member?limit=${limit}&offset=${offset}`;
+//
+// `congress` (task-8b-brief.md D2, minimal addition — no parallel parser): when provided, routes
+// to `/member/congress/{congress}` instead of the unfiltered `/member` list. That endpoint returns
+// every member who EVER served in the named congress, including ones no longer serving — the
+// current-member-only `/member` endpoint (every existing caller, unchanged) can never see a
+// departed member at all. Every existing caller passes no 4th argument, so this is purely
+// additive. Same response shape either way (parseMemberList does not care which endpoint produced
+// it).
+export function fetchMemberPage(offset, limit = 250, limiter = congressLimiter, congress = null) {
+  const path = congress != null ? `/member/congress/${congress}` : '/member';
+  const url = `https://api.congress.gov/v3${path}?limit=${limit}&offset=${offset}`;
   return fetchWithLimit(url, { source: SOURCE, limiter, headers: apiKeyHeaders(), as: 'json' });
 }
