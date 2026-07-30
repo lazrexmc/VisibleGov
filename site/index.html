@@ -18,7 +18,14 @@
       <!-- Privacy contract (spec §5, Lance's ruling) — rendered VERBATIM next to the input. -->
       <p class="privacy-contract">Your address is sent to the U.S. Census Bureau geocoder to find
         your districts, and is not stored or logged — not by us, not ever.</p>
-      <form id="address-form">
+      <!-- N4 (task-8 re-review, belt-and-braces on the MAJOR-1 JS fix): method="post" is the
+           NATIVE fallback if the module script below ever fails to load (partial deploy, a CSP
+           blocking module scripts, JS disabled) — the form's own default submission then puts the
+           address in a POST request BODY, not a GET query string on the URL, keeping the privacy
+           contract's "not stored or logged" promise even in that degraded path. The JS path above
+           (wireAddressForm, site/js/directory-page.js) always preventDefault()s and never lets
+           this native submission actually fire when the module loaded successfully. -->
+      <form id="address-form" method="post">
         <label for="address-input">Street address, city, state</label>
         <input id="address-input" type="text" name="address" autocomplete="street-address" />
         <button type="submit">Find my representatives</button>

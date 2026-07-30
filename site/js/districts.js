@@ -104,6 +104,15 @@ function sameState(a, b) {
   return typeof a === 'string' && typeof b === 'string' && a.toUpperCase() === b.toUpperCase();
 }
 
+// Micro-round (task-8 re-review, N2): exported so directory-page.js's SEAT_IN_SCOPE gate uses the
+// SAME case-insensitive check matchReps itself uses below, rather than a second, stricter
+// (case-sensitive) copy that could silently disagree with it — a lowercase STUSAB used to make
+// matchReps correctly find MO candidates while directory-page.js's own scope gate still called
+// that category out-of-scope, dropping a real matched rep with no message at all (skip != empty).
+export function isMOState(state) {
+  return sameState(state, 'MO');
+}
+
 function buildCandidates(matchedTerms, legislatorById) {
   return matchedTerms
     .map((term) => {
@@ -125,7 +134,7 @@ export function matchReps({ terms, legislators } = {}, {
   const legislatorList = Array.isArray(legislators) ? legislators : [];
   const legislatorById = new Map(legislatorList.filter(Boolean).map((l) => [l.id, l]));
 
-  const isMO = typeof state === 'string' && state.toUpperCase() === 'MO';
+  const isMO = isMOState(state);
 
   const usSenatorTerms = state
     ? termList.filter((t) => t && t.jurisdiction_id === 'us-congress' && t.chamber === 'senate'

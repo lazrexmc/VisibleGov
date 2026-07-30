@@ -14,7 +14,9 @@ import {
 } from './render.js';
 import { chamberLabel } from './profile-model.js';
 import { slugify } from './slugs.js';
-import { parseGeographies, matchReps, termDateEvidence } from './districts.js';
+import {
+  parseGeographies, matchReps, termDateEvidence, isMOState,
+} from './districts.js';
 
 // ============================================================================
 // Pure model (TDD'd in tests/directory-model.test.js BEFORE any of the DOM code below existed)
@@ -197,13 +199,18 @@ function renderCandidate(candidate, entryIndex) {
 }
 
 // A category is only rendered at all when it is GEOGRAPHICALLY IN SCOPE for the matched address
-// (mirrors matchReps' own gating conditions) — a non-MO address never mentions MO Senate/House at
-// all, since those categories are structurally inapplicable there, not merely empty.
+// (mirrors matchReps' own gating conditions EXACTLY, including case-insensitivity via the SAME
+// imported isMOState — micro-round N2: a strict `=== 'MO'` copy here used to disagree with
+// matchReps' own case-insensitive check, so a lowercase STUSAB could make matchReps correctly
+// find a MO candidate while this gate still called the category out of scope, dropping a real
+// matched rep with no message at all — skip != empty) — a non-MO address never mentions MO
+// Senate/House at all, since those categories are structurally inapplicable there, not merely
+// empty.
 const SEAT_IN_SCOPE = {
   usSenators: (geo) => Boolean(geo?.state),
   usHouse: (geo) => Boolean(geo?.state),
-  moSenate: (geo) => geo?.state === 'MO',
-  moHouse: (geo) => geo?.state === 'MO',
+  moSenate: (geo) => isMOState(geo?.state),
+  moHouse: (geo) => isMOState(geo?.state),
 };
 
 // MED-5 (task-8 review): distinct from "in scope but zero legislators matched" — this is "in
@@ -270,13 +277,21 @@ function renderMatchedReps(container, matched, entryIndex, geo) {
 // fetch never renders as an empty section").
 // ============================================================================
 
+// N1 (task-8 re-review, MEDIUM, wrong-rep surface — reproduced by the reviewer: a slow KS
+// response can resolve AFTER a faster, later MO submission and overwrite the correct MO result
+// with Kansas districts). `isStale` is threaded through from runAddressLookupWithData's own
+// generation counter (mirrors person-page.js's loadVotesSection/loadChartsSection voteGeneration
+// pattern exactly) — checked before EVERY write to resultsContainer, both sectionState calls and
+// renderMatchedReps, so a superseded call's async work (however late it resolves) can never
+// render over a newer submission's result.
 async function runAddressLookup(address, {
-  resultsContainer, legislators, terms, entryIndex,
+  resultsContainer, legislators, terms, entryIndex, isStale,
 }) {
   const retry = () => runAddressLookup(address, {
-    resultsContainer, legislators, terms, entryIndex,
+    resultsContainer, legislators, terms, entryIndex, isStale,
   });
 
+  if (isStale()) return;
   sectionState(resultsContainer, { state: 'loading' });
   let censusJson;
   try {
@@ -299,6 +314,7 @@ async function runAddressLookup(address, {
       throw new Error(censusJson?.error || 'geocoder unavailable');
     }
   } catch {
+    if (isStale()) return;
     sectionState(resultsContainer, {
       state: 'failed',
       message: "Couldn't reach the address geocoder — retry",
@@ -307,8 +323,10 @@ async function runAddressLookup(address, {
     return;
   }
 
+  if (isStale()) return;
   const geo = parseGeographies(censusJson);
   if (!geo.state) {
+    if (isStale()) return;
     sectionState(resultsContainer, { state: 'empty', message: "The geocoder couldn't match that address." });
     return;
   }
@@ -318,6 +336,7 @@ async function runAddressLookup(address, {
   // there is no separate "nothing found at all" branch here that would erase which categories
   // were even checked.
   const matched = matchReps({ terms, legislators }, geo);
+  if (isStale()) return;
   sectionState(resultsContainer, { state: 'ready' });
   renderMatchedReps(resultsContainer, matched, entryIndex, geo);
 }
@@ -344,40 +363,71 @@ async function loadDirectoryData() {
 // `dataState` is a mutable `{ promise }` holder (not a bare promise): a later retry of the
 // directory-list section can refresh `dataState.promise` in place, and every future submit reads
 // it fresh — without ever needing to attach a second listener to the same form element.
+//
+// N1 (task-8 re-review, MEDIUM): `generation` is declared ONCE here, shared by every submit this
+// form ever fires — mirrors person-page.js's voteGeneration pattern (one counter object per
+// section, incremented at the true start of every re-entry).
 export function wireAddressForm({
   form, input, resultsContainer, dataState,
 }) {
   if (!form) return;
+  const generation = { current: 0 };
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const address = (input?.value || '').trim();
     if (!address) return;
-    runAddressLookupWithData(address, { resultsContainer, dataState }).catch(() => {});
+    runAddressLookupWithData(address, { resultsContainer, dataState, generation }).catch(() => {});
   });
 }
 
 // Awaits the shared directory-data promise ONLY at submit time (never eagerly at mount) — if it's
 // still pending, this waits for it; if it has already rejected (or rejects later), this renders
 // the honest "unavailable" message instead of ever silently doing nothing.
-async function runAddressLookupWithData(address, { resultsContainer, dataState }) {
+//
+// N1: increments `generation` synchronously as its own FIRST statement, before any await — this
+// is "the one place every re-entry funnels through" (every submit AND the failed-state's own
+// retry both call this), so capturing `myGeneration` here, before anything can interleave, is
+// what makes every later `isStale()` check meaningful. The reviewer's own repro: submit a
+// slow-resolving address, then submit a fast one — without this, the slow submission's LATE
+// resolution (however long it takes) can still overwrite the fast, correct, already-rendered
+// result from the newer submission.
+async function runAddressLookupWithData(address, { resultsContainer, dataState, generation }) {
+  generation.current += 1;
+  const myGeneration = generation.current;
+  const isStale = () => generation.current !== myGeneration;
+
+  // N3 (task-8 re-review, LOW): captured explicitly so a later retry can tell whether
+  // dataState.promise has ALREADY been refreshed by someone else (the directory-list section's
+  // own independent retry) since THIS attempt started — see the retry closure below.
+  const attemptedPromise = dataState.promise;
   let data;
   try {
-    data = await dataState.promise;
+    data = await attemptedPromise;
   } catch {
+    if (isStale()) return;
     sectionState(resultsContainer, {
       state: 'failed',
       message: "Directory data unavailable — districts can't be matched right now",
       onRetry: () => {
-        dataState.promise = loadDirectoryData();
-        runAddressLookupWithData(address, { resultsContainer, dataState }).catch(() => {});
+        // N3: only fire a NEW fetch if dataState.promise is STILL the one that failed here — if
+        // the directory list's own retry already refreshed it (to an in-flight or already-good
+        // promise) in the meantime, reuse THAT instead of firing a redundant extra fetch. Reading
+        // dataState.promise fresh, right here at retry-click time (not the stale `attemptedPromise`
+        // closed over above), is what makes a recovered directory + resubmit/retry actually render
+        // real results instead of staying stuck re-announcing "unavailable."
+        if (dataState.promise === attemptedPromise) {
+          dataState.promise = loadDirectoryData();
+        }
+        runAddressLookupWithData(address, { resultsContainer, dataState, generation }).catch(() => {});
       },
     });
     return;
   }
+  if (isStale()) return;
   const entries = buildDirectoryEntries(data);
   const entryIndex = indexEntriesByLegislatorId(entries);
   await runAddressLookup(address, {
-    resultsContainer, legislators: data.legislators, terms: data.terms, entryIndex,
+    resultsContainer, legislators: data.legislators, terms: data.terms, entryIndex, isStale,
   });
 }
 

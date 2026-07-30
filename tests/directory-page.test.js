@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 import { wireAddressForm } from '../site/js/directory-page.js';
+import { _setFetch, _setConfig } from '../site/js/rest.js';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://127.0.0.1:8990/' });
 globalThis.document = dom.window.document;
@@ -247,5 +248,195 @@ test('a non-MO address never mentions MO Senate/House at all (structurally out o
     assert.equal(resultsContainer.textContent.includes('MO House'), false);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+// ============================================================================
+// N1 (task-8 re-review, MEDIUM, wrong-rep surface): a slower, EARLIER submission's stale response
+// must never overwrite a faster, LATER submission's correct result. The reviewer's own repro: a
+// slow Kansas lookup, then a fast Missouri lookup — Missouri's real result must render and stay
+// rendered even once the stale Kansas response finally arrives.
+// ============================================================================
+
+const KS_GEO_RESPONSE = {
+  result: {
+    addressMatches: [{
+      geographies: {
+        States: [{ STUSAB: 'KS' }],
+        '119th Congressional Districts': [{ CD119: '02', BASENAME: '2' }],
+      },
+    }],
+  },
+};
+
+test('N1: a slow EARLIER submit (Kansas) resolving AFTER a fast LATER submit (Missouri) must never overwrite the correct, already-rendered Missouri result', async () => {
+  const { form, input, resultsContainer } = buildFixture();
+  const dataState = { promise: Promise.resolve({ legislators: [], persons: [], terms: [] }) };
+  const originalFetch = globalThis.fetch;
+  let resolveKansas;
+  globalThis.fetch = async (url, opts) => {
+    const { address } = JSON.parse(opts.body);
+    if (address === 'Kansas address (slow)') {
+      // Deliberately hangs until resolveKansas() is called below, well after the MO submit.
+      return new Promise((resolve) => {
+        resolveKansas = () => resolve({ ok: true, json: async () => KS_GEO_RESPONSE });
+      });
+    }
+    return { ok: true, json: async () => FULL_MO_GEO_RESPONSE };
+  };
+  try {
+    wireAddressForm({
+      form, input, resultsContainer, dataState,
+    });
+
+    // Submit 1: Kansas — slow, deliberately left unresolved.
+    input.value = 'Kansas address (slow)';
+    submit(form);
+    await flush(5); // let the KS fetch actually start (and hang) before the next submit
+
+    // Submit 2: Missouri — resolves immediately, must win and render.
+    input.value = '201 W Capitol Ave, Jefferson City, MO';
+    submit(form);
+    await flush();
+
+    assert.match(resultsContainer.textContent, /MO Senate/, 'the correct, newer Missouri result is showing');
+    assert.equal(resultsContainer.textContent.includes('Kansas'), false);
+
+    // NOW let the STALE Kansas response resolve — it must be silently dropped, not rendered.
+    resolveKansas();
+    await flush();
+
+    assert.match(resultsContainer.textContent, /MO Senate/, 'Missouri result must still be showing after the stale Kansas response resolves');
+    assert.equal(resultsContainer.textContent.includes('No U.S. Senate representative found in our data for this state.') && !resultsContainer.textContent.includes('MO Senate'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ============================================================================
+// N2 (task-8 re-review, LOW): the directory-page.js scope gate for MO Senate/House must use the
+// SAME case-insensitive state check matchReps itself uses — a lowercase STUSAB used to make
+// matchReps correctly find a MO candidate while the (stricter, `=== 'MO'`) scope gate still
+// called the category out of scope, silently dropping a real matched rep (skip != empty).
+// ============================================================================
+
+test('N2: a lowercase STUSAB ("mo") still puts MO Senate/House in scope and renders the real matched candidate, never silently dropped', async () => {
+  const { form, input, resultsContainer } = buildFixture();
+  input.value = '201 W Capitol Ave, Jefferson City, MO';
+  const legislator = {
+    id: 'leg-mo-sen', full_name: 'Mo Senator', party: 'Republican', person_id: null,
+  };
+  const term = {
+    legislator_id: 'leg-mo-sen', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '6', party: 'Republican', start_date: '2021-01-06', end_date: null,
+  };
+  const dataState = { promise: Promise.resolve({ legislators: [legislator], persons: [], terms: [term] }) };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      result: {
+        addressMatches: [{
+          geographies: {
+            States: [{ STUSAB: 'mo' }], // lowercase — a real live-shape possibility, not guaranteed uppercase
+            '2024 State Legislative Districts - Upper': [{ SLDU: '006', BASENAME: '6' }],
+            '2024 State Legislative Districts - Lower': [{ SLDL: '060', BASENAME: '60' }],
+          },
+        }],
+      },
+    }),
+  });
+  try {
+    wireAddressForm({
+      form, input, resultsContainer, dataState,
+    });
+    submit(form);
+    await flush();
+    assert.match(resultsContainer.textContent, /MO Senate/);
+    assert.match(resultsContainer.textContent, /Mo Senator/, 'the real matched MO Senate candidate renders, not silently dropped');
+    assert.equal(resultsContainer.textContent.includes('No MO Senate representative found'), false, 'the real candidate rendered, so the empty/not-found message must NOT also appear for MO Senate');
+    assert.equal(resultsContainer.textContent.includes('No MO House representative found'), true, 'MO House correctly reports not-found (no matching data for it), proving the section actually ran, not just skipped');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ============================================================================
+// N3 (task-8 re-review, LOW): the "Directory data unavailable" message/retry must not get stuck
+// re-announcing unavailability once the shared dataState.promise has actually recovered (e.g. via
+// the directory-list section's own independent retry) — both a fresh resubmit AND the failed
+// message's own retry button must pick up the CURRENT dataState.promise, and the retry must not
+// fire a redundant extra fetch when the holder is already good.
+// ============================================================================
+
+test('N3: after dataState.promise recovers externally (simulating the directory list\'s own retry), a fresh resubmit renders real results, not the stale "unavailable" message', async () => {
+  const { form, input, resultsContainer } = buildFixture();
+  input.value = '201 W Capitol Ave, Jefferson City, MO';
+  const failed = Promise.reject(new Error('network fault'));
+  failed.catch(() => {});
+  const dataState = { promise: failed };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => FULL_MO_GEO_RESPONSE });
+  try {
+    wireAddressForm({
+      form, input, resultsContainer, dataState,
+    });
+    submit(form);
+    await flush();
+    assert.match(resultsContainer.textContent, /Directory data unavailable/);
+
+    // Simulate the directory list's OWN independent retry succeeding, external to the address form.
+    dataState.promise = Promise.resolve({ legislators: [], persons: [], terms: [] });
+
+    submit(form); // a fresh resubmit, not the failed message's own retry button
+    await flush();
+    assert.match(resultsContainer.textContent, /Results shown per the most recent term evidence/);
+    assert.equal(resultsContainer.textContent.includes('Directory data unavailable'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('N3: the failed message\'s own retry button reuses an already-recovered dataState.promise instead of firing a redundant extra fetch', async () => {
+  const { form, input, resultsContainer } = buildFixture();
+  input.value = '201 W Capitol Ave, Jefferson City, MO';
+  const originallyFailed = Promise.reject(new Error('network fault'));
+  originallyFailed.catch(() => {});
+  const dataState = { promise: originallyFailed };
+
+  let restFetchCalls = 0;
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => {
+    restFetchCalls += 1;
+    return {
+      ok: true, status: 200, json: async () => [], headers: { get: () => null },
+    };
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => FULL_MO_GEO_RESPONSE });
+
+  try {
+    wireAddressForm({
+      form, input, resultsContainer, dataState,
+    });
+    submit(form);
+    await flush();
+    assert.match(resultsContainer.textContent, /Directory data unavailable/);
+    assert.equal(restFetchCalls, 0, 'no directory fetch has happened yet (the ORIGINAL promise was pre-built, not via loadDirectoryData)');
+
+    // Externally refresh dataState.promise (simulating the directory list's own retry) to an
+    // ALREADY-GOOD, already-resolved promise — without going through loadDirectoryData, so
+    // restFetchCalls stays 0 up to this point.
+    dataState.promise = Promise.resolve({ legislators: [], persons: [], terms: [] });
+
+    const retryBtn = resultsContainer.querySelector('button');
+    assert.ok(retryBtn, 'a retry button was rendered');
+    retryBtn.click();
+    await flush();
+
+    assert.equal(restFetchCalls, 0, 'the retry reused the already-good dataState.promise — no new fetchAllRows call fired');
+    assert.match(resultsContainer.textContent, /Results shown per the most recent term evidence/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    _setFetch(null);
   }
 });
