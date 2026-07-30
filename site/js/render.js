@@ -14,7 +14,7 @@ export class UnsafeAttributeError extends Error {
   }
 }
 
-const ALLOWED_ATTRS = new Set(['class', 'href', 'id', 'dataset']);
+const ALLOWED_ATTRS = new Set(['class', 'href', 'id', 'dataset', 'src', 'alt']);
 
 // Fix round 1 (task review, findings 1+2): a bare `value.trim().startsWith('javascript:')`
 // blocklist has two holes. (1) `.trim()` only strips leading/trailing whitespace — a TAB/CR/LF
@@ -26,38 +26,69 @@ const ALLOWED_ATTRS = new Set(['class', 'href', 'id', 'dataset']);
 // just the ends), then require either no scheme at all (a relative/site-internal href) or one of
 // http:, https:, mailto: — everything else throws the same typed error.
 const ALLOWED_HREF_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+// Task 6 extension (pre-flagged by the task-3 report): the photo section needs <img src alt>.
+// src reuses the SAME guard structure as href (control-char strip, protocol-relative rejection,
+// scheme allowlist) below, just configured stricter — https-only, no relative-path allowance.
+// Both real photoUrl() results (receipts.js: legislators.image_url or the bioguide-derived URL)
+// are always absolute https — there is no legitimate case for allowing more than that on <img
+// src>, so the allowlist stays as narrow as the real data ever needs.
+const ALLOWED_SRC_SCHEMES = new Set(['https:']);
 const SCHEME_PATTERN = /^([a-z][a-z0-9+\-.]*:)/i;
 
-function assertSafeHref(tag, value) {
+// Shared by both href and src (task 6): strip control chars everywhere first (not just the ends
+// — see the fix-round-1 note below), reject protocol-relative outright, then check the scheme
+// against a caller-supplied allowlist. `allowRelative` is href's own "no scheme at all ->
+// relative, site-internal path" allowance; src has no relative use case (every real photoUrl()
+// result is an absolute https URL) so it requires a matched, allowlisted scheme with nothing
+// missing.
+//
+// Fix round 1 (task review, findings 1+2, applied when this only guarded href): a bare
+// `value.trim().startsWith('javascript:')` blocklist has two holes. (1) `.trim()` only strips
+// leading/trailing whitespace — a TAB/CR/LF EMBEDDED mid-scheme ('jav\tascript:alert(1)')
+// survives it untouched, and browsers' URL parsers strip embedded TAB/CR/LF anywhere before
+// scheme resolution, so that string resolves to a real javascript: URL despite not literally
+// starting with it. (2) blocklisting one dangerous scheme misses the rest of the class — data:
+// can run script from a clicked link exactly like javascript: can. Fixed by switching to an
+// ALLOWLIST: strip control chars everywhere first, then require either no scheme at all (when
+// `allowRelative`) or one of the caller's allowlisted schemes — everything else throws the same
+// typed error.
+function assertSafeUrlAttr(tag, attr, value, allowedSchemes, { allowRelative }) {
   if (typeof value !== 'string') return;
   const stripped = value.replace(/[\t\r\n]/g, '').trim();
   // Micro-round (re-review, pre-existing LOW-MEDIUM): a protocol-relative URL ('//host/path') has
   // no scheme token either, so it would fall through to the "no scheme -> relative" branch below
   // — but browsers resolve it against the CURRENT page's scheme, i.e. it still goes cross-origin.
-  // A genuine same-site path never starts with '//' (real DB receipt URLs are absolute http(s)),
-  // so this is rejected outright before the scheme check even runs.
+  // A genuine same-site path never starts with '//' (real DB receipt/photo URLs are absolute
+  // http(s)), so this is rejected outright before the scheme check even runs.
   if (stripped.startsWith('//')) {
     throw new UnsafeAttributeError(
-      `el(): refusing a protocol-relative href ("//...") on <${tag}> — resolves cross-origin; DB receipt URLs are absolute http(s), a same-site path never starts with //`,
-      { tag, attr: 'href', value },
+      `el(): refusing a protocol-relative ${attr} ("//...") on <${tag}> — resolves cross-origin; DB-sourced URLs are absolute http(s), a same-site path never starts with //`,
+      { tag, attr, value },
     );
   }
   const match = stripped.match(SCHEME_PATTERN);
-  if (!match) return; // no scheme -> relative, site-internal href; always allowed
-  const scheme = match[1].toLowerCase();
-  if (!ALLOWED_HREF_SCHEMES.has(scheme)) {
+  if (!match) {
+    if (allowRelative) return; // no scheme -> relative, site-internal path; allowed for href only
     throw new UnsafeAttributeError(
-      `el(): href scheme "${scheme}" is not allowlisted (relative, http:, https:, mailto:) on <${tag}>`,
-      { tag, attr: 'href', value },
+      `el(): ${attr} must be an absolute URL with an allowlisted scheme on <${tag}> (no scheme found, and relative ${attr} is not allowed)`,
+      { tag, attr, value },
+    );
+  }
+  const scheme = match[1].toLowerCase();
+  if (!allowedSchemes.has(scheme)) {
+    throw new UnsafeAttributeError(
+      `el(): ${attr} scheme "${scheme}" is not allowlisted on <${tag}>`,
+      { tag, attr, value },
     );
   }
 }
 
-// attrs allowlist: class/href/id/dataset only. Anything starting with "on" (event handlers), any
-// non-allowlisted key, and any href outside the scheme allowlist above all throw a typed
-// UnsafeAttributeError — a DB string can never become an attribute that executes. Every other
-// non-allowlisted key throws too (allowlist, not blocklist): widening it is a deliberate future
-// change, not an accident of a forgotten case.
+// attrs allowlist: class/href/id/dataset/src/alt only. Anything starting with "on" (event
+// handlers), any non-allowlisted key, and any href/src outside its own scheme allowlist above all
+// throw a typed UnsafeAttributeError — a DB string can never become an attribute that executes.
+// Every other non-allowlisted key throws too (allowlist, not blocklist): widening it is a
+// deliberate future change, not an accident of a forgotten case. (alt needs no scheme guard — it
+// is plain text, and setAttribute never parses a string as markup.)
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -69,12 +100,15 @@ export function el(tag, attrs = {}, ...children) {
     }
     if (!ALLOWED_ATTRS.has(key)) {
       throw new UnsafeAttributeError(
-        `el(): "${key}" is not in the attrs allowlist (class, href, id, dataset) on <${tag}>`,
+        `el(): "${key}" is not in the attrs allowlist (class, href, id, dataset, src, alt) on <${tag}>`,
         { tag, attr: key },
       );
     }
     if (key === 'href') {
-      assertSafeHref(tag, value);
+      assertSafeUrlAttr(tag, 'href', value, ALLOWED_HREF_SCHEMES, { allowRelative: true });
+    }
+    if (key === 'src') {
+      assertSafeUrlAttr(tag, 'src', value, ALLOWED_SRC_SCHEMES, { allowRelative: false });
     }
     if (key === 'dataset') {
       for (const [dataKey, dataValue] of Object.entries(value || {})) {

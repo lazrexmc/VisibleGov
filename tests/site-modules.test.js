@@ -191,6 +191,35 @@ test('el: allows the class/href/id/dataset allowlist and sets them correctly', (
   assert.equal(a.textContent, 'Vote');
 });
 
+// Task 6 extension (pre-flagged by the task-3 report: "later page tasks needing e.g. src/alt/type
+// will need render.js extended at that point"). The photo section needs <img src alt> — src gets
+// the SAME guard structure as href (control-char strip, protocol-relative rejection, scheme
+// allowlist) but configured stricter: https-only, no relative-path allowance, since every real
+// photoUrl() result (receipts.js: legislators.image_url or the bioguide derivation) is an
+// absolute https URL — there is no legitimate case for allowing more than that on an <img src>.
+test('el: allows src/alt attrs; a genuine https src is accepted', () => {
+  const img = el('img', { src: 'https://unitedstates.github.io/images/congress/450x550/O000177.jpg', alt: 'Robert F. Onder' });
+  assert.equal(img.getAttribute('src'), 'https://unitedstates.github.io/images/congress/450x550/O000177.jpg');
+  assert.equal(img.getAttribute('alt'), 'Robert F. Onder');
+});
+
+test('el: src scheme allowlist rejects javascript: and data: URLs (hostile src)', () => {
+  assert.throws(() => el('img', { src: 'javascript:alert(1)' }), UnsafeAttributeError);
+  assert.throws(() => el('img', { src: 'data:image/svg+xml,<svg onload=alert(1)>' }), UnsafeAttributeError);
+});
+
+test('el: src guard rejects protocol-relative ("//evil.com/x.jpg") the same as href does', () => {
+  assert.throws(() => el('img', { src: '//evil.com/x.jpg' }), UnsafeAttributeError);
+});
+
+// src is stricter than href on purpose: unlike href, a scheme-less relative src is REJECTED, not
+// treated as a same-site path — no real photoUrl() result is ever relative, so there is nothing
+// legitimate to preserve, and rejecting keeps the allowlist narrow (https only, nothing else).
+test('el: src guard rejects a plain http: URL and a scheme-less relative path (https-only, no relative allowance)', () => {
+  assert.throws(() => el('img', { src: 'http://example.com/x.jpg' }), UnsafeAttributeError);
+  assert.throws(() => el('img', { src: '/img/local.jpg' }), UnsafeAttributeError);
+});
+
 test('el: real DOM node children are appended as-is, not stringified', () => {
   const span = el('span', {}, 'inner');
   const wrapper = el('div', {}, span);
