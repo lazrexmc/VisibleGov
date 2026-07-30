@@ -706,3 +706,36 @@ by sonnet subagents, mechanically gated — 4 published with receipts, 4 flagged
 citation-precision catches, zero API dollars. The record gate rejected nothing incorrectly and
 published nothing unverified. Migrations 0014/0015 applied. Final whole-branch review next;
 merge menu awaits Lance's morning.
+
+## 2026-07-30 (morning) — profile completeness: final review, two fix waves, CLEAN
+
+Lance woke to "hows progress?"; this is the trail of what the machines did about it.
+
+**Federal pass finished.** 476/478 federal bills have status (2 honest detail-fetch failures,
+retryable), 426 federal sponsors (0 unresolved), 396 texts fetched + 11 oversize refused. The
+suspicious statusPatched:0 in the relaunch was honest — an earlier partial run had already filled
+statuses. DB now: 46,268 bill_sponsors, 465 bill_texts.
+
+**Final whole-branch review (workflow, 3 dimensions → adversarial verify → synthesize): FIX
+FIRST, 7 confirmed findings.** 2 Critical, both in the attach demotion path (no contradiction
+veto; keep-separate rulings not threaded); 5 Important (attach keep-separate recorded no durable
+fact; record gate bound verdicts by count only; stated_purpose had zero verification coverage;
+--limit failed open; newline injection minted unverified public bullets). All gate-hardening —
+zero live decisions had flowed through any of the holes.
+
+**Fix round 1** (abf53e7/8b11785/1e5de42, 1180→1208 tests): all 7 closed. The scoped re-review
+confirmed each closure by re-running the original attack constructions — then found 2 NEW
+Importants the wave itself introduced: keep-separate on a demoted flag silently un-blocked the
+cluster's own merge (next run auto-created a person, no review), and both vetoes were
+surname-scoped so a Bono/Bono-Mack-shaped person couldn't veto. Controller ruling per the
+asymmetric-cost law: ambiguity never resolves toward a merge — demoted-origin flags record the
+candidate×candidate pairs too, keeping the cluster in Lance's queue.
+
+**Fix round 2** (83dec75/e2eb637, 1220/1220): origin markers distinguish the two attach-flag
+producers; vetoes iterate every person member; missing-row lookups throw typed; BOMs stripped.
+Verification re-executed the repros end-to-end through the real HTTP route: the silent merge is
+gone (clusters:0, flagged:1, Lance's own note cited), Bono Mack vetoes both paths, un-marked
+legacy flags default toward blocking (recoverable) never toward merging (not). ALL CLEAR.
+
+**Where that leaves it:** branch profile-completeness, 16 commits, suite 1220/0, final review
+clean, every residual ledgered with rationale. Merge menu goes to Lance next — his decision.
