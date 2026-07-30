@@ -328,6 +328,38 @@ export function excludeQuarantinedDays(candidates, dir = JOURNAL_ARTIFACT_DIR) {
   return { kept, skippedQuarantined: skippedKeys.length, skippedKeys };
 }
 
+// ---- standing quarantined-day set (freshness-honesty fix, 2026-07-30) ----
+//
+// excludeQuarantinedDays above only ever sees candidates from ONE year's journal index (whatever
+// --year this invocation is running), so its skippedKeys is scoped to that year — a run for
+// --year 2020 correctly reports [] when none of 2020's own days are quarantined, even while a
+// DIFFERENT year's backlog (e.g. six 2016 days) sits quarantined in the very same
+// JOURNAL_ARTIFACT_DIR. Migration 0016's public_freshness view reads ONLY the latest run's
+// detail->counts->quarantined_days (jsonb_array_length) — so a per-year-scoped answer is an
+// honesty failure: the public freshness box would report 0 days pending review whenever the most
+// recently-closed run happened to process a clean year, even though the persistent backlog is
+// nonempty. FIX: scan the WHOLE artifacts directory for every *.failed.json that has reached the
+// quarantine threshold, independent of any one year's index candidates — this is the STANDING
+// quarantined set, the same fact an operator would get by listing the artifacts dir by hand. Pure
+// filesystem read (no DB, no live fetch, no year parameter) — cheap enough to call every time a
+// run reaches worklist-build time. A corrupt/partial .failed.json is skipped, never crashes the
+// driver, same defensive convention as readCache.
+export function listQuarantinedDays(dir = JOURNAL_ARTIFACT_DIR) {
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir).filter((f) => f.endsWith('.failed.json'));
+  const quarantined = [];
+  for (const file of files) {
+    let record;
+    try {
+      record = JSON.parse(readFileSync(`${dir}/${file}`, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (record && record.attempts >= JOURNAL_DAY_MAX_FAILED_ATTEMPTS) quarantined.push(record.pdf_basename);
+  }
+  return quarantined;
+}
+
 // ---- day-completeness ("done") marker (CONTROLLER RULING 4, first sentence) ----
 //
 // "a day is complete when every parsed block became a votes row and parseJournalVotes reported
@@ -1117,7 +1149,12 @@ async function main() {
       gated: anyGated,
       attributed_from_context: attribution.preceding_taken_up,
       attribution,
-      quarantined_days: worklist.skippedQuarantinedKeys,
+      // FIX (freshness-honesty, 2026-07-30): worklist.skippedQuarantinedKeys is scoped to THIS
+      // run's --year candidates only — listQuarantinedDays() reports the STANDING quarantined set
+      // across the whole artifacts directory, so the public_freshness view (which reads only the
+      // latest run's detail) never under-reports a backlog that happens to live in a year this
+      // particular run isn't processing. See listQuarantinedDays's own comment for the full trace.
+      quarantined_days: listQuarantinedDays(),
       total_pending_days: worklist.totalPending,
       artifact_replay: artifactReplay,
     };

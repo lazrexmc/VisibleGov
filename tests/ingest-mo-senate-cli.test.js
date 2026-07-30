@@ -11,7 +11,7 @@ import {
   parseMoSenateArgs, journalPdfBasename, buildVoteSourceKey, buildVoteRow, buildCastTokens,
   pickRosterSource, RosterSourceUnavailableError, buildJournalIndexUrl, shouldRefetch, effectiveMaxAge,
   MO_SENATE_ROSTER_MAX_AGE_MS, MO_SENATE_INDEX_MAX_AGE_MS,
-  readDayFailureArtifact, writeDayFailureArtifact, excludeQuarantinedDays, JOURNAL_DAY_MAX_FAILED_ATTEMPTS,
+  readDayFailureArtifact, writeDayFailureArtifact, excludeQuarantinedDays, listQuarantinedDays, JOURNAL_DAY_MAX_FAILED_ATTEMPTS,
   hasDoneMarker, writeDoneMarker,
   selectJournalDayWorklist,
   remainingCooldownMs, formatCooldownWait, enforceDurableCooldown, CooldownConvergenceError,
@@ -311,6 +311,61 @@ test('excludeQuarantinedDays: skips a day once attempts reaches JOURNAL_DAY_MAX_
     assert.equal(skippedQuarantined, 1);
     assert.deepEqual(kept, [{ pdf_basename: 'RDay2' }]);
     assert.deepEqual(skippedKeys, ['RDay1']);
+  });
+});
+
+// ---- standing quarantined-day set (freshness-honesty fix, 2026-07-30) ----
+
+test('listQuarantinedDays: no artifacts dir at all -> [] (never throws)', () => {
+  withScratchDir((dir) => {
+    assert.deepEqual(listQuarantinedDays(`${dir}/does-not-exist`), []);
+  });
+});
+
+test('listQuarantinedDays: a day below the retry cap (attempts < 3) is not reported', () => {
+  withScratchDir((dir) => {
+    const failures = [Object.assign(new Error('boom'), { ordinal: 1, category: 'yeas' })];
+    writeDayFailureArtifact('RDay1', 'https://x', failures, dir);
+    writeDayFailureArtifact('RDay1', 'https://x', failures, dir);
+    assert.deepEqual(listQuarantinedDays(dir), []);
+  });
+});
+
+test('listQuarantinedDays: reports every day quarantined ANYWHERE in the artifacts dir — the STANDING set, not scoped to any one year\'s index candidates (the bug this fixes)', () => {
+  withScratchDir((dir) => {
+    const failures = [Object.assign(new Error('boom'), { ordinal: 1, category: 'yeas' })];
+    // Two different days' worth of quarantine history, as if left over from backfilling two
+    // different --year runs — listQuarantinedDays takes no indexRows/candidates at all, so it
+    // cannot be scoped to either one specifically.
+    writeDayFailureArtifact('RDay160131222-234', 'https://x/RDay160131222-234.pdf', failures, dir);
+    writeDayFailureArtifact('RDay160131222-234', 'https://x/RDay160131222-234.pdf', failures, dir);
+    writeDayFailureArtifact('RDay160131222-234', 'https://x/RDay160131222-234.pdf', failures, dir);
+    writeDayFailureArtifact('RDay200315001-010', 'https://x/RDay200315001-010.pdf', failures, dir);
+    writeDayFailureArtifact('RDay200315001-010', 'https://x/RDay200315001-010.pdf', failures, dir);
+    writeDayFailureArtifact('RDay200315001-010', 'https://x/RDay200315001-010.pdf', failures, dir);
+
+    // Prove the point directly: a --year run whose OWN index candidates don't include either
+    // quarantined day reports skippedQuarantinedKeys: [] (the old, scope-limited signal) even
+    // though both days actually stand quarantined — listQuarantinedDays reports both regardless.
+    const otherYearsCandidates = [{ pdf_basename: 'RDay260101001-010' }];
+    const { skippedKeys } = excludeQuarantinedDays(otherYearsCandidates, dir);
+    assert.deepEqual(skippedKeys, []);
+
+    assert.deepEqual(
+      listQuarantinedDays(dir).slice().sort(),
+      ['RDay160131222-234', 'RDay200315001-010'],
+    );
+  });
+});
+
+test('listQuarantinedDays: a corrupt/partial .failed.json is skipped, never crashes', () => {
+  withScratchDir((dir) => {
+    const failures = [Object.assign(new Error('boom'), { ordinal: 1, category: 'yeas' })];
+    writeDayFailureArtifact('RDayGood', 'https://x', failures, dir);
+    writeDayFailureArtifact('RDayGood', 'https://x', failures, dir);
+    writeDayFailureArtifact('RDayGood', 'https://x', failures, dir);
+    writeFileSync(`${dir}/RDayCorrupt.failed.json`, '{not valid json');
+    assert.deepEqual(listQuarantinedDays(dir), ['RDayGood']);
   });
 });
 
