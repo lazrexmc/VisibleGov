@@ -85,7 +85,22 @@ Data flow (parallel anon fetches):
 - Reconciliation flags: any displayed vote carrying a reconciliation flag shows a badge linking
   to the trust page's explanation. Primary-source display wins, per the quarantine doctrine.
 - Missed-votes view: a filter over the same cast list (not voting / absent), presented as the
-  printed positions they are — no percentage, no comparison to peers (that is a scorecard).
+  printed positions they are.
+- **Vote aggregates (Lance direction, 2026-07-30 — supersedes this section's earlier
+  no-percentage line):** users evaluate politicians, so the profile carries a mechanical
+  aggregate section above the vote list, driven by the same filters, all three elements
+  approved: (1) position distribution — yea/nay/not-voting/absent counts + shares for the
+  current view, as CSS bar charts with raw numbers always visible as text, each bar
+  click-filtering the vote list below (the chart IS the list summarized — receipts intact);
+  (2) party comparison — on the same roll-call set, the member's yea share beside their own
+  party's aggregate yea share (member-vs-own-party-aggregate is arithmetic; never
+  member-vs-member); (3) party-line cohesion — % of roll calls where the member's cast vote
+  matched the majority position of their own party's cast votes on that roll call.
+  Neutrality wall unchanged: exact metric definitions published on the trust page (party
+  majority = strict majority of that party's yea/nay casts on the roll call; not-voting/absent
+  excluded from cohesion's numerator and denominator; ties = no majority = roll call excluded;
+  party = as recorded in our data, with that caveat published); identical math for everyone;
+  numbers only — no grades, no adjectives, no ranked lists of politicians, ever.
 
 ## 4. The bill page
 
