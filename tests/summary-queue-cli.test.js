@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs, PASSAGE_QUESTION_RE, isPassageVote, planQueue, pickCurrentTextRow, loadPlanState,
@@ -317,6 +317,18 @@ function fakeClient(resultsByTable, onCall) {
   };
 }
 
+// BILL_TEXT_CONTENT — the hash-pinned stored bill text every record-mode fixture below is
+// summarized FROM. Final whole-branch review, finding 5: the record gate now re-reads this content
+// and requires a non-empty stated_purpose to be a verbatim (whitespace-normalized) substring of it,
+// so a fixture that omits the content is a fixture asserting "we cannot verify the stated purpose"
+// — which is exactly the flag path, not the publish path. goodSummary's stated_purpose is printed
+// here verbatim, the way a real bill's own purpose section would be.
+const BILL_TEXT_CONTENT = 'SEC. 1. Does X.\nSEC. 2. Does Y.\n\nPURPOSE.—To do X and Y.\n';
+
+const textRow = (contentHash = 'h1', retrievedAt = '2026-01-01T00:00:00Z') => ({
+  content: BILL_TEXT_CONTENT, content_hash: contentHash, retrieved_at: retrievedAt,
+});
+
 const goodSummary = () => ({
   what_it_does: [{ point: 'Does X.', section: 'Sec. 1' }, { point: 'Does Y.', section: 'Sec. 2' }],
   stated_purpose: 'To do X and Y.',
@@ -377,7 +389,7 @@ test('classifyRecordItem: throws MissingBillTextError when no bill_texts row exi
 
 test('classifyRecordItem: throws TextHashMismatchError when the claimed hash does not match the current stored text', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1-DIFFERENT', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow('h1-DIFFERENT')], error: null },
   });
   await assert.rejects(
     () => classifyRecordItem(client, baseItem()),
@@ -394,8 +406,8 @@ test('classifyRecordItem: hash check uses the MOST RECENT bill_texts row when se
   const client = fakeClient({
     bill_texts: {
       data: [
-        { content_hash: 'h1-old', retrieved_at: '2026-01-01T00:00:00Z' },
-        { content_hash: 'h1', retrieved_at: '2026-01-05T00:00:00Z' },
+        textRow('h1-old', '2026-01-01T00:00:00Z'),
+        textRow('h1', '2026-01-05T00:00:00Z'),
       ],
       error: null,
     },
@@ -407,7 +419,7 @@ test('classifyRecordItem: hash check uses the MOST RECENT bill_texts row when se
 
 test('classifyRecordItem: alreadySummarized (draft/approved/published) at the matching hash short-circuits, no summary write attempted', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow()], error: null },
     summaries: { data: [{ id: 'sum-existing', status: 'approved', bill_text_hash: 'h1' }], error: null },
   });
   const decision = await classifyRecordItem(client, baseItem());
@@ -418,7 +430,7 @@ test('classifyRecordItem: alreadySummarized (draft/approved/published) at the ma
 
 test('classifyRecordItem: a REJECTED existing summary at the same hash does NOT block — proceeds to a write decision', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow()], error: null },
     summaries: { data: [{ id: 'sum-old', status: 'rejected', bill_text_hash: 'h1' }], error: null },
   });
   const decision = await classifyRecordItem(client, baseItem());
@@ -427,7 +439,7 @@ test('classifyRecordItem: a REJECTED existing summary at the same hash does NOT 
 
 test('classifyRecordItem: complete verdicts, all supported -> action publish, overall clean', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow()], error: null },
     summaries: { data: [], error: null },
   });
   const decision = await classifyRecordItem(client, baseItem());
@@ -437,7 +449,7 @@ test('classifyRecordItem: complete verdicts, all supported -> action publish, ov
 
 test('classifyRecordItem: complete verdicts, one unsupported -> action flagDraft, overall flagged', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow()], error: null },
     summaries: { data: [], error: null },
   });
   const verdicts = [
@@ -451,7 +463,7 @@ test('classifyRecordItem: complete verdicts, one unsupported -> action flagDraft
 
 test('classifyRecordItem: missing/incomplete verdicts -> action leaveUnverified, NEVER trusting a self-reported overall', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow()], error: null },
     summaries: { data: [], error: null },
   });
   for (const badVerdicts of [undefined, null, [], [{ bullet_index: 0, supported: true }]]) {
@@ -462,7 +474,7 @@ test('classifyRecordItem: missing/incomplete verdicts -> action leaveUnverified,
 
 test('classifyRecordItem: default author/verifier model labels come from summarizer.js/verifier.js constants; explicit overrides are respected', async () => {
   const client = fakeClient({
-    bill_texts: { data: [{ content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    bill_texts: { data: [textRow()], error: null },
     summaries: { data: [], error: null },
   });
   const d1 = await classifyRecordItem(client, baseItem());
@@ -674,7 +686,7 @@ test('autoPublishSummary: write order is approve-update, approve-note, publish-u
 
 function makeStatefulRecordClient() {
   const state = {
-    bill_texts: [{ bill_id: 'b1', content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }],
+    bill_texts: [{ bill_id: 'b1', ...textRow() }],
     summaries: [],
     summary_verifications: [],
     summary_notes: [],
@@ -831,4 +843,177 @@ test('loadPlanState: picks the most-recently-retrieved bill_texts row as "curren
   assert.equal(texts.length, 1);
   assert.equal(texts[0].content_hash, 'h-new');
   assert.equal(texts[0].length, 'new text'.length);
+});
+
+// ============================================================================================
+// FINAL WHOLE-BRANCH REVIEW (.superpowers/sdd/2026-07-29-profile-completeness/
+// final-review-findings.md), findings 4, 5 and 7 — the record gate.
+// ============================================================================================
+
+// ---- FINDING 4: the record gate bound verdicts to a summary by COUNT ONLY ----
+// classifyRecordItem checked verdict-array length, bullet_index uniqueness/range and
+// supported===true; nothing tied the verdicts to THIS summary, and the verdicts themselves were
+// never validated against VERIFY_SCHEMA (only the summary was schema-checked). A verdict set citing
+// another bill's sections auto-published and was stored verbatim in summary_verifications as the
+// permanent trust-model-v3 receipt.
+
+const oneBulletSummary = () => ({
+  what_it_does: [{ point: 'Does X.', section: 'Sec. 1' }],
+  stated_purpose: '',
+  classification: 'other',
+  referenced_terms: [],
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 4 — a verdict set whose sections cite ANOTHER bill is flagged, never published: VERIFY_SCHEMA already mandates the verifier COPY each section from the summary, and that binding is now enforced mechanically', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const crossBillVerdicts = [
+    { bullet_index: 0, section: 'Sec. 402', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 403', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: crossBillVerdicts }));
+  assert.equal(decision.action, 'flagDraft', 'a verification that never looked at this summary is a verification FAILURE, handled exactly like an unsupported verdict');
+  assert.equal(decision.overall, 'flagged');
+  assert.match(decision.gateReason, /Sec\. 402/);
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 4 — a hollow verdict carrying only bullet_index+supported (no section/reason/evidence_quote) is flagged, never published, even though assessVerdicts alone reads it as complete and clean', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const summary = oneBulletSummary();
+  const hollow = [{ bullet_index: 0, supported: true }];
+  const decision = await classifyRecordItem(client, baseItem({ summary, verdicts: hollow }));
+  assert.equal(decision.action, 'flagDraft');
+  assert.equal(decision.overall, 'flagged');
+  assert.match(decision.gateReason, /evidence_quote|section|reason/);
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 4 — a real, correctly-bound verdict set still publishes (the gate narrows nothing that was legitimately clean)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const decision = await classifyRecordItem(client, baseItem());
+  assert.equal(decision.action, 'publish');
+  assert.equal(decision.overall, 'clean');
+});
+
+// ---- FINDING 5: stated_purpose published with ZERO verdict coverage ----
+// renderMarkdown emits "**Stated purpose (from the bill):** ..." into anon-readable body_md, but
+// verdicts only ever cover what_it_does bullets — a fabricated stated_purpose published under a
+// clean-verification note. The mechanical-substring route: a non-empty stated_purpose must appear
+// verbatim in the hash-pinned stored text, whitespace runs collapsed on both sides and nothing else
+// normalized (facts-only).
+
+test('classifyRecordItem: FINAL REVIEW FINDING 5 — a stated_purpose that is a verbatim substring of the hash-pinned stored bill text publishes', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const summary = goodSummary();
+  summary.stated_purpose = 'To do X and Y.';
+  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  assert.equal(decision.action, 'publish');
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 5 — a PARAPHRASED stated_purpose (nowhere in the bill text) is flagged with an honest reason, never published under a clean-verification note', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const summary = goodSummary();
+  summary.stated_purpose = 'To improve the lives of hardworking families.';
+  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  assert.equal(decision.action, 'flagDraft', 'nothing mechanical covered this field before — it rendered into anon-readable body_md unchecked');
+  assert.equal(decision.overall, 'flagged');
+  assert.match(decision.gateReason, /stated_purpose/);
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 5 — line breaks and indentation in the stored bill text do not defeat the check (whitespace runs collapse on BOTH sides; nothing else is normalized)', async () => {
+  const client = fakeClient({
+    bill_texts: {
+      data: [{ content: 'SEC. 1. PURPOSE.\n    To do   X\n    and Y.\n', content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }],
+      error: null,
+    },
+    summaries: { data: [], error: null },
+  });
+  const summary = goodSummary();
+  summary.stated_purpose = 'To do X and Y.';
+  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  assert.equal(decision.action, 'publish');
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 5 — an EMPTY stated_purpose stays allowed (a bill that states no purpose is a real, honest shape; the schema itself says so)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const summary = goodSummary();
+  summary.stated_purpose = '';
+  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  assert.equal(decision.action, 'publish');
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 5 — a stored bill_texts row with no content at all cannot ground a non-empty stated_purpose, so it flags rather than publishing on an unverifiable field', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [{ content: null, content_hash: 'h1', retrieved_at: '2026-01-01T00:00:00Z' }], error: null },
+    summaries: { data: [], error: null },
+  });
+  const decision = await classifyRecordItem(client, baseItem());
+  assert.equal(decision.action, 'flagDraft');
+  assert.match(decision.gateReason, /stated_purpose/);
+});
+
+// ---- FINDING 7: a newline inside a what_it_does point injects extra public bullets ----
+// validateSummaryShape only required a non-empty string; renderMarkdown interpolates the point into
+// a `- ` line, so a point containing "\n- Repeals the Clean Air Act in full. (Sec. 9)" rendered TWO
+// citable public bullets while assessVerdicts counted ONE, and a point containing "\n\n**Stated
+// purpose (from the bill):** ..." forged a block no field ever held. Structural fields are
+// single-line by contract.
+
+test('validateSummaryShape: FINAL REVIEW FINDING 7 — a newline inside a what_it_does point is a shape failure (it renders a SECOND citable public bullet the verification record never covers)', () => {
+  const summary = goodSummary();
+  summary.what_it_does[0].point = 'Does X.\n- Repeals the Clean Air Act in full. (Sec. 9)';
+  assert.match(validateSummaryShape(summary), /what_it_does\[0\]\.point/);
+});
+
+test('validateSummaryShape: FINAL REVIEW FINDING 7 — a newline inside stated_purpose is a shape failure (the forged-stated-purpose-block probe)', () => {
+  const summary = goodSummary();
+  summary.stated_purpose = 'To do X and Y.\n\n**Stated purpose (from the bill):** To seize all private property.';
+  assert.match(validateSummaryShape(summary), /stated_purpose/);
+});
+
+test('validateSummaryShape: FINAL REVIEW FINDING 7 — a carriage return counts too, in a section as well as a point', () => {
+  const withPointCr = goodSummary();
+  withPointCr.what_it_does[1].point = 'Does Y.\r- Forged.';
+  assert.match(validateSummaryShape(withPointCr), /what_it_does\[1\]\.point/);
+
+  const withSectionNewline = goodSummary();
+  withSectionNewline.what_it_does[0].section = 'Sec. 1\nSec. 9';
+  assert.match(validateSummaryShape(withSectionNewline), /what_it_does\[0\]\.section/);
+});
+
+test('validateSummaryShape: FINAL REVIEW FINDING 7 — referenced_terms fields are single-line by contract too (they feed the glossary pipeline, which renders them elsewhere)', () => {
+  const withTermNewline = goodSummary();
+  withTermNewline.referenced_terms[0].term = 'Some Act\nOther Act';
+  assert.match(validateSummaryShape(withTermNewline), /referenced_terms\[0\]\.term/);
+
+  const withCitationNewline = goodSummary();
+  withCitationNewline.referenced_terms[0].citation_raw = '42 U.S.C. 1396b\n42 U.S.C. 9999';
+  assert.match(validateSummaryShape(withCitationNewline), /referenced_terms\[0\]\.citation_raw/);
+});
+
+test('validateSummaryShape: FINAL REVIEW FINDING 7 — a clean multi-bullet summary still passes; single-line is the only new constraint', () => {
+  assert.equal(validateSummaryShape(goodSummary()), null);
+});
+
+test('classifyRecordItem: FINAL REVIEW FINDING 7 — the newline injection is a SHAPE failure, so it takes the existing typed-reject path (MalformedSummaryError) before any DB read, never a flagged draft', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen — the shape reject fires before any read'));
+  const summary = goodSummary();
+  summary.what_it_does[0].point = 'Does X.\n- Repeals the Clean Air Act in full. (Sec. 9)';
+  await assert.rejects(() => classifyRecordItem(client, baseItem({ summary })), MalformedSummaryError);
 });

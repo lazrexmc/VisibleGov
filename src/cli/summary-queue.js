@@ -6,7 +6,7 @@ import {
   MODEL, PROMPT_VERSION, MAX_TEXT_CHARS, SUMMARY_SCHEMA, renderMarkdown,
 } from '../lib/summarizer.js';
 import {
-  VERIFIER_MODEL, VERIFY_PROMPT_VERSION, assessVerdicts,
+  VERIFIER_MODEL, VERIFY_PROMPT_VERSION, VERIFY_SCHEMA, assessVerdicts,
 } from '../lib/verifier.js';
 import { nextStatus, mapNoteAction } from '../review/server.js';
 import { persistReferencedTermsGracefully } from './summarize.js';
@@ -248,6 +248,20 @@ const REFERENCED_TERM_FIELDS = new Set(Object.keys(SUMMARY_SCHEMA.properties.ref
 const CLASSIFICATION_VALUES = new Set(SUMMARY_SCHEMA.properties.classification.enum);
 const REFERENCED_TERM_KINDS = new Set(SUMMARY_SCHEMA.properties.referenced_terms.items.properties.kind.enum);
 
+// FINAL WHOLE-BRANCH REVIEW, finding 7 (execution-proven probes): every structural field of a
+// summary is SINGLE-LINE by contract, and this is the only thing enforcing it. renderMarkdown
+// interpolates each what_it_does point straight into a `- ` line, so a point containing
+// '...\n- Repeals the Clean Air Act in full. (Sec. 9)' renders TWO citable public bullets while
+// assessVerdicts counts ONE — the published artifact carrying more content than the verification
+// record covers — and a point containing '...\n\n**Stated purpose (from the bill):** ...' forges a
+// stated-purpose block no field ever held. Rejecting the newline outright (rather than escaping or
+// stripping it at render time) keeps the stored fact and the rendered fact identical, which is the
+// whole point of the receipts model. referenced_terms fields are included because they are rendered
+// by the glossary pipeline downstream, on the same terms.
+function containsLineBreak(value) {
+  return typeof value === 'string' && /[\r\n]/.test(value);
+}
+
 // validateSummaryShape: mechanical re-check of a subagent's summary JSON against SUMMARY_SCHEMA's
 // actual shape (required fields, additionalProperties:false, enums) — derived FROM SUMMARY_SCHEMA
 // itself (not a hand-duplicated parallel list) so this validator can never silently drift out of
@@ -272,9 +286,12 @@ export function validateSummaryShape(summary) {
       if (!WHAT_IT_DOES_FIELDS.has(key)) return `summary.what_it_does[${i}] has an unexpected field: ${key}`;
     }
     if (typeof b.point !== 'string' || b.point.trim() === '') return `summary.what_it_does[${i}].point must be a non-empty string`;
+    if (containsLineBreak(b.point)) return `summary.what_it_does[${i}].point contains a line break — structural fields are single-line by contract (a newline here renders extra public bullets no verdict covers)`;
     if (typeof b.section !== 'string') return `summary.what_it_does[${i}].section must be a string`;
+    if (containsLineBreak(b.section)) return `summary.what_it_does[${i}].section contains a line break — structural fields are single-line by contract`;
   }
   if (typeof summary.stated_purpose !== 'string') return 'summary.stated_purpose must be a string';
+  if (containsLineBreak(summary.stated_purpose)) return 'summary.stated_purpose contains a line break — structural fields are single-line by contract (a newline here forges additional rendered blocks)';
   if (!CLASSIFICATION_VALUES.has(summary.classification)) {
     return `summary.classification must be one of: ${[...CLASSIFICATION_VALUES].join(', ')}`;
   }
@@ -286,8 +303,96 @@ export function validateSummaryShape(summary) {
       if (!REFERENCED_TERM_FIELDS.has(key)) return `summary.referenced_terms[${i}] has an unexpected field: ${key}`;
     }
     if (typeof t.term !== 'string' || t.term.trim() === '') return `summary.referenced_terms[${i}].term must be a non-empty string`;
+    if (containsLineBreak(t.term)) return `summary.referenced_terms[${i}].term contains a line break — structural fields are single-line by contract`;
     if (!REFERENCED_TERM_KINDS.has(t.kind)) return `summary.referenced_terms[${i}].kind must be one of: ${[...REFERENCED_TERM_KINDS].join(', ')}`;
     if (typeof t.citation_raw !== 'string') return `summary.referenced_terms[${i}].citation_raw must be a string`;
+    if (containsLineBreak(t.citation_raw)) return `summary.referenced_terms[${i}].citation_raw contains a line break — structural fields are single-line by contract`;
+  }
+  return null;
+}
+
+// ---- FINAL WHOLE-BRANCH REVIEW, findings 4 & 5: the two gates that stand between a subagent's
+// output and an AUTO-PUBLISHED, anon-readable artifact carrying a "clean adversarial verification"
+// note. Both are verification failures, not shape failures, so both route to flagDraft (the same
+// handling an unsupported verdict already gets) — never a crash, never a publish. ----
+
+const VERDICT_FIELDS = new Set(Object.keys(VERIFY_SCHEMA.properties.verdicts.items.properties));
+const VERDICT_REQUIRED = VERIFY_SCHEMA.properties.verdicts.items.required;
+
+// validateVerdictBinding — finding 4: classifyRecordItem bound verdicts to a summary by COUNT ONLY
+// (array length, bullet_index uniqueness/range, supported===true). Nothing tied the verdicts to
+// THIS summary, and — unlike the summary itself — the verdicts were never validated against their
+// own schema at all. Proven: a verdict set citing another bill's sections, or a hollow
+// [{bullet_index: 0, supported: true}], auto-published and was stored verbatim in
+// summary_verifications as the permanent trust-model-v3 receipt.
+//
+// Two mechanical requirements, both derived FROM VERIFY_SCHEMA rather than hand-duplicated (the
+// same anti-drift discipline validateSummaryShape applies to SUMMARY_SCHEMA):
+//   1. each verdict matches VERIFY_SCHEMA's item shape (required fields present, no extras, right
+//      primitive types) — a real Anthropic API call gets json_schema-enforced output for free; a
+//      subagent's text response gets no such guarantee, so this is the stand-in;
+//   2. each verdict's `section` equals the section of the bullet it names. VERIFY_SCHEMA already
+//      MANDATES the verifier copy that value from the summary ("The section cited by this bullet,
+//      copied from the summary") — this enforces the mandate instead of trusting it.
+// Matched by bullet_index, not array position: bullet_index is what assessVerdicts already
+// validated as a complete, gap-free, in-range bijection onto the bullets, so it — not the array's
+// incidental ordering — is the verdict's own claim about which bullet it verified.
+// Returns a human-readable reason string, or null if every verdict is well-shaped and bound.
+export function validateVerdictBinding(verdicts, whatItDoes) {
+  if (!Array.isArray(verdicts)) return 'verdicts must be an array';
+  for (let i = 0; i < verdicts.length; i += 1) {
+    const v = verdicts[i];
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return `verdicts[${i}] must be an object`;
+    for (const key of Object.keys(v)) {
+      if (!VERDICT_FIELDS.has(key)) return `verdicts[${i}] has an unexpected field: ${key}`;
+    }
+    for (const key of VERDICT_REQUIRED) {
+      if (!(key in v)) return `verdicts[${i}] is missing required field: ${key}`;
+    }
+    if (!Number.isInteger(v.bullet_index)) return `verdicts[${i}].bullet_index must be an integer`;
+    if (typeof v.section !== 'string') return `verdicts[${i}].section must be a string`;
+    if (typeof v.supported !== 'boolean') return `verdicts[${i}].supported must be a boolean`;
+    if (typeof v.reason !== 'string') return `verdicts[${i}].reason must be a string`;
+    if (typeof v.evidence_quote !== 'string') return `verdicts[${i}].evidence_quote must be a string`;
+    const bullet = whatItDoes[v.bullet_index];
+    if (!bullet) return `verdicts[${i}].bullet_index ${v.bullet_index} names no bullet in this summary`;
+    if (v.section !== bullet.section) {
+      return `verdicts[${i}] cites section "${v.section}" but what_it_does[${v.bullet_index}] cites "${bullet.section}" — this verdict is not bound to THIS summary's bullet`;
+    }
+  }
+  return null;
+}
+
+// collapseWhitespace — the ONLY normalization checkStatedPurposeGrounding applies, on BOTH sides.
+// Whitespace runs collapse to a single space (stored bill text wraps and indents; a purpose
+// sentence quoted out of it will not carry the same line breaks). Nothing else is normalized — no
+// case folding, no punctuation smoothing, no dash unification: facts-only means the words and
+// characters must actually be the bill's own.
+function collapseWhitespace(value) {
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+// checkStatedPurposeGrounding — finding 5: renderMarkdown emits "**Stated purpose (from the
+// bill):** ..." into anon-readable body_md, but verdicts only ever cover what_it_does bullets. NO
+// mechanical check of any kind covered stated_purpose, so a fabricated one published under a
+// clean-verification note. A non-empty stated_purpose must now appear verbatim (whitespace
+// collapsed) in the hash-pinned stored bill text — the same bill_texts row whose content_hash
+// classifyRecordItem has already re-verified against the item's claimed hash — or the gate refuses
+// to publish. An empty stated_purpose stays allowed: SUMMARY_SCHEMA itself says "empty string if
+// the bill states none," which is a real and honest shape.
+//
+// NOTE (ledgered, not a bug): the long-title inconsistency already recorded in this branch's
+// progress notes means some existing drafts whose stated_purpose paraphrases rather than quotes the
+// bill will flag on this. That is correct behavior — a paraphrase is precisely what nothing was
+// checking. Returns a reason string, or null when the purpose is grounded (or empty).
+export function checkStatedPurposeGrounding(statedPurpose, billTextContent) {
+  const needle = collapseWhitespace(statedPurpose ?? '');
+  if (needle === '') return null;
+  if (typeof billTextContent !== 'string' || billTextContent === '') {
+    return 'summary.stated_purpose is non-empty but the stored bill text carries no content to ground it against — refusing to publish an unverifiable field';
+  }
+  if (!collapseWhitespace(billTextContent).includes(needle)) {
+    return `summary.stated_purpose is not a verbatim substring of the hash-pinned stored bill text — nothing in the trust chain covers this field, so an ungrounded purpose is never published: "${needle}"`;
   }
   return null;
 }
@@ -371,7 +476,10 @@ export async function classifyRecordItem(client, item) {
   if (shapeError) throw new MalformedSummaryError(`summary for bill ${identifier}: ${shapeError}`, { billId });
   checkCitationsPresent(summary.what_it_does);
 
-  const { data: textRows, error: tErr } = await client.from('bill_texts').select('content_hash,retrieved_at').eq('bill_id', billId);
+  // `content` (final whole-branch review, finding 5): the stated-purpose grounding check reads the
+  // SAME row whose content_hash is re-verified two lines below — one query, one pinned text, so the
+  // purpose can only ever be checked against the exact bytes the hash covers.
+  const { data: textRows, error: tErr } = await client.from('bill_texts').select('content,content_hash,retrieved_at').eq('bill_id', billId);
   if (tErr) throw new Error(`bill_texts lookup failed for bill ${identifier}: ${tErr.message}`);
   const currentText = pickCurrentTextRow(textRows ?? []);
   if (!currentText) {
@@ -413,6 +521,23 @@ export async function classifyRecordItem(client, item) {
   // row is ever mislabeled 'flagged' just because the verifier's OUTPUT was broken.
   const { complete, overall } = assessVerdicts(item.verdicts, summary.what_it_does.length);
   if (!complete) return { action: 'leaveUnverified', ...base };
+
+  // FINAL WHOLE-BRANCH REVIEW, findings 4 & 5: two further mechanical gates stand between a
+  // complete verdict set and an auto-publish. Both run AFTER the completeness gate for a reason —
+  // an incomplete verdict set already lands in 'leaveUnverified' (a plain draft, nothing published,
+  // no summary_verifications row written), so these only ever need to decide whether a verdict set
+  // that PASSED completeness is trustworthy enough to publish behind. A failure of either is a
+  // verification failure, not a shape failure: flagDraft, overall 'flagged' (never the re-derived
+  // 'clean', which is precisely the claim being refused), with the reason carried through to the
+  // operator's report rather than dropped.
+  const gateReason = validateVerdictBinding(item.verdicts, summary.what_it_does)
+    ?? checkStatedPurposeGrounding(summary.stated_purpose, currentText.content);
+  if (gateReason) {
+    return {
+      action: 'flagDraft', ...base, verdicts: item.verdicts, overall: 'flagged', gateReason,
+    };
+  }
+
   if (overall === 'clean') return { action: 'publish', ...base, verdicts: item.verdicts, overall };
   return { action: 'flagDraft', ...base, verdicts: item.verdicts, overall };
 }
@@ -496,7 +621,10 @@ export async function applyRecordDecision(client, runId, decision) {
 
   if (decision.action === 'flagDraft') {
     return {
-      outcome: 'flaggedDraft', billId, summaryId, termsUpserted, warning,
+      // gateReason (final whole-branch review, findings 4 & 5): non-null only when a MECHANICAL
+      // gate — not the verifier's own verdicts — is what refused publication. Carried out of here
+      // so main() can print it: a gate that fires silently is a gate nobody can audit.
+      outcome: 'flaggedDraft', billId, summaryId, termsUpserted, warning, gateReason: decision.gateReason ?? null,
     };
   }
 
@@ -520,6 +648,10 @@ function describeDecision(decision) {
     identifier: decision.identifier ?? decision.billId,
     would: OUTCOME_BY_ACTION[decision.action],
     summary_id: decision.action === 'alreadySummarized' ? decision.summaryId : null,
+    // gate_reason (final whole-branch review, findings 4 & 5): why a mechanical gate refused to
+    // publish, surfaced in the --dry-run preview too — the operator sees the same reason before a
+    // live run that the live run itself will report.
+    gate_reason: decision.gateReason ?? null,
   };
 }
 
@@ -593,6 +725,11 @@ async function main() {
 
   const runId = await openRun(client, 'summary-queue-record');
   const failures = [];
+  // gated (final whole-branch review, findings 4 & 5): every item a MECHANICAL gate refused to
+  // publish, with its reason. Not a failure (the draft was still written, honestly, as a flagged
+  // draft) and not silence either — a gate whose reason never reaches the operator's output is a
+  // gate nobody can audit or act on.
+  const gated = [];
   const outcomes = {
     alreadySummarized: 0, unverifiedDraft: 0, flaggedDraft: 0, published: 0,
   };
@@ -601,17 +738,20 @@ async function main() {
       try {
         const result = await recordOne(client, runId, item);
         outcomes[result.outcome] += 1;
+        if (result.gateReason) gated.push({ bill_id: result.billId, summary_id: result.summaryId, reason: result.gateReason });
       } catch (err) {
         if (isTypedFailure(err)) failures.push({ bill_id: item?.bill_id ?? null, error: err.name, message: err.message });
         else throw err;
       }
     }
 
-    const counts = { total: results.length, ...outcomes, failures: failures.length };
+    const counts = {
+      total: results.length, ...outcomes, gated: gated.length, failures: failures.length,
+    };
     const status = failures.length === 0 ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, { counts, failures });
+    await closeRun(client, runId, status, { counts, failures, gated });
     console.log(JSON.stringify({
-      mode: 'live', run_id: runId, status, counts, failures,
+      mode: 'live', run_id: runId, status, counts, gated, failures,
     }, null, 2));
     if (failures.length > 0) process.exitCode = 2;
   } catch (err) {
