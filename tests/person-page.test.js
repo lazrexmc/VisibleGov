@@ -6,6 +6,7 @@ import {
   idFromPath, buildOneLinerMap, joinFlagBadges, relevantFreshnessRows,
   loadVotesSection, renderIdentity, paginationSummary, nextVoteFilters,
   isNumericStatusCode, renderSponsorships, renderPhoto, loadFreshnessSection,
+  mountProfile,
 } from '../site/js/person-page.js';
 import { _setFetch, _setConfig } from '../site/js/rest.js';
 
@@ -669,6 +670,16 @@ test('loadVotesSection: LOW-10 — empty legislatorIds renders the honest empty 
   assert.notEqual(container.querySelector('.section-state-empty'), null);
 });
 
+// NEW-C(a) (task review, fix round 3 micro-round, cosmetic): the message must name the ACTUAL
+// reason — "no legislator records linked" is a different, more accurate fact than "no votes
+// matched this filter" (which wrongly implies a normal query ran and simply found nothing).
+test('loadVotesSection: NEW-C(a) — the empty-legislatorIds message names the real reason, not a filter-shaped one', async () => {
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: [], filters: {} });
+  assert.equal(container.textContent.includes('No legislator records are linked to this profile.'), true);
+  assert.equal(container.textContent.includes('No recorded votes for this filter.'), false);
+});
+
 // MED-5: a filter/page change while a PRIOR loadVotesSection call is still in flight is a real
 // race — network responses can resolve OUT OF ORDER. Without a generation guard, whichever call
 // resolves LAST wins the render even if it's the stale one, leaving the vote list mismatched
@@ -726,4 +737,118 @@ test('loadVotesSection: MED-5 — a caller that omits voteGeneration (e.g. a dir
   const container = document.createElement('section');
   await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
   assert.equal(container.querySelectorAll('.vote-row').length, 1);
+});
+
+// ============================================================================
+// Fix round 3 micro-round (re-review, opus) — 3 new findings in round 3's own new coupling.
+// ============================================================================
+
+function mountSections() {
+  return {
+    identity: document.createElement('section'),
+    voteFilters: document.createElement('div'),
+    votes: document.createElement('section'),
+    sponsorships: document.createElement('section'),
+    freshness: document.createElement('section'),
+  };
+}
+
+// NEW-A (MED-LOW): loadIdentitySection's own onRetry used to bypass loadIdentityThenFreshness —
+// re-running ONLY identity, never freshness. Reviewer's proven scenario: terms fetch 500s, BOTH
+// sections fail; user clicks IDENTITY's own retry button (not freshness's); identity recovers,
+// but freshness stayed stranded forever on "Couldn't determine this profile's jurisdictions"
+// despite terms now being in hand. Fixed: identity's onRetry now points at
+// loadIdentityThenFreshness too, so either button recovers both sections.
+test('mountProfile: NEW-A — identity\'s OWN retry button also un-fails freshness (the reviewer\'s exact stranded-freshness scenario)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  let termsShouldFail = true;
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/terms?')) {
+      if (termsShouldFail) {
+        return {
+          ok: false, status: 500, json: async () => ({ message: 'boom' }), headers: { get: () => null },
+        };
+      }
+      return emptyOkResponse();
+    }
+    if (u.includes('/public_vote_feed?')) return voteFeedResponse([]);
+    if (u.includes('/bill_sponsors?')) return emptyOkResponse();
+    if (u.includes('/public_freshness?')) return emptyOkResponse();
+    return emptyOkResponse();
+  });
+
+  const sections = mountSections();
+  await mountProfile(sections, {
+    person: null,
+    legislators: [{
+      id: 'leg-1', full_name: 'Jane Doe', bioguide_id: null, image_url: null,
+    }],
+  });
+
+  // Both sections start out failed: identity's own fetch failed, and freshness never learned
+  // its terms (null), which loadFreshnessSection renders as 'failed', not the empty claim.
+  assert.notEqual(sections.identity.querySelector('.section-state-failed'), null, 'identity starts failed');
+  assert.notEqual(sections.freshness.querySelector('.section-state-failed'), null, 'freshness starts failed (terms unknown)');
+
+  // "Fix the network", then click IDENTITY's own retry — NOT freshness's.
+  termsShouldFail = false;
+  const identityRetryBtn = sections.identity.querySelector('button');
+  assert.notEqual(identityRetryBtn, null);
+  identityRetryBtn.click();
+  await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+  assert.equal(sections.identity.querySelector('.section-state-failed'), null, 'identity itself recovers');
+  assert.equal(
+    sections.freshness.querySelector('.section-state-failed'),
+    null,
+    'freshness must ALSO recover from identity\'s retry button, not stay stranded on "jurisdictions unknown"',
+  );
+});
+
+// NEW-B (LOW): round 3 accidentally serialized the vote feed behind public_freshness (the
+// centerpiece waited on a secondary section's round-trip: order became terms -> freshness ->
+// votes, was terms -> votes -> ... -> freshness). Fixed: freshness is STARTED right after
+// identity but not awaited before votes starts — proven here by deferring freshness's own fetch
+// resolution indefinitely and confirming the votes fetch still fires (tri-state semantics
+// unchanged: freshness still receives exactly terms-or-null, only the ordering vs. votes moved).
+test('mountProfile: NEW-B — the votes fetch fires even while freshness\'s fetch is still pending (freshness must not block the centerpiece)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const callOrder = [];
+  let releaseFreshness;
+  const freshnessGate = new Promise((resolve) => { releaseFreshness = resolve; });
+
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/terms?')) return emptyOkResponse();
+    if (u.includes('/public_freshness?')) {
+      callOrder.push('freshness-fetch-started');
+      await freshnessGate; // deliberately held open until the test releases it
+      callOrder.push('freshness-fetch-resolved');
+      return emptyOkResponse();
+    }
+    if (u.includes('/public_vote_feed?')) {
+      callOrder.push('votes-fetch-fired');
+      return voteFeedResponse([]);
+    }
+    if (u.includes('/bill_sponsors?')) return emptyOkResponse();
+    return emptyOkResponse();
+  });
+
+  const sections = mountSections();
+  const mountPromise = mountProfile(sections, {
+    person: null,
+    legislators: [{
+      id: 'leg-1', full_name: 'Jane Doe', bioguide_id: null, image_url: null,
+    }],
+  });
+
+  // Give every microtask a chance to run EXCEPT freshness's, which is deliberately stuck.
+  await new Promise((resolve) => { setTimeout(resolve, 30); });
+  assert.equal(callOrder.includes('votes-fetch-fired'), true, 'the votes fetch must fire even though freshness has not resolved yet');
+  assert.equal(callOrder.includes('freshness-fetch-resolved'), false, 'freshness genuinely has not resolved at this checkpoint — this is not a race artifact');
+
+  releaseFreshness();
+  await mountPromise;
+  assert.equal(callOrder.includes('freshness-fetch-resolved'), true, 'freshness still completes once released — nothing was dropped, only the ordering vs. votes changed');
 });

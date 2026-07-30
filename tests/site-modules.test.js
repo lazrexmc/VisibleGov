@@ -8,6 +8,7 @@ import {
 } from '../site/js/rest.js';
 import {
   el, clearChildren, sectionState, mountFooter, UnsafeAttributeError, InvalidSectionStateError,
+  isSafeSrc,
 } from '../site/js/render.js';
 import { voteReceiptUrl, photoUrl, officialBillUrl } from '../site/js/receipts.js';
 import {
@@ -269,6 +270,28 @@ test('el: src guard rejects protocol-relative ("//evil.com/x.jpg") the same as h
 test('el: src guard rejects a plain http: URL and a scheme-less relative path (https-only, no relative allowance)', () => {
   assert.throws(() => el('img', { src: 'http://example.com/x.jpg' }), UnsafeAttributeError);
   assert.throws(() => el('img', { src: '/img/local.jpg' }), UnsafeAttributeError);
+});
+
+// Fix round 3 micro-round (task review, NEW-C(b)): isSafeSrc is the non-throwing predicate form
+// of the exact same guard el()'s src handling uses above — a caller that wants to CHECK a src
+// before ever attempting to render it (person-page.js's renderPhoto) gets ONE copy of this
+// security rule, not a second lookalike one.
+test('isSafeSrc: a genuine https url is safe', () => {
+  assert.equal(isSafeSrc('https://unitedstates.github.io/images/congress/450x550/O000177.jpg'), true);
+});
+
+test('isSafeSrc: http/javascript/data/protocol-relative/relative are all unsafe (matches el()\'s own rejections above)', () => {
+  assert.equal(isSafeSrc('http://example.com/x.jpg'), false);
+  assert.equal(isSafeSrc('javascript:alert(1)'), false);
+  assert.equal(isSafeSrc('data:image/svg+xml,<svg onload=alert(1)>'), false);
+  assert.equal(isSafeSrc('//evil.com/x.jpg'), false);
+  assert.equal(isSafeSrc('/img/local.jpg'), false);
+});
+
+test('isSafeSrc: non-string input is unsafe (never throws)', () => {
+  assert.equal(isSafeSrc(null), false);
+  assert.equal(isSafeSrc(undefined), false);
+  assert.equal(isSafeSrc(42), false);
 });
 
 test('el: real DOM node children are appended as-is, not stringified', () => {

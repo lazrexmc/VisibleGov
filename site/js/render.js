@@ -83,6 +83,22 @@ function assertSafeUrlAttr(tag, attr, value, allowedSchemes, { allowRelative }) 
   }
 }
 
+// Fix round 3 micro-round (task review, NEW-C(b)): a non-throwing predicate version of the src
+// guard, for callers that want to CHECK a src BEFORE ever attempting to render it (e.g.
+// person-page.js's renderPhoto, which needs to fall back to a no-photo state rather than throw).
+// Reuses assertSafeUrlAttr's EXACT logic (control-char stripping, protocol-relative rejection,
+// scheme allowlist) instead of a lookalike copy — one copy of every security rule, not two that
+// could quietly drift apart.
+export function isSafeSrc(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    assertSafeUrlAttr('img', 'src', value, ALLOWED_SRC_SCHEMES, { allowRelative: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // attrs allowlist: class/href/id/dataset/src/alt only. Anything starting with "on" (event
 // handlers), any non-allowlisted key, and any href/src outside its own scheme allowlist above all
 // throw a typed UnsafeAttributeError — a DB string can never become an attribute that executes.

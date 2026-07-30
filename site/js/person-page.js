@@ -17,7 +17,7 @@ import {
   pagedFetch, fetchAllRows, restGet,
 } from './rest.js';
 import {
-  el, clearChildren, sectionState, mountFooter,
+  el, clearChildren, sectionState, mountFooter, isSafeSrc,
 } from './render.js';
 import { voteReceiptUrl, photoUrl } from './receipts.js';
 import { extractOneLiner } from './summary-parse.js';
@@ -185,9 +185,14 @@ function billHref(billId, identifierOrTitle) {
 // bioguide derivation) ever failed that guard, el() would THROW mid-render. Checked here, BEFORE
 // el() is ever called, rather than caught after the fact, so a bad photo URL degrades to the
 // honest no-photo state instead of taking the whole identity render down with it.
+//
+// Fix round 3 micro-round (task review, NEW-C(b)): this used to carry a private
+// `/^https:\/\//i` regex duplicating render.js's own src security rule. Now consumes render.js's
+// exported isSafeSrc — the SAME control-char-stripping/protocol-relative-rejection/scheme-check
+// logic el() itself enforces, not a second copy that could quietly drift out of sync with it.
 export function renderPhoto(container, legislatorLike, displayName) {
   const url = photoUrl(legislatorLike);
-  if (url && /^https:\/\//i.test(url)) {
+  if (url && isSafeSrc(url)) {
     container.appendChild(el('img', { class: 'profile-photo', src: url, alt: displayName || 'photo' }));
     return;
   }
@@ -368,7 +373,15 @@ function renderFreshness(container, rows) {
 // career").
 // ============================================================================
 
-async function loadIdentitySection(container, { person, legislators, legislatorIds }) {
+// `reload` (fix round 3 micro-round, NEW-A): the caller supplies what "retry" means here, rather
+// than this function self-recursing on its own narrow inputs. mountProfile passes
+// loadIdentityThenFreshness — NOT a bare re-call of loadIdentitySection — so that clicking
+// IDENTITY's OWN retry button ALSO re-attempts freshness. Before this, identity's retry only
+// re-ran identity itself: proven stranded case (task review) — terms fetch 500s, both identity
+// and freshness fail; user clicks IDENTITY's retry; identity recovers but freshness stays stuck
+// on "Couldn't determine this profile's jurisdictions" forever, even though terms are now in
+// hand. Both retry buttons must lead back to the same place.
+async function loadIdentitySection(container, { person, legislators, legislatorIds, reload }) {
   sectionState(container, { state: 'loading' });
   try {
     const terms = legislatorIds.length > 0
@@ -382,9 +395,7 @@ async function loadIdentitySection(container, { person, legislators, legislatorI
     sectionState(container, {
       state: 'failed',
       message: "Couldn't load this legislator's identity — retry",
-      // LOW-6 (task review, fix round 3): catch-wrapped like votes' `reload` — a retry-triggered
-      // network failure must never surface as an unhandled rejection.
-      onRetry: () => { loadIdentitySection(container, { person, legislators, legislatorIds }).catch(() => {}); },
+      onRetry: reload,
     });
     throw err;
   }
@@ -421,8 +432,11 @@ export async function loadVotesSection(container, { legislatorIds, filters, vote
   // LOW-10 (task review, fix round 3): no legislator ids at all -> nothing to honestly query. An
   // empty in.() is either a PostgREST error or an accidental match-everything depending on exact
   // syntax — never fire it; this is an honest empty result, not a fetch that needs to happen.
+  // NEW-C(a) (task review, fix round 3 micro-round): the message must name the ACTUAL reason —
+  // this isn't a filtered-away result ("this filter" implies a normal query just found nothing),
+  // it's that no legislator row is even linked to query in the first place.
   if (!legislatorIds || legislatorIds.length === 0) {
-    sectionState(container, { state: 'empty', message: 'No recorded votes for this filter.' });
+    sectionState(container, { state: 'empty', message: 'No legislator records are linked to this profile.' });
     return {
       rows: [], total: 0, page: filters.page || 1, pageSize: 50,
     };
@@ -605,17 +619,40 @@ export async function loadFreshnessSection(container, { terms, onTermsUnknownRet
 export async function mountProfile(sections, { person, legislators }) {
   const legislatorIds = (legislators || []).map((l) => l.id);
 
-  // MED-2: bundled so freshness's own retry button can re-attempt BOTH identity and freshness —
-  // freshness alone has no fetch that could ever recover a null `terms` on its own.
-  async function loadIdentityThenFreshness() {
-    const identityResult = await loadIdentitySection(sections.identity, { person, legislators, legislatorIds }).catch(() => ({ terms: null }));
-    await loadFreshnessSection(sections.freshness, {
-      terms: identityResult.terms,
+  // loadIdentity/loadFreshness are split out (rather than one inline block) so the INITIAL mount
+  // below can interleave votes between them (NEW-B), while BOTH retry buttons still funnel
+  // through the single loadIdentityThenFreshness composition (NEW-A) — `function` declarations
+  // so the three can reference each other regardless of textual definition order (hoisted).
+  async function loadIdentity() {
+    return loadIdentitySection(sections.identity, {
+      person, legislators, legislatorIds, reload: () => { loadIdentityThenFreshness().catch(() => {}); },
+    }).catch(() => ({ terms: null }));
+  }
+  async function loadFreshness(terms) {
+    return loadFreshnessSection(sections.freshness, {
+      terms,
       onTermsUnknownRetry: () => { loadIdentityThenFreshness().catch(() => {}); },
     }).catch(() => {});
-    return identityResult.terms;
   }
-  await loadIdentityThenFreshness();
+  // MED-2 + NEW-A: the RETRY-time composition — both identity's own retry AND freshness's own
+  // retry point HERE, so either button recovers both sections. (Freshness has no fetch of its
+  // own that could ever discover terms without identity re-running first; before this fix,
+  // identity's retry bypassed freshness entirely, leaving it stranded on "Couldn't determine
+  // this profile's jurisdictions" even after identity itself recovered.)
+  async function loadIdentityThenFreshness() {
+    const { terms } = await loadIdentity();
+    await loadFreshness(terms);
+    return terms;
+  }
+
+  // NEW-B: the INITIAL mount must not let votes (the page's centerpiece) wait on freshness's
+  // round-trip. Identity is awaited first (both votes' legislatorIds and freshness's terms
+  // conceptually follow it), but freshness is only STARTED here, not awaited — it proceeds
+  // concurrently with votes/sponsorships below (still gets exactly terms-or-null, same tri-state
+  // semantics as always; only the ordering relative to votes changed) and is awaited once, at
+  // the very end, so mountProfile's own returned promise still reflects every section settling.
+  const { terms } = await loadIdentity();
+  const freshnessLoad = loadFreshness(terms);
 
   const filters = { chamber: null, year: null, missedOnly: false, page: 1 };
   const voteGeneration = { current: 0 };
@@ -626,6 +663,7 @@ export async function mountProfile(sections, { person, legislators }) {
   await runVotes();
 
   await loadSponsorshipsSection(sections.sponsorships, { legislatorIds }).catch(() => {});
+  await freshnessLoad;
 }
 
 // Wires the filter controls (chamber select, year select/input, missed-votes checkbox) to
