@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  additivePatch, isMissingRelationError, isMissingColumnError, selectAll,
+  additivePatch, isMissingRelationError, isMissingColumnError, isCheckConstraintViolation, selectAll,
 } from '../src/lib/db.js';
 
 test('additivePatch never overwrites a set field, even when values differ', () => {
@@ -76,6 +76,34 @@ test('isMissingColumnError does not false-positive on a different missing column
 
 test('isMissingColumnError is false for a null/absent error', () => {
   assert.equal(isMissingColumnError(null, 'mo_house_id'), false);
+});
+
+// ---- isCheckConstraintViolation (Task 2 fix round 1: backfill-mo-bill-meta.js's pre-0015
+// tolerance — a live run reaching a widened sponsor_type value before migration 0015 lands must
+// name the pending migration, not crash or get lumped in with an unrelated failure) ----
+
+test('isCheckConstraintViolation recognizes a raw Postgres check_violation (23514)', () => {
+  const err = { code: '23514', message: 'new row for relation "bill_sponsors" violates check constraint "bill_sponsors_sponsor_type_check"' };
+  assert.equal(isCheckConstraintViolation(err, 'bill_sponsors_sponsor_type_check'), true);
+});
+
+test('isCheckConstraintViolation matches on message text alone when .code was stripped', () => {
+  const err = new Error('upsert failed: new row for relation "bill_sponsors" violates check constraint "bill_sponsors_sponsor_type_check"');
+  assert.equal(isCheckConstraintViolation(err, 'bill_sponsors_sponsor_type_check'), true);
+});
+
+test('isCheckConstraintViolation does not false-positive on an unrelated error', () => {
+  const err = { code: 'ECONNRESET', message: 'network error' };
+  assert.equal(isCheckConstraintViolation(err, 'bill_sponsors_sponsor_type_check'), false);
+});
+
+test('isCheckConstraintViolation does not false-positive on a different constraint', () => {
+  const err = { code: '23514', message: 'new row for relation "bills" violates check constraint "bills_status_check"' };
+  assert.equal(isCheckConstraintViolation(err, 'bill_sponsors_sponsor_type_check'), false);
+});
+
+test('isCheckConstraintViolation is false for a null/absent error', () => {
+  assert.equal(isCheckConstraintViolation(null, 'bill_sponsors_sponsor_type_check'), false);
 });
 
 // ---- selectAll (final-review finding 1: unbounded .select() calls silently truncate at

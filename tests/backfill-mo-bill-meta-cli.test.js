@@ -113,18 +113,26 @@ test('readCachedDatasetBills: an injected readFileFn that throws is honestly rep
   assert.deepEqual(decoded, { ok: false, filePath: 'anything.json' });
 });
 
-// ---- mapSponsorType (pure — verified against both real fixtures, see module header comment) ----
+// ---- mapSponsorType (pure — Task 2 fix round 1: all four values verified against LegiScan's own
+// API manual, tests/fixtures/research/legiscan/LegiScan_API_User_Manual.pdf page 42, "Static
+// Values > Sponsor Types" table, independently re-extracted via pdfjs-dist — not the two committed
+// dataset fixtures alone, which only ever show 1/2) ----
 
-test('mapSponsorType: 1 -> primary, 2 -> cosponsor (the only two values observed in either real fixture)', () => {
+test('mapSponsorType: 1 -> primary, 2 -> cosponsor (the only two values observed in either real dataset fixture)', () => {
   assert.equal(mapSponsorType(1), 'primary');
   assert.equal(mapSponsorType(2), 'cosponsor');
 });
 
-test('mapSponsorType: any other value (0 = None, 3 = Joint Sponsor per LegiScan\'s own docs — confirmed present in the wider live cache by pre-flight scan) maps to null — never guessed, never forced into migration 0014\'s check constraint', () => {
-  assert.equal(mapSponsorType(0), null);
-  assert.equal(mapSponsorType(3), null);
+test('mapSponsorType: 0 -> unspecified, 3 -> joint (LegiScan\'s own "Sponsor (Generic / Unspecified)" and "Joint Sponsor" — absent from the two small fixtures but real in the wider 31-file live cache, migration 0015\'s whole reason for existing)', () => {
+  assert.equal(mapSponsorType(0), 'unspecified');
+  assert.equal(mapSponsorType(3), 'joint');
+});
+
+test('mapSponsorType: a value genuinely outside LegiScan\'s documented {0,1,2,3} maps to null — never guessed, never forced into migration 0015\'s widened check constraint', () => {
+  assert.equal(mapSponsorType(4), null);
   assert.equal(mapSponsorType(999), null);
   assert.equal(mapSponsorType(undefined), null);
+  assert.equal(mapSponsorType(null), null);
 });
 
 // ---- extractBillSponsorCandidates (pure — real fixture data) ----
@@ -262,9 +270,15 @@ test('loadSponsorIndex: an unrelated DB error is thrown, never silently swallowe
 // ---- fake write-only client: .from(table).update(patch).eq(col,val) / .upsert(row, opts) ----
 // ---- (reads are injected directly as pre-built index Maps in the orchestration tests below) ----
 
-function makeFakeWriteClient() {
+// rejectSponsorTypes — fix round 1: simulates migration 0015 NOT yet applied. Any bill_sponsors
+// upsert whose sponsor_type is in this set fails with a real-shaped Postgres check_violation
+// (23514), the same error a live run would actually hit against the OLD, narrower
+// bill_sponsors_sponsor_type_check constraint — lets the pre-0015 tolerance path be tested without
+// a real DB.
+function makeFakeWriteClient({ rejectSponsorTypes = [] } = {}) {
   const tables = { bills: [], bill_sponsors: [] };
   const calls = [];
+  const rejectSet = new Set(rejectSponsorTypes);
   return {
     calls,
     tables,
@@ -282,6 +296,14 @@ function makeFakeWriteClient() {
           calls.push({
             op: 'upsert', table, row, opts,
           });
+          if (table === 'bill_sponsors' && rejectSet.has(row.sponsor_type)) {
+            return Promise.resolve({
+              error: {
+                code: '23514',
+                message: 'new row for relation "bill_sponsors" violates check constraint "bill_sponsors_sponsor_type_check"',
+              },
+            });
+          }
           tables[table].push({ id: `bs-${tables[table].length + 1}`, ...row });
           return Promise.resolve({ error: null });
         },
@@ -352,6 +374,7 @@ test('runBackfillMoBillMeta: --dry-run performs the bulk index loads but zero wr
     sponsorLegislatorNotFound: 0,
     sponsorAlreadyExists: 0,
     sponsorGated: 0,
+    sponsorType0015Gated: 0,
     sponsorInserted: 0,
     cacheMissing: 1,
   });
@@ -547,12 +570,12 @@ test('runBackfillMoBillMeta: migration 0014 unapplied — every sponsor candidat
   assert.deepEqual(client.calls.filter((c) => c.table === 'bill_sponsors'), [], 'zero bill_sponsors writes attempted once gated');
 });
 
-test('runBackfillMoBillMeta: an unrecognized sponsor_type_id is a typed, counted skip — never guessed, and never even reaches the legislator index', async () => {
+test('runBackfillMoBillMeta: a sponsor_type_id genuinely outside LegiScan\'s documented {0,1,2,3} is a typed, counted skip — never guessed, and never even reaches the legislator index (0/1/2/3 are now all mapped, per fix round 1 — this uses 99, never observed anywhere)', async () => {
   const files = ['a.json'];
   const listFilesFn = () => files;
   const readDatasetFn = async () => fakeDataset({
     sessionId: 1608,
-    bills: [billFixture({ billNumber: 'HB1', status: null, sponsors: [{ people_id: 100, sponsor_type_id: 3 }] })],
+    bills: [billFixture({ billNumber: 'HB1', status: null, sponsors: [{ people_id: 100, sponsor_type_id: 99 }] })],
   });
   const client = makeFakeWriteClient();
   const loadSessionIndexFn = async () => new Map([[1608, { id: 'sess-1608' }]]);
@@ -695,12 +718,124 @@ test('runBackfillMoBillMeta: zero cache files found (cache dir missing/empty) ->
     sponsorLegislatorNotFound: 0,
     sponsorAlreadyExists: 0,
     sponsorGated: 0,
+    sponsorType0015Gated: 0,
     sponsorInserted: 0,
     cacheMissing: 0,
   });
   assert.equal(report.cacheFilesFound, 0);
   assert.deepEqual(client.calls, []);
   assert.equal(loadsCalled, 4);
+});
+
+// ---- fix round 1: sponsorTypeBreakdown (requirement 3) + pre-0015 tolerance (requirement 2) ----
+
+test('runBackfillMoBillMeta: sponsorTypeBreakdown reports the real per-type composition of the source data (all 4 widened-enum types), in BOTH dry-run and live mode, independent of match/write outcome — an unmatched-legislator candidate still counts toward its type, a genuinely-unknown type does not', async () => {
+  const files = ['a.json'];
+  const listFilesFn = () => files;
+  const readDatasetFn = async () => fakeDataset({
+    sessionId: 1608,
+    bills: [billFixture({
+      billNumber: 'HB1',
+      status: null,
+      sponsors: [
+        { people_id: 100, sponsor_type_id: 1 }, // primary
+        { people_id: 200, sponsor_type_id: 2 }, // cosponsor
+        { people_id: 300, sponsor_type_id: 3 }, // joint
+        { people_id: 400, sponsor_type_id: 0 }, // unspecified
+        { people_id: 999, sponsor_type_id: 1 }, // primary, unmatched legislator — still in the breakdown
+        { people_id: 500, sponsor_type_id: 77 }, // genuinely unknown — excluded from the breakdown
+      ],
+    })],
+  });
+  const loadSessionIndexFn = async () => new Map([[1608, { id: 'sess-1608' }]]);
+  const loadLegislatorIndexFn = async () => new Map([
+    [100, 'leg-100'], [200, 'leg-200'], [300, 'leg-300'], [400, 'leg-400'],
+  ]);
+  const loadBillIndexFn = async () => new Map([
+    [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-hb1', status: null }],
+  ]);
+  const loadSponsorIndexFn = async () => ({ gated: false, index: new Map() });
+  const deps = {
+    listFilesFn, readDatasetFn, loadSessionIndexFn, loadLegislatorIndexFn, loadBillIndexFn, loadSponsorIndexFn,
+  };
+  const expectedBreakdown = {
+    primary: 2, cosponsor: 1, joint: 1, unspecified: 1,
+  };
+
+  const dryReport = await runBackfillMoBillMeta(makeFakeWriteClient(), { dryRun: true, ...deps });
+  assert.deepEqual(dryReport.sponsorTypeBreakdown, expectedBreakdown);
+
+  const liveReport = await runBackfillMoBillMeta(makeFakeWriteClient(), { dryRun: false, runId: 'run-1', ...deps });
+  assert.deepEqual(liveReport.sponsorTypeBreakdown, expectedBreakdown);
+});
+
+test('runBackfillMoBillMeta: pre-0015 tolerance — a live "joint"/"unspecified" insert that 23514s against the OLD (0014-only) check constraint is caught and named sponsorType0015Gated, never thrown; primary/cosponsor writes are completely unaffected; the gate (once discovered by ANY widened-type candidate) short-circuits every later widened-type candidate without a further live query', async () => {
+  const files = ['a.json'];
+  const listFilesFn = () => files;
+  const readDatasetFn = async () => fakeDataset({
+    sessionId: 1608,
+    bills: [billFixture({
+      billNumber: 'HB1',
+      status: null,
+      sponsors: [
+        { people_id: 100, sponsor_type_id: 1 }, // primary — always succeeds
+        { people_id: 200, sponsor_type_id: 3 }, // joint — 23514s live, discovers the gate
+        { people_id: 300, sponsor_type_id: 3 }, // joint — short-circuited, no 2nd live attempt
+        { people_id: 400, sponsor_type_id: 0 }, // unspecified — ALSO short-circuited by the SAME gate
+      ],
+    })],
+  });
+  const client = makeFakeWriteClient({ rejectSponsorTypes: ['joint', 'unspecified'] });
+  const loadSessionIndexFn = async () => new Map([[1608, { id: 'sess-1608' }]]);
+  const loadLegislatorIndexFn = async () => new Map([
+    [100, 'leg-100'], [200, 'leg-200'], [300, 'leg-300'], [400, 'leg-400'],
+  ]);
+  const loadBillIndexFn = async () => new Map([
+    [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-hb1', status: null }],
+  ]);
+  const loadSponsorIndexFn = async () => ({ gated: false, index: new Map() }); // 0014 IS applied
+
+  const report = await runBackfillMoBillMeta(client, {
+    dryRun: false,
+    runId: 'run-1',
+    listFilesFn,
+    readDatasetFn,
+    loadSessionIndexFn,
+    loadLegislatorIndexFn,
+    loadBillIndexFn,
+    loadSponsorIndexFn,
+  });
+
+  assert.equal(report.counts.sponsorInserted, 1, 'only the primary sponsor actually wrote');
+  assert.equal(report.counts.sponsorType0015Gated, 3, 'joint x2 + unspecified x1, all named as the 0015 gate');
+  assert.equal(report.counts.sponsorGated, 0, 'this is NOT the 0014 whole-table gate — that one is unaffected');
+  const sponsorUpserts = client.calls.filter((c) => c.op === 'upsert' && c.table === 'bill_sponsors');
+  assert.equal(sponsorUpserts.length, 2, 'exactly 2 live attempts: the successful primary + the FIRST joint (which fails and discovers the gate) — the second joint and the unspecified candidate never re-attempt a live write');
+});
+
+test('runBackfillMoBillMeta: pre-0015 tolerance does not apply in dry-run — dry-run never attempts a write, so it cannot discover the constraint; joint/unspecified candidates land in plan.sponsorInserts like any other, a documented dry-run limitation', async () => {
+  const files = ['a.json'];
+  const listFilesFn = () => files;
+  const readDatasetFn = async () => fakeDataset({
+    sessionId: 1608,
+    bills: [billFixture({ billNumber: 'HB1', status: null, sponsors: [{ people_id: 200, sponsor_type_id: 3 }] })],
+  });
+  const client = makeFakeWriteClient({ rejectSponsorTypes: ['joint'] });
+  const loadSessionIndexFn = async () => new Map([[1608, { id: 'sess-1608' }]]);
+  const loadLegislatorIndexFn = async () => new Map([[200, 'leg-200']]);
+  const loadBillIndexFn = async () => new Map([
+    [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-hb1', status: null }],
+  ]);
+  const loadSponsorIndexFn = async () => ({ gated: false, index: new Map() });
+
+  const report = await runBackfillMoBillMeta(client, {
+    dryRun: true, listFilesFn, readDatasetFn, loadSessionIndexFn, loadLegislatorIndexFn, loadBillIndexFn, loadSponsorIndexFn,
+  });
+
+  assert.equal(report.counts.sponsorType0015Gated, 0);
+  assert.equal(report.plan.sponsorInserts.length, 1);
+  assert.equal(report.plan.sponsorInserts[0].sponsorType, 'joint');
+  assert.deepEqual(client.calls, [], 'zero writes reachable from dry-run, so the 23514 is never even seen');
 });
 
 // ---- real end-to-end file decode (no live DB — empty index maps, just proving the FILE side of

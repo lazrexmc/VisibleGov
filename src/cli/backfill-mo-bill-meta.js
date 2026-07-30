@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import {
-  getClient, openRun, closeRun, additivePatch, isMissingRelationError, selectAll,
+  getClient, openRun, closeRun, additivePatch, isMissingRelationError, isCheckConstraintViolation, selectAll,
 } from '../lib/db.js';
 import { decodeDatasetZip, extractDatasetFiles, normalizeBillIdentifier } from '../adapters/legiscan-dataset.js';
 import { listCachedDatasetFiles } from './backfill-nicknames.js';
@@ -61,16 +61,33 @@ import { listCachedDatasetFiles } from './backfill-nicknames.js';
 // matching, never fuzzy matching, anywhere. An unmatched people_id is an honest count
 // (`sponsorLegislatorNotFound`), never guessed.
 //
-// SPONSOR TYPE (verified against the fixtures, not assumed): every sponsor record in BOTH real
-// committed fixtures (tests/fixtures/research/legiscan/dataset-2018/MO and
-// tests/fixtures/research/legiscan/dataset-2018-1608/MO, 27+11 = 38 sponsor entries across 27
-// bills) carries `sponsor_type_id`, taking only the values 1 (27 occurrences, always
-// sponsor_order:1) or 2 (11 occurrences, always sponsor_order>=2). Mapped mechanically: 1 ->
-// 'primary', 2 -> 'cosponsor' (migration 0014's own check constraint only allows those two values
-// anyway). A live pre-flight scan of all 31 real cached archives confirmed 0 and 3 (LegiScan's own
-// documented "None"/"Joint Sponsor" values) DO occur in the wider live data even though neither
-// fixture shows them — any value other than 1/2 is a typed, counted skip (`sponsorTypeUnknown`),
-// never forced into the constraint, never guessed.
+// SPONSOR TYPE (fix round 1, 2026-07-29 — verified, not assumed): the two committed fixtures only
+// ever show `sponsor_type_id` 1 (27 occurrences, always sponsor_order:1) or 2 (11 occurrences,
+// always sponsor_order>=2) — a live pre-flight scan of all 31 real cached archives found the FIRST
+// dry-run against production actually surfaced 0 and 3 too (8,124 of 45,792 real MO sponsorships,
+// ~18% — see task-2-report.md), both silently discarded as `sponsorTypeUnknown` in the original
+// pass. Rather than trust memory for what those mean, the mapping below was re-verified straight
+// from the primary source: LegiScan's own API manual (tests/fixtures/research/legiscan/LegiScan_
+// API_User_Manual.pdf, page 42, "Static Values > Sponsor Types" table, independently re-extracted
+// via pdfjs-dist for this fix round — not copied from a prior session's notes) prints exactly:
+//   0 = "Sponsor (Generic / Unspecified)"   1 = "Primary Sponsor"
+//   2 = "Co-Sponsor"                         3 = "Joint Sponsor"
+// Migration 0015 (controller-drafted, draft-then-apply) widens bill_sponsors.sponsor_type's check
+// constraint to match: ('primary','cosponsor','joint','unspecified'). All FOUR now-verified values
+// map mechanically (SPONSOR_TYPE_MAP below) — nothing is discarded as unknown anymore. Only a value
+// genuinely outside {0,1,2,3} (never observed anywhere, not in LegiScan's own documented lookup) is
+// still a typed, counted skip (`sponsorTypeUnknown`) — the distinction the brief draws as "fail loud
+// on genuinely unknown, never on known-but-unmapped": every KNOWN LegiScan sponsor type now has a
+// mapped destination, so "known-but-unmapped" can no longer happen.
+//
+// PRE-0015 TOLERANCE: `loadSponsorIndex`'s own bulk SELECT can only detect the 0014 whole-table gate
+// (a CHECK constraint says nothing until something actually violates it) — so a live run reaching a
+// 'joint'/'unspecified' sponsor row before migration 0015 lands will hit the OLD, narrower
+// `bill_sponsors_sponsor_type_check` constraint on that specific INSERT (Postgres 23514). This is
+// caught (`isCheckConstraintViolation`, src/lib/db.js) and named honestly as its own gated state
+// (`sponsorType0015Gated`) — distinct from the 0014 table-missing gate, never a crash, never lumped
+// in with an unrelated failure. 'primary'/'cosponsor' rows are unaffected either way (both migrations
+// always allow them) — only 'joint'/'unspecified' candidates are held back pre-0015.
 //
 // STATUS (never invented): ingest-legiscan.js's own ensureLegiscanBillRows comment states it
 // plainly — "LegiScan's own `status` is a numeric lifecycle code (no house-style label mapping
@@ -134,13 +151,20 @@ export async function readCachedDatasetBills(filePath, { readFileFn = readFileSy
   }
 }
 
-// ---- sponsor field mapping (verified against both real fixtures — see header comment) ----
+// ---- sponsor field mapping (verified against LegiScan's own API manual — see SPONSOR TYPE header
+// comment; migration 0015 widens bill_sponsors.sponsor_type to match all four) ----
 
-const SPONSOR_TYPE_MAP = { 1: 'primary', 2: 'cosponsor' };
+const SPONSOR_TYPE_MAP = {
+  0: 'unspecified', 1: 'primary', 2: 'cosponsor', 3: 'joint',
+};
 
 export function mapSponsorType(sponsorTypeId) {
   return SPONSOR_TYPE_MAP[sponsorTypeId] ?? null;
 }
+
+// The bill_sponsors.sponsor_type check constraint's own name (migrations 0014/0015) — named here
+// once so isCheckConstraintViolation's call site and any test both reference the same literal.
+const SPONSOR_TYPE_CHECK_CONSTRAINT = 'bill_sponsors_sponsor_type_check';
 
 // extractBillSponsorCandidates — one bill's `sponsors[]` -> raw { peopleId, sponsorTypeId } pairs,
 // UNFILTERED and UNMAPPED (unlike extractNicknamePeople's redundancy filter in backfill-nicknames.js
@@ -227,8 +251,22 @@ function emptyCounts() {
     sponsorLegislatorNotFound: 0,
     sponsorAlreadyExists: 0,
     sponsorGated: 0,
+    // sponsorType0015Gated — fix round 1, pre-0015 tolerance: a 'joint'/'unspecified' candidate
+    // that hit the OLD (0014-only) check constraint live (Postgres 23514), honestly named apart
+    // from the 0014 whole-table gate above. 'primary'/'cosponsor' candidates never land here.
+    sponsorType0015Gated: 0,
     sponsorInserted: 0,
     cacheMissing: 0,
+  };
+}
+
+// emptySponsorTypeBreakdown — fix round 1, requirement 3: composition of the SOURCE data by
+// LegiScan's own sponsor type, independent of match/write outcome, so an operator can see what a
+// live run would actually be writing before authorizing it. Populated in both dry-run and live
+// mode (cheap, pure counting — unlike `plan`, which is deliberately dry-run-only).
+function emptySponsorTypeBreakdown() {
+  return {
+    primary: 0, cosponsor: 0, joint: 0, unspecified: 0,
   };
 }
 
@@ -245,6 +283,7 @@ export async function runBackfillMoBillMeta(client, {
 } = {}) {
   const files = listFilesFn(cacheDir);
   const counts = emptyCounts();
+  const sponsorTypeBreakdown = emptySponsorTypeBreakdown();
   const plan = { statusPatches: [], sponsorInserts: [] };
   const sessionsSeen = new Set();
 
@@ -256,6 +295,12 @@ export async function runBackfillMoBillMeta(client, {
   const sponsorLoad = await loadSponsorIndexFn(client);
   let sponsorGatedForRun = sponsorLoad.gated;
   const sponsorIndex = sponsorLoad.index;
+  // sponsorType0015Missing — set the first time a live 'joint'/'unspecified' insert 23514s against
+  // the OLD constraint (see PRE-0015 TOLERANCE header comment). Unlike sponsorGatedForRun (decided
+  // up front by a SELECT), this can only be discovered by an actual write attempt, so it starts
+  // false even in a run where migration 0015 turns out to be unapplied — the first candidate of
+  // either new type pays for the discovery, every later one is short-circuited.
+  let sponsorType0015Missing = false;
 
   for (const filePath of files) {
     // eslint-disable-next-line no-await-in-loop -- sequential, same "small/infrequent backlog"
@@ -294,11 +339,13 @@ export async function runBackfillMoBillMeta(client, {
         }
       }
 
-      // --- sponsors: insert-if-absent, migration-0014-gated (see loadSponsorIndex) ---
+      // --- sponsors: insert-if-absent, migration-0014-gated (see loadSponsorIndex) and
+      // migration-0015-tolerant (see PRE-0015 TOLERANCE header comment) ---
       for (const { peopleId, sponsorTypeId } of extractBillSponsorCandidates(bill)) {
         counts.sponsorsSeen += 1;
         const sponsorType = mapSponsorType(sponsorTypeId);
         if (!sponsorType) { counts.sponsorTypeUnknown += 1; continue; }
+        sponsorTypeBreakdown[sponsorType] += 1; // composition of the source data, both modes
 
         const legislatorId = legislatorIndex.get(peopleId);
         if (!legislatorId) { counts.sponsorLegislatorNotFound += 1; continue; }
@@ -314,6 +361,10 @@ export async function runBackfillMoBillMeta(client, {
           });
           continue;
         }
+
+        const isWidenedType = sponsorType === 'joint' || sponsorType === 'unspecified';
+        if (isWidenedType && sponsorType0015Missing) { counts.sponsorType0015Gated += 1; continue; }
+
         // eslint-disable-next-line no-await-in-loop
         const { error: insErr } = await client.from('bill_sponsors')
           .upsert({
@@ -323,6 +374,11 @@ export async function runBackfillMoBillMeta(client, {
           if (isMissingRelationError(insErr, 'bill_sponsors')) {
             sponsorGatedForRun = true;
             counts.sponsorGated += 1;
+            continue;
+          }
+          if (isWidenedType && isCheckConstraintViolation(insErr, SPONSOR_TYPE_CHECK_CONSTRAINT)) {
+            sponsorType0015Missing = true;
+            counts.sponsorType0015Gated += 1;
             continue;
           }
           throw new Error(`backfill-mo-bill-meta: sponsor insert failed for bill_id=${billRow.id} legislator_id=${legislatorId}: ${insErr.message}`);
@@ -336,6 +392,7 @@ export async function runBackfillMoBillMeta(client, {
   return {
     mode: dryRun ? 'dry-run' : 'live',
     counts,
+    sponsorTypeBreakdown,
     cacheFilesFound: files.length,
     sessionsSeen: [...sessionsSeen],
     plan: dryRun ? plan : undefined,
@@ -362,7 +419,9 @@ async function main() {
   const runId = await openRun(client, SOURCE);
   try {
     const report = await runBackfillMoBillMeta(client, { dryRun: false, runId });
-    await closeRun(client, runId, 'succeeded', { counts: report.counts, cacheFilesFound: report.cacheFilesFound });
+    await closeRun(client, runId, 'succeeded', {
+      counts: report.counts, sponsorTypeBreakdown: report.sponsorTypeBreakdown, cacheFilesFound: report.cacheFilesFound,
+    });
     console.log(JSON.stringify({ source: SOURCE, run_id: runId, ...report }, null, 2));
   } catch (err) {
     await closeRun(client, runId, 'failed', { error: String(err) });

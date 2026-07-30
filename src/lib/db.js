@@ -121,3 +121,20 @@ export function isMissingColumnError(error, column) {
   if (code === 'PGRST204' || code === '42703') return mentionsColumn;
   return mentionsColumn && (msg.includes('does not exist') || msg.includes('could not find'));
 }
+
+// Detects a Postgres CHECK constraint violation (23514) for a NAMED constraint — same
+// code-primary/message-corroborated shape as isMissingRelationError/isMissingColumnError above, so
+// a caller can tell "this specific constraint rejected the row" apart from every other kind of DB
+// error without re-deriving the pattern. First use: src/cli/backfill-mo-bill-meta.js's pre-0015
+// tolerance — a live run that reaches a widened-enum value (e.g. bill_sponsors.sponsor_type =
+// 'joint'/'unspecified') before migration 0015 lands hits the OLD, narrower check constraint;
+// this lets that be caught and named (which migration is still pending) rather than crashing the
+// whole run or being lumped in with an unrelated failure.
+export function isCheckConstraintViolation(error, constraintName) {
+  if (!error) return false;
+  const code = error.code;
+  const msg = String(error.message || '').toLowerCase();
+  const mentionsConstraint = msg.includes(constraintName.toLowerCase());
+  if (code === '23514') return mentionsConstraint;
+  return mentionsConstraint && msg.includes('violates check constraint');
+}
