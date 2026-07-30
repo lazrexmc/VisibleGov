@@ -746,3 +746,35 @@ Menu presented after the clean final review; Lance chose local merge. Fast-forwa
 full suite re-run on the merged tree (1220/1220), pushed, branch deleted. TODO NOW advanced to
 Plan 3 (public site, profile-first) — interactive brainstorm with Lance is the next step, no
 code before it.
+
+## 2026-07-30 (evening) — the public site, built end-to-end in a day
+
+Plan 3 executed: eleven tasks (10 build + data completeness), all through the serialized
+implementer→reviewer→fix-round machinery. The site is feature-complete on branch public-site:
+
+- **Profile pages** — identity with all affiliations, 1,850-cast paginated vote lists with
+  plain-language one-liners and receipts, sponsorships, freshness boxes, and Lance's
+  vote-aggregate charts (distribution + party comparison + party-line cohesion), every number
+  hand-verified against the raw views.
+- **Directory + address lookup** — "who represents me" works: the Capitol address returns the
+  real Jefferson City legislators, the privacy contract renders verbatim, the geocode call is a
+  no-logging POST pass-through.
+- **Bill pages** — printed results beside recorded tallies (never reconciled), verified
+  summaries with per-bullet citations and verification receipts, deterministic multi-citation
+  glossary, reconciliation-flag badges.
+- **Trust page** — the pipeline explained in sentences fact-checked against the code (one
+  overclaim caught and rewritten), metric definitions single-sourced from the chart module,
+  full attribution incl. LegiScan CC-BY and congress-legislators CC0.
+
+Review machinery highlights: a fabricated 100% party-cohesion score caught before it ever
+rendered (party-string normalization); the controller's own ruling corrected twice by reviewers
+(Democratic vs Democrat; the Jan-3 date synthesis proven false against Payne's real service and
+replaced, at Lance's direction, with the congress-legislators real-dates source); an address-leak
+path through a *failure* branch; an XSS bypass via embedded tab; and a flag badge that could
+never render, caught only because the re-reviewer executed the construction instead of trusting
+a green suite. Suite: 1220 → 1686 tests.
+
+Data landed along the way: 193 MO terms (address lookup's backbone), 441 real names replacing
+bioguide codes, 893 federal terms with real service dates, at-large districts, three applied
+migrations (0016/0017/0018+a). Remaining Lance items: Cloudflare console (T7), the MO
+status-code correction approval, and the merge menu after the final whole-branch review.
