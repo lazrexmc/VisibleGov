@@ -56,14 +56,18 @@ the actual record, in plain language where a verified summary exists, with zero 
 Data flow (parallel anon fetches):
 - Identity: person + person_links + legislator rows (or the single row); display_name as stored
   (mechanical precedence — never edited client-side); party/chamber/district from the most
-  recent term; career span from all terms across MO + federal; photo URL derived from
-  bioguide_id at render time (the ruled no-column decision) with a clean no-photo fallback for
-  state-only careers.
+  recent term; career span from all terms across MO + federal; photo from
+  `legislators.image_url` where a source provided one, else derived from bioguide_id at render
+  time (the ruled no-NEW-column decision), else a clean no-photo state.
 - Votes: `vote_casts` for all linked legislator ids, paginated newest-first (50/page), each row
-  embedding vote → bill (identifier, title). Position rendered **as printed**: yea / nay /
-  not voting / absent — never collapsed or reinterpreted. Where the bill has a **published**
-  summary, its one-line plain-language description renders under the bill title; absent that,
-  the title alone — no gap-filling.
+  embedding vote → bill (identifier, title). Newest-first crosses the cast→vote join
+  (`vote_casts` carries no date; `votes.vote_date` does) — use PostgREST embedded ordering if it
+  holds up, else 0016 adds a narrow `public_vote_feed` view (cast + vote_date denormalized);
+  decide at plan time, never client-side sorting of partial pages. Position rendered exactly
+  **as the source recorded it** (the stored vocabulary: yea / nay / not_voting / absent) —
+  never collapsed or reinterpreted. Where the bill has a **published** summary, its one-line
+  plain-language description renders under the bill title; absent that, the title alone — no
+  gap-filling.
 - Sponsored bills: `bill_sponsors` for the linked ids, embedding bill + status; sponsor_type
   labeled honestly (primary / cosponsor / joint / unspecified — the 0015 vocabulary, as the
   source printed it).
@@ -130,8 +134,10 @@ missing:
 - A `public_person_links` view exposing only (person_id, legislator_id) — the site needs the
   mapping, not the evidence payloads or decided_by; the full audit trail stays internal and the
   trust page describes it in prose instead.
-- A `public_freshness` view over ingestion_runs exposing source, status, finished_at only —
-  run internals stay internal (the slice-1 final-review item 10d, finally built).
+- A `public_freshness` view over ingestion_runs exposing source, status, finished_at, and the
+  quarantined-day count (extracted from the latest run's detail JSON in the view SQL — the
+  count only, never the detail payload) — §3's freshness box reads exactly this surface; run
+  internals stay internal (the slice-1 final-review item 10d, finally built).
 - A reconciliation-flags read surface (view) exposing the flag's factual content (vote, nature
   of discrepancy, sources) minus any internal notes.
 - A `public_verification_notes` view over summary_verifications exposing (summary_id,
@@ -174,5 +180,6 @@ full-text search beyond the client-side directory filter, historical-boundary ad
 Lance's own definition of finished: "users can look up any politician and see their info."
 Concretely for v1: any of the 1,576 legislator rows (or their merged persons) resolves to a
 profile URL that renders identity, votes with receipts, and sponsorships from the live DB; an
-address in Missouri returns its three representatives; every rendered fact can be clicked
-through to the official record; the whole thing costs $0/month.
+address in Missouri returns all five of its people (two U.S. senators, one U.S. representative,
+one MO senator, one MO representative); every rendered fact can be clicked through to the
+official record; the whole thing costs $0/month.
