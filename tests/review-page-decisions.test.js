@@ -390,3 +390,77 @@ test('identity tab: decision buttons are restored (not left stuck disabled) when
   assert.equal(afterState.keepSeparateDisabled, false, 'a 409 does not call loadIdentityQueue() — the finally block restores it directly');
   assert.equal(afterState.linkDisabled, true, 'still zero candidates selected');
 });
+
+// ============================================================================
+// Identity tab — Task 4 (attach-to-existing): the 'Attach' button only ever becomes available on
+// an attach_candidate flag (existing_person set), and needs only 1+ selected candidates (contrast
+// 'Link's 2+ minimum). Drives the REAL shipped postIdentityDecision/getIdentityButtonState — same
+// discipline as the two tests above, not a hand-copied reimplementation.
+// ============================================================================
+
+test('identity tab: attach button stays disabled on a normal (non-attach) flag even with candidates selected, and enables with just ONE selection on an attach_candidate flag', async () => {
+  const normalItem = {
+    id: 'flag-1',
+    cluster_key: 'jones:leg-a,leg-b',
+    reason: 'ambiguous_era',
+    created_at: '2026-01-01T00:00:00Z',
+    candidates: [
+      {
+        legislator_id: 'leg-a', full_name: 'Robert Jones', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+    ],
+  };
+  const { document, hooks } = loadPage(makeFetchMock(identityQueueMocks(normalItem)));
+  await hooks.loadIdentityQueue();
+  document.querySelector('#identity-table-body input[type=checkbox]').click();
+  assert.equal(hooks.getIdentityButtonState().attachDisabled, true, 'no existing_person on this flag -> attach never becomes available, no matter what is selected');
+
+  const attachItem = {
+    id: 'flag-2',
+    cluster_key: 'attach:person-onder-1:leg-fifth',
+    reason: 'attach_candidate',
+    created_at: '2026-01-01T00:00:00Z',
+    existing_person: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+    candidates: [
+      {
+        legislator_id: 'leg-fifth', full_name: 'Robert Onder', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+    ],
+  };
+  const { document: doc2, hooks: hooks2 } = loadPage(makeFetchMock(identityQueueMocks(attachItem)));
+  await hooks2.loadIdentityQueue();
+  assert.equal(hooks2.getIdentityButtonState().attachDisabled, true, 'zero candidates selected yet');
+  doc2.querySelector('#identity-table-body input[type=checkbox]').click();
+  assert.equal(hooks2.getIdentityButtonState().attachDisabled, false, 'ONE selected candidate is enough on an attach_candidate flag — contrast link\'s 2+ minimum');
+  assert.equal(hooks2.getIdentityButtonState().linkDisabled, true, 'link still needs 2+, unaffected by attach\'s lower threshold');
+  assert.equal(doc2.getElementById('identity-meta').textContent.indexOf('Robert F. Onder') !== -1, true, 'the meta line names the real attach target, never invented');
+});
+
+test('identity tab: clicking Attach posts person_id from the flag\'s own existing_person + the selected legislator_ids', async () => {
+  const attachItem = {
+    id: 'flag-2',
+    cluster_key: 'attach:person-onder-1:leg-fifth',
+    reason: 'attach_candidate',
+    created_at: '2026-01-01T00:00:00Z',
+    existing_person: { personId: 'person-onder-1', displayName: 'Robert F. Onder' },
+    candidates: [
+      {
+        legislator_id: 'leg-fifth', full_name: 'Robert Onder', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+    ],
+  };
+  const mock = makeFetchMock([
+    ...identityQueueMocks(attachItem),
+    { match: (url) => url === '/api/identity/decision', respond: () => ({ body: { person_id: 'person-onder-1', resolved: true } }) },
+  ]);
+  const { document, hooks } = loadPage(mock);
+  await hooks.loadIdentityQueue();
+  document.querySelector('#identity-table-body input[type=checkbox]').click();
+  await hooks.postIdentityDecision('attach');
+
+  const decisionCalls = postCallsTo(mock.calls, '/api/identity/decision');
+  assert.equal(decisionCalls.length, 1);
+  assert.deepEqual(decisionCalls[0].body, {
+    flag_id: 'flag-2', action: 'attach', note: '', legislator_ids: ['leg-fifth'], person_id: 'person-onder-1',
+  });
+});

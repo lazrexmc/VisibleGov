@@ -3,6 +3,7 @@ import {
 } from '../lib/db.js';
 import {
   clusterLegislators, pickDisplayName, rowNameVariantMatch, auditClusterCoherence,
+  surnameKey, finalPairStatus, buildMemberEvidence,
 } from '../lib/person-identity.js';
 
 // link-persons — Task 1 of docs/superpowers/plans/2026-07-29-identity-merge.md. Loads every
@@ -76,6 +77,19 @@ export async function loadIdentityFlags(client) {
   const { data, error } = await selectAll(client, IDENTITY_FLAGS_TABLE, 'id,cluster_key,evidence');
   if (error) throw new Error(`${IDENTITY_FLAGS_TABLE} lookup failed: ${error.message}`);
   return data ?? [];
+}
+
+// loadPersons — Task 4 (attach-to-existing): every existing `persons` row's own display_name, the
+// EXACT text an attach_candidate flag's evidence must cite ("evidence carries the existing
+// person_id + display_name", the brief's own words) — never re-derived via pickDisplayName over
+// the person's member rows, which would risk silently disagreeing with the actual persisted value
+// (e.g. if a future correction path ever hand-edits display_name directly). selectAll — whole-table
+// by design, same convention as loadLegislators/loadTerms/loadIdentityFlags (persons is small,
+// 7 rows live today, nowhere near the 1000-row cap, but the convention is followed regardless).
+export async function loadPersons(client) {
+  const { data, error } = await selectAll(client, PERSONS_TABLE, 'id,display_name');
+  if (error) throw new Error(`${PERSONS_TABLE} lookup failed: ${error.message}`);
+  return new Map((data ?? []).map((p) => [p.id, p.display_name]));
 }
 
 // ---- pure-ish assembly: legislators rows + terms rows -> clusterLegislators's own `rows` input ----
@@ -219,6 +233,118 @@ export function applyKeepSeparateRulings(clusters, keepSeparatePairs) {
     }
   }
   return { cleanClusters, downgradedFlags };
+}
+
+// ---- attach pass (Task 4, .superpowers/sdd/2026-07-29-profile-completeness/task-4-brief.md):
+// the identity system's missing path. Every prior wave only ever compared UNLINKED rows against
+// OTHER unlinked rows in the SAME batch (clusterLegislators, above) — a returning legislator whose
+// new session/source row arrives ALONE (no sibling unlinked row to pair with in this run, which is
+// the deadline scenario itself: the Jan 2027 session rollover mints one fresh row per returning
+// legislator, each alone) never had anything to compare against and simply stayed a singleton
+// forever, never rejoining the person they already belong to. This pass closes that gap: every
+// SINGLETON unlinked row (clusterLegislators' own `singletons` output — deliberately scoped this
+// narrowly, not every unlinked row; a row that already found a same-run cluster partner or landed
+// in a matcher flag has its own resolution path already in flight, and folding it into attach too
+// would risk presenting Lance two competing, confusing suggestions for the same row in the same
+// run) is compared against every ALREADY-LINKED person's member rows, using finalPairStatus — the
+// SAME pairwise matcher + evidence-compatibility rules clusterLegislators itself uses (Global
+// Constraints: "reuse matcher primitives verbatim — no parallel matching logic"). NEVER
+// auto-attaches: a qualifying match only ever emits an attach_candidate identity_flag; Lance's own
+// 'attach' decision (src/review/server.js) is the sole place person_id is written for this path.
+
+// groupAlreadyLinkedByPerson — pure re-shaping, zero matching: already-linked rows (buildEvidenceRows
+// -shaped, each carrying its own `.evidence` array) bucketed by person_id.
+export function groupAlreadyLinkedByPerson(alreadyLinkedRows) {
+  const groups = new Map();
+  for (const row of alreadyLinkedRows ?? []) {
+    if (row.person_id == null) continue; // defensive — every row this function is ever called with is already-linked by construction
+    if (!groups.has(row.person_id)) groups.set(row.person_id, []);
+    groups.get(row.person_id).push(row);
+  }
+  return groups;
+}
+
+// buildAttachCandidates — the pure matcher core. surnameKey pre-filters exactly the way
+// clusterLegislators' own grouping does (a broad, permissive gate — finalPairStatus is the real
+// narrowing); a person P qualifies as an attach TARGET for singleton row X iff: (a) NO member of P
+// returns 'contradiction' against X (a hard structural fact vetoes the whole person outright, never
+// partially — the same doctrine as a cluster-internal contradiction flagging the whole group); (b)
+// at least one member of P returns 'compatible' or 'ambiguous' against X (a real, non-vacuous
+// name+evidence edge — every member returning 'no-pair' means nothing licenses the suggestion at
+// all); and (c) no keep-separate ruling (buildKeepSeparatePairs) exists between X and ANY member of
+// P — final-wave item 2's own binding, extended to gate this new path exactly as it already gates
+// the auto-cluster path. A ruling against even ONE member vetoes the whole person, never just that
+// member: every member of an already-linked person is, by construction, the SAME person, so "X is
+// not Y" is transitively "X is not P" regardless of how X compares to P's OTHER members.
+export function buildAttachCandidates(singletonRows, alreadyLinkedRows, keepSeparatePairs) {
+  const personGroups = groupAlreadyLinkedByPerson(alreadyLinkedRows);
+  const results = [];
+  for (const singleton of singletonRows ?? []) {
+    const key = surnameKey(singleton);
+    if (!key) continue; // no derivable name at all -> never a candidate, same as clusterLegislators' own singleton sweep
+    for (const [personId, members] of personGroups) {
+      const sameKeyMembers = members.filter((m) => surnameKey(m) === key);
+      if (sameKeyMembers.length === 0) continue;
+
+      const blockedByRuling = sameKeyMembers.some((m) => keepSeparatePairs.has(pairKey(singleton.id, m.id)));
+      if (blockedByRuling) continue;
+
+      let hasContradiction = false;
+      const matchedMembers = [];
+      for (const member of sameKeyMembers) {
+        const status = finalPairStatus(singleton, member);
+        if (status === 'contradiction') { hasContradiction = true; break; }
+        if (status === 'compatible' || status === 'ambiguous') {
+          matchedMembers.push({ legislatorId: member.id, fullName: member.full_name, status });
+        }
+      }
+      if (hasContradiction || matchedMembers.length === 0) continue;
+
+      results.push({ legislatorId: singleton.id, personId, matchedMembers });
+    }
+  }
+  return results;
+}
+
+// buildAttachClusterKey — deterministic over (personId, candidate id SET), the same
+// buildClusterKey-shaped convention used everywhere else in this file, prefixed 'attach:' so it can
+// never collide with a normal surname-keyed cluster_key.
+function buildAttachClusterKey(personId, candidateIds) {
+  return `attach:${personId}:${[...candidateIds].sort().join(',')}`;
+}
+
+// buildAttachFlags — groups buildAttachCandidates' own (singleton, person) pairs BY person (one
+// attach_candidate flag per already-linked person with 1+ qualifying new candidates, not one flag
+// per pair — mirrors 'link's own per-subset review shape: Lance sees every currently-qualifying
+// candidate for a person side by side and picks which, if any, actually belong). Each candidate's
+// evidence reuses buildMemberEvidence verbatim — the SAME shape every other flag's
+// evidence.candidates already carries — plus its own matchedMembers detail (which of the person's
+// existing rows it matched, and how strongly) for audit-trail completeness. `rowsById`: the
+// caller's full unlinked-rows-by-id map (the singleton rows live in there); `personDisplayNameById`:
+// loadPersons' own id->display_name map — "evidence carries the existing person_id + display_name"
+// per the brief, cited directly rather than re-derived.
+export function buildAttachFlags(attachCandidates, rowsById, personDisplayNameById) {
+  const byPerson = new Map();
+  for (const c of attachCandidates ?? []) {
+    if (!byPerson.has(c.personId)) byPerson.set(c.personId, []);
+    byPerson.get(c.personId).push(c);
+  }
+  const flags = [];
+  for (const [personId, entries] of byPerson) {
+    const candidateIds = entries.map((e) => e.legislatorId);
+    const evidence = entries.map((e) => {
+      const row = rowsById.get(e.legislatorId);
+      return { ...buildMemberEvidence(row, surnameKey(row)), matchedMembers: e.matchedMembers };
+    });
+    flags.push({
+      clusterKey: buildAttachClusterKey(personId, candidateIds),
+      candidateIds,
+      evidence,
+      reason: 'attach_candidate',
+      existingPerson: { personId, displayName: personDisplayNameById.get(personId) ?? null },
+    });
+  }
+  return flags;
 }
 
 // ---- conflict guard (Global Constraints: "a non-null person_id is NEVER overwritten — conflict
@@ -369,6 +495,11 @@ export async function writeIdentityFlag(client, runId, flag) {
         reason: flag.reason,
         candidates: flag.evidence,
         ...(flag.keepSeparateRuling ? { keepSeparateRuling: flag.keepSeparateRuling } : {}),
+        // existingPerson (Task 4, attach-to-existing): present only on an attach_candidate flag
+        // (buildAttachFlags) — the EXISTING person's own id + display_name, cited directly rather
+        // than re-derived, so the review tab and the 'attach' decision route both read the same
+        // fact off this one flag row.
+        ...(flag.existingPerson ? { existingPerson: flag.existingPerson } : {}),
       },
       run_id: runId,
     })
@@ -419,7 +550,21 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
   const { clusters: rawClusters, flagged: matcherFlagged, singletons } = clusterLegislators(evidenceRows);
   const keepSeparatePairs = buildKeepSeparatePairs(identityFlagRows);
   const { cleanClusters, downgradedFlags } = applyKeepSeparateRulings(rawClusters, keepSeparatePairs);
-  const flagged = [...matcherFlagged, ...downgradedFlags];
+
+  // Task 4 (attach-to-existing): the attach pass — scoped to clusterLegislators' own `singletons`
+  // output (see buildAttachCandidates' own comment for why), compared against EVERY already-linked
+  // person's member rows (buildEvidenceRows applied to the `alreadyLinked` bucket too, so those rows
+  // carry the SAME evidence/nickname shape the matcher needs), gated by the same keepSeparatePairs
+  // the auto-cluster path already binds to. Computed here, in the shared planning phase, before any
+  // write — dry-run and live share this identical pass, exactly like coherenceAudit above.
+  const rowsById = new Map(evidenceRows.map((r) => [r.id, r]));
+  const alreadyLinkedEvidenceRows = buildEvidenceRows(alreadyLinked, termRows);
+  const singletonRows = singletons.map((id) => rowsById.get(id)).filter(Boolean);
+  const attachCandidates = buildAttachCandidates(singletonRows, alreadyLinkedEvidenceRows, keepSeparatePairs);
+  const personDisplayNameById = await loadPersons(client);
+  const attachFlags = buildAttachFlags(attachCandidates, rowsById, personDisplayNameById);
+
+  const flagged = [...matcherFlagged, ...downgradedFlags, ...attachFlags];
   const coherenceAudit = auditClusterCoherence(cleanClusters);
 
   const counts = {
@@ -437,7 +582,6 @@ export async function runLink(client, { dryRun = false, runId = null } = {}) {
     };
   }
 
-  const rowsById = new Map(evidenceRows.map((r) => [r.id, r]));
   let flaggedWritten = 0;
   let flaggedDeduped = 0;
   for (const cluster of cleanClusters) {
@@ -480,7 +624,14 @@ async function main() {
       counts: report.counts,
       coherenceAudit: report.coherenceAudit,
       clusters: report.clusters.map((c) => ({ key: c.key, memberIds: c.memberIds })),
-      flagged: report.flagged.map((f) => ({ clusterKey: f.clusterKey, candidateIds: f.candidateIds, reason: f.reason })),
+      flagged: report.flagged.map((f) => ({
+        clusterKey: f.clusterKey,
+        candidateIds: f.candidateIds,
+        reason: f.reason,
+        // existingPerson (Task 4): the attach pass's own target person, surfaced to the operator
+        // right in the dry-run report — never dropped silently the way an ad-hoc field would be.
+        ...(f.existingPerson ? { existingPerson: f.existingPerson } : {}),
+      })),
       singletons: report.singletons,
     }, null, 2));
     if (!report.coherenceAudit.ok) {

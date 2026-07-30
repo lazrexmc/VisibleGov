@@ -485,7 +485,15 @@ function rowSeatStatus(evidenceA, evidenceB) {
 //     seat verdict passes through as-is: 'ambiguous' stays 'ambiguous' (e.g. the same-name,
 //     provably-non-overlapping-era case), 'compatible' stays 'compatible' (real corroboration or
 //     the accepted dateless-same-name residual, both fix round 1's own examples).
-function finalPairStatus(rowA, rowB) {
+// EXPORTED (Task 4, .superpowers/sdd/2026-07-29-profile-completeness/task-4-brief.md,
+// attach-to-existing): the Global Constraints there are explicit — "Attach-to-existing must reuse
+// the same matcher primitives — no parallel matching logic." finalPairStatus IS the one function
+// that already encodes "same pairwise matcher, same evidence rules" for an arbitrary pair of rows
+// (name-variant gate + seat-evidence compatibility, fix round 2's own unconditional gate, unchanged
+// above) — src/cli/link-persons.js's attach pass calls this verbatim, pairing an unlinked row
+// against an ALREADY-LINKED row, exactly the same call shape clusterLegislators' own internal
+// pairStatus(i,j) already uses. No logic here changes for this export; only its visibility widens.
+export function finalPairStatus(rowA, rowB) {
   const seat = rowSeatStatus(rowA.evidence, rowB.evidence);
   if (seat === 'contradiction') return 'contradiction';
   const namesMatch = rowNameVariantMatch(rowA, rowB);
@@ -508,7 +516,13 @@ function buildClusterKey(nameKeyValue, ids) {
 // "rebuild the SAME given-name equivalence" described the removed token-union-find design; there
 // is no equivalence STRUCTURE left to rebuild — matching is pure pairwise comparison now, so this
 // recomputes fresh per pair rather than reconstructing any shared state).
-function buildMemberEvidence(row, nameKeyValue) {
+// EXPORTED (Task 4, attach-to-existing): reused verbatim by src/cli/link-persons.js's attach pass
+// to shape an attach_candidate flag's per-candidate evidence in the EXACT SAME shape every other
+// identity_flags row's evidence.candidates already carries (legislatorId/fullName/nickname/
+// surnameKeyUsed/sourceKeys/chamberDistrictEra) — so src/review/server.js's existing
+// formatCandidateDistrict/formatCandidateEraSpan/findCandidateEvidence need no reason-specific
+// branching to render an attach flag's candidates. No logic change; only its visibility widens.
+export function buildMemberEvidence(row, nameKeyValue) {
   const sourceKeys = {};
   for (const col of SOURCE_KEY_COLUMNS) sourceKeys[col] = row[col] ?? null;
   return {

@@ -66,6 +66,11 @@
   #identity-table tr.already-linked td { font-style: italic; }
   #identity-btn-link { border-color: #2e7d32; color: #2e7d32; }
   #identity-btn-keep-separate { border-color: #c62828; color: #c62828; }
+  /* Task 4 (attach-to-existing): a distinct color from 'Link' — attach targets an EXISTING
+     person, link always mints a brand-new one; the color difference is a visual reminder they are
+     different decisions, not interchangeable buttons for the same action. */
+  #identity-btn-attach { border-color: #1565c0; color: #1565c0; }
+  .identity-attach-target { font-weight: bold; }
 </style>
 </head>
 <body>
@@ -157,9 +162,10 @@
         <tbody id="identity-table-body"></tbody>
       </table>
     </div>
-    <label for="identity-note">Note (required for Keep Separate; optional context for Link)</label>
+    <label for="identity-note">Note (required for Keep Separate; optional context for Link/Attach)</label>
     <textarea id="identity-note" rows="3"></textarea>
     <div class="actions">
+      <button id="identity-btn-attach" type="button" disabled>Attach to existing person</button>
       <button id="identity-btn-link" type="button" disabled>Link selected as one person</button>
       <button id="identity-btn-keep-separate" type="button" disabled>Keep whole flag separate</button>
     </div>
@@ -928,6 +934,10 @@
   let identitySelectedIds = new Set(); // legislator_ids Lance has checked, for the NEXT link decision
   let identitySortCol = null;
   let identitySortDir = 1;
+  // currentIdentityExistingPerson (Task 4, attach-to-existing): the current flag's own
+  // existing_person ({personId, displayName}), or null for every non-attach flag — gates the
+  // 'Attach' button and supplies the person_id an 'attach' decision posts.
+  let currentIdentityExistingPerson = null;
 
   var SOURCE_KEY_LABELS = {
     bioguide_id: 'bioguide', openstates_id: 'openstates', mo_house_id: 'mo_house', mo_senate_id: 'mo_senate', legiscan_people_id: 'legiscan',
@@ -974,6 +984,15 @@
     document.getElementById('identity-btn-link').disabled = identitySelectedIds.size < 2;
   }
 
+  // updateIdentityAttachButton — Task 4 (attach-to-existing): 'Attach' is only ever legal on an
+  // attach_candidate flag (currentIdentityExistingPerson set from item.existing_person, the target
+  // EXISTING person src/cli/link-persons.js's attach pass named) and needs only 1+ selected
+  // candidates (contrast 'Link's 2+ minimum — attach joins into something that already exists, so
+  // even a lone candidate is a complete decision).
+  function updateIdentityAttachButton() {
+    document.getElementById('identity-btn-attach').disabled = !currentIdentityExistingPerson || identitySelectedIds.size < 1;
+  }
+
   // Builds every row with DOM APIs + textContent only (escaping discipline, controller ruling 5's
   // convention carried over from the glossary tab) — full_name/district/era_span all ultimately
   // trace back to legislators.full_name and terms rows, real DB text.
@@ -993,6 +1012,7 @@
         if (checkbox.checked) identitySelectedIds.add(c.legislator_id);
         else identitySelectedIds.delete(c.legislator_id);
         updateIdentityLinkButton();
+        updateIdentityAttachButton();
       });
       tdCheck.appendChild(checkbox);
       tr.appendChild(tdCheck);
@@ -1040,12 +1060,20 @@
     identitySelectedIds = new Set();
     identitySortCol = null;
     identitySortDir = 1;
+    currentIdentityExistingPerson = item.existing_person || null;
     document.getElementById('identity-heading').textContent = item.cluster_key;
-    document.getElementById('identity-meta').textContent = '[' + item.reason + '] ' + item.candidates.length + ' candidate(s)';
+    // Task 4: an attach_candidate flag's meta line names its target person explicitly — Lance
+    // needs to see WHICH existing person this row is being proposed to join before deciding.
+    var metaText = '[' + item.reason + '] ' + item.candidates.length + ' candidate(s)';
+    if (currentIdentityExistingPerson) {
+      metaText += ' — attach target: ' + currentIdentityExistingPerson.displayName + ' (' + currentIdentityExistingPerson.personId + ')';
+    }
+    document.getElementById('identity-meta').textContent = metaText;
     document.getElementById('identity-note').value = '';
     document.getElementById('identity-btn-keep-separate').disabled = false;
     renderIdentityTableBody();
     updateIdentityLinkButton();
+    updateIdentityAttachButton();
     updateIdentitySortHeaders();
   }
 
@@ -1053,11 +1081,13 @@
     currentIdentityFlagId = null;
     currentIdentityCandidates = [];
     identitySelectedIds = new Set();
+    currentIdentityExistingPerson = null;
     document.getElementById('identity-heading').textContent = heading;
     document.getElementById('identity-meta').textContent = meta;
     document.getElementById('identity-table-body').textContent = '';
     document.getElementById('identity-btn-link').disabled = true;
     document.getElementById('identity-btn-keep-separate').disabled = true;
+    document.getElementById('identity-btn-attach').disabled = true;
   }
 
   async function loadIdentityQueue() {
@@ -1112,13 +1142,23 @@
       if (identitySelectedIds.size < 2) { setStatus('Select at least 2 candidates to link.'); return; }
       payload.legislator_ids = Array.from(identitySelectedIds);
     }
-    // Disable both decision buttons for the duration of this request (final wave, item 3) — a
+    // Task 4 (attach-to-existing): needs only 1+ selected candidates (contrast link's 2+) plus the
+    // target person_id — pulled from currentIdentityExistingPerson, set by renderIdentityFlag from
+    // this flag's own existing_person (never typed by hand, never guessed).
+    if (action === 'attach') {
+      if (identitySelectedIds.size < 1) { setStatus('Select at least 1 candidate to attach.'); return; }
+      if (!currentIdentityExistingPerson) { setStatus('This flag has no attach target.'); return; }
+      payload.legislator_ids = Array.from(identitySelectedIds);
+      payload.person_id = currentIdentityExistingPerson.personId;
+    }
+    // Disable all three decision buttons for the duration of this request (final wave, item 3) — a
     // double-click or an operator retrying against a slow response must never fire the same
     // decision twice against the same flag while the first is still in flight. The server's own
     // TOCTOU guard (src/review/server.js's handleIdentityDecision) is the durable backstop; this
     // is the first, cheap line of defense.
     document.getElementById('identity-btn-link').disabled = true;
     document.getElementById('identity-btn-keep-separate').disabled = true;
+    document.getElementById('identity-btn-attach').disabled = true;
     try {
       const res = await fetch('/api/identity/decision', {
         method: 'POST',
@@ -1129,6 +1169,8 @@
       if (!res.ok) { setStatus('Error: ' + (body.error || res.status)); return; }
       if (action === 'link') {
         setStatus(body.resolved ? 'Linked — flag fully resolved.' : 'Linked this subset — remaining candidates stay in the flag.');
+      } else if (action === 'attach') {
+        setStatus(body.resolved ? 'Attached — flag fully resolved.' : 'Attached this subset — remaining candidates stay in the flag.');
       } else {
         setStatus('Marked keep-separate — flag resolved.');
       }
@@ -1137,11 +1179,12 @@
       setStatus('Network error.');
     } finally {
       // Restores whatever the CORRECT disabled state is right now — on success, loadIdentityQueue()
-      // already ran renderIdentityFlag/showIdentityPlaceholder (both set both buttons correctly for
-      // the new state); on any error path it did not, so this recomputes fresh. Both calls are
-      // idempotent with whatever loadIdentityQueue() already did, so running them unconditionally
-      // here is always safe.
+      // already ran renderIdentityFlag/showIdentityPlaceholder (both set all three buttons correctly
+      // for the new state); on any error path it did not, so this recomputes fresh. All three calls
+      // are idempotent with whatever loadIdentityQueue() already did, so running them
+      // unconditionally here is always safe.
       updateIdentityLinkButton();
+      updateIdentityAttachButton();
       document.getElementById('identity-btn-keep-separate').disabled = !currentIdentityFlagId;
     }
   }
@@ -1152,6 +1195,7 @@
   });
   document.getElementById('identity-btn-link').addEventListener('click', () => postIdentityDecision('link'));
   document.getElementById('identity-btn-keep-separate').addEventListener('click', () => postIdentityDecision('keep-separate'));
+  document.getElementById('identity-btn-attach').addEventListener('click', () => postIdentityDecision('attach'));
 
   // ---- tab switching ----
   function showTab(tab) {
@@ -1199,6 +1243,9 @@
       getIdentityButtonState: () => ({
         linkDisabled: document.getElementById('identity-btn-link').disabled,
         keepSeparateDisabled: document.getElementById('identity-btn-keep-separate').disabled,
+        // attachDisabled (Task 4): exposed the same way, so a test can prove the 'Attach' button's
+        // own disable-while-in-flight and existing-person gating without hand-copying the script.
+        attachDisabled: document.getElementById('identity-btn-attach').disabled,
       }),
     });
   }

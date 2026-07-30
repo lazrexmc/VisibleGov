@@ -701,6 +701,21 @@ export function buildLanceLinkEvidence(candidateEvidence, {
   };
 }
 
+// buildLanceAttachEvidence — Task 4 (attach-to-existing): reuses buildLanceLinkEvidence VERBATIM
+// (same base evidence, same flagId/clusterKey/linkedWith/note shape) and layers on ONE extra fact
+// specific to this path — attachedToPersonId, the EXISTING person this candidate joined (contrast
+// 'link', which always mints a brand-new person; there is no equivalent fact to record there).
+export function buildLanceAttachEvidence(candidateEvidence, {
+  flagId, clusterKey, linkedLegislatorIds, personId, note,
+}) {
+  return {
+    ...buildLanceLinkEvidence(candidateEvidence, {
+      flagId, clusterKey, linkedLegislatorIds, note,
+    }),
+    attachedToPersonId: personId,
+  };
+}
+
 // appendResolution — identity_flags has no notes table and controller ruling 2 is explicit ("no
 // schema change"), so a per-decision audit trail for THIS flag lives inside its own `evidence`
 // jsonb column: an append-only `resolutions` array, one entry per decision (link-subset or
@@ -716,19 +731,31 @@ export function appendResolution(evidence, resolution, nowIso = new Date().toISO
   };
 }
 
-const IDENTITY_ACTIONS = new Set(['link', 'keep-separate']);
+const IDENTITY_ACTIONS = new Set(['link', 'keep-separate', 'attach']);
 
 // validateIdentityDecisionInput — controller ruling 1 (per-subset: link needs 2+ distinct ids)
 // and ruling 4 (keep-separate "resolves the flag with a note" — mirrors validateDecisionInput's
 // own reject-requires-note rule: the one case with no person_links audit row to explain itself,
-// so the note IS the record of why these stayed separate).
-export function validateIdentityDecisionInput({ action, legislator_ids, note }) {
+// so the note IS the record of why these stayed separate). Task 4 (attach-to-existing): 'attach'
+// needs only 1+ distinct ids (contrast 'link's 2+ — attach joins candidates into an ALREADY-
+// EXISTING person, so a single candidate is a complete, meaningful decision on its own — the
+// Onder-shaped fifth row is exactly this shape) plus a person_id naming which existing person.
+export function validateIdentityDecisionInput({
+  action, legislator_ids, person_id, note,
+}) {
   if (!IDENTITY_ACTIONS.has(action)) return 'unknown action';
   if (action === 'link') {
     if (!Array.isArray(legislator_ids) || legislator_ids.length < 2) {
       return 'legislator_ids must include at least 2 ids for link';
     }
     if (new Set(legislator_ids).size !== legislator_ids.length) return 'legislator_ids must not contain duplicates';
+  }
+  if (action === 'attach') {
+    if (!Array.isArray(legislator_ids) || legislator_ids.length < 1) {
+      return 'legislator_ids must include at least 1 id for attach';
+    }
+    if (new Set(legislator_ids).size !== legislator_ids.length) return 'legislator_ids must not contain duplicates';
+    if (!person_id) return 'person_id is required for attach';
   }
   if (action === 'keep-separate' && !note) return 'note is required for keep-separate';
   return null;
@@ -821,6 +848,10 @@ async function handleIdentityQueue(client, res) {
         reason: (flag.evidence && flag.evidence.reason) || null,
         created_at: flag.created_at,
         candidates: candidateViews,
+        // existing_person (Task 4, attach-to-existing): present only on an attach_candidate flag —
+        // the EXISTING person's id + display_name (buildAttachFlags, src/cli/link-persons.js),
+        // cited directly so the review tab's 'Attach' action can target it without a second lookup.
+        existing_person: (flag.evidence && flag.evidence.existingPerson) || null,
       });
     }
 
@@ -848,10 +879,14 @@ async function handleIdentityDecision(client, req, res) {
     return;
   }
 
-  const { flag_id, action, legislator_ids } = payload ?? {};
+  const {
+    flag_id, action, legislator_ids, person_id,
+  } = payload ?? {};
   const note = payload && payload.note != null ? payload.note : null;
   if (!flag_id) { sendJson(res, 400, { error: 'flag_id is required' }); return; }
-  const validationError = validateIdentityDecisionInput({ action, legislator_ids, note });
+  const validationError = validateIdentityDecisionInput({
+    action, legislator_ids, person_id, note,
+  });
   if (validationError) { sendJson(res, 400, { error: validationError }); return; }
 
   try {
@@ -883,6 +918,100 @@ async function handleIdentityDecision(client, req, res) {
         .update({ resolved: true, evidence: patchedEvidence }).eq('id', flag_id);
       if (uErr) throw uErr;
       sendJson(res, 200, { resolved: true });
+      return;
+    }
+
+    if (action === 'attach') {
+      // Task 4 (.superpowers/sdd/2026-07-29-profile-completeness/task-4-brief.md):
+      // attach-to-existing. legislator_ids here are UNLINKED candidate rows src/cli/link-persons.js's
+      // attach pass flagged as possibly belonging to the EXISTING person named by person_id
+      // (attach_candidate evidence — buildAttachFlags, matched via the SAME finalPairStatus every
+      // other identity path uses). Lance decides which, if any, actually join that person. NEVER
+      // creates a new persons row (contrast the 'link' branch below, which always mints one) —
+      // person_id must name a real, already-existing person, validated before any write.
+      const candidateIdSet = new Set(flag.candidate_legislator_ids ?? []);
+      const outsiders = legislator_ids.filter((id) => !candidateIdSet.has(id));
+      if (outsiders.length > 0) { sendJson(res, 400, { error: 'legislator_ids must all belong to this flag' }); return; }
+
+      const { data: personRow, error: personErr } = await client
+        .from('persons').select('id').eq('id', person_id).maybeSingle();
+      if (personErr) throw personErr;
+      if (!personRow) { sendJson(res, 404, { error: 'person not found' }); return; }
+
+      const { data: selectedRows, error: srErr } = await client
+        .from('legislators')
+        .select('id,full_name,bioguide_id,openstates_id,mo_house_id,mo_senate_id,legiscan_people_id,person_id')
+        .in('id', legislator_ids);
+      if (srErr) throw srErr;
+      const rows = selectedRows ?? [];
+      if (rows.length !== legislator_ids.length) { sendJson(res, 404, { error: 'one or more legislators not found' }); return; }
+
+      // Every selected member's person_id validated null FIRST, before any write happens at all —
+      // same all-or-nothing conflict-throw discipline as 'link' below.
+      for (const row of rows) {
+        if (row.person_id != null) {
+          throw new PersonLinkConflictError(
+            `legislators.id=${row.id} already has person_id=${row.person_id} — refusing to attach it `
+              + '(a non-null person_id is never overwritten)',
+            { legislatorId: row.id, existingPersonId: row.person_id, flagId: flag_id },
+          );
+        }
+      }
+
+      // TOCTOU guard, attach variant: same .is('person_id', null) + row-count discipline as the
+      // 'link' branch's own guard below — but with NO orphan-cleanup step. Unlike 'link', this path
+      // never creates a persons row: person_id names a person that already existed BEFORE this
+      // decision and already carries its other members' links, so there is never a just-inserted
+      // orphan to clean up here, and — critically — the target person must NEVER be deleted on a
+      // race (it is real, pre-existing data, not a candidate for removal). A race simply maps to the
+      // same plain 409 the outer catch already produces for PersonLinkRaceError.
+      for (const row of rows) {
+        const patch = additivePatch(row, { person_id });
+        // eslint-disable-next-line no-await-in-loop -- small member loop, same sequential precedent
+        // as the 'link' branch's own TOCTOU loop below.
+        const { data: updatedRows, error: updErr } = await client
+          .from('legislators').update(patch).eq('id', row.id).is('person_id', null).select('id');
+        if (updErr) throw updErr;
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new PersonLinkRaceError(
+            `legislator_id=${row.id} was linked by a concurrent request between validation and write`,
+            { legislatorId: row.id, personId: person_id, flagId: flag_id },
+          );
+        }
+
+        const candidateEvidence = findCandidateEvidence(flag.evidence, row.id);
+        const linkEvidence = buildLanceAttachEvidence(candidateEvidence, {
+          flagId: flag.id, clusterKey: flag.cluster_key, linkedLegislatorIds: legislator_ids, personId: person_id, note,
+        });
+        // eslint-disable-next-line no-await-in-loop
+        const { error: linkErr } = await client.from('person_links').insert({
+          person_id, legislator_id: row.id, evidence: linkEvidence, decided_by: 'lance',
+        });
+        if (linkErr) {
+          if (isUniqueViolation(linkErr)) {
+            throw new PersonLinkRaceError(
+              `legislator_id=${row.id} was linked by a concurrent request (person_links race)`,
+              { legislatorId: row.id, personId: person_id, flagId: flag_id },
+            );
+          }
+          throw linkErr;
+        }
+      }
+
+      const allCandidateIds = flag.candidate_legislator_ids ?? [];
+      const personIdById = await fetchPersonIdsForCandidates(client, allCandidateIds);
+      const allLinked = allCandidateIds.length > 0
+        && allCandidateIds.every((id) => personIdById.get(id) != null);
+
+      const patchedEvidence = appendResolution(flag.evidence, {
+        action: 'attach', legislatorIds: legislator_ids, personId: person_id, note,
+      });
+      const flagPatch = { evidence: patchedEvidence };
+      if (allLinked) flagPatch.resolved = true;
+      const { error: fpErr } = await client.from('identity_flags').update(flagPatch).eq('id', flag_id);
+      if (fpErr) throw fpErr;
+
+      sendJson(res, 200, { person_id, resolved: allLinked });
       return;
     }
 

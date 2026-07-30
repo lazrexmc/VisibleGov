@@ -15,6 +15,10 @@ import {
   buildKeepSeparatePairs,
   findKeepSeparateConflict,
   applyKeepSeparateRulings,
+  loadPersons,
+  groupAlreadyLinkedByPerson,
+  buildAttachCandidates,
+  buildAttachFlags,
 } from '../src/cli/link-persons.js';
 
 // Task 1 (docs/superpowers/plans/2026-07-29-identity-merge.md) — cluster pass + linker CLI.
@@ -1007,12 +1011,15 @@ test('buildEvidenceRows: a terms row for a legislator outside the snapshot is de
 // (src/lib/db.js) that legislators/terms reads go through here. ----
 
 function makeFakeClient({
-  legislatorRows = [], termRows = [], identityFlagsRows = [], forceFlagRace = false,
+  legislatorRows = [], termRows = [], identityFlagsRows = [], personsRows = [], forceFlagRace = false,
 } = {}) {
   const state = {
     legislators: legislatorRows.map((r) => ({ ...r })),
     terms: termRows.map((r) => ({ ...r })),
-    persons: [],
+    // personsRows (Task 4, attach-to-existing): seeds ALREADY-EXISTING persons rows so runLink's
+    // own loadPersons (the attach pass's display_name source) has something real to read — every
+    // prior test left this empty (dry-run/live runs that never pre-seed an existing person).
+    persons: personsRows.map((r) => ({ ...r })),
     person_links: [],
     identity_flags: identityFlagsRows.map((r) => ({ ...r })),
   };
@@ -1073,7 +1080,9 @@ function makeFakeClient({
     from(table) {
       return {
         select(cols) {
-          if (table === 'legislators' || table === 'terms' || table === 'identity_flags') return selectAllBuilder(table, cols);
+          // 'persons' added (Task 4): runLink's own loadPersons goes through the SAME selectAll
+          // pagination shape as legislators/terms/identity_flags — no new builder needed.
+          if (table === 'legislators' || table === 'terms' || table === 'identity_flags' || table === 'persons') return selectAllBuilder(table, cols);
           throw new Error(`fake client: unexpected select on table "${table}"`);
         },
         update(patch) {
@@ -1572,4 +1581,267 @@ test('runLink: a re-run after a live run is idempotent — already-linked rows a
     clusters: 0, personsCreated: 0, linked: 0, flagged: 0, alreadyLinked: 4, singletons: 0,
   });
   assert.equal(client.state.persons.length, 2, 'no duplicate person created on re-run');
+});
+
+// ============================================================================================
+// Task 4 (.superpowers/sdd/2026-07-29-profile-completeness/task-4-brief.md): attach-to-existing.
+// The identity system's missing path — a returning legislator's fresh, unlinked session/source row
+// (arriving ALONE, with nothing else new to cluster with) must be comparable against the rows
+// ALREADY linked into an existing person, using the SAME matcher primitives (finalPairStatus),
+// never a parallel matching path. NEVER auto-attaches — only proposes, via an attach_candidate
+// identity_flag; keep-separate rulings gate this path exactly as they already gate auto-clustering.
+// ============================================================================================
+
+// alreadyLinkedOnderMembers — the real four-Onder rows (onderRows(), already used throughout this
+// file), each stamped with the SAME person_id — exactly what buildEvidenceRows(alreadyLinked,
+// termRows) would hand the attach pass after a prior run already linked them.
+function alreadyLinkedOnderMembers(personId = 'person-onder-1') {
+  return onderRows().map((r) => ({ ...r, person_id: personId }));
+}
+
+// ---- groupAlreadyLinkedByPerson ----
+
+test('groupAlreadyLinkedByPerson: buckets already-linked rows by person_id', () => {
+  const rows = [
+    { id: 'a', person_id: 'p1' }, { id: 'b', person_id: 'p1' }, { id: 'c', person_id: 'p2' },
+  ];
+  const groups = groupAlreadyLinkedByPerson(rows);
+  assert.equal(groups.size, 2);
+  assert.deepEqual(groups.get('p1').map((r) => r.id), ['a', 'b']);
+  assert.deepEqual(groups.get('p2').map((r) => r.id), ['c']);
+});
+
+test('groupAlreadyLinkedByPerson: tolerant of empty/undefined input, defensively skips a null person_id', () => {
+  assert.deepEqual([...groupAlreadyLinkedByPerson([]).keys()], []);
+  assert.deepEqual([...groupAlreadyLinkedByPerson(undefined).keys()], []);
+  assert.deepEqual([...groupAlreadyLinkedByPerson([{ id: 'x', person_id: null }]).keys()], []);
+});
+
+// ---- buildAttachCandidates: the pure matcher core ----
+
+test('buildAttachCandidates: THE WORKED EXAMPLE — an Onder-shaped fifth row (unlinked, evidence-free "Robert Onder") qualifies to attach into the already-linked four-Onder person, matched via the bioguide+legiscan members (given+family "robert"+"onder"); the mo_senate/openstates "Bob Onder" members neither block nor contribute (different given name -> "no-pair", not "contradiction")', () => {
+  const members = alreadyLinkedOnderMembers('person-onder-1');
+  const fifthRow = {
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+  };
+  const candidates = buildAttachCandidates([fifthRow], members, new Map());
+  assert.equal(candidates.length, 1);
+  const [candidate] = candidates;
+  assert.equal(candidate.legislatorId, 'leg-onder-fifth');
+  assert.equal(candidate.personId, 'person-onder-1');
+  assert.deepEqual(
+    candidate.matchedMembers.map((m) => m.legislatorId).sort(),
+    ['leg-onder-bioguide', 'leg-onder-legiscan'],
+    'only the given-name-matching members (robert/robert) contribute a matched edge — "Bob Onder" members are no-pair, not counted, but also do not block the person',
+  );
+  assert.ok(candidate.matchedMembers.every((m) => m.status === 'compatible'));
+});
+
+test('buildAttachCandidates: a real seat CONTRADICTION against even ONE member vetoes the WHOLE person, regardless of a name match elsewhere — never a partial attach suggestion', () => {
+  const members = [
+    {
+      id: 'leg-smith-a', full_name: 'Jane Smith', surname: 'Smith', person_id: 'person-smith-1', evidence: [{
+        source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '7', start_date: null, end_date: null,
+      }],
+    },
+    {
+      id: 'leg-smith-b', full_name: 'Jane Smith', surname: 'Smith', person_id: 'person-smith-1', evidence: [],
+    },
+  ];
+  const singleton = {
+    id: 'leg-smith-new', full_name: 'Jane Smith', surname: 'Smith', person_id: null, evidence: [{
+      source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '9', start_date: null, end_date: null,
+    }],
+  };
+  const candidates = buildAttachCandidates([singleton], members, new Map());
+  assert.deepEqual(candidates, [], 'district 7 vs district 9, same jurisdiction+chamber, is a hard contradiction against leg-smith-a — the whole person is vetoed even though leg-smith-b would otherwise match');
+});
+
+test('buildAttachCandidates: no surname-key overlap at all -> no candidates (the pre-filter, same doctrine as clusterLegislators\' own grouping)', () => {
+  const members = alreadyLinkedOnderMembers();
+  const unrelated = {
+    id: 'leg-unrelated', full_name: 'Zaphod Beeblebrox', surname: null, person_id: null, evidence: [],
+  };
+  assert.deepEqual(buildAttachCandidates([unrelated], members, new Map()), []);
+});
+
+test('buildAttachCandidates: a keep-separate ruling against ANY member of the person vetoes attaching to that person entirely — final-wave item 2\'s own binding, extended to gate this new path', () => {
+  const members = alreadyLinkedOnderMembers('person-onder-1');
+  const fifthRow = {
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+  };
+  // Sanity check the premise: WITHOUT the ruling, this pair qualifies (proven above already, but
+  // re-asserted here so the ruling's effect is visibly a DELTA, not just an empty-by-coincidence result).
+  assert.equal(buildAttachCandidates([fifthRow], members, new Map()).length, 1);
+
+  const keepSeparatePairs = buildKeepSeparatePairs([{
+    id: 'flag-prior',
+    cluster_key: 'onder:prior',
+    evidence: {
+      resolutions: [{
+        action: 'keep-separate', legislatorIds: ['leg-onder-fifth', 'leg-onder-bioguide'], note: 'Lance: confirmed this is a DIFFERENT Robert Onder', decidedAt: '2026-01-01T00:00:00Z',
+      }],
+    },
+  }]);
+  const candidates = buildAttachCandidates([fifthRow], members, keepSeparatePairs);
+  assert.deepEqual(candidates, [], 'a ruling against just ONE member (bioguide) vetoes the whole person — every member of an already-linked person is transitively the same person Lance already ruled leg-onder-fifth is NOT');
+});
+
+test('buildAttachCandidates: a singleton with no derivable name at all is never a candidate', () => {
+  const members = alreadyLinkedOnderMembers();
+  const nameless = {
+    id: 'leg-nameless', full_name: '', surname: null, person_id: null, evidence: [],
+  };
+  assert.deepEqual(buildAttachCandidates([nameless], members, new Map()), []);
+});
+
+test('buildAttachCandidates: a singleton can qualify against MULTIPLE different already-linked persons independently (each grouped separately) — real cross-person ambiguity is surfaced, never picked', () => {
+  const onderMembers = alreadyLinkedOnderMembers('person-onder-1');
+  const otherOnder = [{
+    id: 'leg-onder-other', full_name: 'Robert Onder', surname: 'Onder', person_id: 'person-onder-2', evidence: [],
+  }];
+  const fifthRow = {
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+  };
+  const candidates = buildAttachCandidates([fifthRow], [...onderMembers, ...otherOnder], new Map());
+  assert.deepEqual(candidates.map((c) => c.personId).sort(), ['person-onder-1', 'person-onder-2']);
+});
+
+// ---- buildAttachFlags: grouping + evidence shaping ----
+
+test('buildAttachFlags: groups candidates by person, one flag per person, evidence reuses buildMemberEvidence shape + matchedMembers, existingPerson carries the real display_name', () => {
+  const fifthRow = {
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+  };
+  const rowsById = new Map([['leg-onder-fifth', fifthRow]]);
+  const attachCandidates = [{
+    legislatorId: 'leg-onder-fifth',
+    personId: 'person-onder-1',
+    matchedMembers: [{ legislatorId: 'leg-onder-bioguide', fullName: 'Onder, Robert F.', status: 'compatible' }],
+  }];
+  const personDisplayNameById = new Map([['person-onder-1', 'Robert F. Onder']]);
+  const flags = buildAttachFlags(attachCandidates, rowsById, personDisplayNameById);
+  assert.equal(flags.length, 1);
+  const [flag] = flags;
+  assert.equal(flag.clusterKey, 'attach:person-onder-1:leg-onder-fifth');
+  assert.deepEqual(flag.candidateIds, ['leg-onder-fifth']);
+  assert.equal(flag.reason, 'attach_candidate');
+  assert.deepEqual(flag.existingPerson, { personId: 'person-onder-1', displayName: 'Robert F. Onder' });
+  assert.equal(flag.evidence.length, 1);
+  const [candidateEvidence] = flag.evidence;
+  assert.equal(candidateEvidence.legislatorId, 'leg-onder-fifth');
+  assert.equal(candidateEvidence.fullName, 'Robert Onder');
+  assert.equal(candidateEvidence.surnameKeyUsed, 'onder');
+  assert.deepEqual(candidateEvidence.matchedMembers, attachCandidates[0].matchedMembers);
+});
+
+test('buildAttachFlags: a person with an unrecorded display_name (defensive — should never happen live, persons.display_name is NOT NULL) renders null, never invented', () => {
+  const row = {
+    id: 'leg-x', full_name: 'X Y', surname: 'Y', person_id: null, evidence: [],
+  };
+  const flags = buildAttachFlags(
+    [{ legislatorId: 'leg-x', personId: 'person-ghost', matchedMembers: [] }],
+    new Map([['leg-x', row]]),
+    new Map(),
+  );
+  assert.equal(flags[0].existingPerson.displayName, null);
+});
+
+test('buildAttachFlags: no candidates -> no flags', () => {
+  assert.deepEqual(buildAttachFlags([], new Map(), new Map()), []);
+});
+
+// ---- runLink end-to-end: the attach pass wired into the full orchestration ----
+
+test('runLink Task 4: an Onder-shaped fifth row arrives unlinked alongside the already-linked four-Onder person — dry-run emits ONE attach_candidate flag citing the real existing person_id + display_name, ZERO writes', async () => {
+  const legislatorRows = [
+    ...alreadyLinkedOnderMembers('person-onder-1'),
+    {
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+    },
+  ].map(({ evidence: _e, ...r }) => r);
+  const termRows = [{
+    legislator_id: 'leg-onder-mosenate', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null,
+  }];
+  const personsRows = [{ id: 'person-onder-1', display_name: 'Robert F. Onder', display_name_source: 'bioguide' }];
+  const client = makeFakeClient({ legislatorRows, termRows, personsRows });
+
+  const report = await runLink(client, { dryRun: true });
+  assert.equal(report.counts.alreadyLinked, 4);
+  assert.equal(report.counts.singletons, 1, 'leg-onder-fifth has no OTHER unlinked row to cluster with in this batch');
+  const attachFlag = report.flagged.find((f) => f.reason === 'attach_candidate');
+  assert.ok(attachFlag, 'an attach_candidate flag was emitted for the fifth row');
+  assert.deepEqual(attachFlag.candidateIds, ['leg-onder-fifth']);
+  assert.deepEqual(attachFlag.existingPerson, { personId: 'person-onder-1', displayName: 'Robert F. Onder' });
+
+  const writeOps = client.calls.filter((c) => c.op === 'insert' || c.op === 'update');
+  assert.deepEqual(writeOps, [], 'dry-run: zero writes, same as every other proposed change');
+});
+
+test('runLink Task 4: LIVE mode writes the attach_candidate flag to identity_flags but NEVER touches legislators.person_id for the candidate — attach only ever proposes, Lance decides', async () => {
+  const legislatorRows = [
+    ...alreadyLinkedOnderMembers('person-onder-1'),
+    {
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+    },
+  ].map(({ evidence: _e, ...r }) => r);
+  const termRows = [{
+    legislator_id: 'leg-onder-mosenate', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null,
+  }];
+  const personsRows = [{ id: 'person-onder-1', display_name: 'Robert F. Onder', display_name_source: 'bioguide' }];
+  const client = makeFakeClient({ legislatorRows, termRows, personsRows });
+
+  const report = await runLink(client, { dryRun: false, runId: 'run-attach-1' });
+  assert.equal(report.flaggedWritten, 1);
+  assert.equal(client.state.identity_flags.length, 1);
+  const [flagRow] = client.state.identity_flags;
+  assert.equal(flagRow.evidence.reason, 'attach_candidate');
+  assert.deepEqual(flagRow.evidence.existingPerson, { personId: 'person-onder-1', displayName: 'Robert F. Onder' });
+  assert.deepEqual(flagRow.candidate_legislator_ids, ['leg-onder-fifth']);
+  assert.equal(flagRow.run_id, 'run-attach-1');
+  assert.equal(client.state.persons.length, 1, 'the pre-existing person is untouched — no new persons row for an attach proposal');
+  assert.equal(client.state.legislators.find((l) => l.id === 'leg-onder-fifth').person_id, null, 'never auto-attached');
+});
+
+test('runLink Task 4: a PRIOR keep-separate ruling between the fifth row and an Onder member suppresses the attach_candidate flag entirely', async () => {
+  const legislatorRows = [
+    ...alreadyLinkedOnderMembers('person-onder-1'),
+    {
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+    },
+  ].map(({ evidence: _e, ...r }) => r);
+  const identityFlagsRows = [{
+    id: 'flag-prior',
+    cluster_key: 'onder:prior',
+    evidence: {
+      resolutions: [{
+        action: 'keep-separate', legislatorIds: ['leg-onder-fifth', 'leg-onder-bioguide'], note: 'Lance: confirmed a different Robert Onder', decidedAt: '2026-01-01T00:00:00Z',
+      }],
+    },
+  }];
+  const personsRows = [{ id: 'person-onder-1', display_name: 'Robert F. Onder', display_name_source: 'bioguide' }];
+  const client = makeFakeClient({
+    legislatorRows, termRows: [], identityFlagsRows, personsRows,
+  });
+
+  const report = await runLink(client, { dryRun: true });
+  assert.equal(report.counts.singletons, 1);
+  assert.equal(
+    report.flagged.some((f) => f.reason === 'attach_candidate'),
+    false,
+    'the keep-separate ruling vetoes this specific attach suggestion — never re-flagged',
+  );
+});
+
+test('loadPersons: returns id->display_name for every persons row', async () => {
+  const client = makeFakeClient({
+    personsRows: [
+      { id: 'p1', display_name: 'Robert F. Onder', display_name_source: 'bioguide' },
+      { id: 'p2', display_name: 'Jane Smith', display_name_source: 'mo_senate' },
+    ],
+  });
+  const map = await loadPersons(client);
+  assert.equal(map.size, 2);
+  assert.equal(map.get('p1'), 'Robert F. Onder');
+  assert.equal(map.get('p2'), 'Jane Smith');
 });
