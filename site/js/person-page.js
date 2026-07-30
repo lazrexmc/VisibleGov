@@ -172,7 +172,11 @@ export function isNumericStatusCode(status) {
 // controller's Step 4; kept small and named so each does exactly one thing)
 // ============================================================================
 
-function slugify(text) {
+// Exported (task 8, directory-page.js) so the directory's /person//legislator links reuse this
+// EXACT scheme rather than inventing a third one — task-6-report.md flagged that as the thing to
+// avoid (no other shared slug utility exists in the codebase; the trailing slug segment is
+// cosmetic and ignored by lookup either way, so any consumer can share this one).
+export function slugify(text) {
   return String(text || '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

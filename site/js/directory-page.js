@@ -1,0 +1,346 @@
+// site/js/directory-page.js — site/index.html's entry point: the directory + address lookup,
+// "the front door" (design spec §5, task-8-brief.md). Same split as site/js/person-page.js: pure
+// model functions first (TDD'd in tests/directory-model.test.js BEFORE the DOM code existed),
+// DOM/network orchestration below. Reuses the existing toolbox by exact name — never a lookalike
+// reimplementation: rest.js (fetchAllRows), render.js (el/clearChildren/sectionState/mountFooter),
+// profile-model.js (chamberLabel), person-page.js (slugify — the report for Task 6 flagged a
+// third slug scheme as the thing to avoid), districts.js (parseGeographies/matchReps/
+// termDateEvidence, task-8's own new pure module).
+
+import { fetchAllRows } from './rest.js';
+import {
+  el, clearChildren, sectionState, mountFooter,
+} from './render.js';
+import { chamberLabel } from './profile-model.js';
+import { slugify } from './person-page.js';
+import { parseGeographies, matchReps, termDateEvidence } from './districts.js';
+
+// ============================================================================
+// Pure model (TDD'd in tests/directory-model.test.js BEFORE any of the DOM code below existed)
+// ============================================================================
+
+// Mirrors profile-model.js's own "most recent term wins" anchor rule (that file's private
+// mostRecentTerm) — not imported (profile-model.js only exports chamberLabel for this task, per
+// the brief), so this is a small hand-written equivalent scoped to the directory's own terms
+// shape. Only a term carrying a start_date can be ranked; no dated term at all -> null (the
+// caller falls back to "the first term in hand," same as profile-model.js does).
+function mostRecentDatedTerm(terms) {
+  const dated = (terms || []).filter((t) => t && t.start_date);
+  if (dated.length === 0) return null;
+  return dated.reduce((best, t) => (!best || t.start_date > best.start_date ? t : best), null);
+}
+
+// legislators.surname (migration 0006) is populated for MO House/Senate rows only — federal rows
+// (us-congress.js/us-senate.js adapters) never set it. A missing surname must not silently break
+// the sort: this derives a display-only sort key from the LAST whitespace token of the full name
+// (a real surname for the overwhelmingly common "First Last" shape). Unlike
+// reconstructSurnameHeuristic (src/cli/ingest-mo-house.js, which drops everything after the FIRST
+// token and is used for identity-critical roll-call matching), this is purely a cosmetic sort
+// fallback — a wrong guess here just orders one row slightly off, never a data-integrity issue.
+function fallbackSurname(fullName) {
+  const tokens = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  return tokens.length > 0 ? tokens[tokens.length - 1] : null;
+}
+
+// fetchAllRows over legislators+persons+terms -> one entry per person/ungrouped-legislator-row,
+// grouped by person_id (a null/absent person_id stands alone), chamber/party/district from the
+// group's own most-recent term, alphabetical by surname (the one neutral order). Links reuse the
+// exact /person/<id>/<slug> and /legislator/<id>/<slug> shapes person-page.js uses — never a
+// third slug scheme. Never throws on missing/malformed input.
+export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
+  const legislatorRows = (Array.isArray(legislators) ? legislators : []).filter(Boolean);
+  const personRows = (Array.isArray(persons) ? persons : []).filter(Boolean);
+  const termRows = (Array.isArray(terms) ? terms : []).filter(Boolean);
+
+  const personById = new Map(personRows.map((p) => [p.id, p]));
+  const termsByLegislatorId = new Map();
+  for (const t of termRows) {
+    if (!t || !t.legislator_id) continue;
+    if (!termsByLegislatorId.has(t.legislator_id)) termsByLegislatorId.set(t.legislator_id, []);
+    termsByLegislatorId.get(t.legislator_id).push(t);
+  }
+
+  // Group legislator rows by person_id; an ungrouped row (no person_id) is its own group of one.
+  const groups = new Map();
+  for (const row of legislatorRows) {
+    if (!row || !row.id) continue;
+    const key = row.person_id ? `person:${row.person_id}` : `legislator:${row.id}`;
+    if (!groups.has(key)) groups.set(key, { personId: row.person_id || null, legislatorRows: [] });
+    groups.get(key).legislatorRows.push(row);
+  }
+
+  const entries = [];
+  for (const [key, group] of groups) {
+    const groupTerms = group.legislatorRows.flatMap((r) => termsByLegislatorId.get(r.id) || []);
+    const anchorTerm = mostRecentDatedTerm(groupTerms) ?? groupTerms[0] ?? null;
+    const anchorLegislator = (anchorTerm
+      && group.legislatorRows.find((r) => r.id === anchorTerm.legislator_id))
+      || group.legislatorRows[0];
+
+    const person = group.personId ? personById.get(group.personId) : null;
+    const displayName = person?.display_name || anchorLegislator?.full_name || '(name unrecorded)';
+    const surname = anchorLegislator?.surname
+      || group.legislatorRows.find((r) => r && r.surname)?.surname
+      || fallbackSurname(displayName);
+    const party = anchorTerm?.party || anchorLegislator?.party || null;
+    const chamber = anchorTerm ? chamberLabel(anchorTerm.jurisdiction_id, anchorTerm.chamber) : null;
+    const district = anchorTerm?.district ?? null;
+
+    const href = group.personId
+      ? `/person/${group.personId}/${slugify(displayName)}`
+      : `/legislator/${anchorLegislator.id}/${slugify(displayName)}`;
+
+    entries.push({
+      key,
+      legislatorIds: group.legislatorRows.map((r) => r.id),
+      personId: group.personId,
+      displayName,
+      surname,
+      party,
+      chamber,
+      district,
+      href,
+    });
+  }
+
+  entries.sort((a, b) => {
+    const sa = (a.surname || '').toLowerCase();
+    const sb = (b.surname || '').toLowerCase();
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    const na = (a.displayName || '').toLowerCase();
+    const nb = (b.displayName || '').toLowerCase();
+    if (na !== nb) return na < nb ? -1 : 1;
+    return 0;
+  });
+
+  return entries;
+}
+
+// Client-side text filter over the COMPLETE fetched list (name + chamber + party) — never a
+// partial-page server re-sort/filter (the brief: "a filter over a COMPLETE fetched list"). Empty/
+// whitespace-only query returns the list unchanged. Never throws on malformed input.
+export function filterDirectory(entries, queryText) {
+  const list = Array.isArray(entries) ? entries : [];
+  const q = String(queryText || '').trim().toLowerCase();
+  if (!q) return list;
+  return list.filter((e) => {
+    if (!e) return false;
+    const haystack = [e.displayName, e.chamber, e.party].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+// legislator id -> its directory entry (displayName/href already resolved through the SAME
+// person-vs-legislator link logic buildDirectoryEntries used) — reused by the address-lookup
+// results below so a matched rep links exactly like their directory row does, one link-building
+// code path instead of two.
+function indexEntriesByLegislatorId(entries) {
+  const index = new Map();
+  for (const entry of entries) {
+    for (const legId of entry.legislatorIds) index.set(legId, entry);
+  }
+  return index;
+}
+
+// ============================================================================
+// DOM rendering (not independently unit-tested — same convention as person-page.js's own DOM
+// helpers; smoke-tested live). Small and named so each does one thing.
+// ============================================================================
+
+function renderDirectoryList(container, entries) {
+  clearChildren(container);
+  const ul = el('ul', { class: 'directory-list' });
+  for (const entry of entries) {
+    const li = el('li', { class: 'directory-row' });
+    li.appendChild(el('a', { href: entry.href }, entry.displayName));
+    const meta = [entry.chamber, entry.district ? `district ${entry.district}` : null, entry.party]
+      .filter(Boolean)
+      .join(' · ');
+    if (meta) li.appendChild(el('span', { class: 'directory-meta' }, ` — ${meta}`));
+    ul.appendChild(li);
+  }
+  container.appendChild(ul);
+}
+
+const SEAT_LABELS = {
+  usSenators: 'U.S. Senate',
+  usHouse: 'U.S. House',
+  moSenate: 'MO Senate',
+  moHouse: 'MO House',
+};
+const SEAT_ORDER = ['usSenators', 'usHouse', 'moSenate', 'moHouse'];
+
+function renderCandidate(candidate, entryIndex) {
+  const li = el('li', { class: 'rep-candidate' });
+  const linked = entryIndex.get(candidate.legislator.id);
+  const displayName = linked ? linked.displayName : (candidate.legislator.full_name || '(name unrecorded)');
+  const href = linked ? linked.href : `/legislator/${candidate.legislator.id}/${slugify(displayName)}`;
+  li.appendChild(el('a', { href }, displayName));
+  const party = candidate.term?.party || candidate.legislator.party || null;
+  if (party) li.appendChild(el('span', { class: 'rep-party' }, ` — ${party}`));
+  li.appendChild(el('p', { class: 'rep-date-evidence' }, termDateEvidence(candidate.term)));
+  return li;
+}
+
+// A category is only rendered at all when it is GEOGRAPHICALLY applicable to the matched address
+// (mirrors matchReps' own gating conditions exactly) — a non-MO address never shows "MO Senate:
+// not found," since MO categories are structurally inapplicable there, not merely empty.
+const SEAT_APPLICABLE = {
+  usSenators: (geo) => Boolean(geo?.state),
+  usHouse: (geo) => Boolean(geo?.state) && geo?.cd != null,
+  moSenate: (geo) => geo?.state === 'MO' && geo?.sldu != null,
+  moHouse: (geo) => geo?.state === 'MO' && geo?.sldl != null,
+};
+
+// "skip != empty" (the same discipline sectionState enforces everywhere else on this site): an
+// applicable category with zero matched legislators says so explicitly (a real, evidenced live
+// case — the terms table currently carries near-zero mo-legislature rows) rather than silently
+// vanishing from the page, which would look identical to "this address has no MO Senate seat."
+const SEAT_EMPTY_MESSAGE = {
+  usSenators: 'No U.S. Senate representative found in our data for this state.',
+  usHouse: 'No U.S. House representative found in our data for this district.',
+  moSenate: 'No MO Senate representative found in our data for this district.',
+  moHouse: 'No MO House representative found in our data for this district.',
+};
+
+// Renders every GEOGRAPHICALLY APPLICABLE category, plus the single as-of label (currency-
+// honesty law, spec §5: never the word "current" — matchReps already enforces this in the string
+// it hands back here). An ambiguous seat's every candidate renders, each with its own term as
+// visible date evidence — showing candidates honestly beats guessing.
+function renderMatchedReps(container, matched, entryIndex, geo) {
+  clearChildren(container);
+  container.appendChild(el('p', { class: 'reps-as-of' }, `Results shown ${matched.asOf}.`));
+  for (const groupKey of SEAT_ORDER) {
+    if (!SEAT_APPLICABLE[groupKey](geo)) continue;
+    const candidates = matched[groupKey] || [];
+    const section = el('section', { class: `rep-group rep-group-${groupKey}` });
+    section.appendChild(el('h3', {}, SEAT_LABELS[groupKey]));
+    if (candidates.length === 0) {
+      section.appendChild(el('p', { class: 'rep-group-empty' }, SEAT_EMPTY_MESSAGE[groupKey]));
+    } else {
+      const ul = el('ul', {});
+      for (const candidate of candidates) ul.appendChild(renderCandidate(candidate, entryIndex));
+      section.appendChild(ul);
+    }
+    container.appendChild(section);
+  }
+}
+
+// ============================================================================
+// Orchestration — three-state discipline on every fetch section (plan law, verbatim: "a failed
+// fetch never renders as an empty section").
+// ============================================================================
+
+async function runAddressLookup(address, {
+  resultsContainer, legislators, terms, entryIndex,
+}) {
+  const retry = () => runAddressLookup(address, {
+    resultsContainer, legislators, terms, entryIndex,
+  });
+
+  sectionState(resultsContainer, { state: 'loading' });
+  let censusJson;
+  try {
+    const res = await fetch(`/geocode?address=${encodeURIComponent(address)}`);
+    censusJson = await res.json();
+    if (!res.ok) {
+      // The pass-through function itself returned an error body (upstream Census failure, or our
+      // own validation) — an honest failure, not a "no districts found" result.
+      throw new Error(censusJson?.error || 'geocoder unavailable');
+    }
+  } catch {
+    sectionState(resultsContainer, {
+      state: 'failed',
+      message: "Couldn't reach the address geocoder — retry",
+      onRetry: retry,
+    });
+    return;
+  }
+
+  const geo = parseGeographies(censusJson);
+  if (!geo.state) {
+    sectionState(resultsContainer, { state: 'empty', message: "The geocoder couldn't match that address." });
+    return;
+  }
+
+  const matched = matchReps({ terms, legislators }, geo);
+  const total = SEAT_ORDER.reduce((sum, k) => sum + (matched[k]?.length || 0), 0);
+  if (total === 0) {
+    sectionState(resultsContainer, { state: 'empty', message: 'No representatives found in our data for these districts.' });
+    return;
+  }
+
+  sectionState(resultsContainer, { state: 'ready' });
+  renderMatchedReps(resultsContainer, matched, entryIndex, geo);
+}
+
+function wireAddressForm({
+  form, input, resultsContainer, legislators, terms, entryIndex,
+}) {
+  if (!form) return;
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const address = (input?.value || '').trim();
+    if (!address) return;
+    runAddressLookup(address, {
+      resultsContainer, legislators, terms, entryIndex,
+    }).catch(() => {});
+  });
+}
+
+function wireDirectoryFilter(input, container, allEntries) {
+  if (!input) return;
+  input.addEventListener('input', () => {
+    const filtered = filterDirectory(allEntries, input.value);
+    if (filtered.length === 0) {
+      sectionState(container, { state: 'empty', message: 'No legislators match this filter.' });
+    } else {
+      sectionState(container, { state: 'ready' });
+      renderDirectoryList(container, filtered);
+    }
+  });
+}
+
+// Entry point for site/index.html — exported, never auto-run at module load (same convention as
+// bootstrapPersonPage/bootstrapLegislatorPage).
+export async function bootstrapDirectoryPage() {
+  const directoryListContainer = document.getElementById('directory-list');
+  const filterInput = document.getElementById('directory-filter');
+  const addressForm = document.getElementById('address-form');
+  const addressInput = document.getElementById('address-input');
+  const addressResults = document.getElementById('address-results');
+  mountFooter(document.getElementById('site-footer'));
+
+  sectionState(directoryListContainer, { state: 'loading' });
+  let legislators;
+  let persons;
+  let terms;
+  try {
+    [legislators, persons, terms] = await Promise.all([
+      fetchAllRows('legislators?select=id,full_name,surname,party,person_id,bioguide_id,mo_senate_id,mo_house_id,openstates_id,legiscan_people_id'),
+      fetchAllRows('persons?select=id,display_name'),
+      fetchAllRows('terms?select=legislator_id,jurisdiction_id,chamber,district,state,party,start_date,end_date'),
+    ]);
+  } catch {
+    sectionState(directoryListContainer, {
+      state: 'failed',
+      message: "Couldn't load the directory — retry",
+      onRetry: () => bootstrapDirectoryPage(),
+    });
+    return;
+  }
+
+  const entries = buildDirectoryEntries({ legislators, persons, terms });
+  if (entries.length === 0) {
+    sectionState(directoryListContainer, { state: 'empty', message: 'No legislators recorded.' });
+  } else {
+    sectionState(directoryListContainer, { state: 'ready' });
+    renderDirectoryList(directoryListContainer, entries);
+  }
+  wireDirectoryFilter(filterInput, directoryListContainer, entries);
+
+  const entryIndex = indexEntriesByLegislatorId(entries);
+  wireAddressForm({
+    form: addressForm, input: addressInput, resultsContainer: addressResults, legislators, terms, entryIndex,
+  });
+}

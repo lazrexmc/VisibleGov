@@ -13,7 +13,9 @@ import {
 import { voteReceiptUrl, photoUrl, officialBillUrl } from '../site/js/receipts.js';
 import {
   resolveSitePath, applyRewrites, createSiteServer, contentTypeFor, SITE_ROOT, PathTraversalError,
+  _setGeocodeFetch,
 } from '../scripts/serve-site.js';
+import { buildUpstreamUrl, onRequestGet } from '../site/functions/geocode.js';
 
 // render.js is a plain browser-native ES module — it reaches for the global `document`, exactly
 // as it will in a real browser tab. jsdom supplies that global here so node:test can drive it
@@ -513,5 +515,184 @@ test('createSiteServer: a traversal request is rejected (400), not served', asyn
     assert.equal(status, 400);
   } finally {
     server.close();
+  }
+});
+
+// ============================================================================
+// site/functions/geocode.js — the one allowed server code (task 8). PRIVACY CONTRACT
+// (review-blocking): the address goes to the Census request and nowhere else — no logging, no
+// analytics, no cache writes, no error reporting that includes the address.
+// ============================================================================
+
+test('buildUpstreamUrl: builds the exact Census Geocoder request URL, address percent-encoded', () => {
+  const u = buildUpstreamUrl('201 W Capitol Ave, Jefferson City, MO');
+  assert.equal(u.origin + u.pathname, 'https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress');
+  assert.equal(u.searchParams.get('address'), '201 W Capitol Ave, Jefferson City, MO');
+  assert.equal(u.searchParams.get('benchmark'), 'Public_AR_Current');
+  // LIVE CENSUS-SHAPE CORRECTION (task-8 report): the brief's own draft code used
+  // vintage=Current, which the real Census API rejects outright (400 "Invalid vintage in
+  // request") — verified live against
+  // https://geocoding.geo.census.gov/geocoder/vintages?benchmark=Public_AR_Current&format=json,
+  // whose one Public_AR_Current-paired vintage is named Current_Current.
+  assert.equal(u.searchParams.get('vintage'), 'Current_Current');
+  assert.equal(u.searchParams.get('format'), 'json');
+});
+
+test('onRequestGet: no address -> 400 {error: "address required"}, upstream never called', async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; throw new Error('must not be called'); };
+  try {
+    const res = await onRequestGet({ request: { url: 'https://site.example/geocode' } });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'address required' });
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('onRequestGet: an address over 500 chars -> 400, upstream never called', async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; throw new Error('must not be called'); };
+  try {
+    const longAddress = 'a'.repeat(501);
+    const res = await onRequestGet({ request: { url: `https://site.example/geocode?address=${longAddress}` } });
+    assert.equal(res.status, 400);
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('onRequestGet: a successful upstream fetch passes the Census JSON straight through', async () => {
+  const originalFetch = globalThis.fetch;
+  const fakeGeocodeResult = { result: { addressMatches: [{ geographies: {} }] } };
+  globalThis.fetch = async (url, opts) => {
+    assert.ok(String(url).includes('vintage=Current_Current'));
+    assert.ok(opts && opts.signal, 'a timeout AbortSignal is attached to the upstream request');
+    return { ok: true, json: async () => fakeGeocodeResult };
+  };
+  try {
+    const res = await onRequestGet({ request: { url: 'https://site.example/geocode?address=201+W+Capitol+Ave' } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), fakeGeocodeResult);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('onRequestGet: a non-ok upstream response -> 502 generic error, never the upstream body verbatim', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({ some: 'internal census detail' }) });
+  try {
+    const res = await onRequestGet({ request: { url: 'https://site.example/geocode?address=x' } });
+    assert.equal(res.status, 502);
+    assert.deepEqual(await res.json(), { error: 'geocoder unavailable' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('onRequestGet: a thrown/timed-out upstream fetch -> 502 generic error, never throws out of the handler', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network fault'); };
+  try {
+    const res = await onRequestGet({ request: { url: 'https://site.example/geocode?address=x' } });
+    assert.equal(res.status, 502);
+    assert.deepEqual(await res.json(), { error: 'geocoder unavailable' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('onRequestGet: never calls console.log/console.error (no-logging privacy contract, review-blocking)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const originalError = console.error;
+  let logCalls = 0;
+  console.log = () => { logCalls += 1; };
+  console.error = () => { logCalls += 1; };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ result: { addressMatches: [] } }) });
+  try {
+    await onRequestGet({ request: { url: 'https://site.example/geocode?address=some+private+address' } });
+    assert.equal(logCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+    console.error = originalError;
+  }
+});
+
+// ============================================================================
+// scripts/serve-site.js — the /geocode dev passthrough (task 8). Same upstream-URL builder as
+// the Pages Function (buildUpstreamUrl, imported directly — one copy, not two).
+// ============================================================================
+
+test('createSiteServer: GET /geocode passes address+params to the SAME upstream URL the Pages Function builds, returns the upstream JSON', async () => {
+  let capturedUrl = null;
+  _setGeocodeFetch(async (url) => {
+    capturedUrl = String(url);
+    return { ok: true, json: async () => ({ result: { addressMatches: [] } }) };
+  });
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  try {
+    const { status, body } = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/geocode?address=201+W+Capitol+Ave`, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, body: data }));
+      }).on('error', reject);
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(JSON.parse(body), { result: { addressMatches: [] } });
+    assert.ok(capturedUrl.includes('vintage=Current_Current'));
+    assert.ok(capturedUrl.includes('address=201'));
+  } finally {
+    server.close();
+    _setGeocodeFetch(null);
+  }
+});
+
+test('createSiteServer: GET /geocode with no address -> 400, upstream never called', async () => {
+  let called = false;
+  _setGeocodeFetch(async () => { called = true; return { ok: true, json: async () => ({}) }; });
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  try {
+    const status = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/geocode`, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      }).on('error', reject);
+    });
+    assert.equal(status, 400);
+    assert.equal(called, false);
+  } finally {
+    server.close();
+    _setGeocodeFetch(null);
+  }
+});
+
+test('createSiteServer: GET /geocode when the upstream fetch fails -> 502, never crashes the server', async () => {
+  _setGeocodeFetch(async () => { throw new Error('network fault'); });
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  try {
+    const status = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/geocode?address=x`, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      }).on('error', reject);
+    });
+    assert.equal(status, 502);
+  } finally {
+    server.close();
+    _setGeocodeFetch(null);
   }
 });
