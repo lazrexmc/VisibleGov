@@ -300,3 +300,93 @@ test('glossary tab: a dirty gloss-edit on a status where edit is NOT legal (appr
   assert.equal(decisionCalls.length, 1);
   assert.equal(decisionCalls[0].body.action, 'publish');
 });
+
+// ============================================================================
+// Identity tab (postIdentityDecision) — final wave, item 3: TOCTOU guard's client-side companion.
+// A double-click or a retry against a slow response must never fire the same decision twice while
+// the first is still in flight; the server's own guarded-update race handling
+// (tests/review-logic.test.js's double-submit interleave tests) is the durable backstop, this is
+// the first, cheap line of defense.
+// ============================================================================
+
+function identityQueueMocks(item) {
+  return [
+    { match: (url) => url === '/api/identity/queue', respond: () => ({ body: { available: true, items: [item] } }) },
+  ];
+}
+
+test('identity tab: decision buttons disable for the duration of an in-flight request and are correctly restored once it resolves', async () => {
+  const item = {
+    id: 'flag-1',
+    cluster_key: 'jones:leg-a,leg-b',
+    reason: 'ambiguous_era',
+    created_at: '2026-01-01T00:00:00Z',
+    candidates: [
+      {
+        legislator_id: 'leg-a', full_name: 'Robert Jones', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+      {
+        legislator_id: 'leg-b', full_name: 'Robert Jones', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+    ],
+  };
+  const { document, hooks, setFetch } = loadPage(makeFetchMock(identityQueueMocks(item)));
+  await hooks.loadIdentityQueue();
+  assert.equal(hooks.getIdentityButtonState().keepSeparateDisabled, false, 'a flag is selected — keep-separate starts available');
+
+  document.getElementById('identity-note').value = 'A required note for keep-separate';
+
+  // A deferred fetch response, held open under our control — lets us inspect button state WHILE
+  // the request is genuinely still in flight, not just before/after it.
+  let resolveFetch;
+  const deferred = new Promise((resolve) => { resolveFetch = resolve; });
+  setFetch(async (url) => {
+    if (url === '/api/identity/decision') return deferred;
+    return { ok: true, status: 200, json: async () => ({ available: true, items: [item] }) };
+  });
+
+  const decisionPromise = hooks.postIdentityDecision('keep-separate');
+  // postIdentityDecision runs SYNCHRONOUSLY up to its own `await fetch(...)` — by the time control
+  // returns here (no await needed), the disable lines have already executed and the fetch is
+  // genuinely pending on `deferred`.
+  const midFlightState = hooks.getIdentityButtonState();
+  assert.equal(midFlightState.linkDisabled, true, 'disabled while the request is in flight');
+  assert.equal(midFlightState.keepSeparateDisabled, true, 'disabled while the request is in flight');
+
+  resolveFetch({ ok: true, status: 200, json: async () => ({ resolved: true }) });
+  await decisionPromise;
+
+  const afterState = hooks.getIdentityButtonState();
+  assert.equal(afterState.keepSeparateDisabled, false, 'restored to enabled once loadIdentityQueue() re-renders the (still-current, per this mock) flag');
+  assert.equal(afterState.linkDisabled, true, 'link stays disabled — zero candidates are selected after the reload, correctly, not stuck from mid-flight');
+});
+
+test('identity tab: decision buttons are restored (not left stuck disabled) when the request fails', async () => {
+  const item = {
+    id: 'flag-1',
+    cluster_key: 'jones:leg-a,leg-b',
+    reason: 'ambiguous_era',
+    created_at: '2026-01-01T00:00:00Z',
+    candidates: [
+      {
+        legislator_id: 'leg-a', full_name: 'Robert Jones', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+      {
+        legislator_id: 'leg-b', full_name: 'Robert Jones', source_keys: {}, district: '', era_span: '', cast_count: 0, already_linked: false, linked_person_id: null,
+      },
+    ],
+  };
+  const { document, hooks, setFetch } = loadPage(makeFetchMock(identityQueueMocks(item)));
+  await hooks.loadIdentityQueue();
+  document.getElementById('identity-note').value = 'A required note for keep-separate';
+
+  const mock = makeFetchMock([
+    { match: (url) => url === '/api/identity/decision', respond: () => ({ status: 409, body: { error: 'flag already resolved' } }) },
+  ]);
+  setFetch(mock);
+  await hooks.postIdentityDecision('keep-separate');
+
+  const afterState = hooks.getIdentityButtonState();
+  assert.equal(afterState.keepSeparateDisabled, false, 'a 409 does not call loadIdentityQueue() — the finally block restores it directly');
+  assert.equal(afterState.linkDisabled, true, 'still zero candidates selected');
+});

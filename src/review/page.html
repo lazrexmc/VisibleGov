@@ -1112,6 +1112,13 @@
       if (identitySelectedIds.size < 2) { setStatus('Select at least 2 candidates to link.'); return; }
       payload.legislator_ids = Array.from(identitySelectedIds);
     }
+    // Disable both decision buttons for the duration of this request (final wave, item 3) — a
+    // double-click or an operator retrying against a slow response must never fire the same
+    // decision twice against the same flag while the first is still in flight. The server's own
+    // TOCTOU guard (src/review/server.js's handleIdentityDecision) is the durable backstop; this
+    // is the first, cheap line of defense.
+    document.getElementById('identity-btn-link').disabled = true;
+    document.getElementById('identity-btn-keep-separate').disabled = true;
     try {
       const res = await fetch('/api/identity/decision', {
         method: 'POST',
@@ -1128,6 +1135,14 @@
       await loadIdentityQueue();
     } catch {
       setStatus('Network error.');
+    } finally {
+      // Restores whatever the CORRECT disabled state is right now — on success, loadIdentityQueue()
+      // already ran renderIdentityFlag/showIdentityPlaceholder (both set both buttons correctly for
+      // the new state); on any error path it did not, so this recomputes fresh. Both calls are
+      // idempotent with whatever loadIdentityQueue() already did, so running them unconditionally
+      // here is always safe.
+      updateIdentityLinkButton();
+      document.getElementById('identity-btn-keep-separate').disabled = !currentIdentityFlagId;
     }
   }
 
@@ -1176,6 +1191,15 @@
       loadGlossaryQueue, loadGlossaryItem, postGlossaryDecision,
       getSummaryState: () => ({ currentId, lastLoadedBodyMd, currentSummaryStatus }),
       getGlossaryState: () => ({ currentGlossaryId, lastLoadedGlossMd, currentGlossaryStatus }),
+      // Final wave, item 3: exposes the identity tab's own load/decide functions the same way the
+      // other two tabs already are, so tests/review-page-decisions.test.js can drive the REAL
+      // shipped postIdentityDecision (button-disable-while-in-flight) against a controllable fetch
+      // mock, not a hand-copied reimplementation.
+      loadIdentityQueue, postIdentityDecision,
+      getIdentityButtonState: () => ({
+        linkDisabled: document.getElementById('identity-btn-link').disabled,
+        keepSeparateDisabled: document.getElementById('identity-btn-keep-separate').disabled,
+      }),
     });
   }
 </script>

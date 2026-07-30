@@ -331,7 +331,11 @@ export async function writeAutoCluster(client, runId, cluster, memberRowsById) {
   return { personId, memberCount: memberRows.length };
 }
 
-function isUniqueViolation(error) {
+// isUniqueViolation — exported (final wave, item 3) so src/review/server.js's own TOCTOU guard on
+// the identity 'link' decision route can map a person_links 23505 (a concurrent writer won a race
+// this route's own guarded legislators.update lost) onto the same 409 path, rather than reusing a
+// second, drifting copy of this one-line check.
+export function isUniqueViolation(error) {
   return error?.code === '23505';
 }
 

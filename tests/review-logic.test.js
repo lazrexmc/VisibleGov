@@ -1146,6 +1146,16 @@ function identityFakeClient({
   castCountsByLegislatorId = new Map(),
   identityFlagsMissing = false,
   newPersonId = 'person-new-1',
+  // TOCTOU guard test seams (final wave, item 3): `raceOnLegislatorUpdateFor` flips the named
+  // legislator's person_id to a rival value right BEFORE the guarded update's own
+  // .is('person_id', null) filter is evaluated — this is the precise "a second writer won the
+  // race in the gap between the pre-check SELECT and this write" interleave, not merely a
+  // pre-seeded already-linked row (which the EARLIER pre-check loop would catch first, never even
+  // reaching the write). `raceOnPersonLinksFor` makes that legislator's person_links insert return
+  // a 23505 instead of succeeding — the race caught one step later, after the legislators guard
+  // itself passed.
+  raceOnLegislatorUpdateFor = null,
+  raceOnPersonLinksFor = null,
 } = {}, onCall) {
   const record = (table, method, args) => { if (onCall) onCall(table, method, args); };
   // Real Supabase generates a fresh uuid per insert; a fixed canned id would make every 'link'
@@ -1154,8 +1164,15 @@ function identityFakeClient({
   // person ids). Scoped at the client level (not inside from('persons')) so it persists across
   // multiple decision requests against one identityFakeClient instance.
   let personInsertCount = 0;
+  // insertedPersonIds/deletedPersonIds (final wave, item 3): tracked so a test can assert the
+  // TOCTOU guard's own cleanup (deleting an orphaned persons row when nothing has linked to it
+  // yet) actually happened, not just that the route returned 409.
+  const insertedPersonIds = [];
+  const deletedPersonIds = [];
 
   return {
+    insertedPersonIds,
+    deletedPersonIds,
     from(table) {
       if (table === 'identity_flags') {
         return {
@@ -1222,9 +1239,27 @@ function identityFakeClient({
             return {
               eq: (col, val) => {
                 record(table, 'eq', [col, val]);
-                const row = legislatorsById.get(val);
-                if (row) Object.assign(row, patch);
-                return Promise.resolve({ data: null, error: null });
+                return {
+                  is: (isCol, isVal) => {
+                    record(table, 'is', [isCol, isVal]);
+                    return {
+                      select: (selCols) => {
+                        record(table, 'select', [selCols]);
+                        if (raceOnLegislatorUpdateFor === val) {
+                          // Simulate: a concurrent writer wins the race right before THIS
+                          // update's own guard is evaluated.
+                          const raced = legislatorsById.get(val);
+                          if (raced) raced.person_id = 'person-rival';
+                        }
+                        const row = legislatorsById.get(val);
+                        const guardFails = !row || (isCol === 'person_id' && isVal === null && row.person_id !== null);
+                        if (guardFails) return Promise.resolve({ data: [], error: null });
+                        Object.assign(row, patch);
+                        return Promise.resolve({ data: [{ id: row.id }], error: null });
+                      },
+                    };
+                  },
+                };
               },
             };
           },
@@ -1251,10 +1286,21 @@ function identityFakeClient({
             record(table, 'insert', [row]);
             personInsertCount += 1;
             const id = personInsertCount === 1 ? newPersonId : `${newPersonId}-${personInsertCount}`;
+            insertedPersonIds.push(id);
             return {
               select: () => ({
                 single: () => Promise.resolve({ data: { id }, error: null }),
               }),
+            };
+          },
+          delete() {
+            record(table, 'delete', []);
+            return {
+              eq: (col, val) => {
+                record(table, 'eq', [col, val]);
+                if (col === 'id') deletedPersonIds.push(val);
+                return Promise.resolve({ error: null });
+              },
             };
           },
         };
@@ -1264,6 +1310,9 @@ function identityFakeClient({
         return {
           insert(row) {
             record(table, 'insert', [row]);
+            if (raceOnPersonLinksFor === row.legislator_id) {
+              return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "person_links_legislator_id_key"' } });
+            }
             return Promise.resolve({ data: null, error: null });
           },
         };
@@ -1703,6 +1752,102 @@ test('POST /api/identity/decision link: a selected legislator already carrying a
     assert.ok(!calls.some((c) => c.table === 'persons'), 'no person row created once a conflict is found');
     assert.ok(!calls.some((c) => c.table === 'person_links'), 'no link rows written once a conflict is found');
     assert.equal(legislatorsById.get('leg-b').person_id, null, 'leg-b (checked, no conflict) still never got written — the whole decision aborts before any write');
+  }, client);
+});
+
+// ---- FINAL WAVE, item 3: TOCTOU guard — the pre-check loop validates person_id===null against a
+// SELECT snapshot; these tests prove the SEPARATE guarded-write race (a concurrent writer wins
+// the race in the gap between that snapshot and this route's own write) is caught too, not just
+// the already-linked-at-snapshot-time case the test above covers. ----
+
+test('POST /api/identity/decision link: double-submit interleave — the SECOND member loses the guarded update to a concurrent writer -> 409, the first member\'s real link stays (honest partial state), the just-created person is NOT deleted (something already links to it)', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'X', bioguide_id: 'X1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Y', bioguide_id: 'Y1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const client = identityFakeClient({
+    flags: [flag], legislatorsById, raceOnLegislatorUpdateFor: 'leg-b',
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'] }),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 409);
+    assert.match(body.error, /concurrent/);
+    assert.equal(legislatorsById.get('leg-a').person_id, 'person-new-1', 'leg-a already got a real link before the race was detected — left as-is, an honest partial state');
+    assert.equal(legislatorsById.get('leg-b').person_id, 'person-rival', 'leg-b was linked by the simulated concurrent writer, never overwritten by this request');
+    assert.deepEqual(client.deletedPersonIds, [], 'the person is NOT deleted — leg-a genuinely links to it');
+  }, client);
+});
+
+test('POST /api/identity/decision link: double-submit interleave — the FIRST (and only) member loses the guarded update -> 409, the just-created orphaned person IS deleted (nothing links to it yet)', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'X', bioguide_id: 'X1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Y', bioguide_id: 'Y1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const client = identityFakeClient({
+    flags: [flag], legislatorsById, raceOnLegislatorUpdateFor: 'leg-a',
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'] }),
+    });
+    assert.equal(res.status, 409);
+    assert.equal(legislatorsById.get('leg-a').person_id, 'person-rival', 'raced away by the simulated concurrent writer');
+    assert.equal(legislatorsById.get('leg-b').person_id, null, 'never reached — the loop aborted on leg-a first');
+    assert.deepEqual(client.insertedPersonIds, ['person-new-1']);
+    assert.deepEqual(client.deletedPersonIds, ['person-new-1'], 'the orphaned person (zero links landed) is cleaned up rather than left stranded');
+  }, client);
+});
+
+test('POST /api/identity/decision link: a person_links unique-violation (the SAME race, caught one step later) also maps to 409, not a raw 500', () => {
+  const flag = {
+    id: 'f1', cluster_key: 'k', resolved: false,
+    candidate_legislator_ids: ['leg-a', 'leg-b'],
+    evidence: { reason: 'internal_contradiction', candidates: [{ legislatorId: 'leg-a' }, { legislatorId: 'leg-b' }] },
+  };
+  const legislatorsById = new Map([
+    ['leg-a', {
+      id: 'leg-a', full_name: 'X', bioguide_id: 'X1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+    ['leg-b', {
+      id: 'leg-b', full_name: 'Y', bioguide_id: 'Y1', openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
+    }],
+  ]);
+  const client = identityFakeClient({
+    flags: [flag], legislatorsById, raceOnPersonLinksFor: 'leg-a',
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/identity/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_id: 'f1', action: 'link', legislator_ids: ['leg-a', 'leg-b'] }),
+    });
+    assert.equal(res.status, 409);
+    assert.deepEqual(client.deletedPersonIds, ['person-new-1'], 'nothing had linked yet when the race was detected — cleaned up');
   }, client);
 });
 

@@ -9,10 +9,27 @@ import { pickDisplayName } from '../lib/person-identity.js';
 // PersonLinkConflictError reused verbatim (Task 2, controller ruling 4: "conflict-throw path
 // intact") — the SAME typed guard link-persons.js's writeAutoCluster throws when a cluster
 // member already carries a non-null person_id, now also thrown here for Lance's manual
-// per-subset link decisions. Importing a CLI module into the review server is safe: link-
-// persons.js only imports from ../lib/db.js and ../lib/person-identity.js (no circularity), and
-// its own `invokedDirectly` guard at the bottom means importing it here never runs its main().
-import { PersonLinkConflictError } from '../cli/link-persons.js';
+// per-subset link decisions. isUniqueViolation reused verbatim too (final wave, item 3 — the
+// TOCTOU guard's own person_links-race detection). Importing a CLI module into the review server
+// is safe: link-persons.js only imports from ../lib/db.js and ../lib/person-identity.js (no
+// circularity), and its own `invokedDirectly` guard at the bottom means importing it here never
+// runs its main().
+import { PersonLinkConflictError, isUniqueViolation } from '../cli/link-persons.js';
+
+// PersonLinkRaceError — final wave, item 3 (TOCTOU guard): distinct from PersonLinkConflictError
+// (which fires on the pre-check, against a SELECT snapshot, BEFORE any write for this decision
+// happens) — this fires when the guarded WRITE itself (legislators.update(...).is('person_id',
+// null), or a person_links unique-violation one step later) discovers a concurrent writer won the
+// race in the gap between that snapshot and now. Both map to the same 409 in the route's outer
+// catch, but are kept as separate typed errors since PersonLinkRaceError's own handling (persons-
+// row cleanup when nothing has linked yet) is specific to the mid-write race, not the pre-check.
+export class PersonLinkRaceError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'PersonLinkRaceError';
+    Object.assign(this, meta);
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PAGE_HTML = readFileSync(path.join(__dirname, 'page.html'));
@@ -903,22 +920,64 @@ async function handleIdentityDecision(client, req, res) {
     if (insErr) throw insErr;
     const personId = person.id;
 
-    for (const row of rows) {
-      const patch = additivePatch(row, { person_id: personId });
-      // eslint-disable-next-line no-await-in-loop -- small (2-14) member loop, same sequential
-      // precedent as writeAutoCluster's own per-member loop.
-      const { error: updErr } = await client.from('legislators').update(patch).eq('id', row.id);
-      if (updErr) throw updErr;
+    // TOCTOU guard (final wave, item 3): the pre-check loop above validated person_id===null
+    // against a SELECT snapshot taken before this point — a concurrent request (double-submit
+    // from a slow UI, or two admins acting on the same flag) could link one of these rows to a
+    // DIFFERENT person in the gap between that snapshot and this write. `.is('person_id', null)`
+    // makes the UPDATE itself the guard (not just the earlier read), and `.select('id')` lets us
+    // see whether it actually matched anything: zero rows back means the guard lost the race.
+    // `linkedCount` tracks how many members ALREADY got real person_links rows before the race was
+    // detected — if none (the very first member in this decision), the persons row just inserted
+    // above links to nothing at all and is cleaned up rather than left an orphan; if some already
+    // succeeded, those stay (an honest partial state, same "leave it, don't half-undo real writes"
+    // philosophy PersonLinkConflictError's own all-or-nothing pre-check exists to avoid needing in
+    // the common case, but can't fully prevent here since this IS the race window itself).
+    let linkedCount = 0;
+    try {
+      for (const row of rows) {
+        const patch = additivePatch(row, { person_id: personId });
+        // eslint-disable-next-line no-await-in-loop -- small (2-14) member loop, same sequential
+        // precedent as writeAutoCluster's own per-member loop.
+        const { data: updatedRows, error: updErr } = await client
+          .from('legislators').update(patch).eq('id', row.id).is('person_id', null).select('id');
+        if (updErr) throw updErr;
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new PersonLinkRaceError(
+            `legislator_id=${row.id} was linked by a concurrent request between validation and write`,
+            { legislatorId: row.id, personId, flagId: flag_id },
+          );
+        }
 
-      const candidateEvidence = findCandidateEvidence(flag.evidence, row.id);
-      const linkEvidence = buildLanceLinkEvidence(candidateEvidence, {
-        flagId: flag.id, clusterKey: flag.cluster_key, linkedLegislatorIds: legislator_ids, note,
-      });
-      // eslint-disable-next-line no-await-in-loop
-      const { error: linkErr } = await client.from('person_links').insert({
-        person_id: personId, legislator_id: row.id, evidence: linkEvidence, decided_by: 'lance',
-      });
-      if (linkErr) throw linkErr;
+        const candidateEvidence = findCandidateEvidence(flag.evidence, row.id);
+        const linkEvidence = buildLanceLinkEvidence(candidateEvidence, {
+          flagId: flag.id, clusterKey: flag.cluster_key, linkedLegislatorIds: legislator_ids, note,
+        });
+        // eslint-disable-next-line no-await-in-loop
+        const { error: linkErr } = await client.from('person_links').insert({
+          person_id: personId, legislator_id: row.id, evidence: linkEvidence, decided_by: 'lance',
+        });
+        if (linkErr) {
+          // person_links.legislator_id is unique (migration 0012) — a 23505 here is the SAME race
+          // caught one step later (the legislators guard passed, but a concurrent writer's OWN
+          // person_links insert landed first), mapped to the identical 409 path rather than a raw
+          // 500.
+          if (isUniqueViolation(linkErr)) {
+            throw new PersonLinkRaceError(
+              `legislator_id=${row.id} was linked by a concurrent request (person_links race)`,
+              { legislatorId: row.id, personId, flagId: flag_id },
+            );
+          }
+          throw linkErr;
+        }
+        linkedCount += 1;
+      }
+    } catch (loopErr) {
+      if (loopErr instanceof PersonLinkRaceError && linkedCount === 0) {
+        // Nothing links to the just-created person yet — clean it up rather than leaving an
+        // orphaned row with zero person_links pointing at it.
+        await client.from('persons').delete().eq('id', personId);
+      }
+      throw loopErr;
     }
 
     // Controller ruling 1: "remaining candidates stay in the flag until it's fully resolved" —
@@ -941,6 +1000,10 @@ async function handleIdentityDecision(client, req, res) {
   } catch (err) {
     if (err instanceof PersonLinkConflictError) {
       sendJson(res, 409, { error: 'one or more selected legislators are already linked to a different person' });
+      return;
+    }
+    if (err instanceof PersonLinkRaceError) {
+      sendJson(res, 409, { error: 'one or more selected legislators were linked by a concurrent request' });
       return;
     }
     sendServerError(res, 'identity-decision', err);
