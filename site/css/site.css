@@ -1,0 +1,48 @@
+/* site/css/site.css — placeholder base styles (task 3 scaffold). Later page tasks extend this;
+   deliberately minimal here, not a design system. */
+
+:root {
+  color-scheme: light dark;
+  --fg: #1a1a1a;
+  --bg: #ffffff;
+  --muted: #666666;
+  --link: #0b5fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e8e8e8;
+    --bg: #121212;
+    --muted: #a0a0a0;
+    --link: #6ea8ff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--link);
+}
+
+.section-state {
+  color: var(--muted);
+}
+
+.section-state-failed {
+  color: #b00020;
+}
+
+.footer-placeholder {
+  color: var(--muted);
+  font-size: 0.85em;
+}

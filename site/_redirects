@@ -1,0 +1,4 @@
+/person/*      /person.html      200
+/legislator/*  /legislator.html  200
+/bill/*        /bill.html        200
+/trust         /trust.html       200
