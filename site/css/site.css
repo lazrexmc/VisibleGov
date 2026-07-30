@@ -245,3 +245,73 @@ button.chart-bar-row {
   color: var(--muted);
   font-style: italic;
 }
+
+/* Task 9 — bill page (site/bill.html). Functional only, same minimal-polish level as the profile
+   page's own first pass (final visual polish is a later step, design spec's own "Build order"). */
+
+.bill-mo-disclaimer {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.bill-vote-list,
+.bill-summary-bullets {
+  list-style: none;
+  padding: 0;
+}
+
+.bill-vote-row {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--muted);
+}
+
+.bill-vote-tally {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.bill-summary-fallback-note {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.bill-verification-note {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-top: 0.75rem;
+}
+
+/* Glossary inline (site/js/glossary-inline.js) — a matched term reads as an underlined, focusable
+   inline element (native <dfn> semantics kept; interactivity layered on top via tabIndex/role, not
+   a real <button>, since a term-in-running-text is a definition reference first). Same "no
+   good/bad implication" color discipline site.css already applies to the vote-chart bars: one
+   neutral treatment for every term, never anything party- or valence-coded. */
+.gloss-term {
+  cursor: pointer;
+  border-bottom: 1px dotted var(--link);
+  font-style: normal;
+}
+
+.gloss-term:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.gloss-detail {
+  margin: 0.35rem 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--muted);
+  font-size: 0.9em;
+}
+
+.gloss-detail-heading {
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+}
+
+.gloss-quote {
+  color: var(--muted);
+  margin: 0.35rem 0;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--muted);
+}

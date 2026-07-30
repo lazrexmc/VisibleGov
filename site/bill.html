@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisibleGov — bill</title>
+  <!-- Trivial authored asset (not DB content), same favicon every other page ships (task 6 fix
+       round 1, finding 3) — stops the favicon 404 console noise, no live-DB dependency. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b5fff'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='18' font-weight='700' fill='%23fff' text-anchor='middle'%3EV%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <main id="app">
+    <section id="bill-identity" class="bill-identity" aria-label="Bill"></section>
+
+    <h2>Sponsors</h2>
+    <section id="bill-sponsors" aria-label="Sponsors"></section>
+
+    <h2>Plain-language summary</h2>
+    <section id="bill-summary" aria-label="Plain-language summary"></section>
+
+    <h2>Roll calls</h2>
+    <section id="bill-votes" aria-label="Roll calls"></section>
+  </main>
+  <footer id="site-footer"></footer>
+  <script type="module">
+    import { bootstrapBillPage } from '/js/bill-page.js';
+    bootstrapBillPage();
+  </script>
+</body>
+</html>
