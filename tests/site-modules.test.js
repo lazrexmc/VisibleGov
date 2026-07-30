@@ -7,7 +7,7 @@ import {
   restGet, pagedFetch, fetchAllRows, countOnly, _setFetch, _setConfig, ConfigError,
 } from '../site/js/rest.js';
 import {
-  el, clearChildren, sectionState, mountFooter, UnsafeAttributeError,
+  el, clearChildren, sectionState, mountFooter, UnsafeAttributeError, InvalidSectionStateError,
 } from '../site/js/render.js';
 import { voteReceiptUrl, photoUrl, officialBillUrl } from '../site/js/receipts.js';
 import {
@@ -139,6 +139,29 @@ test('el: rejects javascript: hrefs with a typed error', () => {
   assert.throws(() => el('a', { href: '  JavaScript:alert(1)' }, 'click'), UnsafeAttributeError, 'case/whitespace variants too');
 });
 
+// Fix round 1 (task review): a bare `.trim()` only strips leading/trailing whitespace — a TAB or
+// newline EMBEDDED in the middle of the scheme survives it, and browsers' URL parsers strip
+// embedded TAB/CR/LF anywhere before scheme resolution (jsdom's .protocol confirms 'javascript:'
+// for this exact construction), so the blocklist check silently let this through.
+test('el: rejects a TAB-embedded javascript: scheme bypass (control chars stripped before scheme check)', () => {
+  assert.throws(() => el('a', { href: 'jav\tascript:alert(1)' }, 'click'), UnsafeAttributeError);
+});
+
+// Fix round 1 (task review, finding 2): blocklisting javascript: alone is insufficient — switch
+// to an ALLOWLIST of href schemes (http:, https:, mailto:, or no scheme at all/relative). This
+// closes the general class, not just the one construction: data:text/html can run script in a
+// clicked link exactly like javascript: can, and it must be rejected the same way.
+test('el: href scheme allowlist rejects data: URLs', () => {
+  assert.throws(() => el('a', { href: 'data:text/html,<script>alert(1)</script>' }, 'click'), UnsafeAttributeError);
+});
+
+test('el: href scheme allowlist still accepts relative paths and http(s)/mailto hrefs', () => {
+  assert.equal(el('a', { href: '/person/abc-123' }, 'x').getAttribute('href'), '/person/abc-123');
+  assert.equal(el('a', { href: 'https://example.com/bill/1' }, 'x').getAttribute('href'), 'https://example.com/bill/1');
+  assert.equal(el('a', { href: 'http://example.com' }, 'x').getAttribute('href'), 'http://example.com');
+  assert.equal(el('a', { href: 'mailto:someone@example.com' }, 'x').getAttribute('href'), 'mailto:someone@example.com');
+});
+
 test('el: rejects any attribute outside the {class, href, id, dataset} allowlist', () => {
   assert.throws(() => el('div', { title: 'hello' }), UnsafeAttributeError);
 });
@@ -197,6 +220,16 @@ test('sectionState: ready state clears the container for the caller to fill', ()
   container.appendChild(el('p', {}, 'placeholder'));
   sectionState(container, { state: 'ready' });
   assert.equal(container.childNodes.length, 0);
+});
+
+// Fix round 1 (task review, finding 3): an unrecognized state used to fall through to an empty
+// <p> — exactly the plan's forbidden "a failed fetch renders as an empty section" (design spec
+// §8), reachable by a simple caller typo (e.g. 'error' instead of 'failed'). Must throw loud
+// instead of silently rendering the wrong-but-plausible-looking empty state.
+test('sectionState: an unrecognized state throws a typed error rather than silently rendering empty', () => {
+  const container = document.createElement('div');
+  assert.throws(() => sectionState(container, { state: 'error', message: 'oops' }), InvalidSectionStateError);
+  assert.equal(container.childNodes.length, 0, 'nothing rendered — the throw happens before any DOM mutation');
 });
 
 test('mountFooter: renders placeholder attribution text (Task 10 fills real content)', () => {

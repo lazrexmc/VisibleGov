@@ -16,10 +16,37 @@ export class UnsafeAttributeError extends Error {
 
 const ALLOWED_ATTRS = new Set(['class', 'href', 'id', 'dataset']);
 
-// attrs allowlist: class/href/id/dataset only. Anything starting with "on" (event handlers) and
-// any javascript: href throw a typed UnsafeAttributeError — a DB string can never become an
-// attribute that executes. Every other non-allowlisted key throws too (allowlist, not blocklist):
-// widening it is a deliberate future change, not an accident of a forgotten case.
+// Fix round 1 (task review, findings 1+2): a bare `value.trim().startsWith('javascript:')`
+// blocklist has two holes. (1) `.trim()` only strips leading/trailing whitespace — a TAB/CR/LF
+// EMBEDDED mid-scheme ('jav\tascript:alert(1)') survives it untouched, and browsers' URL parsers
+// strip embedded TAB/CR/LF anywhere before scheme resolution, so that string resolves to a real
+// javascript: URL despite not literally starting with it. (2) blocklisting one dangerous scheme
+// misses the rest of the class — data: can run script from a clicked link exactly like
+// javascript: can. Fixed by switching to an ALLOWLIST: strip control chars everywhere first (not
+// just the ends), then require either no scheme at all (a relative/site-internal href) or one of
+// http:, https:, mailto: — everything else throws the same typed error.
+const ALLOWED_HREF_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+const SCHEME_PATTERN = /^([a-z][a-z0-9+\-.]*:)/i;
+
+function assertSafeHref(tag, value) {
+  if (typeof value !== 'string') return;
+  const stripped = value.replace(/[\t\r\n]/g, '').trim();
+  const match = stripped.match(SCHEME_PATTERN);
+  if (!match) return; // no scheme -> relative, site-internal href; always allowed
+  const scheme = match[1].toLowerCase();
+  if (!ALLOWED_HREF_SCHEMES.has(scheme)) {
+    throw new UnsafeAttributeError(
+      `el(): href scheme "${scheme}" is not allowlisted (relative, http:, https:, mailto:) on <${tag}>`,
+      { tag, attr: 'href', value },
+    );
+  }
+}
+
+// attrs allowlist: class/href/id/dataset only. Anything starting with "on" (event handlers), any
+// non-allowlisted key, and any href outside the scheme allowlist above all throw a typed
+// UnsafeAttributeError — a DB string can never become an attribute that executes. Every other
+// non-allowlisted key throws too (allowlist, not blocklist): widening it is a deliberate future
+// change, not an accident of a forgotten case.
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs || {})) {
@@ -35,8 +62,8 @@ export function el(tag, attrs = {}, ...children) {
         { tag, attr: key },
       );
     }
-    if (key === 'href' && typeof value === 'string' && value.trim().toLowerCase().startsWith('javascript:')) {
-      throw new UnsafeAttributeError(`el(): refusing a javascript: href on <${tag}>`, { tag, attr: key, value });
+    if (key === 'href') {
+      assertSafeHref(tag, value);
     }
     if (key === 'dataset') {
       for (const [dataKey, dataValue] of Object.entries(value || {})) {
@@ -63,6 +90,16 @@ export function clearChildren(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+export class InvalidSectionStateError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'InvalidSectionStateError';
+    Object.assign(this, meta);
+  }
+}
+
+const VALID_STATES = new Set(['loading', 'failed', 'empty', 'ready']);
+
 const STATE_DEFAULT_MESSAGE = {
   loading: 'Loading…',
   empty: 'No data recorded.',
@@ -74,7 +111,18 @@ const STATE_DEFAULT_MESSAGE = {
 // — retry") are always visually and semantically distinct, never collapsed into one blank state.
 // 'ready' just clears the container — the caller fills in the real content immediately after;
 // there is nothing generic to render for it.
+//
+// Fix round 1 (task review, finding 3): an unrecognized state (a simple caller typo, e.g. 'error'
+// instead of 'failed') used to fall through the two `if`s below and render an empty <p> with no
+// text — exactly the plan's forbidden "a failed fetch renders as an empty section" (design spec
+// §8), just reached a different way. Fail loud instead: validate the enum before touching the DOM.
 export function sectionState(container, { state, message, onRetry } = {}) {
+  if (!VALID_STATES.has(state)) {
+    throw new InvalidSectionStateError(
+      `sectionState(): "${state}" is not a valid state (loading, failed, empty, ready)`,
+      { state },
+    );
+  }
   clearChildren(container);
   if (state === 'ready') return;
   const text = message || STATE_DEFAULT_MESSAGE[state] || '';
