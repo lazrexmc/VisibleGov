@@ -142,9 +142,14 @@ missing:
 - Anon SELECT where absent among: legislators, terms, votes, vote_casts, bills, sessions,
   jurisdictions, persons (has it), bill_sponsors (has it), summaries (published-only policy
   exists), glossary (published-only).
-- A `public_person_links` view exposing only (person_id, legislator_id) — the site needs the
-  mapping, not the evidence payloads or decided_by; the full audit trail stays internal and the
-  trust page describes it in prose instead.
+- ~~A `public_person_links` view~~ **Superseded at plan time (2026-07-30):** `legislators.person_id`
+  is already anon-readable and IS the mapping — no view needed; the audit trail stays internal
+  and the trust page describes it in prose.
+- **Added at plan time (verified live):** migration 0016 also (a) REVOKES the slice-1 anon
+  policies on `bill_texts` and `ingestion_runs` — both were fully anon-readable, contradicting
+  this section — and (b) adds `terms.state` (additive, fills-null backfill): US House terms
+  store bare district numbers with no state, so address lookup cannot match a House seat
+  without it. Seat geography on terms does not violate the 0014 identity-column design freeze.
 - A `public_freshness` view over ingestion_runs exposing source, status, finished_at, and the
   quarantined-day count (extracted from the latest run's detail JSON in the view SQL — the
   count only, never the detail payload) — §3's freshness box reads exactly this surface; run
