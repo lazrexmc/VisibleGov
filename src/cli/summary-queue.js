@@ -97,7 +97,18 @@ export function parseArgs(argv) {
 // Passage/third-reading votes are the priority signal the plan doc names explicitly: a bill that
 // has actually been voted on for final passage is the one readers most want explained first.
 // Everything else (procedural motions, amendment votes, committee votes) sorts after.
-export const PASSAGE_QUESTION_RE = /passage|third reading/i;
+//
+// Fix round 1 (Important finding 3): the original /passage|third reading/i missed the repo's own
+// real corpus shapes — MO LegiScan's `"House: SB 894  SBs 3rd READ - INFORMAL"` (tests/fixtures/
+// research/legiscan/mo-2018-rollcall-747209.json) and MO's OpenStates motion_text `"Third Read and
+// Passed (H) -"` (tests/fixtures/mo-legislature/bills-with-votes.json) both name a real passage-
+// adjacent reading vote but neither contains the literal substring "third reading". Widened to
+// `third\s+read` / `3rd\s+read` (word-boundary-free — "Third Read" is a prefix match inside
+// "Third Reading" too, so the original clean-room form still matches). This is a prioritization
+// signal, not a correctness gate (a miss here mis-orders the queue, it never corrupts a write) —
+// but the whole point of priority ordering is to serve readers, so it should be true against real
+// data, not just the shapes this file's own author imagined.
+export const PASSAGE_QUESTION_RE = /passage|third\s+read|3rd\s+read/i;
 
 export function isPassageVote(question) {
   return PASSAGE_QUESTION_RE.test(String(question ?? ''));
@@ -285,7 +296,24 @@ export function validateSummaryShape(summary) {
 // 'string' has no minLength here) — a bullet with an empty cited section is exactly the
 // uncited-bullet gap verify.js's own checkBulletCoverage guards against on the review-edit path;
 // this is the record-mode equivalent, checked BEFORE any DB write.
+//
+// Fix round 1 (CRITICAL finding 1): an empty what_it_does array vacuously satisfies BOTH this
+// function's own missingAt loop (nothing to iterate, so nothing is ever "missing") AND
+// assessVerdicts' documented zero-bullets/zero-verdicts "complete: true, overall: 'clean'" vacuous
+// case (verifier.js's own test: "zero bullets, zero verdicts -> complete/clean") — a
+// {what_it_does: [], verdicts: []} record item would sail through every gate in this file and
+// auto-publish with a body_md of literally nothing, carrying a verification note that falsely
+// reads as "clean." This codebase's THIRD encounter with the empty-set-vacuously-passes class (the
+// glossary pipeline hit the identical shape as its own final-review finding 4) — rejected here,
+// mechanically, before assessVerdicts ever runs. A summary asserting zero points is definitionally
+// not a summary.
 export function checkCitationsPresent(whatItDoes) {
+  if (!whatItDoes || whatItDoes.length === 0) {
+    throw new MalformedSummaryError(
+      'summary has zero what_it_does bullets — a summary with no substantive points is not a summary',
+      { count: 0 },
+    );
+  }
   const missingAt = [];
   whatItDoes.forEach((b, i) => { if (!b.section || !b.section.trim()) missingAt.push(i); });
   if (missingAt.length > 0) {
@@ -296,11 +324,32 @@ export function checkCitationsPresent(whatItDoes) {
   }
 }
 
+// Fix round 1 (Important finding 2): author_model/verifier_model are OPTIONAL (undefined ->
+// classifyRecordItem's own MODEL/VERIFIER_MODEL default applies), but if the caller supplies one
+// it must be a real bare model id — never an empty string (which would previously slip through
+// the `?? MODEL` default check, since `??` only falls back on null/undefined, not '', producing a
+// provenance label of the literal string 'subagent:') and never already carrying THIS code's own
+// 'subagent:' prefix (a caller that double-supplies the prefix would otherwise get
+// 'subagent:subagent:claude-opus-5' stored as provenance — the prefix is applied exactly once,
+// by this file, never by the caller).
+function validateModelLabel(value, fieldName) {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || value.trim() === '') return `record item's ${fieldName} must be a non-empty string when provided`;
+  if (value.startsWith('subagent:')) {
+    return `record item's ${fieldName} must be the bare model id — the 'subagent:' provenance prefix is applied by this code, never supplied by the caller`;
+  }
+  return null;
+}
+
 function validateEnvelope(item) {
   if (!item || typeof item !== 'object') return 'record item must be an object';
   if (typeof item.bill_id !== 'string' || !item.bill_id) return 'record item requires a non-empty bill_id';
   if (typeof item.bill_text_hash !== 'string' || !item.bill_text_hash) return 'record item requires a non-empty bill_text_hash';
   if (!item.summary || typeof item.summary !== 'object') return 'record item requires a summary object';
+  const authorModelError = validateModelLabel(item.author_model, 'author_model');
+  if (authorModelError) return authorModelError;
+  const verifierModelError = validateModelLabel(item.verifier_model, 'verifier_model');
+  if (verifierModelError) return verifierModelError;
   return null;
 }
 
@@ -337,6 +386,11 @@ export async function classifyRecordItem(client, item) {
 
   const { data: existingSummaries, error: sErr } = await client.from('summaries').select('id,status,bill_text_hash').eq('bill_id', billId);
   if (sErr) throw new Error(`summaries lookup failed for bill ${identifier}: ${sErr.message}`);
+  // Minor (fix round 1, finding 4, note-only — inherited check-then-act shape, not fixed here):
+  // two concurrent `record` invocations for the SAME bill could both read past this check before
+  // either has written, both proceeding to insert a duplicate draft. Accepted: this file's whole
+  // design (see the header comment) is a single controller session dispatching subagents and
+  // feeding `record` serially, never two concurrent record processes racing the same bill.
   const already = (existingSummaries ?? []).find((s) => s.bill_text_hash === claimedHash && ALREADY_SUMMARIZED_STATUSES.has(s.status));
   if (already) return { action: 'alreadySummarized', billId, identifier, summaryId: already.id };
 

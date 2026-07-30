@@ -59,6 +59,23 @@ test('PASSAGE_QUESTION_RE is the same regex isPassageVote uses', () => {
   assert.ok(PASSAGE_QUESTION_RE.test('Passage'));
 });
 
+// ---- fix round 1, Important finding 3: PASSAGE_QUESTION_RE against REAL corpus shapes, verbatim
+// from repo fixtures — the original /passage|third reading/i regex matched neither. ----
+
+test('isPassageVote matches the real MO LegiScan corpus shape verbatim (tests/fixtures/research/legiscan/mo-2018-rollcall-747209.json)', () => {
+  assert.ok(isPassageVote('House: SB 894  SBs 3rd READ - INFORMAL'));
+});
+
+test('isPassageVote matches the real MO OpenStates motion_text shape verbatim (tests/fixtures/mo-legislature/bills-with-votes.json)', () => {
+  assert.ok(isPassageVote('Third Read and Passed (H) -'));
+  assert.ok(isPassageVote('Third Read and Passed (S) -'));
+});
+
+test('isPassageVote still matches the original clean-room forms after the regex widening', () => {
+  assert.ok(isPassageVote('On Passage'));
+  assert.ok(isPassageVote('Third Reading'));
+});
+
 // ---- planQueue ----
 
 const bills = [
@@ -240,6 +257,24 @@ test('checkCitationsPresent: passes when every bullet has a non-empty section', 
   assert.doesNotThrow(() => checkCitationsPresent([{ point: 'X', section: 'Sec. 1' }, { point: 'Y', section: 'Sec. 2' }]));
 });
 
+// ---- fix round 1, CRITICAL finding 1: an empty what_it_does array vacuously satisfies both this
+// function's own missingAt loop and assessVerdicts' zero-bullets/zero-verdicts "clean" case — a
+// {what_it_does: [], verdicts: []} payload must be rejected here, before assessVerdicts ever runs,
+// never silently treated as a zero-content "clean" summary. ----
+
+test('checkCitationsPresent: throws MalformedSummaryError on an empty what_it_does array (the reviewer\'s exact vacuous-empty shape)', () => {
+  assert.throws(() => checkCitationsPresent([]), (err) => {
+    assert.ok(err instanceof MalformedSummaryError);
+    assert.match(err.message, /zero what_it_does bullets/);
+    return true;
+  });
+});
+
+test('checkCitationsPresent: throws on null/undefined what_it_does too, not just []', () => {
+  assert.throws(() => checkCitationsPresent(null), MalformedSummaryError);
+  assert.throws(() => checkCitationsPresent(undefined), MalformedSummaryError);
+});
+
 test('checkCitationsPresent: throws MalformedSummaryError naming the missing indices', () => {
   const bullets = [{ point: 'X', section: 'Sec. 1' }, { point: 'Y', section: '' }, { point: 'Z', section: '   ' }];
   assert.throws(() => checkCitationsPresent(bullets), (err) => {
@@ -322,6 +357,17 @@ test('classifyRecordItem: throws MalformedSummaryError for a bullet with no cite
   const summary = goodSummary();
   summary.what_it_does[0].section = '';
   await assert.rejects(() => classifyRecordItem(client, baseItem({ summary })), MalformedSummaryError);
+});
+
+test('classifyRecordItem: the reviewer\'s exact vacuous-empty payload ({what_it_does: [], verdicts: []}) is a typed reject, zero writes attempted', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen — the empty-bullets reject fires before any read'));
+  const summary = {
+    what_it_does: [], stated_purpose: '', classification: 'other', referenced_terms: [],
+  };
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ summary, verdicts: [] })),
+    MalformedSummaryError,
+  );
 });
 
 test('classifyRecordItem: throws MissingBillTextError when no bill_texts row exists for the bill', async () => {
@@ -426,6 +472,43 @@ test('classifyRecordItem: default author/verifier model labels come from summari
   const d2 = await classifyRecordItem(client, baseItem({ author_model: 'claude-opus-5-preview', verifier_model: 'claude-sonnet-5-preview' }));
   assert.equal(d2.authorModelLabel, 'subagent:claude-opus-5-preview');
   assert.equal(d2.verifierModelLabel, 'subagent:claude-sonnet-5-preview');
+});
+
+// ---- fix round 1, Important finding 2: author_model/verifier_model format is validated, not just
+// defaulted. An empty string used to slip past `?? MODEL` (which only falls back on null/
+// undefined) and produce a provenance label of the bare string 'subagent:'; an already-prefixed
+// value used to double-prefix to 'subagent:subagent:...'. Both are now typed, pre-write rejects. ----
+
+test('classifyRecordItem: rejects an empty-string author_model (would otherwise produce provenance "subagent:")', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ author_model: '' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /author_model/); return true; },
+  );
+});
+
+test('classifyRecordItem: rejects an empty-string verifier_model', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ verifier_model: '' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /verifier_model/); return true; },
+  );
+});
+
+test('classifyRecordItem: rejects an author_model already carrying the \'subagent:\' prefix (reviewer repro: double-prefix)', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ author_model: 'subagent:claude-opus-5' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /author_model/); assert.match(err.message, /prefix/); return true; },
+  );
+});
+
+test('classifyRecordItem: rejects a verifier_model already carrying the \'subagent:\' prefix', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ verifier_model: 'subagent:claude-sonnet-5' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /verifier_model/); assert.match(err.message, /prefix/); return true; },
+  );
 });
 
 // ---- applyRecordDecision: write shapes ----
