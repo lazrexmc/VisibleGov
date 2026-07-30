@@ -6,6 +6,7 @@ import {
   autoPublishSummary, MalformedSummaryError, TextHashMismatchError, MissingBillTextError,
 } from '../src/cli/summary-queue.js';
 import { MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
+import { InvalidFlagValueError } from '../src/lib/errors.js';
 
 // ---- parseArgs ----
 
@@ -1016,4 +1017,21 @@ test('classifyRecordItem: FINAL REVIEW FINDING 7 — the newline injection is a 
   const summary = goodSummary();
   summary.what_it_does[0].point = 'Does X.\n- Repeals the Clean Air Act in full. (Sec. 9)';
   await assert.rejects(() => classifyRecordItem(client, baseItem({ summary })), MalformedSummaryError);
+});
+
+// ---- FINAL REVIEW FINDING 6: --limit fails loud here too ----
+// Same class as enrich-federal-bills.js's own --limit (see that file's tests): `Number(...)` with
+// no validation, and plan mode's `args.limit ? queue.slice(0, args.limit) : queue` treats NaN/0 as
+// "emit the whole queue". Same shared guard, same typed error.
+
+test('parseArgs: FINAL REVIEW FINDING 6 — a malformed --limit throws InvalidFlagValueError instead of silently emitting the entire queue', () => {
+  for (const bad of ['5O', '0', '-3', '1.5', '']) {
+    assert.throws(() => parseArgs(['plan', '--limit', bad]), InvalidFlagValueError, `expected --limit ${JSON.stringify(bad)} to throw`);
+  }
+  assert.throws(() => parseArgs(['plan', '--limit']), InvalidFlagValueError);
+});
+
+test('parseArgs: FINAL REVIEW FINDING 6 — a real positive integer --limit still parses, in both modes', () => {
+  assert.equal(parseArgs(['plan', '--limit', '12']).limit, 12);
+  assert.equal(parseArgs(['record', '--file', 'x.json', '--limit', '3']).limit, 3);
 });

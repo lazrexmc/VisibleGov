@@ -8,6 +8,7 @@ import {
 import {
   VERIFIER_MODEL, VERIFY_PROMPT_VERSION, VERIFY_SCHEMA, assessVerdicts,
 } from '../lib/verifier.js';
+import { parsePositiveIntegerFlag } from '../lib/errors.js';
 import { nextStatus, mapNoteAction } from '../review/server.js';
 import { persistReferencedTermsGracefully } from './summarize.js';
 
@@ -81,7 +82,10 @@ export function parseArgs(argv) {
   while (i < rest.length) {
     const key = rest[i];
     if (key === '--dry-run') { out.dryRun = true; i += 1; continue; }
-    if (key === '--limit') { out.limit = Number(rest[i + 1]); i += 2; continue; }
+    // Final whole-branch review, finding 6: same class, same shared guard as
+    // enrich-federal-bills.js's own --limit — plan mode's `args.limit ? queue.slice(...) : queue`
+    // reads NaN/0 as "emit the whole queue", so a typo silently defeats the operator's chunking.
+    if (key === '--limit') { out.limit = parsePositiveIntegerFlag(rest[i + 1], '--limit'); i += 2; continue; }
     if (key === '--file') { out.file = rest[i + 1]; i += 2; continue; }
     if (key === '--bill') { out.bill = rest[i + 1]; i += 2; continue; }
     throw new Error(`unknown flag: ${key}`);

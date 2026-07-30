@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs,
@@ -13,7 +13,7 @@ import {
   runEnrichFederalBills,
   dryRunFederalBillPlan,
 } from '../src/cli/enrich-federal-bills.js';
-import { SourceFetchError } from '../src/lib/errors.js';
+import { SourceFetchError, InvalidFlagValueError } from '../src/lib/errors.js';
 import { MAX_TEXT_CHARS, OversizeTextError } from '../src/lib/summarizer.js';
 
 // Task 3 of the profile-completeness plan
@@ -877,4 +877,37 @@ test('dryRunFederalBillPlan: migration 0014 unapplied surfaces sponsorTableGated
   const report = await dryRunFederalBillPlan(client, { deps });
   assert.equal(report.counts.sponsorTableGated, true);
   assert.equal(report.counts.needingSponsors, 1, 'every bill needs sponsors while gated — never silently hidden');
+});
+
+// ============================================================================================
+// FINAL WHOLE-BRANCH REVIEW (.superpowers/sdd/2026-07-29-profile-completeness/
+// final-review-findings.md), finding 6: `out.limit = Number(argv[i + 1])` had no validation, and
+// every run gate downstream treats NaN/0/negative as "no limit at all" — so `--limit 5O` (capital
+// O for zero, the obvious typo) silently ran the FULL live congress.gov pass instead of the chunk
+// the operator asked for. The lone silent degradation in an otherwise fail-loud parser.
+// ============================================================================================
+
+test('parseArgs: FINAL REVIEW FINDING 6 — `--limit 5O` (the typo) throws InvalidFlagValueError at parse time instead of silently becoming "no limit" and running the whole live pass', () => {
+  assert.throws(
+    () => parseArgs(['--limit', '5O']),
+    (err) => {
+      assert.ok(err instanceof InvalidFlagValueError);
+      assert.match(err.message, /--limit/);
+      assert.equal(err.flag, '--limit');
+      assert.equal(err.value, '5O');
+      return true;
+    },
+  );
+});
+
+test('parseArgs: FINAL REVIEW FINDING 6 — `--limit 0`, a negative, a fraction and a missing value all throw (a limit is a POSITIVE INTEGER or it is not a limit)', () => {
+  for (const bad of ['0', '-1', '2.5', '', 'all']) {
+    assert.throws(() => parseArgs(['--limit', bad]), InvalidFlagValueError, `expected --limit ${JSON.stringify(bad)} to throw`);
+  }
+  assert.throws(() => parseArgs(['--limit']), InvalidFlagValueError, 'a --limit with no value at all throws too');
+});
+
+test('parseArgs: FINAL REVIEW FINDING 6 — a real positive integer still parses to a number, unchanged', () => {
+  assert.equal(parseArgs(['--limit', '12']).limit, 12);
+  assert.equal(parseArgs(['--limit', '1', '--dry-run']).limit, 1);
 });

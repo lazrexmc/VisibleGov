@@ -1,7 +1,7 @@
 import {
   getClient, openRun, closeRun, insertIfAbsent, additivePatch, selectAll, isMissingRelationError,
 } from '../lib/db.js';
-import { SourceFetchError } from '../lib/errors.js';
+import { SourceFetchError, parsePositiveIntegerFlag } from '../lib/errors.js';
 import * as us from '../adapters/us-congress.js';
 import {
   parseTextVersions, pickTextUrl, stripHtml, sha256, fetchBillTextVersions, fetchTextBody,
@@ -62,7 +62,10 @@ export function parseArgs(argv) {
     // roster re-page entirely — see that function's own header comment for why a Task-6 operator
     // chunking bill work across many invocations wants this on every chunk after the first.
     if (key === '--skip-members') { out.skipMembers = true; i += 1; continue; }
-    if (key === '--limit') { out.limit = Number(argv[i + 1]); i += 2; continue; }
+    // Final whole-branch review, finding 6: validated at PARSE time (parsePositiveIntegerFlag,
+    // src/lib/errors.js) — an unparseable value used to fall through as NaN, which every run gate
+    // below reads as "no limit", turning `--limit 5O` into a full live congress.gov pass.
+    if (key === '--limit') { out.limit = parsePositiveIntegerFlag(argv[i + 1], '--limit'); i += 2; continue; }
     throw new Error(`unknown flag: ${key}`);
   }
   return out;
