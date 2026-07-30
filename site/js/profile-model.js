@@ -50,13 +50,25 @@ export function careerSpan(terms) {
   // honest string. This is deliberately NOT limited to only the most-recent term: an open middle
   // term is just as much an unresolved end as an open latest term.
   const hasOpenEnd = dated.some((t) => !t.end_date);
-  if (hasOpenEnd) return `${startYear} ${EN_DASH} (end date unrecorded)`;
 
-  const endYear = dated.reduce((max, t) => {
+  // Fix round 1, finding 2 (task review, execution-proven): a term with NO start_date at all used
+  // to be dropped entirely by the `dated` filter above, silently discarding its recorded
+  // end_date (careerSpan([2013-2018, {start:null, end:2020}]) used to say '2013 – 2018',
+  // dropping real 2020 evidence). The END bound below is computed over ALL terms' end_date, not
+  // just `dated` — every real end_date is real evidence and stays in, even when its own term's
+  // start is unrecorded. The gap itself is still flagged honestly with a suffix, since "some
+  // start dates are missing" is itself a fact worth surfacing (this module's own standard).
+  const missingStart = list.some((t) => t && !t.start_date);
+  const suffix = missingStart ? ' (some service dates unrecorded)' : '';
+
+  if (hasOpenEnd) return `${startYear} ${EN_DASH} (end date unrecorded)${suffix}`;
+
+  const endYear = list.reduce((max, t) => {
+    if (!(t && t.end_date)) return max;
     const y = yearOf(t.end_date);
     return max === null || y > max ? y : max;
   }, null);
-  return `${startYear} ${EN_DASH} ${endYear}`;
+  return `${startYear} ${EN_DASH} ${endYear}${suffix}`;
 }
 
 const CHAMBER_LABELS = {
@@ -74,17 +86,40 @@ export function chamberLabel(jurisdictionId, chamber) {
   return `${jurisdictionId} ${chamber}`;
 }
 
-// party: from the most recent term that itself carries a party, else the first legislator row
-// carrying a party (caller-supplied order — no additional source-authority precedence invented
-// here, unlike pickDisplayName's bioguide/mo_senate/mo_house/legiscan/openstates ranking, since
-// the brief specifies no such ranking for this fallback), else null. Rendered by the UI as
-// "party unrecorded" — this module returns null, never that string, so the wording stays a
-// display concern, not a model concern.
+// Mirrors src/lib/person-identity.js's DISPLAY_NAME_PRIORITY exactly: "bioguide > mo_senate >
+// mo_house > legiscan > openstates" (that file's own comment, matching migration 0012's
+// persons.display_name_source CHECK constraint vocabulary). DUPLICATED HERE, NOT IMPORTED:
+// profile-model.js is browser-clean (zero imports) by design, and person-identity.js is a much
+// larger Node-oriented clustering module this file has no other reason to pull in — so this
+// order is a small, hand-copied constant instead of a shared import. Tradeoff: there is no
+// mechanical link between the two copies; if DISPLAY_NAME_PRIORITY's order ever changes in
+// person-identity.js, this constant must be updated by hand to match (a drift risk, accepted).
+const SOURCE_PRECEDENCE_COLUMNS = [
+  'bioguide_id',
+  'mo_senate_id',
+  'mo_house_id',
+  'legiscan_people_id',
+  'openstates_id',
+];
+
+// Fix round 1, finding 1 (task review, execution-proven): the legislator-row fallback used to be
+// "first row in caller-supplied array order with a party" — swapping two rows in the input array
+// flipped the displayed party, and Task 6's query carries no order= clause (Postgres guarantees
+// nothing). Party is the single most neutrality-sensitive fact this page renders, so the
+// fallback must be mechanical: rank by source precedence, never by incidental array position.
+//
+// party: from the most recent term that itself carries a party, else the highest-precedence
+// legislator row that carries a party, else null. Rendered by the UI as "party unrecorded" —
+// this module returns null, never that string, so the wording stays a display concern.
 function resolveParty(termRows, legislatorRows) {
   const fromTerm = datedTermsMostRecentFirst(termRows).find((t) => t.party)?.party;
   if (fromTerm) return fromTerm;
-  const fromLegislator = legislatorRows.find((l) => l && l.party)?.party;
-  return fromLegislator ?? null;
+
+  for (const column of SOURCE_PRECEDENCE_COLUMNS) {
+    const row = legislatorRows.find((l) => l && l[column] != null && l.party);
+    if (row) return row.party;
+  }
+  return null;
 }
 
 // Which legislator row is handed to receipts.js's photoUrl() later (Task 6) — this module never

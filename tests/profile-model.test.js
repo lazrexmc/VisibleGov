@@ -102,6 +102,35 @@ test('buildIdentity: party falls back to legislator.party when no term carries a
   assert.equal(identity.party, 'Republican');
 });
 
+// Fix round 1, finding 1 (task review, execution-proven): the original legislator.party fallback
+// picked the FIRST row in caller-supplied array order — swapping two rows flipped the displayed
+// party. Party is the most neutrality-sensitive fact on the page (CLAUDE.md's "mechanically
+// neutral" non-negotiable); it must be mechanical, never dependent on an unordered query's
+// incidental row order (Task 6's query carries no order= clause — Postgres guarantees nothing).
+test('buildIdentity: party fallback across legislator rows is mechanical (bioguide > mo_senate > mo_house > legiscan > openstates), never caller-order-dependent', () => {
+  const bioguideRow = {
+    id: 'a', full_name: 'X', bioguide_id: 'B1', party: 'Republican',
+  };
+  const openstatesRow = {
+    id: 'b', full_name: 'X', openstates_id: 'os-1', party: 'Democrat',
+  };
+  const forward = buildIdentity({ person: null, legislators: [bioguideRow, openstatesRow], terms: [] });
+  const swapped = buildIdentity({ person: null, legislators: [openstatesRow, bioguideRow], terms: [] });
+  assert.equal(forward.party, 'Republican');
+  assert.equal(swapped.party, 'Republican', 'row order swapped -> party must NOT flip');
+});
+
+test('buildIdentity: party fallback skips a higher-precedence row with no recorded party and falls to the next tier', () => {
+  const bioguideRowNoParty = {
+    id: 'a', full_name: 'X', bioguide_id: 'B1', party: null,
+  };
+  const legiscanRow = {
+    id: 'b', full_name: 'X', legiscan_people_id: 99, party: 'Democrat',
+  };
+  const identity = buildIdentity({ person: null, legislators: [bioguideRowNoParty, legiscanRow], terms: [] });
+  assert.equal(identity.party, 'Democrat');
+});
+
 test('buildIdentity: zero terms rows (unlinked, freshly-ingested row) -> chamberLabel/districtLabel null, careerSpan "service dates unrecorded", never padded or guessed', () => {
   const identity = buildIdentity({
     person: null,
@@ -179,6 +208,22 @@ test('careerSpan: null/undefined terms input -> "service dates unrecorded", neve
   assert.equal(careerSpan(undefined), 'service dates unrecorded');
 });
 
+// Fix round 1, finding 2 (task review, execution-proven): the original `dated` filter dropped a
+// null-start term ENTIRELY, silently discarding its recorded end_date. careerSpan([2013-2018,
+// {start:null, end:2020}]) used to say '2013 – 2018', losing the real 2020 evidence.
+const MIXED_EVIDENCE_TERMS = [
+  { start_date: '2013-01-01', end_date: '2018-01-01' },
+  { start_date: null, end_date: '2020-01-01' },
+];
+
+test('careerSpan: fix round 1 finding 2 — a term missing start_date is NOT dropped; its end_date still counts, honesty suffix marks the gap', () => {
+  assert.equal(careerSpan(MIXED_EVIDENCE_TERMS), '2013 – 2020 (some service dates unrecorded)');
+});
+
+test('careerSpan: fix round 1 finding 2 — the all-null case is unaffected (still the plain "service dates unrecorded", no suffix stacking)', () => {
+  assert.equal(careerSpan(moSenateOnlyTerms()), 'service dates unrecorded');
+});
+
 test('careerSpan: "present" never appears in any careerSpan output (assert across every fixture in this file)', () => {
   const fixtures = [
     onderTerms(),
@@ -186,6 +231,7 @@ test('careerSpan: "present" never appears in any careerSpan output (assert acros
     [],
     [{ start_date: '2019-01-01', end_date: null }],
     [{ start_date: '2001-01-01', end_date: '2009-01-01' }, { start_date: '2013-01-01', end_date: '2023-01-01' }],
+    MIXED_EVIDENCE_TERMS,
   ];
   for (const terms of fixtures) {
     const span = careerSpan(terms);
