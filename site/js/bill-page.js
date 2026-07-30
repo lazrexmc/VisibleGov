@@ -1,13 +1,13 @@
-// site/js/bill-page.js — the bill page (design spec §4, task-9 brief). Browser-native ES module.
-// Same "wiring" layer split as person-page.js/directory-page.js: pure helpers here (TDD'd in
-// tests/bill-page.test.js BEFORE the DOM code below existed), DOM/network orchestration after,
-// reusing the existing toolbox by exact name — never a lookalike reimplementation: rest.js
-// (restGet, fetchAllRows), render.js (el, clearChildren, sectionState), receipts.js
-// (officialBillUrl), summary-parse.js (parseBullets, extractStatedPurpose), profile-model.js
-// (chamberLabel, groupSponsorships), slugs.js (slugify), person-page.js (idFromPath — uuid-
-// validated, reused verbatim for the /bill/<id> parse; isNumericStatusCode and renderNotFound
-// reused the same way, see their own call sites below), glossary-inline.js (markTerms,
-// renderMarkedText — task 9's own new module).
+// site/js/bill-page.js — the bill page (design spec §4, task-9 brief; fix round 1, task-9
+// review). Browser-native ES module. Same "wiring" layer split as person-page.js/directory-
+// page.js: pure helpers here (TDD'd in tests/bill-page.test.js BEFORE the DOM code below existed),
+// DOM/network orchestration after, reusing the existing toolbox by exact name — never a lookalike
+// reimplementation: rest.js (restGet, fetchAllRows), render.js (el, clearChildren, sectionState),
+// receipts.js (officialBillUrl), summary-parse.js (parseBullets, extractStatedPurpose),
+// profile-model.js (chamberLabel, groupSponsorships), slugs.js (slugify), person-page.js
+// (idFromPath — uuid-validated, reused verbatim for the /bill/<id> parse; isNumericStatusCode and
+// joinFlagBadges reused the same way, see their own call sites below), glossary-inline.js
+// (markTerms, renderMarkedText — task 9's own new module).
 //
 // Three-state discipline (plan law, verbatim, same as every other page): every fetch renders one
 // of loading / failed ('couldn't load — retry') / honestly-empty. A failed fetch never renders as
@@ -22,7 +22,7 @@ import { officialBillUrl } from './receipts.js';
 import { parseBullets, extractStatedPurpose } from './summary-parse.js';
 import { chamberLabel, groupSponsorships } from './profile-model.js';
 import { slugify } from './slugs.js';
-import { idFromPath, isNumericStatusCode, renderNotFound } from './person-page.js';
+import { idFromPath, isNumericStatusCode, joinFlagBadges } from './person-page.js';
 import { renderMarkedText } from './glossary-inline.js';
 
 // ============================================================================
@@ -69,56 +69,88 @@ export const PLAIN_TEXT_FALLBACK_NOTE = 'Formatting could not be verified for th
 
 // renderSummaryStructured(bodyMd) -> the parsed structure to render, via Task 4's shared parsers
 // (parseBullets/extractStatedPurpose — never a lookalike client-side markdown parse, which would
-// be the client inventing display facts). Coverage rule (spec-critical, mirrors the verifier's own
-// checkBulletCoverage): if parseBullets yields FEWER bullets than body_md's raw '- ' line count,
-// the parse is incomplete (an edited/malformed bullet is invisible to the structured view) and
-// this returns the PLAIN-TEXT fallback shape instead — never a half-rendered structured view.
-// `formattingVerified` is the discriminator the render layer branches on; `statedPurpose`/
-// `bullets` stay present (empty) on the fallback branch so every caller can treat the return
-// shape uniformly without an extra null-check.
+// be the client inventing display facts).
+//
+// Coverage rule (spec-critical, mirrors the verifier's own checkBulletCoverage): if parseBullets
+// yields FEWER bullets than body_md's raw '- ' line count, the parse is incomplete (an edited/
+// malformed bullet is invisible to the structured view) — PLAIN-TEXT fallback instead of a
+// half-rendered structured view.
+//
+// Fix round 1, MED-2 (task-9 review, "the vacuous-empty class, 4th appearance"): a structureless
+// published body_md (zero bullets AND no stated purpose) used to render the STRUCTURED branch with
+// nothing in it — an empty summary section carrying only a "verified clean" receipt underneath,
+// which misleadingly implies substantive content was checked when the page shows none at all.
+// Split into two honest outcomes instead: body_md that is genuinely blank (`isEmpty: true`, no
+// receipt line — there is nothing to have verified) vs. body_md that has REAL content the shared
+// parsers just don't recognize as bullets/purpose (the plain-text fallback, same as the coverage-
+// gap case, so at least the authored text still renders instead of vanishing).
+//
+// `formattingVerified`/`isEmpty` are the discriminators the render layer branches on;
+// `statedPurpose`/`bullets` stay present (empty) on both fallback branches so every caller can
+// destructure the same shape without an extra null-check.
 export function renderSummaryStructured(bodyMd) {
-  const bullets = parseBullets(bodyMd);
-  const rawBulletLineCount = countRawBulletLines(bodyMd);
+  const text = String(bodyMd || '');
+  const bullets = parseBullets(text);
+  const statedPurpose = extractStatedPurpose(text);
 
+  if (bullets.length === 0 && !statedPurpose) {
+    if (text.trim() === '') {
+      return {
+        formattingVerified: true, isEmpty: true, statedPurpose: null, bullets: [], plainTextLines: [], note: null,
+      };
+    }
+    return {
+      formattingVerified: false,
+      isEmpty: false,
+      statedPurpose: null,
+      bullets: [],
+      plainTextLines: text.split('\n').filter((line) => line.trim() !== ''),
+      note: PLAIN_TEXT_FALLBACK_NOTE,
+    };
+  }
+
+  const rawBulletLineCount = countRawBulletLines(text);
   if (bullets.length < rawBulletLineCount) {
     return {
       formattingVerified: false,
+      isEmpty: false,
       statedPurpose: null,
       bullets: [],
-      plainTextLines: String(bodyMd || '').split('\n').filter((line) => line.trim() !== ''),
+      plainTextLines: text.split('\n').filter((line) => line.trim() !== ''),
       note: PLAIN_TEXT_FALLBACK_NOTE,
     };
   }
 
   return {
-    formattingVerified: true,
-    statedPurpose: extractStatedPurpose(bodyMd),
-    bullets,
-    plainTextLines: [],
-    note: null,
+    formattingVerified: true, isEmpty: false, statedPurpose, bullets, plainTextLines: [], note: null,
   };
 }
 
 export const NO_SUMMARY_NOTE = 'No plain-language summary yet — the facts above are the record.';
 
-// buildVerificationNote({summary, note}) -> the exact receipt sentence (task-9 brief, verbatim):
-// "Summary by {summaries.model}, adversarially verified {overall} by {note.model} on {date}" — the
-// trust-model-v3 receipt that this text passed adversarial verification. `note` is a
-// public_verification_notes row (migration 0016: summary_id, model, prompt_version, overall,
-// created_at) or null. Two states are named explicitly by the brief: no published summary at all
-// (the exact honest line), and the normal receipt. A published summary with no verification-note
-// row on file is a third, defensive case NOT covered by steady-state trust model v3 (publish
-// implies verification already happened) but handled honestly rather than assumed impossible.
+// buildVerificationNote({summary, note, noteUnavailable}) -> the exact receipt sentence (task-9
+// brief, verbatim): "Summary by {summaries.model}, adversarially verified {overall} by
+// {note.model} on {date}" — the trust-model-v3 receipt that this text passed adversarial
+// verification. `note` is a public_verification_notes row (migration 0016: summary_id, model,
+// prompt_version, overall, created_at) or null.
+//
+// Fix round 1, LOW-6 (task-9 review): "no verification record on file" (the fetch SUCCEEDED and
+// legitimately found zero rows) and "verification record could not be loaded" (the fetch itself
+// FAILED) are different facts — collapsing them into one string would claim more certainty than
+// either case alone supports. `noteUnavailable` is the caller's own signal for which happened;
+// `note === null` with `noteUnavailable` false/omitted means the former.
 // Pure: never throws, never touches the DOM.
-export function buildVerificationNote({ summary, note } = {}) {
+export function buildVerificationNote({ summary, note, noteUnavailable } = {}) {
   if (!summary) return NO_SUMMARY_NOTE;
   const model = summary.model || '(model unrecorded)';
-  if (!note) return `Summary by ${model} — verification record unavailable.`;
+  if (noteUnavailable) return `Summary by ${model} — verification record could not be loaded.`;
+  if (!note) return `Summary by ${model} — no verification record on file.`;
   const date = String(note.created_at || '').slice(0, 10) || '(date unrecorded)';
   return `Summary by ${model}, adversarially verified ${note.overall} by ${note.model} on ${date}.`;
 }
 
 export const MO_DISCLAIMER_TEXT = 'Bill text and status shown are not official copies; the official record is at the linked source.';
+export const BILL_NOT_FOUND_MESSAGE = 'No such bill in our data.';
 
 // ============================================================================
 // Small rendering helpers (DOM, not independently unit-tested — same convention as
@@ -133,6 +165,30 @@ function personHref(legislator) {
   return legislator?.person_id
     ? `/person/${legislator.person_id}/${slugify(displayName)}`
     : `/legislator/${legislator?.id}/${slugify(displayName)}`;
+}
+
+// Fix round 1, LOW-3 (task-9 review): the bill page's own noun ("No such bill," never person-
+// page.js's "No such profile" wording) — reuses sectionState's 'failed' visual/semantic weight
+// exactly like person-page.js's renderNotFound, but is NOT imported from person-page.js (that
+// module hardcodes its own profile-specific message). Deliberately NEVER offered a retry button
+// (task-9 review, explicit: "no retry button for a genuine not-found — mirror person-page's
+// uuid-reject path") — both call sites below (a malformed/non-uuid URL, and a well-formed uuid
+// that resolves to zero rows) are treated the same honest way: retrying the identical lookup
+// against a bill id that plainly does not exist would only ever fail again the same way.
+function renderBillNotFound(container) {
+  sectionState(container, { state: 'failed', message: BILL_NOT_FOUND_MESSAGE });
+}
+
+// Fix round 1, LOW-7 (task-9 review): a not-found bill must not leave the static "Sponsors" /
+// "Plain-language summary" / "Roll calls" headings (and their now-permanently-empty sections)
+// visible below the not-found message — that would misleadingly imply those sections exist for a
+// bill that does not. Toggled via a class on <main id="app"> (site/css/site.css hides the
+// non-identity h2s and sections when it's present) rather than clearChildren-ing #app outright, so
+// a later successful retry-driven re-render (bootstrapBillPage called again) can simply toggle the
+// class back off without needing to reconstruct any removed DOM.
+function setNotFoundLayout(isNotFound) {
+  const app = document.getElementById('app');
+  if (app) app.classList.toggle('bill-not-found', Boolean(isNotFound));
 }
 
 function renderIdentity(container, bill) {
@@ -151,15 +207,20 @@ function renderIdentity(container, bill) {
 
   const session = bill.sessions || null;
   const jurisdiction = session?.jurisdictions || null;
-  if (session) {
-    const sessionLabel = [jurisdiction?.name, session.name || session.identifier].filter(Boolean).join(' — ');
-    container.appendChild(el('p', { class: 'bill-session' }, sessionLabel || 'Session unrecorded'));
-  }
 
-  const isMoBill = session?.jurisdiction_id === 'mo-legislature';
-  if (isMoBill) {
-    // "Facts always" (design spec §4): every MO bill carries this disclaimer, regardless of
-    // whether an official link is on file — a missing link is itself worth stating honestly.
+  // Fix round 1, LOW-2 (task-9 review): a null session embed (the bill's session_id doesn't
+  // resolve, or the embed simply came back empty) used to render NO session line at all — now an
+  // honest 'Session unrecorded' state, same as any other unrecorded fact on this site.
+  const sessionLabel = session ? [jurisdiction?.name, session.name || session.identifier].filter(Boolean).join(' — ') : '';
+  container.appendChild(el('p', { class: 'bill-session' }, sessionLabel || 'Session unrecorded'));
+
+  // Fix round 1, LOW-2: fail TOWARD showing the MO disclaimer — a null session embed means this
+  // bill's jurisdiction cannot even be determined, so MO cannot be ruled out. Only a session we
+  // POSITIVELY know is NOT mo-legislature suppresses it; an unplaceable bill errs toward showing
+  // it rather than silently omitting a disclaimer a real MO bill might have needed.
+  const jurisdictionId = session ? session.jurisdiction_id : null;
+  const showMoDisclaimer = jurisdictionId == null || jurisdictionId === 'mo-legislature';
+  if (showMoDisclaimer) {
     container.appendChild(el('p', { class: 'bill-mo-disclaimer' }, MO_DISCLAIMER_TEXT));
   }
 
@@ -185,7 +246,7 @@ const SPONSOR_GROUP_ORDER = ['primary', 'cosponsor', 'joint', 'unspecified'];
 
 function renderSponsors(container, sponsorRows) {
   clearChildren(container);
-  const grouped = groupSponsorships(sponsorRows);
+  const grouped = groupSponsorships(sponsorRows); // can throw UnknownSponsorTypeError — caller wraps
   let renderedAny = false;
   for (const type of SPONSOR_GROUP_ORDER) {
     const rows = grouped[type];
@@ -219,8 +280,18 @@ function formatTallyLine(tally) {
   return `Recorded casts in our data — ${parts.join(', ')}`;
 }
 
-function renderVotes(container, votes, tallyByVoteId) {
+// Fix round 1, HIGH-1 (task-9 review — 7 live unresolved flags all land on the roll-call surface
+// that shows printed-result-beside-recorded-tallies, e.g. HB 1623: printed 103-48 beside recorded
+// yea 0 nay 1, unexplained without a flag): `flagsUnavailable` and each vote's own `.flagged`
+// (attached via person-page.js's joinFlagBadges — the SAME pure join, not a lookalike copy) render
+// with the PROFILE PAGE's exact badge markup/text/classes, never a bill-page-specific rewording.
+function renderVotes(container, votes, tallyByVoteId, flagsUnavailable) {
   clearChildren(container);
+  if (flagsUnavailable) {
+    // Exact class/text match to person-page.js's own flagsUnavailable notice — one wording for
+    // "we could not confirm flag status," not two that could drift apart.
+    container.appendChild(el('p', { class: 'flags-unavailable-notice' }, 'Reconciliation-flag status unavailable for this page.'));
+  }
   const list = el('ul', { class: 'bill-vote-list' });
   for (const vote of votes) {
     const li = el('li', { class: 'bill-vote-row' });
@@ -237,12 +308,19 @@ function renderVotes(container, votes, tallyByVoteId) {
         li.appendChild(el('span', { class: 'bill-vote-source-unavailable' }, 'source unavailable'));
       }
     }
+    if (vote.flagged) {
+      // Exact markup match to person-page.js's renderVoteRow badge — same class, same href, same
+      // glyph+text — so a reader who has seen this badge on a profile page recognizes it here too.
+      li.appendChild(el('a', { class: 'flag-badge', href: '/trust#flags' }, '⚑ reconciliation flag'));
+    }
     list.appendChild(li);
   }
   container.appendChild(list);
 }
 
-function renderSummary(container, { summary, note, glossaryTerms }) {
+function renderSummary(container, {
+  summary, note, noteUnavailable, glossaryTerms, glossaryUnavailable,
+}) {
   clearChildren(container);
 
   if (!summary) {
@@ -254,33 +332,60 @@ function renderSummary(container, { summary, note, glossaryTerms }) {
 
   const structured = renderSummaryStructured(summary.body_md);
 
+  if (structured.isEmpty) {
+    // Fix round 1, MED-2: nothing was actually authored — no bullets, no purpose, no plain text
+    // either. Rendering the verification-note receipt here would imply substantive content was
+    // checked and passed when the page shows none at all — an honest-empty state instead, no
+    // receipt line (this function returns here, before the receipt paragraph below is ever built).
+    container.appendChild(el('p', { class: 'bill-summary-none' }, 'This bill has a published summary record with no extractable content.'));
+    return;
+  }
+
   if (structured.formattingVerified) {
     if (structured.statedPurpose) {
       const p = el('p', { class: 'bill-summary-purpose' });
-      p.appendChild(renderMarkedText(structured.statedPurpose, glossaryTerms));
+      // Fix round 1, LOW-4: `inline` (text + <dfn> wraps) goes INTO the <p>; `details` (block-level
+      // expandable panels) are appended AFTER it, as siblings in `container` — never nested inside
+      // the <p>, which would be invalid structure and broken layout.
+      const { inline, details } = renderMarkedText(structured.statedPurpose, glossaryTerms);
+      p.appendChild(inline);
       container.appendChild(p);
+      for (const detail of details) container.appendChild(detail);
     }
     if (structured.bullets.length > 0) {
       const ul = el('ul', { class: 'bill-summary-bullets' });
       for (const bullet of structured.bullets) {
         const li = el('li', {});
-        li.appendChild(renderMarkedText(bullet.point, glossaryTerms));
+        // A bullet's <li> can validly hold block content directly (unlike the purpose <p> above),
+        // so the detail panels are appended as further children of the SAME <li>, after the
+        // inline text and section citation — still never nested inside an inline element.
+        const { inline, details } = renderMarkedText(bullet.point, glossaryTerms);
+        li.appendChild(inline);
         li.appendChild(el('span', { class: 'bill-summary-bullet-section' }, ` (${bullet.section})`));
+        for (const detail of details) li.appendChild(detail);
         ul.appendChild(li);
       }
       container.appendChild(ul);
     }
   } else {
-    // Never render half (task-9 brief, spec-critical): the parse coverage gap means the
-    // structured view (and therefore glossary marking, which is built on the parsed bullet text)
-    // cannot be trusted — plain, unmarked text lines instead, with the honest note attached.
+    // Never render half (task-9 brief, spec-critical): the parse coverage gap (or, per MED-2, a
+    // structureless-but-non-empty body) means the structured view — and therefore glossary
+    // marking, which is built on the parsed bullet text — cannot be trusted. Plain, unmarked text
+    // lines instead, with the honest note attached.
     container.appendChild(el('p', { class: 'bill-summary-fallback-note' }, structured.note));
     for (const line of structured.plainTextLines) {
       container.appendChild(el('p', { class: 'bill-summary-plain-line' }, line));
     }
   }
 
-  container.appendChild(el('p', { class: 'bill-verification-note' }, buildVerificationNote({ summary, note })));
+  // Fix round 1, LOW-6: a failed glossary fetch gets its own one-line honest notice — distinct
+  // from "this summary references no glossary terms at all," which renders no notice because
+  // there is nothing wrong to report.
+  if (glossaryUnavailable) {
+    container.appendChild(el('p', { class: 'bill-glossary-unavailable' }, 'Glossary unavailable for this summary.'));
+  }
+
+  container.appendChild(el('p', { class: 'bill-verification-note' }, buildVerificationNote({ summary, note, noteUnavailable })));
 }
 
 // ============================================================================
@@ -291,24 +396,33 @@ function renderSummary(container, { summary, note, glossaryTerms }) {
 const BILL_SELECT = 'id,identifier,title,status,canonical_url,session_id,'
   + 'sessions(id,identifier,name,jurisdiction_id,jurisdictions(id,name))';
 
+// Fix round 1, LOW-5 (task-9 review): explicit select= for the columns this section actually
+// uses (never a bare `*`), and `.nullslast` on the vote_date ordering — Postgres's own default for
+// a bare DESC order is NULLS FIRST, which would put undated/procedural votes at the TOP of a
+// newest-first roll-call list; `.nullslast` keeps that honestly at the end instead.
+const VOTES_SELECT = 'id,jurisdiction_id,chamber,vote_date,question,result,source_url';
+
+// Fix round 1, MED-3 (task-9 review): groupSponsorships can THROW (UnknownSponsorTypeError, a
+// sponsor_type outside the 0015 vocabulary) — the fetch AND the render call are now inside the
+// SAME try/catch, mirroring person-page.js:774-795's loadSponsorshipsSection exactly, so a
+// render-time throw routes to the SAME 'failed'-with-retry state a fetch failure would, instead of
+// escaping past an already-cleared-to-'ready' container as an unhandled rejection.
 async function loadSponsorsSection(container, { billId }) {
   sectionState(container, { state: 'loading' });
   const reload = () => loadSponsorsSection(container, { billId }).catch(() => {});
-  let rows;
   try {
-    rows = (await restGet(`bill_sponsors?bill_id=eq.${billId}&select=sponsor_type,legislators(id,full_name,person_id)`)).rows;
+    const rows = (await restGet(`bill_sponsors?bill_id=eq.${billId}&select=sponsor_type,legislators(id,full_name,person_id)`)).rows;
+    if (rows.length === 0) {
+      sectionState(container, { state: 'empty', message: 'No sponsors recorded.' });
+      return;
+    }
+    sectionState(container, { state: 'ready' });
+    renderSponsors(container, rows);
   } catch {
     sectionState(container, {
       state: 'failed', message: "Couldn't load sponsors — retry", onRetry: reload,
     });
-    return;
   }
-  if (rows.length === 0) {
-    sectionState(container, { state: 'empty', message: 'No sponsors recorded.' });
-    return;
-  }
-  sectionState(container, { state: 'ready' });
-  renderSponsors(container, rows);
 }
 
 async function loadVotesSection(container, { billId }) {
@@ -316,7 +430,7 @@ async function loadVotesSection(container, { billId }) {
   const reload = () => loadVotesSection(container, { billId }).catch(() => {});
   let votes;
   try {
-    votes = (await restGet(`votes?bill_id=eq.${billId}&order=vote_date.desc`)).rows;
+    votes = (await restGet(`votes?bill_id=eq.${billId}&select=${VOTES_SELECT}&order=vote_date.desc.nullslast`)).rows;
   } catch {
     sectionState(container, {
       state: 'failed', message: "Couldn't load roll calls — retry", onRetry: reload,
@@ -333,7 +447,7 @@ async function loadVotesSection(container, { billId }) {
   // to `null`, rendered as an honest "tally unavailable," never a false claim of zero casts) so
   // one bad fetch never blanks every other roll call's real tally.
   const tallyByVoteId = new Map();
-  await Promise.all(votes.map(async (vote) => {
+  const tallyWork = Promise.all(votes.map(async (vote) => {
     try {
       const casts = await fetchAllRows(`vote_casts?vote_id=eq.${vote.id}&select=position`);
       tallyByVoteId.set(vote.id, tallyPositions(casts));
@@ -342,8 +456,30 @@ async function loadVotesSection(container, { billId }) {
     }
   }));
 
+  // HIGH-1 (task-9 review): the SAME reconciliation-flags read + join as the profile page —
+  // public_reconciliation_flags?vote_id=in.(...)&resolved=is.false (an ADJUDICATED discrepancy is
+  // not an open dispute; only unresolved flags are worth a live badge), joined via
+  // person-page.js's own joinFlagBadges (not a lookalike copy). Runs in parallel with the tally
+  // fetches above — independent data, no reason to serialize.
+  const voteIds = votes.map((v) => v.id).filter(Boolean);
+  let flaggedVotes = votes;
+  let flagsUnavailable = false;
+  const flagsWork = (async () => {
+    try {
+      const flagRows = voteIds.length > 0
+        ? (await restGet(`public_reconciliation_flags?vote_id=in.(${voteIds.join(',')})&resolved=is.false`)).rows
+        : [];
+      flaggedVotes = joinFlagBadges(votes, flagRows);
+    } catch {
+      flaggedVotes = joinFlagBadges(votes, []);
+      flagsUnavailable = true;
+    }
+  })();
+
+  await Promise.all([tallyWork, flagsWork]);
+
   sectionState(container, { state: 'ready' });
-  renderVotes(container, votes, tallyByVoteId);
+  renderVotes(container, flaggedVotes, tallyByVoteId, flagsUnavailable);
 }
 
 async function loadSummarySection(container, { billId }) {
@@ -373,29 +509,38 @@ async function loadSummarySection(container, { billId }) {
   // Verification note and glossary are enhancements ON TOP of an already-successfully-fetched
   // summary, not hard dependencies of it (same "skip != empty" reasoning person-page.js applies to
   // its one-liner/flag-badge fetches) — a failure here degrades to buildVerificationNote's own
-  // honest "verification record unavailable" fallback / an empty glossary, never fails this
-  // section outright.
+  // honest "could not be loaded" fallback / a visible "glossary unavailable" notice (LOW-6), never
+  // fails this section outright.
   let note = null;
+  let noteUnavailable = false;
   try {
     const noteRows = (await restGet(`public_verification_notes?summary_id=eq.${summary.id}&order=created_at.desc`)).rows;
     note = noteRows[0] || null;
   } catch {
     note = null;
+    noteUnavailable = true;
   }
 
   let glossaryTerms = [];
+  let glossaryUnavailable = false;
   try {
     const links = (await restGet(`summary_terms?summary_id=eq.${summary.id}`)).rows;
     const termIds = [...new Set(links.map((l) => l.term_id).filter(Boolean))];
+    // MED-1 (task-9 review): order=citation.nullsfirst,id — deterministic fetch order is what
+    // makes markTerms' grouping (glossary-inline.js) render every duplicate-named term's citation
+    // in a stable, reproducible order rather than whatever order PostgREST happened to return.
     glossaryTerms = termIds.length > 0
-      ? (await restGet(`glossary_terms?id=in.(${termIds.join(',')})&status=eq.published&select=id,term,kind,citation,gloss_md,supported_by_quote,source_url`)).rows
+      ? (await restGet(`glossary_terms?id=in.(${termIds.join(',')})&status=eq.published&select=id,term,kind,citation,gloss_md,supported_by_quote,source_url&order=citation.nullsfirst,id`)).rows
       : [];
   } catch {
     glossaryTerms = [];
+    glossaryUnavailable = true;
   }
 
   sectionState(container, { state: 'ready' });
-  renderSummary(container, { summary, note, glossaryTerms });
+  renderSummary(container, {
+    summary, note, noteUnavailable, glossaryTerms, glossaryUnavailable,
+  });
 }
 
 // Entry point for site/bill.html — exported, never auto-run at module load (same convention as
@@ -403,10 +548,14 @@ async function loadSummarySection(container, { billId }) {
 export async function bootstrapBillPage() {
   const identityContainer = document.getElementById('bill-identity');
   mountFooter(document.getElementById('site-footer'));
+  // Reset any not-found layout left over from a prior attempt on this same page load (a retry
+  // click re-runs this whole function) before doing anything else.
+  setNotFoundLayout(false);
 
   const billId = idFromPath(window.location.pathname, '/bill/');
   if (!billId) {
-    renderNotFound(identityContainer);
+    setNotFoundLayout(true);
+    renderBillNotFound(identityContainer);
     return;
   }
 
@@ -425,7 +574,8 @@ export async function bootstrapBillPage() {
   }
 
   if (!bill) {
-    renderNotFound(identityContainer, () => bootstrapBillPage());
+    setNotFoundLayout(true);
+    renderBillNotFound(identityContainer);
     return;
   }
 
@@ -433,8 +583,8 @@ export async function bootstrapBillPage() {
   renderIdentity(identityContainer, bill);
 
   await Promise.all([
-    loadSponsorsSection(document.getElementById('bill-sponsors'), { billId }),
-    loadVotesSection(document.getElementById('bill-votes'), { billId }),
-    loadSummarySection(document.getElementById('bill-summary'), { billId }),
+    loadSponsorsSection(document.getElementById('bill-sponsors'), { billId }).catch(() => {}),
+    loadVotesSection(document.getElementById('bill-votes'), { billId }).catch(() => {}),
+    loadSummarySection(document.getElementById('bill-summary'), { billId }).catch(() => {}),
   ]);
 }

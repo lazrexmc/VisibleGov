@@ -281,6 +281,19 @@ button.chart-bar-row {
   margin-top: 0.75rem;
 }
 
+.bill-glossary-unavailable {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Fix round 1, LOW-7 (task-9 review) — a not-found bill (site/js/bill-page.js's
+   setNotFoundLayout) hides the static section headings/containers so they never imply sections
+   exist for a bill that doesn't. #bill-identity (the not-found message itself) stays visible. */
+main#app.bill-not-found h2,
+main#app.bill-not-found section:not(#bill-identity) {
+  display: none;
+}
+
 /* Glossary inline (site/js/glossary-inline.js) — a matched term reads as an underlined, focusable
    inline element (native <dfn> semantics kept; interactivity layered on top via tabIndex/role, not
    a real <button>, since a term-in-running-text is a definition reference first). Same "no
@@ -307,6 +320,15 @@ button.chart-bar-row {
 .gloss-detail-heading {
   font-weight: 700;
   margin: 0 0 0.25rem;
+}
+
+/* MED-1 (task-9 review) — a single gloss-detail block can hold MULTIPLE entries (duplicate term
+   text, different citations); each gets its own heading, so a visible gap keeps them from reading
+   as one run-on block. */
+.gloss-detail-entry + .gloss-detail-entry {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--muted);
 }
 
 .gloss-quote {
