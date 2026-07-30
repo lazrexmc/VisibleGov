@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisibleGov — legislator profile</title>
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <main id="app">
+    <section id="identity" class="profile-identity" aria-label="Identity"></section>
+
+    <h2>Votes</h2>
+    <div id="vote-filters" class="vote-filters" aria-label="Vote filters"></div>
+    <section id="votes" aria-label="Votes"></section>
+
+    <h2>Sponsored bills</h2>
+    <section id="sponsorships" aria-label="Sponsored bills"></section>
+
+    <h2>Data freshness</h2>
+    <section id="freshness" aria-label="Data freshness"></section>
+  </main>
+  <footer id="site-footer"></footer>
+  <script type="module">
+    import { bootstrapPersonPage } from '/js/person-page.js';
+    bootstrapPersonPage();
+  </script>
+</body>
+</html>

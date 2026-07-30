@@ -282,6 +282,35 @@ test('voteFilterQuery: year only, no chamber', () => {
   assert.equal(path, 'public_vote_feed?legislator_id=in.(leg-1)&vote_date=gte.2019-01-01&vote_date=lt.2020-01-01&order=vote_date.desc.nullslast,cast_id.desc');
 });
 
+// Task 6 extension: the missed-votes toggle (design spec §3, "a filter over the same cast list —
+// not voting / absent, presented as the printed positions they are, no percentage, no
+// comparison") re-queries the server, never client-filters a partial page — this is that server
+// filter, appended to the SAME path builder rather than a lookalike client-side re-implementation.
+test('voteFilterQuery: missedOnly true appends position=in.(not_voting,absent) before the order clause', () => {
+  const path = voteFilterQuery({ legislatorIds: ['leg-1'], missedOnly: true });
+  assert.equal(
+    path,
+    'public_vote_feed?legislator_id=in.(leg-1)&position=in.(not_voting,absent)&order=vote_date.desc.nullslast,cast_id.desc',
+  );
+});
+
+test('voteFilterQuery: missedOnly false/absent -> no position filter, output unchanged from before this option existed', () => {
+  const withFalse = voteFilterQuery({ legislatorIds: ['leg-1'], chamber: 'senate', missedOnly: false });
+  const withoutOption = voteFilterQuery({ legislatorIds: ['leg-1'], chamber: 'senate' });
+  assert.equal(withFalse, withoutOption);
+  assert.equal(withFalse, 'public_vote_feed?legislator_id=in.(leg-1)&chamber=eq.senate&order=vote_date.desc.nullslast,cast_id.desc');
+});
+
+test('voteFilterQuery: missedOnly combines with chamber + year, all filters present in order', () => {
+  const path = voteFilterQuery({
+    legislatorIds: ['leg-1'], chamber: 'house', year: 2021, missedOnly: true,
+  });
+  assert.equal(
+    path,
+    'public_vote_feed?legislator_id=in.(leg-1)&chamber=eq.house&vote_date=gte.2021-01-01&vote_date=lt.2022-01-01&position=in.(not_voting,absent)&order=vote_date.desc.nullslast,cast_id.desc',
+  );
+});
+
 test('voteFilterQuery: page is accepted per the interface signature but never alters the path (pagination is Range-header driven, not a URL filter)', () => {
   const withPage = voteFilterQuery({ legislatorIds: ['leg-1'], chamber: 'senate', year: 2023, page: 3 });
   const withoutPage = voteFilterQuery({ legislatorIds: ['leg-1'], chamber: 'senate', year: 2023 });

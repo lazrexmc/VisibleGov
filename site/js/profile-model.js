@@ -160,7 +160,7 @@ export function buildIdentity({ person, legislators, terms }) {
 // vote_id, vote_date, chamber, question, result, source_url, jurisdiction_id, bill_id,
 // bill_identifier, bill_title, session_id.
 export function voteFilterQuery({
-  legislatorIds, chamber, year, page,
+  legislatorIds, chamber, year, missedOnly, page,
 } = {}) {
   // `page` is accepted for signature symmetry with the caller's full filter state (task-5
   // brief's interface line lists it), but pagination is Range-header driven by rest.js's
@@ -175,6 +175,10 @@ export function voteFilterQuery({
     params.push(`vote_date=gte.${y}-01-01`);
     params.push(`vote_date=lt.${y + 1}-01-01`);
   }
+  // Task 6 extension: the missed-votes toggle (design spec §3) — a SERVER filter appended to this
+  // same path builder, never a client-side re-filter of an already-fetched partial page. Renders
+  // the printed positions as-is (no percentage, no peer comparison — that would be a scorecard).
+  if (missedOnly) params.push('position=in.(not_voting,absent)');
   params.push('order=vote_date.desc.nullslast,cast_id.desc');
   return `public_vote_feed?${params.join('&')}`;
 }
