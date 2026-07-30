@@ -65,9 +65,14 @@ Data flow (parallel anon fetches):
   holds up, else 0016 adds a narrow `public_vote_feed` view (cast + vote_date denormalized);
   decide at plan time, never client-side sorting of partial pages. Position rendered exactly
   **as the source recorded it** (the stored vocabulary: yea / nay / not_voting / absent) —
-  never collapsed or reinterpreted. Where the bill has a **published** summary, its one-line
+  never collapsed or reinterpreted. Where the bill has a **published** summary, a one-line
   plain-language description renders under the bill title; absent that, the title alone — no
-  gap-filling.
+  gap-filling. The one-liner's source is mechanical and defined here: the summary's stated
+  purpose when non-empty, else its first what-it-does bullet — extracted from `body_md` by the
+  SAME parser the verifier already uses (shared exported logic, tested; never a lookalike
+  client-side markdown parse, which would be the client inventing display facts).
+- Vote-list filters: session/year and chamber, plus the missed-votes filter below. A ~1,650-cast
+  career is not navigable by pagination alone.
 - Sponsored bills: `bill_sponsors` for the linked ids, embedding bill + status; sponsor_type
   labeled honestly (primary / cosponsor / joint / unspecified — the 0015 vocabulary, as the
   source printed it).
@@ -102,7 +107,13 @@ Data flow (parallel anon fetches):
   linked-person grouping), client-side filter/search. At ~1,576 rows this needs no search
   backend.
 - Address lookup: Census Geocoder (free, keyless) — address in → congressional district + MO
-  SLDU/SLDL out → match against current terms → "your people," federal + state.
+  SLDU/SLDL out → match against terms → "your people," federal + state.
+- Currency honesty: the terms-date backfill is a known-parked gap, so some seat-holdings cannot
+  prove they are current. The lookup therefore never asserts currency beyond what the data
+  supports: results are labeled with their as-of ("per the 2026 legislative session" / the most
+  recent term evidence), and a seat whose holder is ambiguous in our data says so rather than
+  guessing. This is also what makes the January-2027 rollover degrade honestly (labels go stale
+  visibly) instead of silently wrong.
 - Privacy contract (Lance's ruling, stated verbatim on the page): the address is sent to the
   Census Geocoder, districts come back, and **nothing is stored or logged — not by us, not
   ever**. If browser CORS requires it, a minimal Cloudflare Pages Function proxies the geocoder
