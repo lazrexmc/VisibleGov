@@ -16,6 +16,7 @@ import { resolveOrCreateLegiscanPerson } from '../adapters/legiscan-identity.js'
 import {
   reconcileLegiscanTallies, buildLegiscanVoteSourceKey, buildLegiscanVoteCasts,
   crossCheckAgainstPrimarySource, LegiscanRollCallReconcileError, VoteIdMapError,
+  LegiscanRollCallDateError,
 } from '../adapters/legiscan-votes.js';
 
 // LegiScan bulk adapter — driver (Task 9 of docs/superpowers/plans/2026-07-29-legiscan-bulk-
@@ -450,8 +451,19 @@ function emptyRollCallResult() {
 
 async function ingestLegiscanRollCalls(client, runId, {
   allRollCalls, rollCallsToProcess, legiscanSessionId, billRecordByLegiscanBillId, legislatorIdByPeopleId,
+  sessionYears,
   crossCheckFn = crossCheckAgainstPrimarySource,
 }) {
+  // FINAL REVIEW, finding 3: sessionYears is REQUIRED here, not defaulted. The date gate is only
+  // as good as the bounds it is handed, and a silently-absent bound would degrade it to a shape
+  // check while still looking present — a caller that forgets it is a programming error and says
+  // so, rather than quietly ingesting another decade's worth of epoch sentinels.
+  if (!sessionYears || sessionYears.yearStart == null) {
+    throw new Error(
+      'ingest-legiscan: ingestLegiscanRollCalls requires sessionYears {yearStart, yearEnd} from the '
+        + "dataset envelope's own year_start/year_end — the roll-call date gate cannot run without them",
+    );
+  }
   const result = emptyRollCallResult();
 
   // FIX (IMPORTANT 4, final-review-findings.md): --limit (or a reconcile-failing sibling) must
@@ -479,14 +491,18 @@ async function ingestLegiscanRollCalls(client, runId, {
 
     let legiscanTallies;
     try {
-      legiscanTallies = reconcileLegiscanTallies(rollCall);
+      legiscanTallies = reconcileLegiscanTallies(rollCall, sessionYears);
     } catch (err) {
-      if (err instanceof LegiscanRollCallReconcileError || err instanceof VoteIdMapError) {
+      if (err instanceof LegiscanRollCallReconcileError || err instanceof VoteIdMapError
+        || err instanceof LegiscanRollCallDateError) {
         // Internal gate (a) failure — skipped, never stored, same convention as every prior parser
         // in this repo (mo-rollcall-pdf.js's parseMoRollCall, mo-senate-journal-pdf.js's
-        // parseJournalVotes). Not part of the sibling-grouping pool either (no reliable tallies
-        // exist to compare against) — only counted as a failure when this run was actually going to
-        // process it.
+        // parseJournalVotes). LegiscanRollCallDateError (finding 3) rides the SAME path on purpose:
+        // an out-of-session printed date is the same class of source self-contradiction as a tally
+        // that doesn't add up, and gets the same treatment — refused, counted, detailed, never
+        // corrected into looking plausible. Not part of the sibling-grouping pool either (no
+        // reliable tallies exist to compare against) — only counted as a failure when this run was
+        // actually going to process it.
         if (isSelected) {
           result.reconciliationFailures += 1;
           result.reconciliationFailureDetails.push({ rollCallId: rollCall.roll_call_id, message: err.message });
@@ -790,6 +806,15 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
     endDate: `${datasetEnvelope.year_end ?? datasetEnvelope.year_start}-12-31`,
   };
 
+  // FINAL REVIEW, finding 3: the SAME two envelope fields, in their raw year form, bound the
+  // roll-call date gate (legiscan-votes.js's assertRollCallDateWithinSession). Read from the
+  // envelope, never from a hardcoded "plausible" range — the dataset's own declaration of what
+  // session this is IS the thing a roll call's printed date has to be consistent with.
+  const sessionYears = {
+    yearStart: datasetEnvelope.year_start,
+    yearEnd: datasetEnvelope.year_end ?? datasetEnvelope.year_start,
+  };
+
   const billEnsure = sessionResult.gated
     ? { billRecordByLegiscanBillId: new Map() }
     : await ensureLegiscanBillRows(client, runId, sessionResult.id, parsed.bills);
@@ -805,6 +830,7 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
       allRollCalls: parsed.rollCalls,
       rollCallsToProcess,
       legiscanSessionId: datasetEnvelope.session_id,
+      sessionYears,
       billRecordByLegiscanBillId: billEnsure.billRecordByLegiscanBillId,
       legislatorIdByPeopleId: peopleEnsure.legislatorIdByPeopleId,
       crossCheckFn,

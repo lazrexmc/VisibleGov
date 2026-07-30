@@ -13,6 +13,8 @@ import {
   crossCheckAgainstPrimarySource,
   PRIMARY_SOURCE_KEY_PREFIXES,
   PRESENT_CATEGORY_CAVEAT,
+  LegiscanRollCallDateError,
+  assertRollCallDateWithinSession,
 } from '../src/adapters/legiscan-votes.js';
 import { decodeDatasetZip, extractDatasetFiles } from '../src/adapters/legiscan-dataset.js';
 
@@ -216,6 +218,79 @@ test('reconcileLegiscanTallies throws when ONLY the printed total disagrees (eve
     assert.deepEqual(err.mismatches, ['total: parsed 33 vs printed 34']);
     return true;
   });
+});
+
+// ---- the DATE gate (FINAL REVIEW, finding 3) ----
+//
+// Ten MO roll calls are stored in production with vote_date 1969-12-31 — LegiScan's own
+// missing-date sentinel, stored verbatim by the "store only what's printed" rule and now visible
+// as a 1969 bucket on a real profile's chart. The code half of that finding is this guard; the
+// correction of the already-stored rows is Lance-gated and deliberately not done here. Same shape
+// as the tally gate above: a self-contradicting roll call is REFUSED and counted, never corrected,
+// clamped, or nulled into looking plausible.
+
+test('assertRollCallDateWithinSession: every real fixture roll call passes against its own dataset years (2018)', () => {
+  for (const rc of rollCalls) {
+    assert.equal(assertRollCallDateWithinSession(rc.roll_call_id, rc.date, { yearStart: 2018, yearEnd: 2018 }), rc.date);
+  }
+  assert.equal(assertRollCallDateWithinSession(747209, rc747209.date, { yearStart: 2018, yearEnd: 2018 }), rc747209.date);
+});
+
+test("assertRollCallDateWithinSession: the 1969-12-31 sentinel is REFUSED against a real session's years, with the reason typed", () => {
+  assert.throws(() => assertRollCallDateWithinSession(714402, '1969-12-31', { yearStart: 2019, yearEnd: 2019 }), (err) => {
+    assert.ok(err instanceof LegiscanRollCallDateError);
+    assert.equal(err.name, 'LegiscanRollCallDateError');
+    assert.equal(err.reason, 'outside_session_years');
+    assert.equal(err.rollCallId, 714402);
+    assert.equal(err.date, '1969-12-31');
+    assert.equal(err.year, 1969);
+    assert.equal(err.yearStart, 2019);
+    assert.equal(err.yearEnd, 2019);
+    return true;
+  });
+});
+
+test('assertRollCallDateWithinSession: bounds are inclusive on both ends and span a two-year session', () => {
+  assert.equal(assertRollCallDateWithinSession(1, '2019-01-01', { yearStart: 2019, yearEnd: 2020 }), '2019-01-01');
+  assert.equal(assertRollCallDateWithinSession(1, '2020-12-31', { yearStart: 2019, yearEnd: 2020 }), '2020-12-31');
+  assert.throws(() => assertRollCallDateWithinSession(1, '2018-12-31', { yearStart: 2019, yearEnd: 2020 }), LegiscanRollCallDateError);
+  assert.throws(() => assertRollCallDateWithinSession(1, '2021-01-01', { yearStart: 2019, yearEnd: 2020 }), LegiscanRollCallDateError);
+});
+
+test('assertRollCallDateWithinSession: a missing year_end defaults to year_start (single-year session)', () => {
+  assert.equal(assertRollCallDateWithinSession(1, '2019-06-01', { yearStart: 2019 }), '2019-06-01');
+  assert.throws(() => assertRollCallDateWithinSession(1, '2020-06-01', { yearStart: 2019 }), LegiscanRollCallDateError);
+});
+
+test('assertRollCallDateWithinSession: an absent/unparseable printed date is refused too (a vote that cannot be placed in time is never stored)', () => {
+  for (const bad of [null, undefined, '', '   ', 'unknown', '2019-13-01x', 20190101]) {
+    assert.throws(() => assertRollCallDateWithinSession(1, bad, { yearStart: 2019, yearEnd: 2019 }), (err) => {
+      assert.ok(err instanceof LegiscanRollCallDateError, `expected a typed refusal for ${JSON.stringify(bad)}`);
+      assert.equal(err.reason, 'unparseable_date');
+      return true;
+    });
+  }
+});
+
+test('reconcileLegiscanTallies: runs the date gate when the dataset years are supplied — the 1969-12-31 construction on a REAL roll call refuses', () => {
+  const real = findRc(774312); // real date 2018-09-12, tallies all reconcile
+  assert.ok(reconcileLegiscanTallies(real, { yearStart: 2018, yearEnd: 2018 }), 'the unmutated real roll call still reconciles with bounds supplied');
+  const mutated = { ...real, date: '1969-12-31' };
+  assert.throws(() => reconcileLegiscanTallies(mutated, { yearStart: 2018, yearEnd: 2018 }), (err) => {
+    assert.ok(err instanceof LegiscanRollCallDateError);
+    assert.equal(err.reason, 'outside_session_years');
+    assert.equal(err.rollCallId, 774312);
+    return true;
+  });
+});
+
+test('reconcileLegiscanTallies: with NO dataset years supplied, the date SHAPE is still checked (an unparseable date never becomes a stored vote)', () => {
+  const real = findRc(774312);
+  assert.ok(reconcileLegiscanTallies(real));
+  assert.throws(() => reconcileLegiscanTallies({ ...real, date: null }), LegiscanRollCallDateError);
+  // ...but a well-formed date outside some other session's years cannot be judged without bounds,
+  // so it passes here rather than being guessed at. The driver ALWAYS supplies bounds.
+  assert.ok(reconcileLegiscanTallies({ ...real, date: '1969-12-31' }));
 });
 
 test('reconcileLegiscanTallies throws VoteIdMapError (never a silent "other") on a synthetic unrecognized vote_id 5', () => {

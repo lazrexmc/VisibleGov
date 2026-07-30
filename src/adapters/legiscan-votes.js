@@ -147,6 +147,61 @@ export class LegiscanRollCallReconcileError extends Error {
   }
 }
 
+// LegiscanRollCallDateError — FINAL REVIEW, finding 3 (code half; the correction of the rows
+// already stored is Lance-gated and deliberately NOT done here). Ten MO roll calls are stored with
+// vote_date 1969-12-31 — the Unix-epoch-minus-one sentinel LegiScan's own payload prints when it
+// has no date for a roll call. It was stored verbatim, exactly as designed ("store only what's
+// printed"), and it is now a live 1969 bucket on a real profile's vote chart plus an undercount of
+// that legislator's real year.
+//
+// The rule this closes is the same one gate (a) already enforces on tallies: a roll call whose own
+// printed numbers contradict the dataset they arrived in is not stored, it is refused and counted.
+// A date outside the dataset's OWN year_start/year_end is that same class of self-contradiction —
+// the session envelope says 2019, the roll call says 1969, and no amount of reading either field
+// harder resolves it. So it refuses loud rather than being corrected, clamped, or nulled (any of
+// which would be this project inventing a fact the source never printed).
+export class LegiscanRollCallDateError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'LegiscanRollCallDateError';
+    Object.assign(this, meta);
+  }
+}
+
+const ROLL_CALL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+// assertRollCallDateWithinSession — the guard itself, exported so a caller can run it standalone.
+// `sessionYears` is `{ yearStart, yearEnd }` straight off the dataset envelope's own year_start/
+// year_end fields (src/cli/ingest-legiscan.js already reads them for sessionWindow); null means
+// "no bounds known", in which case only the SHAPE of the date is checked. Both branches throw the
+// same typed error with a `reason`, so the driver routes them through one catch.
+export function assertRollCallDateWithinSession(rollCallId, date, sessionYears = null) {
+  const match = typeof date === 'string' ? ROLL_CALL_DATE_PATTERN.exec(date.trim()) : null;
+  if (!match) {
+    throw new LegiscanRollCallDateError(
+      `legiscan-votes: roll call ${rollCallId}: date ${JSON.stringify(date)} is not a printed `
+        + 'YYYY-MM-DD calendar date — a vote that cannot be placed in time is never stored',
+      { rollCallId, date, reason: 'unparseable_date' },
+    );
+  }
+  if (!sessionYears || sessionYears.yearStart == null) return date.trim();
+  const year = Number(match[1]);
+  const yearStart = Number(sessionYears.yearStart);
+  const yearEnd = Number(sessionYears.yearEnd ?? sessionYears.yearStart);
+  if (year < yearStart || year > yearEnd) {
+    throw new LegiscanRollCallDateError(
+      `legiscan-votes: roll call ${rollCallId}: printed date ${date} (year ${year}) falls outside `
+        + `this dataset's own session years ${yearStart}-${yearEnd} — the source contradicts itself, `
+        + 'so the roll call is refused rather than stored under a date the session cannot have had '
+        + '(LegiScan prints 1969-12-31 as its own missing-date sentinel)',
+      {
+        rollCallId, date, year, yearStart, yearEnd, reason: 'outside_session_years',
+      },
+    );
+  }
+  return date.trim();
+}
+
 // reconcileLegiscanTallies(rollCall) -> { rollCallId, legiscanBillId, chamber, date, question,
 // tallies: {yea,nay,not_voting,absent,total}, casts: [{people_id, position}] }.
 // CONTROLLER RULING 1(a): parsed votes[] position counts MUST equal the roll call's own printed
@@ -166,9 +221,17 @@ export class LegiscanRollCallReconcileError extends Error {
 // printed vote_text disagrees with VOTE_TEXT_BY_ID's own label for it) throws VoteIdMapError naming
 // both values — this is a data-integrity signal distinct from an unrecognized vote_id, but shares
 // the same typed-error class since both mean "this cast's vote_id cannot be trusted as printed."
-export function reconcileLegiscanTallies(rollCall) {
+export function reconcileLegiscanTallies(rollCall, sessionYears = null) {
   const rollCallId = rollCall?.roll_call_id;
   const rawVotes = Array.isArray(rollCall?.votes) ? rollCall.votes : [];
+
+  // FINAL REVIEW, finding 3: gate (a) is now TWO self-consistency checks against the source's own
+  // printed fields, not one — the tallies below, and the date here. Run FIRST, before any counting:
+  // a roll call the dataset itself cannot place in time has nothing worth counting, and a single
+  // typed refusal is cheaper to read in the run detail than a tally report about a 1969 vote.
+  // `sessionYears` is optional at THIS layer (the shape check still runs without it) but the driver
+  // always supplies it — see ingestLegiscanRollCalls, which requires it.
+  assertRollCallDateWithinSession(rollCallId, rollCall?.date, sessionYears);
 
   const counted = {
     yea: 0, nay: 0, not_voting: 0, absent: 0,

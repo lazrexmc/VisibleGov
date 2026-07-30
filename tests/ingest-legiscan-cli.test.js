@@ -1213,6 +1213,82 @@ test('runLegiscanIngest: synthetic roll call with a vote_id 3 cast — reconcile
   });
 });
 
+// ---- FINAL REVIEW, finding 3: the epoch-sentinel date gate, end-to-end through the driver ------
+//
+// Ten MO roll calls sit in production with vote_date 1969-12-31 — LegiScan's own missing-date
+// sentinel, stored verbatim, now a live 1969 bucket on a real profile's chart and an undercount of
+// that legislator's real year. This is the CODE half: a roll call whose printed date contradicts
+// the dataset's own year_start/year_end never gets stored again. (The correction of the ten rows
+// already stored is Lance-gated and deliberately not attempted here.)
+//
+// buildEpochDateSyntheticZipBase64 — two roll calls on one bill, identical in every way EXCEPT the
+// date: 501 carries the sentinel, 502 carries a real in-session date. The good one still storing is
+// the load-bearing half of the assertion — a guard that refuses the whole dataset would be its own
+// data-loss bug.
+function buildEpochDateSyntheticZipBase64() {
+  const rollCall = (id, date) => ({
+    name: `MO/99003/vote/${id}.json`,
+    data: Buffer.from(JSON.stringify({
+      roll_call: {
+        roll_call_id: id, bill_id: 1, date, desc: 'Senate: Third Reading', yea: 1, nay: 1, nv: 0, absent: 0, total: 2, passed: 1, chamber: 'S', chamber_id: 2, votes: [{ people_id: 1, vote_id: 1, vote_text: 'Yea' }, { people_id: 2, vote_id: 2, vote_text: 'Nay' }],
+      },
+    })),
+  });
+  const entries = [
+    {
+      name: 'MO/99003/bill/HB1.json',
+      data: Buffer.from(JSON.stringify({
+        bill: {
+          bill_id: 1, bill_number: 'HB1', title: 't', status: 1, url: 'https://legiscan.com/x', votes: [{ roll_call_id: 501, url: 'https://legiscan.com/rc/501', state_link: 'https://mo.gov/rc/501' }, { roll_call_id: 502, url: 'https://legiscan.com/rc/502', state_link: 'https://mo.gov/rc/502' }],
+        },
+      })),
+    },
+    rollCall(501, '1969-12-31'),
+    rollCall(502, '2019-05-10'),
+    { name: 'MO/99003/people/1.json', data: Buffer.from(JSON.stringify({ person: { people_id: 1, name: 'A One', first_name: 'A', last_name: 'One', role: 'Sen', district: 'SD-001', party: 'R' } })) },
+    { name: 'MO/99003/people/2.json', data: Buffer.from(JSON.stringify({ person: { people_id: 2, name: 'B Two', first_name: 'B', last_name: 'Two', role: 'Sen', district: 'SD-002', party: 'D' } })) },
+    { name: 'MO/99003/hash.md5', data: Buffer.from('x') },
+  ];
+  return buildStoredZip(entries).toString('base64');
+}
+
+test("runLegiscanIngest: a roll call dated with LegiScan's 1969-12-31 sentinel REFUSES loud and is never stored; its in-session sibling still stores", async () => {
+  await withScratchDirAsync(async (dir) => {
+    const path = join(dir, 'epoch-date.json');
+    writeFileSync(path, JSON.stringify({
+      status: 'OK',
+      dataset: {
+        session_id: 99003,
+        year_start: 2019,
+        year_end: 2019,
+        special: 1,
+        session_tag: '1st Special Session',
+        session_title: '2019 1st Special Session',
+        session_name: '2019 1st Extraordinary Session',
+        dataset_hash: 'x',
+        zip: buildEpochDateSyntheticZipBase64(),
+      },
+    }));
+    const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+    tables.ingestion_runs.push({ id: 'run-epoch', source: 'legiscan', status: 'running', detail: {} });
+    const result = await runLegiscanIngest(client, 'run-epoch', { datasetFile: path, session: null, limit: null });
+
+    assert.equal(result.counts.rollCallsPlanned, 2);
+    assert.equal(result.counts.reconciliationFailures, 1, 'the 1969 roll call is a counted refusal, exactly like a tally mismatch — never a silent skip');
+    assert.equal(result.counts.reconciliationFailureDetails.length, 1);
+    assert.equal(result.counts.reconciliationFailureDetails[0].rollCallId, 501);
+    assert.match(result.counts.reconciliationFailureDetails[0].message, /1969-12-31/);
+    assert.match(result.counts.reconciliationFailureDetails[0].message, /outside this dataset's own session years 2019-2019/);
+
+    assert.equal(result.counts.votes, 1, 'the in-session sibling still stores — the guard refuses one roll call, never the dataset');
+    assert.equal(tables.votes.length, 1);
+    assert.equal(tables.votes[0].source_key, 'legiscan-99003-rollcall-502');
+    assert.equal(tables.votes[0].vote_date, '2019-05-10');
+    assert.equal(tables.votes.some((v) => v.vote_date === '1969-12-31'), false, 'no epoch-sentinel date reaches the votes table');
+    assert.equal(tables.vote_casts.length, 2, 'only the stored roll call\'s casts land');
+  });
+});
+
 // ---- dryRunReportFromDb / planFromParsedDataset -------------------------------------------------
 
 test('planFromParsedDataset: real 1579 fixture plan matches the manual smoke-test output', async () => {
