@@ -26,6 +26,18 @@
 // clicks map onto real per-position filters (H2) instead of a coarse missedOnly-only toggle;
 // cohesion is scoped by chamber as well as year (H3); METRIC_DEFINITIONS was rewritten so every
 // clause matches the implementation exactly (no more "not normalized" — it now is).
+//
+// FIX ROUND 2 (re-review, spec NOT CLOSED — 2 new HIGH blockers + ride-alongs): N-A extended the
+// "no group of one" rule to party comparison too (a lone Independent used to get their OWN rows
+// back as "the party aggregate" — member-vs-himself, the exact violation design spec §3 forbids;
+// person-page.js's loadChartsSection now checks for this before ever calling
+// partyComparisonModel). N-C: the position/missed-only filter a bar click applies to the vote list
+// below was invisible and sticky — active bars now carry `aria-pressed` + a visible active class,
+// and a "Clear position filter" control appears whenever one is active. N-D: METRIC_DEFINITIONS
+// gained a staleness disclosure (the charts are computed from a periodically refreshed snapshot,
+// not live — the vote list stays live). N-H(f): cohesion's definition now states the member's own
+// cast counts as one of their party's casts when the majority is computed (never excluded from
+// their own party's tally).
 
 import { el, clearChildren } from './render.js';
 
@@ -220,25 +232,38 @@ export const METRIC_DEFINITIONS = {
       + 'difference between our sources, not a guess); every other party label is left exactly as '
       + 'recorded. A legislator whose recorded party does not resolve to one of those three common '
       + 'forms has no party-comparison figure at all, rather than being compared against a group '
-      + 'of one.',
+      + 'of one. The same "no figure" rule applies when this legislator is the ONLY one recorded '
+      + 'with that party within the relevant jurisdictions/chamber — comparing a legislator against '
+      + 'a group that is only themselves would not be a real comparison, so no figure renders in '
+      + 'that case either, even when the party label itself is one of the three common ones.',
   },
   cohesion: {
     title: 'Party-line cohesion',
     body: 'The share of roll calls, grouped by year and chamber, on which the legislator\'s cast '
       + 'vote (yea or nay) matched the strict majority position of their own party\'s (see the '
-      + 'normalization note below) yea/nay casts on that same roll call. A party majority requires '
-      + 'strictly more yea casts than nay, or strictly more nay than yea; a tie means no majority, '
-      + 'and that roll call is excluded entirely from both the numerator and the denominator. Any '
-      + 'cast that is not yea or nay (not voting, absent, present, or another recorded value) is '
-      + 'excluded from both the numerator and the denominator. A roll call where the legislator '
-      + 'was their party\'s ONLY yea/nay caster is also excluded — a "majority" made of one person '
-      + 'voting once is not a party-line signal, so this never manufactures a false 100% figure '
-      + 'for, for example, a chamber\'s only Independent. Party is recorded as our sources printed '
-      + 'it, with one documented normalization applied equally to everyone: the abbreviations \'R\', '
-      + '\'D\', and \'I\' are treated as identical to \'Republican\', \'Democratic\', and '
-      + '\'Independent\' respectively; a legislator whose recorded party does not resolve to one of '
-      + 'those three common forms has no cohesion figure at all. This is identical math applied to '
-      + 'every legislator — a plain percentage, never a grade, rating, or ranking.',
+      + 'normalization note below) yea/nay casts on that same roll call — the legislator\'s own '
+      + 'cast counts as one of their party\'s casts when that majority is computed; it is never '
+      + 'excluded from their own party\'s tally. A party majority requires strictly more yea casts '
+      + 'than nay, or strictly more nay than yea; a tie means no majority, and that roll call is '
+      + 'excluded entirely from both the numerator and the denominator. Any cast that is not yea or '
+      + 'nay (not voting, absent, present, or another recorded value) is excluded from both the '
+      + 'numerator and the denominator. A roll call where the legislator was their party\'s ONLY '
+      + 'yea/nay caster is also excluded — a "majority" made of one person voting once is not a '
+      + 'party-line signal, so this never manufactures a false 100% figure for, for example, a '
+      + 'chamber\'s only Independent. Party is recorded as our sources printed it, with one '
+      + 'documented normalization applied equally to everyone: the abbreviations \'R\', \'D\', and '
+      + '\'I\' are treated as identical to \'Republican\', \'Democratic\', and \'Independent\' '
+      + 'respectively; a legislator whose recorded party does not resolve to one of those three '
+      + 'common forms has no cohesion figure at all. This is identical math applied to every '
+      + 'legislator — a plain percentage, never a grade, rating, or ranking.',
+  },
+  staleness: {
+    title: 'How current are these numbers?',
+    body: 'These three charts are computed from a periodically refreshed snapshot of the vote '
+      + 'record, not a live query — they update when that snapshot is next refreshed, not '
+      + 'necessarily the instant a new vote is recorded. The vote list below the charts, and every '
+      + 'individual vote shown elsewhere on this page, is queried live and always reflects the '
+      + 'current data.',
   },
 };
 
@@ -282,10 +307,29 @@ const BAR_CLICK_PATCH = {
   other: { position: 'other', missedOnly: false },
 };
 
-function buildDistributionBar(position, count, shareString, onBarClick) {
+// N-C (review, fix round 2): pure — which distribution bar(s), if any, the CURRENT filters object
+// already reflects. missedOnly represents BOTH not_voting and absent together (that's the same
+// combined bucket the checkbox always meant); `position` represents exactly one bar. Exported so
+// the "is this bar active" question is independently testable from rendering.
+export function activeFilterPositions(filters) {
+  const f = filters || {};
+  if (f.missedOnly) return new Set(['not_voting', 'absent']);
+  if (f.position === 'yea') return new Set(['yea']);
+  if (f.position === 'nay') return new Set(['nay']);
+  if (f.position === 'other') return new Set(['other']);
+  return new Set();
+}
+
+function buildDistributionBar(position, count, shareString, onBarClick, isActive) {
   // M4: a real button, not a div — natively keyboard/AT accessible.
-  const row = el('button', { class: 'chart-bar-row', dataset: { bar: position } });
+  const row = el('button', {
+    class: isActive ? 'chart-bar-row chart-bar-active' : 'chart-bar-row',
+    dataset: { bar: position },
+  });
   row.type = 'button'; // `type` isn't in el()'s attrs allowlist; set directly on the returned node.
+  // N-C: aria-pressed reflects the REAL current filter state (not just "was this literally
+  // clicked") — isn't in el()'s attrs allowlist either, set directly for the same reason `type` is.
+  row.setAttribute('aria-pressed', isActive ? 'true' : 'false');
   row.appendChild(el('span', { class: 'chart-bar-label' }, DISTRIBUTION_LABELS[position] || position));
   const track = el('div', { class: 'chart-bar-track' });
   const fill = el('div', { class: 'chart-bar-fill' });
@@ -298,11 +342,31 @@ function buildDistributionBar(position, count, shareString, onBarClick) {
   return row;
 }
 
-function renderDistribution(container, distribution, onBarClick) {
+// N-C (review, fix round 2): the position/missed-only filter a bar click applies to the vote list
+// was previously invisible once set (no visual trace on the chart itself) AND sticky (survives
+// other filter changes, by design — but a sticky filter with zero visible indicator is a real
+// usability trap). Active bar(s) now render with aria-pressed + a visible class (see CSS), and a
+// "Clear position filter" control appears whenever activeFilterPositions is non-empty, clearing
+// BOTH levers (`position` and `missedOnly`) through the same onBarClick patch path every other bar
+// uses — no new plumbing.
+function renderDistribution(container, distribution, onBarClick, filters) {
   const section = el('section', { class: 'chart-section chart-distribution' });
   section.appendChild(el('h3', {}, 'Position distribution'));
+  const active = activeFilterPositions(filters);
   for (const position of ['yea', 'nay', 'not_voting', 'absent', 'other']) {
-    section.appendChild(buildDistributionBar(position, distribution[position], distribution.shares[position], onBarClick));
+    section.appendChild(buildDistributionBar(
+      position,
+      distribution[position],
+      distribution.shares[position],
+      onBarClick,
+      active.has(position),
+    ));
+  }
+  if (active.size > 0) {
+    const clearBtn = el('button', { class: 'chart-clear-position-filter' }, 'Clear position filter');
+    clearBtn.type = 'button';
+    clearBtn.addEventListener('click', () => onBarClick({ position: null, missedOnly: false }));
+    section.appendChild(clearBtn);
   }
   container.appendChild(section);
 }
@@ -359,18 +423,20 @@ function renderCohesion(container, cohesion) {
   container.appendChild(section);
 }
 
-// models: { distribution, partyComparison, cohesion, partyLabel }. distribution is always a real
-// summarizeTotals() result (never null — a zero-total view is the caller's job to render as the
-// section's honest 'empty' state instead of calling this function at all, same pattern as every
-// other section on the page). partyComparison and cohesion are each either their real shape or
-// null (not computable) — this function renders BOTH cases, it never decides which applies.
+// models: { distribution, partyComparison, cohesion, partyLabel, filters }. distribution is always
+// a real summarizeTotals() result (never null — a zero-total view is the caller's job to render as
+// the section's honest 'empty' state instead of calling this function at all, same pattern as
+// every other section on the page). partyComparison and cohesion are each either their real shape
+// or null (not computable) — this function renders BOTH cases, it never decides which applies.
+// `filters` (fix round 2, N-C) is the page's CURRENT shared filter state — read-only here, used
+// only to compute which distribution bar(s) should render as visibly active.
 //
 // L4 (review, fix round 1): one authored (not DB-sourced) link to the trust page's metrics
 // section, under the charts — el()'s href guard allows a relative, site-internal path.
 export function renderChartSection(container, models, onBarClick) {
   clearChildren(container);
   const wrapper = el('div', { class: 'vote-charts' });
-  renderDistribution(wrapper, models.distribution, onBarClick);
+  renderDistribution(wrapper, models.distribution, onBarClick, models.filters);
   renderPartyComparison(wrapper, models.partyComparison, models.partyLabel);
   renderCohesion(wrapper, models.cohesion);
   wrapper.appendChild(el('a', { class: 'chart-definitions-link', href: '/trust#metrics' }, 'About these numbers'));

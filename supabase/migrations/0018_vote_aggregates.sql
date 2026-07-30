@@ -6,38 +6,58 @@
 -- majority CTEs (every row requires the FULL party-majority computation over every yea/nay cast
 -- before a WHERE clause on legislator_id could ever apply) — so a plain view's query cost would
 -- be paid on every single anon request, not just occasionally. Materialized is the destination,
--- not an escalation. Both bases (vote_casts, votes, legislators) stay directly anon-readable;
--- matviews take grants directly (no RLS on a matview — the same reasoning migration 0016 used for
--- views over already-public tables, just with data now pre-computed at refresh time instead of
--- query time).
+-- not an escalation.
+--
+-- N-E (re-review, fix round 2 — SECURITY MODEL CORRECTION, read this before touching grants):
+-- these three matviews FAIL OPEN, unlike migration 0016's security_invoker views, which FAIL
+-- CLOSED (a security_invoker view fails closed). A security_invoker view runs its query AS the
+-- querying role every time — revoke anon's
+-- SELECT on a base table and every invoker view over it stops working for anon automatically, no
+-- separate cleanup needed. A materialized view is different in kind: it is a SNAPSHOT, computed
+-- ONCE by whichever role runs REFRESH (here, service_role via refresh_vote_aggregates() below),
+-- and served afterward from that snapshot under ITS OWN, INDEPENDENT `grant select ... to anon`
+-- below — the anon grant on a matview does NOT re-check the base tables' current grants on every
+-- read. If vote_casts/votes/legislators' anon SELECT is ever revoked later (a future policy
+-- tightening), these three matviews will KEEP serving anon requests successfully from their last
+-- refresh until someone ALSO explicitly revokes `select` on public_position_totals,
+-- public_party_alignment, and public_party_position_totals — that revoke is not automatic and
+-- must be done by hand, in the same migration that locks down the bases. Whoever touches base-
+-- table grants on these three tables in the future must read this comment first.
 --
 -- Refreshed by scripts/refresh-aggregates.js (service-role RPC) — see refresh_vote_aggregates()
 -- at the bottom of this file. Until the first refresh (or Lance's apply-time refresh), a
 -- materialized view IS populated immediately by CREATE MATERIALIZED VIEW ... AS (Postgres
 -- default is WITH DATA), so the site has real numbers from the moment this migration lands, not a
 -- window of empty tables.
+--
+-- N-H(b) (re-review, fix round 2): DROP ... IF EXISTS ... CASCADE precedes every CREATE
+-- MATERIALIZED VIEW below (CASCADE also drops that view's own index, so no separate DROP INDEX is
+-- needed), and the refresh function uses CREATE OR REPLACE — this file is safely re-runnable
+-- (idempotent) rather than erroring on a second apply attempt.
 
--- Party normalization (C1+C2, CORRECTED RULING): both views' party handling uses this SAME CASE
--- mapping — 'R'->'Republican', 'D'->'Democratic', 'I'->'Independent'; every other value (including
--- 'Independent Democrat', '', and null) passes through UNCHANGED (never invented, never guessed).
--- Verified live against real data (task 6b, read-only probe + the review's own citation): current
--- distinct `legislators.party` counts are Republican 464 / R 391 / Democratic 456 / D 209 /
--- Democrat 0 — the bare-letter abbreviations are LegiScan-side (MO), the full printed forms are
--- Congress.gov-side (US); this CASE is what makes a Missouri Republican and a US House Republican
--- actually group together for the party-comparison and cohesion metrics, instead of silently
--- splitting into two undercounted groups over a purely cosmetic source difference. This is
--- normalization of a KNOWN, DOCUMENTED equivalence (R=Republican, D=Democratic, I=Independent),
--- never a guess at what an unfamiliar party label "probably" means — every other raw value passes
--- through untouched, and METRIC_DEFINITIONS (site/js/vote-charts.js) states this caveat verbatim
--- on the trust page.
+-- Party normalization (C1+C2, CORRECTED RULING): all THREE views' party handling uses this SAME
+-- CASE mapping — 'R'->'Republican', 'D'->'Democratic', 'I'->'Independent'; every other value
+-- (including 'Independent Democrat', '', and null) passes through UNCHANGED (never invented,
+-- never guessed). Verified live against real data (task 6b, read-only probe + the review's own
+-- citation): current distinct `legislators.party` counts are Republican 464 / R 391 / Democratic
+-- 456 / D 209 / Democrat 0 — the bare-letter abbreviations are LegiScan-side (MO), the full
+-- printed forms are Congress.gov-side (US); this CASE is what makes a Missouri Republican and a
+-- US House Republican actually group together for the party-comparison and cohesion metrics,
+-- instead of silently splitting into two undercounted groups over a purely cosmetic source
+-- difference. This is normalization of a KNOWN, DOCUMENTED equivalence (R=Republican,
+-- D=Democratic, I=Independent), never a guess at what an unfamiliar party label "probably" means
+-- — every other raw value passes through untouched, and METRIC_DEFINITIONS
+-- (site/js/vote-charts.js) states this caveat verbatim on the trust page.
 
 -- 1) Position distribution — one row per (legislator, jurisdiction, chamber, year, position), with
 -- the cast count AND the legislator's normalized party. The profile fetches ALL of a legislator's
 -- OWN rows unfiltered (this is small) and sums/filters client-side by the current chamber/year UI
--- filters (site/js/vote-charts.js's summarizeTotals). Carrying `party` here directly is what lets
--- the party-comparison fetch be ONE indexed query on THIS SAME matview (`party=eq....&
--- jurisdiction_id=in.(...)&chamber=eq....`) instead of a PostgREST embed through an aggregate view
--- (fragile, unverifiable pre-apply — H1/H5 from the review) or N separate per-legislator queries.
+-- filters (site/js/vote-charts.js's summarizeTotals). This view ALSO backs the N-A singleton-
+-- caster existence check (fix round 2): "does at least one row exist for a legislator OTHER than
+-- this profile's own ids, in this same party/jurisdiction/chamber scope" — a cheap, per-legislator
+-- `limit=1` query the party ROLLUP view below (public_party_position_totals) cannot answer on its
+-- own, since it has no legislator_id at all by design.
+drop materialized view if exists public_position_totals cascade;
 create materialized view public_position_totals as
 select
   vc.legislator_id,
@@ -67,10 +87,11 @@ grant select on public_position_totals to anon, authenticated;
 -- 2) Party-line alignment — one row per (legislator, year, chamber): how many roll calls that
 -- legislator's OWN party had a resolvable strict yea/nay majority on (comparable), and how many of
 -- those the legislator's own cast matched (matched). Semantics (design spec §3, exact neutrality-
--- wall language, plus the review's two corrections):
+-- wall language, plus the review's corrections):
 -- - "party majority = strict majority of that party's yea/nay casts on the roll call" — computed
 --   over the party's NORMALIZED label (same CASE as above), so a party's casters are never
---   silently split across a source-formatting difference.
+--   silently split across a source-formatting difference. The legislator's OWN cast is counted as
+--   one of their party's casts here (N-H(f)) — never excluded from their own party's tally.
 -- - "not-voting/absent excluded from cohesion's numerator and denominator" — and, more precisely,
 --   ANY position other than yea/nay (present/other included) is excluded at the source, in
 --   caster_casts below.
@@ -88,6 +109,7 @@ grant select on public_position_totals to anon, authenticated;
 --   'Democratic', or 'Independent' after the CASE above) is excluded at the source
 --   (normalized_casts below) — such a member simply never appears in this view at all, for any
 --   year/chamber: no figure, never a fabricated one. METRIC_DEFINITIONS states this plainly.
+drop materialized view if exists public_party_alignment cascade;
 create materialized view public_party_alignment as
 with caster_casts as (
   select
@@ -154,21 +176,78 @@ create unique index public_party_alignment_uq
   on public_party_alignment (legislator_id, year, chamber);
 grant select on public_party_alignment to anon, authenticated;
 
--- 3) Refresh function — the ONLY way either matview updates after this migration lands. Runs both
--- refreshes CONCURRENTLY (no read lock against anon traffic; requires the unique indexes above).
--- security definer so it can run with the privileges needed to refresh (matview refresh requires
--- ownership/appropriate privilege, which anon/authenticated never have) while the function itself
--- exposes nothing but "refresh, return nothing" — revoked from public/anon explicitly, executable
--- only by service_role. Called by scripts/refresh-aggregates.js; the ingest/backfill CLIs' batch
--- loops call it at batch end (script's own header comment) so the aggregates never drift far
--- behind the underlying vote_casts/votes/legislators data.
-create function refresh_vote_aggregates()
+-- 3) Party rollup — N-G (RE-REVIEW, CONTROLLER RULING, fix round 2, folded in now while 0018 is
+-- still unapplied): one row per (party, jurisdiction, chamber, year, position), summed ACROSS
+-- every legislator recorded with that normalized party — no legislator_id at all, by design. This
+-- is what makes the profile page's party-comparison fetch ONE query (`party=eq....&
+-- jurisdiction_id=in.(...)&chamber=....`) instead of the fix-round-1 design, which filtered the
+-- per-legislator public_position_totals by party and could require many chunked fetchAllRows
+-- round trips for a large party (15-25, per the review, for a several-hundred-member party across
+-- many years). Only the three normalized labels are included (same M3 reasoning as
+-- public_party_alignment) — a null/unrecognized party was never going to be queried against this
+-- view anyway (site/js/vote-charts.js's normalizePartyLabel returns null first), so this keeps the
+-- view itself free of a long tail of raw, inconsistent party strings nobody queries.
+--
+-- No separate (party, jurisdiction_id, chamber) secondary index (N-H(a)): the unique index below
+-- already leads with exactly those three columns, and Postgres can use a leading-column prefix of
+-- a multi-column index for a query that only filters on the prefix — a second index would be
+-- redundant storage/maintenance cost for zero additional query capability.
+drop materialized view if exists public_party_position_totals cascade;
+create materialized view public_party_position_totals as
+with normalized as (
+  select
+    case l.party
+      when 'R' then 'Republican'
+      when 'D' then 'Democratic'
+      when 'I' then 'Independent'
+      else l.party
+    end as party,
+    v.jurisdiction_id,
+    v.chamber,
+    v.vote_date,
+    vc.position
+  from vote_casts vc
+  join votes v on v.id = vc.vote_id
+  join legislators l on l.id = vc.legislator_id
+)
+select
+  party,
+  jurisdiction_id,
+  chamber,
+  date_part('year', vote_date)::int as year,
+  position,
+  count(*)::int as casts
+from normalized
+where party in ('Republican', 'Democratic', 'Independent')
+group by 1, 2, 3, 4, 5;
+
+create unique index public_party_position_totals_uq
+  on public_party_position_totals (party, jurisdiction_id, chamber, year, position);
+grant select on public_party_position_totals to anon, authenticated;
+
+-- 4) Refresh function — the ONLY way any of the three matviews above update after this migration
+-- lands. Runs all three refreshes CONCURRENTLY (no read lock against anon traffic; requires the
+-- unique indexes above) — left AS-IS per the controller's apply-time plan: tested live at apply,
+-- and dropped in favor of a plain (locking) REFRESH only if Postgres's PreventInTransactionBlock
+-- restriction actually fires in Supabase's migration-runner context. security definer so it can
+-- run with the privileges needed to refresh (matview refresh requires ownership/appropriate
+-- privilege, which anon/authenticated never have) while the function itself exposes nothing but
+-- "refresh, return nothing" — `set search_path = public, pg_temp` is added as standard
+-- security-definer hygiene (a security definer function must never resolve an unqualified
+-- identifier against a search_path an unprivileged caller could influence). Revoked from
+-- public/anon explicitly, executable only by service_role. Called by scripts/refresh-
+-- aggregates.js; the ingest/backfill CLIs' batch loops call it at batch end (script's own header
+-- comment) so the aggregates never drift far behind the underlying vote_casts/votes/legislators
+-- data.
+create or replace function refresh_vote_aggregates()
 returns void
 language sql
 security definer
+set search_path = public, pg_temp
 as $$
   refresh materialized view concurrently public_position_totals;
   refresh materialized view concurrently public_party_alignment;
+  refresh materialized view concurrently public_party_position_totals;
 $$;
 
 revoke all on function refresh_vote_aggregates() from public;

@@ -1,8 +1,8 @@
-// scripts/refresh-aggregates.js — refreshes the two vote-aggregate materialized views (migration
-// 0018: public_position_totals, public_party_alignment) via the service-role-only
-// refresh_vote_aggregates() SQL function. Run standalone (`npm run refresh:aggregates`, i.e.
-// `node --env-file=.env scripts/refresh-aggregates.js`) after applying 0018, and again any time
-// the underlying vote_casts/votes/legislators rows change materially.
+// scripts/refresh-aggregates.js — refreshes the three vote-aggregate materialized views (migration
+// 0018: public_position_totals, public_party_alignment, public_party_position_totals) via the
+// service-role-only refresh_vote_aggregates() SQL function. Run standalone (`npm run
+// refresh:aggregates`, i.e. `node --env-file=.env scripts/refresh-aggregates.js`) after applying
+// 0018, and again any time the underlying vote_casts/votes/legislators rows change materially.
 //
 // The ingest/backfill CLIs' own batch loops (src/cli/ingest-legiscan.js, ingest.js, etc.) should
 // call refresh_vote_aggregates() at the end of each batch (via getClient().rpc(...), same pattern
@@ -47,4 +47,13 @@ async function main() {
   console.log(JSON.stringify({ mode: 'refreshed', startedAt, finishedAt }, null, 2));
 }
 
-main();
+// N-H(d) (task 6b review, fix round 2): main() itself could throw on something the `error`-check
+// above never sees (e.g. getClient()'s own createClient() call, or a genuinely unexpected
+// exception) — without a top-level .catch(), that would surface as a raw unhandled-rejection
+// stack trace instead of the same clean, structured JSON every OTHER exit path in this script
+// already produces. Mirrors the `mode: 'failed'` shape above so a caller parsing this script's
+// stdout never has to handle two different failure shapes.
+main().catch((err) => {
+  console.log(JSON.stringify({ mode: 'failed', reason: err.message }, null, 2));
+  process.exitCode = 1;
+});

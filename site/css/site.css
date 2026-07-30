@@ -158,14 +158,16 @@ main#app {
    (site/js/vote-charts.js) for native keyboard/AT accessibility — this class is shared with the
    plain-div, non-interactive party-comparison/cohesion bars, so the browser's default button
    chrome (border, background, font, full-width text alignment) is reset back to look identical
-   to those plain rows; only :focus-visible gets a visible outline back, for keyboard users. */
+   to those plain rows; only :focus-visible gets a visible outline back, for keyboard users.
+   N-H(e) (task 6b review, fix round 2): `cursor: pointer` moved OFF this shared base rule and onto
+   a `button.chart-bar-row` selector below — the decorative party-comparison/cohesion rows (plain
+   divs, never clickable) no longer imply interactivity they don't have. */
 .chart-bar-row {
   display: grid;
   grid-template-columns: 7rem 1fr auto;
   align-items: center;
   gap: 0.5rem;
   padding: 0.15rem 0;
-  cursor: pointer;
   width: 100%;
   border: none;
   background: none;
@@ -175,9 +177,40 @@ main#app {
   appearance: none;
 }
 
+button.chart-bar-row {
+  cursor: pointer;
+}
+
 .chart-bar-row:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
+}
+
+/* N-C (task 6b review, fix round 2): the bar-driven vote-list filter (position=eq.yea, or the
+   missed-only bucket) was invisible once applied — no color implies "good/bad" here, only that
+   THIS bar is the one currently narrowing the vote list below. Bold label + a track outline, never
+   a fill-color change (that would drift toward the same good/bad implication the neutral fill
+   color everywhere else in this file exists to avoid). */
+.chart-bar-active .chart-bar-label {
+  font-weight: 700;
+  color: inherit;
+}
+
+.chart-bar-active .chart-bar-track {
+  outline: 1px solid var(--link);
+  outline-offset: 1px;
+}
+
+.chart-clear-position-filter {
+  margin: 0.35rem 0 0;
+  font-size: 0.85em;
+  background: none;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
 }
 
 .chart-definitions-link {

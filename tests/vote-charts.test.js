@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { readFileSync } from 'node:fs';
 import {
   formatShare, normalizePartyLabel, summarizeTotals, cohesionFromAlignment, partyComparisonModel,
-  renderChartSection, METRIC_DEFINITIONS,
+  renderChartSection, METRIC_DEFINITIONS, activeFilterPositions,
 } from '../site/js/vote-charts.js';
 import {
   loadChartsSection, mountProfile,
@@ -299,38 +299,68 @@ test('normalizePartyLabel: null/undefined/non-string input -> null, never throws
 
 // SQL-shape assertion (review: "normalization CASE via a SQL-shape assertion in tests if
 // practical") — no live DB in this suite (design spec §8), so this reads the DRAFT migration's
-// actual text and asserts the party-normalization CASE (and the other fix-round-1-mandated SQL
+// actual text and asserts the party-normalization CASE (and the other fix-round-mandated SQL
 // shapes) are genuinely present, keeping the migration file and this test honest of each other
 // without a live database.
-test('migration 0018: SQL-shape assertions — materialized views, party normalization CASE (mirrors normalizePartyLabel exactly), unique indexes for CONCURRENTLY refresh, and the locked-down refresh function', () => {
+test('migration 0018: SQL-shape assertions — three materialized views, party normalization CASE (mirrors normalizePartyLabel exactly), unique indexes for CONCURRENTLY refresh, and the locked-down refresh function', () => {
   const sql = readFileSync(new URL('../supabase/migrations/0018_vote_aggregates.sql', import.meta.url), 'utf8');
 
   assert.match(sql, /create materialized view public_position_totals/);
   assert.match(sql, /create materialized view public_party_alignment/);
+  // N-G (fix round 2, CONTROLLER RULING): the party rollup matview.
+  assert.match(sql, /create materialized view public_party_position_totals/);
 
-  // The exact CASE normalizePartyLabel mirrors — appears twice (once per matview).
+  // The exact CASE normalizePartyLabel mirrors — appears three times (once per matview).
   const caseOccurrences = sql.match(/when 'R' then 'Republican'/g) || [];
-  assert.equal(caseOccurrences.length, 2, 'the R->Republican mapping must appear in BOTH matviews\' party handling');
+  assert.equal(caseOccurrences.length, 3, 'the R->Republican mapping must appear in ALL THREE matviews\' party handling');
   assert.match(sql, /when 'D' then 'Democratic'/);
   assert.match(sql, /when 'I' then 'Independent'/);
 
   assert.match(sql, /create unique index public_position_totals_uq[\s\S]*?\(legislator_id, jurisdiction_id, chamber, year, position\)/);
   assert.match(sql, /create unique index public_party_alignment_uq[\s\S]*?\(legislator_id, year, chamber\)/);
+  assert.match(sql, /create unique index public_party_position_totals_uq[\s\S]*?\(party, jurisdiction_id, chamber, year, position\)/);
 
   // M2 singleton-caster exclusion.
   assert.match(sql, /party_yea \+ pm\.party_nay\) > 1/);
-  // M3 null/unrecognized-party exclusion (only the three normalized labels ever form a group).
-  assert.match(sql, /'Republican', 'Democratic', 'Independent'/);
+  // M3 null/unrecognized-party exclusion (only the three normalized labels ever form a group) —
+  // must appear at least twice: once in public_party_alignment, once in public_party_position_totals.
+  const normalizedGroupOccurrences = sql.match(/'Republican', 'Democratic', 'Independent'/g) || [];
+  assert.ok(normalizedGroupOccurrences.length >= 2, 'the normalized-only allowlist must gate both party_alignment and party_position_totals');
 
-  // Refresh function: security definer, revoked from public/anon, granted only to service_role.
-  assert.match(sql, /create function refresh_vote_aggregates/);
+  // N-H(b) (fix round 2): idempotent re-apply — drop-if-exists before every create, and the
+  // refresh function uses CREATE OR REPLACE rather than a plain CREATE.
+  assert.match(sql, /drop materialized view if exists public_position_totals cascade/);
+  assert.match(sql, /drop materialized view if exists public_party_alignment cascade/);
+  assert.match(sql, /drop materialized view if exists public_party_position_totals cascade/);
+  assert.match(sql, /create or replace function refresh_vote_aggregates/);
+  assert.doesNotMatch(sql, /\ncreate function refresh_vote_aggregates/, 'must be CREATE OR REPLACE, not a plain CREATE');
+
+  // Refresh function: security definer, search_path hardened, revoked from public/anon, granted
+  // only to service_role, and refreshes all THREE matviews.
   assert.match(sql, /security definer/);
+  assert.match(sql, /set search_path = public, pg_temp/);
+  assert.match(sql, /refresh materialized view concurrently public_position_totals/);
+  assert.match(sql, /refresh materialized view concurrently public_party_alignment/);
+  assert.match(sql, /refresh materialized view concurrently public_party_position_totals/);
   assert.match(sql, /revoke all on function refresh_vote_aggregates\(\) from public/);
   assert.match(sql, /revoke all on function refresh_vote_aggregates\(\) from anon/);
   assert.match(sql, /grant execute on function refresh_vote_aggregates\(\) to service_role/);
 
   assert.match(sql, /grant select on public_position_totals to anon, authenticated/);
   assert.match(sql, /grant select on public_party_alignment to anon, authenticated/);
+  assert.match(sql, /grant select on public_party_position_totals to anon, authenticated/);
+});
+
+// N-E (review, fix round 2): the migration's own comment must plainly state the fail-open
+// security model (independent grants on an owner-computed snapshot) rather than implying the
+// fail-closed behavior migration 0016's security_invoker views actually have — a future
+// maintainer revoking anon on the base tables needs to be told, in the file itself, that these
+// three matviews' own grants require a SEPARATE, explicit revoke.
+test('migration 0018: the fail-open security-model comment is present (N-E) — distinguishes these matviews from 0016\'s fail-closed invoker views', () => {
+  const sql = readFileSync(new URL('../supabase/migrations/0018_vote_aggregates.sql', import.meta.url), 'utf8');
+  assert.match(sql, /FAIL OPEN/);
+  assert.match(sql, /fails closed/i, 'must name the contrast with 0016\'s invoker views explicitly');
+  assert.match(sql, /explicitly revokes `select`/i, 'must plainly state that revoking the bases requires a SEPARATE, explicit revoke on these matviews too');
 });
 
 // ============================================================================
@@ -433,6 +463,34 @@ test('METRIC_DEFINITIONS.cohesion: names its real grouping (year AND chamber), t
   assert.match(body, /year and chamber/i);
   assert.match(body, /ONLY yea\/nay caster/);
   assert.match(body, /does not resolve to one of those three common forms has no cohesion figure/i);
+});
+
+// N-H(f) (re-review, fix round 2): the member's own cast counts as one of their party's casts
+// when the majority is computed — never excluded from their own party's tally.
+test('METRIC_DEFINITIONS.cohesion: states the legislator\'s own cast counts as one of their party\'s casts when the majority is computed (N-H(f))', () => {
+  const body = METRIC_DEFINITIONS.cohesion.body ?? METRIC_DEFINITIONS.cohesion;
+  assert.match(body, /own cast counts as one of their party's casts/i);
+  assert.match(body, /never excluded from their own party's tally/i);
+});
+
+// N-A (re-review, HIGH, fix round 2): the "no figure for a group of one" rule now covers BOTH the
+// unrecognized-party case (fix round 1) AND the case where the legislator is the only one
+// recorded with an otherwise-common party in the relevant scope — a party label being one of the
+// three common ones is not, on its own, enough to guarantee a real comparison group exists.
+test('METRIC_DEFINITIONS.partyComparison: the "no figure" rule extends to being the ONLY legislator recorded with that party in the relevant scope (N-A)', () => {
+  const body = METRIC_DEFINITIONS.partyComparison.body ?? METRIC_DEFINITIONS.partyComparison;
+  assert.match(body, /ONLY one recorded with that party/i);
+  assert.match(body, /group that is only themselves would not be a real comparison/i);
+});
+
+// N-D (re-review, fix round 2): the staleness disclosure — the charts are computed from a
+// periodically refreshed snapshot, not live; the vote list stays live.
+test('METRIC_DEFINITIONS.staleness: exists and states the charts are a periodically refreshed snapshot while the vote list stays live (N-D)', () => {
+  assert.ok(METRIC_DEFINITIONS.staleness, 'METRIC_DEFINITIONS.staleness must exist');
+  const body = METRIC_DEFINITIONS.staleness.body ?? METRIC_DEFINITIONS.staleness;
+  assert.match(body, /periodically refreshed snapshot/i);
+  assert.match(body, /not a live query|not live/i);
+  assert.match(body, /vote list.*live|live.*vote list/is);
 });
 
 // H3 (review, fix round 1): the OLD "not independently verified or normalized" sentences were a
@@ -539,6 +597,86 @@ test('renderChartSection: distribution bars are real <button type="button"> elem
   const yeaBar = container.querySelector('[data-bar="yea"]');
   assert.equal(yeaBar.tagName, 'BUTTON');
   assert.equal(yeaBar.type, 'button');
+});
+
+// ============================================================================
+// N-C (re-review, fix round 2): the position/missed-only filter a bar click applies to the vote
+// list was invisible once set (no visual trace on the chart itself) and sticky (survives other
+// filter changes, by design — but with zero visible indicator that's a real usability trap).
+// activeFilterPositions is the pure "which bar(s) does the CURRENT filter state reflect" logic;
+// renderChartSection consumes it to set aria-pressed/an active class and to show/hide the "Clear
+// position filter" control.
+// ============================================================================
+
+test('activeFilterPositions: position=yea/nay/other each activate exactly their own bar', () => {
+  assert.deepEqual([...activeFilterPositions({ position: 'yea' })], ['yea']);
+  assert.deepEqual([...activeFilterPositions({ position: 'nay' })], ['nay']);
+  assert.deepEqual([...activeFilterPositions({ position: 'other' })], ['other']);
+});
+
+test('activeFilterPositions: missedOnly activates BOTH not_voting and absent together (the same combined bucket the checkbox always meant)', () => {
+  const active = activeFilterPositions({ missedOnly: true });
+  assert.deepEqual([...active].sort(), ['absent', 'not_voting']);
+});
+
+test('activeFilterPositions: missedOnly wins over a stale/contradictory position value (defensive, same precedence as voteFilterQuery)', () => {
+  const active = activeFilterPositions({ missedOnly: true, position: 'yea' });
+  assert.deepEqual([...active].sort(), ['absent', 'not_voting']);
+});
+
+test('activeFilterPositions: neither set -> empty set, never throws on null/undefined filters', () => {
+  assert.equal(activeFilterPositions({}).size, 0);
+  assert.equal(activeFilterPositions(null).size, 0);
+  assert.equal(activeFilterPositions(undefined).size, 0);
+});
+
+test('renderChartSection: the active bar carries aria-pressed="true" + a visible active class; every other bar is aria-pressed="false"', () => {
+  const container = document.createElement('section');
+  const models = fullModels();
+  models.filters = { position: 'yea', missedOnly: false };
+  renderChartSection(container, models, () => {});
+  const yeaBar = container.querySelector('[data-bar="yea"]');
+  const nayBar = container.querySelector('[data-bar="nay"]');
+  assert.equal(yeaBar.getAttribute('aria-pressed'), 'true');
+  assert.equal(yeaBar.classList.contains('chart-bar-active'), true);
+  assert.equal(nayBar.getAttribute('aria-pressed'), 'false');
+  assert.equal(nayBar.classList.contains('chart-bar-active'), false);
+});
+
+test('renderChartSection: missedOnly=true marks BOTH not_voting and absent as active', () => {
+  const container = document.createElement('section');
+  const models = fullModels();
+  models.filters = { position: null, missedOnly: true };
+  renderChartSection(container, models, () => {});
+  assert.equal(container.querySelector('[data-bar="not_voting"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(container.querySelector('[data-bar="absent"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(container.querySelector('[data-bar="yea"]').getAttribute('aria-pressed'), 'false');
+});
+
+test('renderChartSection: no active filter -> no "Clear position filter" control rendered', () => {
+  const container = document.createElement('section');
+  const models = fullModels();
+  models.filters = { position: null, missedOnly: false };
+  renderChartSection(container, models, () => {});
+  assert.equal(container.querySelector('.chart-clear-position-filter'), null);
+  // and every bar is aria-pressed="false"
+  for (const pos of ['yea', 'nay', 'not_voting', 'absent', 'other']) {
+    assert.equal(container.querySelector(`[data-bar="${pos}"]`).getAttribute('aria-pressed'), 'false');
+  }
+});
+
+test('renderChartSection: an active filter renders a visible "Clear position filter" control that clears BOTH position and missedOnly on click', () => {
+  const container = document.createElement('section');
+  const models = fullModels();
+  models.filters = { position: 'yea', missedOnly: false };
+  const calls = [];
+  renderChartSection(container, models, (patch) => calls.push(patch));
+  const clearBtn = container.querySelector('.chart-clear-position-filter');
+  assert.notEqual(clearBtn, null);
+  assert.equal(clearBtn.textContent, 'Clear position filter');
+  assert.equal(clearBtn.type, 'button');
+  clearBtn.click();
+  assert.deepEqual(calls, [{ position: null, missedOnly: false }]);
 });
 
 // L4 (review, fix round 1): one authored link to the trust page's metrics section under the
@@ -671,29 +809,40 @@ test('loadChartsSection: success path renders ready with real numbers, and resco
   assert.equal(nayValue, '0 (0.0%)', 'the senate/2023 nay row is now scoped out by the chamber filter');
 });
 
-// H1 (review, fix round 1): the party fetch is ONE indexed query on public_position_totals,
-// filtered by the member's OWN normalized party + the member's own jurisdiction set (derived from
-// memberRows, never guessed) + the active chamber filter — replacing the pre-review
-// `legislators!inner(party)` embed entirely.
-test('loadChartsSection: H1 — the party-comparison fetch filters by normalized party + the member\'s own jurisdiction set + the active chamber, and re-fetches only when chamber changes', async () => {
+// H1/N-F/N-G (review, fix round 1 + re-review fix round 2): the party-comparison fetch is ONE
+// indexed query on the public_party_position_totals ROLLUP matview (N-G — pre-summed across every
+// legislator of that party, no legislator_id at all), filtered by the member's OWN normalized
+// party + the member's own jurisdiction set (derived from memberRows, never guessed) + a chamber
+// scope that is ALWAYS present — either the active chamber filter, or (N-F, when no chamber filter
+// is selected) the member's OWN chambers, so the default view never silently widens beyond what
+// the member actually has data for.
+test('loadChartsSection: H1/N-F/N-G — the party-rollup fetch filters by normalized party + jurisdiction set + a chamber scope that defaults to the member\'s OWN chambers, and re-fetches only when the active chamber filter changes', async () => {
   _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
   const partyFetchUrls = [];
+  const existenceFetchUrls = [];
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/public_position_totals') && u.includes('legislator_id=in')) {
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=in.(')) {
+      // A merged senate+house career, so switching the chamber filter later still leaves the
+      // member's OWN distribution non-zero (never hits the empty-state early return).
       return okResponse([
         totalsRow({
           legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'senate', year: 2024, position: 'yea', casts: 5,
         }),
-      ]);
-    }
-    if (u.includes('/public_position_totals')) {
-      partyFetchUrls.push(u);
-      return okResponse([
         totalsRow({
-          jurisdiction_id: 'mo-legislature', chamber: 'senate', year: 2024, position: 'yea', casts: 50,
+          legislator_id: 'leg-1', jurisdiction_id: 'mo-legislature', chamber: 'house', year: 2024, position: 'yea', casts: 3,
         }),
       ]);
+    }
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=not.in')) {
+      existenceFetchUrls.push(u);
+      return okResponse([{ legislator_id: 'other-leg' }]); // confirms a real outside party member exists
+    }
+    if (u.includes('/public_party_position_totals')) {
+      partyFetchUrls.push(u);
+      return okResponse([{
+        party: 'Republican', jurisdiction_id: 'mo-legislature', chamber: 'senate', year: 2024, position: 'yea', casts: 50,
+      }]);
     }
     if (u.includes('/public_party_alignment')) return okResponse([]);
     return okResponse([]);
@@ -703,18 +852,147 @@ test('loadChartsSection: H1 — the party-comparison fetch filters by normalized
   const result = await loadChartsSection(container, {
     legislatorIds: ['leg-1'], party: 'R', filters, onBarClick: () => {},
   });
+
   assert.equal(partyFetchUrls.length, 1);
+  assert.match(partyFetchUrls[0], /public_party_position_totals\?/, 'N-G: queries the pre-summed party ROLLUP view, not the per-legislator one');
   assert.match(partyFetchUrls[0], /party=eq\.Republican/, 'the RAW "R" resolved to the normalized "Republican" before hitting the query');
   assert.match(partyFetchUrls[0], /jurisdiction_id=in\.\(mo-legislature\)/, 'scoped to the member\'s OWN jurisdiction set, derived from memberRows');
-  assert.doesNotMatch(partyFetchUrls[0], /chamber=/, 'no chamber filter active yet -> none applied to the party fetch either');
+  assert.match(partyFetchUrls[0], /chamber=in\.\(senate,house\)/, 'N-F: no chamber filter active yet -> derives chamber=in.(...) from the member\'s OWN chambers, never left unscoped');
 
-  filters.chamber = 'senate';
+  assert.equal(existenceFetchUrls.length, 1);
+  assert.match(existenceFetchUrls[0], /legislator_id=not\.in\.\(leg-1\)/, 'N-A: the existence check excludes the member\'s own ids');
+  assert.match(existenceFetchUrls[0], /chamber=in\.\(senate,house\)/, 'N-A\'s existence check shares the SAME chamber scope as the rollup fetch');
+  assert.notEqual(container.querySelector('[data-bar="party-comparison-party"]'), null, 'a confirmed real outside member -> the comparison actually renders');
+
+  filters.chamber = 'house';
   await result.rescope();
-  assert.equal(partyFetchUrls.length, 2, 'a chamber CHANGE re-fetches the party rows (chamber is a server-side filter on this fetch, unlike year)');
-  assert.match(partyFetchUrls[1], /chamber=eq\.senate/);
+  assert.equal(partyFetchUrls.length, 2, 'a chamber CHANGE re-fetches the party rollup (chamber is a server-side filter on this fetch, unlike year)');
+  assert.match(partyFetchUrls[1], /chamber=eq\.house/);
+  assert.equal(existenceFetchUrls.length, 2, 'the existence check re-runs alongside the rollup fetch on a chamber change');
 
   await result.rescope(); // no chamber change this time
   assert.equal(partyFetchUrls.length, 2, 'an unchanged chamber never triggers a redundant re-fetch');
+  assert.equal(existenceFetchUrls.length, 2);
+});
+
+// N-A (re-review, HIGH, fix round 2): the review's own live scenario — 8 reachable Independents
+// each the only member of their party in their chamber. Without the existence check, the party
+// rollup fetch would return ONLY the member's own summed rows (since they're the only contributor
+// to that party/jurisdiction/chamber group), and partyComparisonModel would render two IDENTICAL
+// bars — member-vs-himself, rendered as "perfectly in line with his party." This must never
+// happen: the existence check confirms nobody else is in the group, so the whole comparison
+// degrades to "not computable," same rendering as a null/unrecognized party.
+test('loadChartsSection: N-A — a lone Independent (party rollup returns only the member\'s own summed data) renders party comparison as "not computable," never member-vs-himself', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=in.(')) {
+      return okResponse([totalsRow({
+        legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2024, position: 'yea', casts: 10,
+      })]);
+    }
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=not.in')) {
+      // The critical fixture: NO row exists for anyone other than this legislator — the existence
+      // check must find nothing.
+      return okResponse([]);
+    }
+    if (u.includes('/public_party_position_totals')) {
+      // The rollup itself DOES return rows — they just happen to be entirely this legislator's
+      // own contribution (a real, if misleading, possible response shape from the pre-summed view).
+      return okResponse([{
+        party: 'Independent', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2024, position: 'yea', casts: 10,
+      }]);
+    }
+    if (u.includes('/public_party_alignment')) return okResponse([]);
+    return okResponse([]);
+  });
+  const container = document.createElement('section');
+  const result = await loadChartsSection(container, {
+    legislatorIds: ['leg-1'], party: 'I', filters: { chamber: null, year: null }, onBarClick: () => {},
+  });
+  assert.notEqual(result, null);
+  const comparisonSection = container.querySelector('.chart-party-comparison');
+  assert.notEqual(comparisonSection, null);
+  assert.match(comparisonSection.textContent, /not computable/i);
+  assert.equal(comparisonSection.querySelector('.chart-bar-fill'), null, 'no bars at all — never two identical member-vs-himself bars');
+});
+
+// N-B (re-review, HIGH, fix round 2): rescope() is async (it may re-fetch party scope on a
+// chamber change) and gets called again on every filter change — two rapid chamber switches are a
+// real race, since network responses can resolve OUT OF ORDER. Mirrors
+// tests/person-page.test.js's own MED-5 construction exactly (loadVotesSection's voteGeneration
+// test): two calls are started back-to-back (the reviewer's own "two quick chamber switches"), and
+// their fetches are resolved in REVERSE order (the older-started one resolves LAST) to prove the
+// fix is about call-START order, not network/resolution order.
+test('loadChartsSection: N-B — a stale (superseded) rescope() call never renders, even if its fetch resolves AFTER the newer call\'s (the reviewer\'s interleaved-chamber-switch construction)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+
+  // Only the party-rollup fetch's resolution is deferred/controlled, and only for the two
+  // chamber-specific (post-mount) requests — every other endpoint (member rows, the N-A existence
+  // check, alignment, and the UNcontrolled initial default-chamber rollup fetch during mount)
+  // resolves immediately, so the ONLY thing under test is the chamber-switch race itself.
+  const resolvers = {};
+  _setFetch((url) => {
+    const u = String(url);
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=in.(')) {
+      return Promise.resolve(okResponse([
+        totalsRow({
+          legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'house', year: 2024, position: 'yea', casts: 9,
+        }),
+        totalsRow({
+          legislator_id: 'leg-1', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2024, position: 'yea', casts: 4,
+        }),
+      ]));
+    }
+    if (u.includes('/public_position_totals') && u.includes('legislator_id=not.in')) {
+      return Promise.resolve(okResponse([{ legislator_id: 'other-leg' }])); // a real outside member, so the comparison actually renders and its content is observable
+    }
+    if (u.includes('/public_party_position_totals')) {
+      if (u.includes('chamber=eq.house')) {
+        return new Promise((resolve) => {
+          resolvers.house = () => resolve(okResponse([{
+            party: 'Republican', jurisdiction_id: 'us-congress', chamber: 'house', year: 2024, position: 'yea', casts: 900,
+          }]));
+        });
+      }
+      if (u.includes('chamber=eq.senate')) {
+        return new Promise((resolve) => {
+          resolvers.senate = () => resolve(okResponse([{
+            party: 'Republican', jurisdiction_id: 'us-congress', chamber: 'senate', year: 2024, position: 'yea', casts: 400,
+          }]));
+        });
+      }
+      // The initial mount's default (no-chamber-filter, chamber=in.(house,senate)) fetch is left
+      // UNcontrolled so the section can actually mount before the race begins.
+      return Promise.resolve(okResponse([]));
+    }
+    if (u.includes('/public_party_alignment')) return Promise.resolve(okResponse([]));
+    return Promise.resolve(okResponse([]));
+  });
+
+  const container = document.createElement('section');
+  const filters = { chamber: null, year: null };
+  const result = await loadChartsSection(container, {
+    legislatorIds: ['leg-1'], party: 'R', filters, onBarClick: () => {},
+  });
+  assert.notEqual(result, null);
+
+  // Start the OLDER call first (house)…
+  filters.chamber = 'house';
+  const older = result.rescope();
+  // …then start the NEWER call (senate) before the older one resolves.
+  filters.chamber = 'senate';
+  const newer = result.rescope();
+
+  // Resolve OUT OF ORDER: the newer (senate) request finishes FIRST, the older (house) one LAST.
+  resolvers.senate();
+  await newer;
+  resolvers.house();
+  await older;
+
+  const partyValue = container.querySelector('[data-bar="party-comparison-party"] .chart-bar-value').textContent;
+  assert.match(partyValue, /400/, 'the newer (current-generation, senate) result must render');
+  assert.doesNotMatch(partyValue, /900/, 'the stale, later-resolving (house) call must never overwrite the newer render');
 });
 
 // M1 (review, fix round 1): a charts-section retry that SUCCEEDS must reassign the caller's
