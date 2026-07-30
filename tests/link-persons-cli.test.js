@@ -1018,14 +1018,31 @@ function makeFakeClient({
   let flagSeq = 0;
   let raceFired = false;
 
-  function selectAllBuilder(table) {
+  // selectAllBuilder now PROJECTS to the caller's actual requested columns (finding 9, final
+  // wave — test-honesty lock) rather than always returning the full fixture row regardless of
+  // what was asked for. Before this fix, the fake silently made loadLegislators'/loadTerms' own
+  // SELECT strings decorative in every test: a real regression (e.g. dropping `nickname` from
+  // loadLegislators' select string) would have been INVISIBLE here, since the fake returned the
+  // whole row anyway. Now a column not named in the select string genuinely comes back missing
+  // (`undefined`), so any test whose behavior actually depends on a specific selected column will
+  // fail loud if that column is ever silently dropped from the real query.
+  function selectAllBuilder(table, cols) {
+    const columns = typeof cols === 'string'
+      ? cols.split(',').map((c) => c.trim()).filter(Boolean)
+      : null;
+    const project = (row) => {
+      if (!columns) return { ...row };
+      const projected = {};
+      for (const col of columns) projected[col] = row[col];
+      return projected;
+    };
     const builder = {
       order: () => builder,
       range: (from, to) => ({
         then: (resolve) => {
           calls.push({ op: 'select', table });
           const rows = state[table] ?? [];
-          resolve({ data: rows.slice(from, to + 1).map((r) => ({ ...r })), error: null });
+          resolve({ data: rows.slice(from, to + 1).map(project), error: null });
         },
       }),
     };
@@ -1037,8 +1054,8 @@ function makeFakeClient({
     state,
     from(table) {
       return {
-        select() {
-          if (table === 'legislators' || table === 'terms') return selectAllBuilder(table);
+        select(cols) {
+          if (table === 'legislators' || table === 'terms') return selectAllBuilder(table, cols);
           if (table === 'identity_flags') {
             return {
               eq: (col, val) => ({
@@ -1283,6 +1300,42 @@ test('writeIdentityFlag: a 23505 race on insert (app-level check missed a concur
   const result = await writeIdentityFlag(client, 'run-1', flag);
   assert.equal(result.deduped, true);
   assert.equal(result.id, 'flag-race-winner');
+});
+
+// ---- FINDING 9 (test-honesty lock, final wave): a runLink-level test that goes through the REAL
+// loadLegislators SELECT string (not a hand-built rows array passed straight to
+// clusterLegislators) — this is the thing the reviewer proved was invisible: the fake client used
+// to ignore its own select(cols) argument entirely and always return full fixture rows regardless
+// of what was actually asked for, so a real regression dropping `nickname` from loadLegislators'
+// own select string would have passed every existing test silently. The fake now PROJECTS to the
+// caller's actual requested columns (see makeFakeClient's own updated comment) — this test is the
+// one that would catch it: WITHOUT nickname data reaching clusterLegislators, 'Robert Jones'
+// (hub1) and 'Robert Jones' (hub2) would still auto-cluster on the pre-existing identical-name
+// residual alone (unrelated to nicknames), while 'Bob Jones'/'Rob Jones' would have nothing to
+// connect to and land as two singletons — a COMPLETELY different, wrong shape from the one
+// asserted below.
+test('runLink FINDING 9: a persisted nickname flowing through the REAL loadLegislators SELECT produces internal_no_name_variant end-to-end — proves nickname wiring is actually exercised, not merely assumed', async () => {
+  const legislatorRows = [
+    {
+      id: 'leg-hub1', full_name: 'Robert Jones', nickname: 'Bob', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 1, person_id: null,
+    },
+    {
+      id: 'leg-hub2', full_name: 'Robert Jones', nickname: 'Rob', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 2, person_id: null,
+    },
+    {
+      id: 'leg-barebob', full_name: 'Bob Jones', nickname: null, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 3, person_id: null,
+    },
+    {
+      id: 'leg-barerob', full_name: 'Rob Jones', nickname: null, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 4, person_id: null,
+    },
+  ];
+  const client = makeFakeClient({ legislatorRows });
+  const report = await runLink(client, { dryRun: true });
+  assert.equal(report.counts.clusters, 0, 'if nickname were NOT wired through, hub1/hub2 would still auto-cluster on the plain identical-name residual alone');
+  assert.equal(report.counts.flagged, 1);
+  assert.equal(report.flagged[0].reason, 'internal_no_name_variant');
+  assert.deepEqual(report.flagged[0].candidateIds.slice().sort(), ['leg-barebob', 'leg-barerob', 'leg-hub1', 'leg-hub2']);
+  assert.equal(report.counts.singletons, 0, 'if nickname were NOT wired through, barebob/barerob would be stranded as two singletons instead of joining this flag');
 });
 
 // ---- runLink: the orchestration seam — dry-run zero-write, live writes + honest counts ----
