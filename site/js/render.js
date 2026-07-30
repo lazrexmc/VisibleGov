@@ -177,6 +177,17 @@ const STATE_DEFAULT_MESSAGE = {
 // instead of 'failed') used to fall through the two `if`s below and render an empty <p> with no
 // text — exactly the plan's forbidden "a failed fetch renders as an empty section" (design spec
 // §8), just reached a different way. Fail loud instead: validate the enum before touching the DOM.
+//
+// task-9 review round 2, NEW-2 (MEDIUM): a 'failed' state used to ALWAYS render the retry button,
+// even when no `onRetry` was given — a determinate not-found (a well-formed id that plainly does
+// not exist in our data; a malformed URL that could never resolve differently on retry) has no
+// meaningful retry action, so the button just silently no-op'd on click. A dead control is worse
+// than either honest alternative (no button at all, or a real one) — it invites a click that does
+// nothing and gives no sign why. The retry button now renders ONLY when the caller passes a real
+// `onRetry` function; every existing 'failed' call site across the site already does this (see the
+// per-page not-found/retry call sites — grepped at review time, no behavior change for any of
+// them), so this is purely additive for the one call shape (`onRetry` omitted) that never had a
+// working retry to begin with.
 export function sectionState(container, { state, message, onRetry } = {}) {
   if (!VALID_STATES.has(state)) {
     throw new InvalidSectionStateError(
@@ -188,11 +199,9 @@ export function sectionState(container, { state, message, onRetry } = {}) {
   if (state === 'ready') return;
   const text = message || STATE_DEFAULT_MESSAGE[state] || '';
   container.appendChild(el('p', { class: `section-state section-state-${state}` }, text));
-  if (state === 'failed') {
+  if (state === 'failed' && typeof onRetry === 'function') {
     const retryBtn = el('button', { class: 'section-state-retry' }, 'Retry');
-    retryBtn.addEventListener('click', () => {
-      if (typeof onRetry === 'function') onRetry();
-    });
+    retryBtn.addEventListener('click', onRetry);
     container.appendChild(retryBtn);
   }
 }

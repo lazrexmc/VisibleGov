@@ -350,6 +350,25 @@ test('sectionState: failed state renders a retry button wired to onRetry', () =>
   assert.equal(called, true);
 });
 
+// task-9 review round 2, NEW-2 (MEDIUM): a determinate not-found (no onRetry given at all) must
+// not render a DEAD retry button — no button beats a button that silently does nothing on click.
+test('sectionState: failed state with NO onRetry renders NO retry button (a determinate not-found offers no dead control)', () => {
+  const container = document.createElement('div');
+  sectionState(container, { state: 'failed', message: 'No such bill in our data.' });
+  assert.equal(container.textContent.includes('No such bill in our data.'), true);
+  assert.equal(container.querySelector('button'), null, 'no button at all — not a button that no-ops on click');
+});
+
+test('sectionState: failed state with onRetry explicitly null/undefined also renders NO retry button (same as omitted)', () => {
+  const container1 = document.createElement('div');
+  sectionState(container1, { state: 'failed', message: 'x', onRetry: null });
+  assert.equal(container1.querySelector('button'), null);
+
+  const container2 = document.createElement('div');
+  sectionState(container2, { state: 'failed', message: 'x', onRetry: undefined });
+  assert.equal(container2.querySelector('button'), null);
+});
+
 test('sectionState: empty state renders the honest-empty message, no retry button', () => {
   const container = document.createElement('div');
   sectionState(container, { state: 'empty', message: 'no recorded votes in our data for this period' });

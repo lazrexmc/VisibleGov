@@ -1,17 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 
 import {
   tallyPositions, renderSummaryStructured, buildVerificationNote, NO_SUMMARY_NOTE, PLAIN_TEXT_FALLBACK_NOTE,
+  loadVotesSection,
 } from '../site/js/bill-page.js';
 import { markTerms } from '../site/js/glossary-inline.js';
 import { renderMarkdown } from '../src/lib/summarizer.js';
+import { _setFetch, _setConfig } from '../site/js/rest.js';
 
-// Task 9 (docs/superpowers/plans/2026-07-30-public-site.md, task-9-brief.md; fix round 1, task-9
-// review) — the bill page's pure helpers, TDD'd here BEFORE the DOM-wiring code exists
-// (bill-page.js's own orchestration functions and glossary-inline.js's DOM helpers are
+// Task 9 (docs/superpowers/plans/2026-07-30-public-site.md, task-9-brief.md; fix rounds 1-2,
+// task-9 review) — the bill page's pure helpers, TDD'd here BEFORE the DOM-wiring code exists
+// (bill-page.js's own orchestration functions and glossary-inline.js's DOM helpers are otherwise
 // smoke-tested live per the controller's own Step 4, same convention as person-page.js/
-// directory-page.js).
+// directory-page.js — EXCEPT for the one DOM regression test at the bottom of this file, added in
+// fix round 2 specifically because a pure-function-only test suite is structurally unable to catch
+// a bug that lives entirely in how two already-correct pieces (the flags fetch, joinFlagBadges)
+// get wired together at the DOM/network orchestration layer).
+//
+// jsdom supplies `document` for that one test (same pattern as tests/person-page.test.js) — set
+// once here, after the static imports, before any test() body runs; bill-page.js never touches
+// `document` at its own module-load time.
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://127.0.0.1:8990/' });
+globalThis.document = dom.window.document;
 
 // ============================================================================
 // tallyPositions — a mechanical count of stored vote_casts rows, labeled "recorded casts in our
@@ -345,4 +357,83 @@ test('markTerms: LOW-1 — a boundary-rejected occurrence does not block a genui
   const marked = segments.filter((s) => s.terms.length > 0);
   assert.equal(marked.length, 1, 'only the standalone "act" matches; the "act" inside "exact" does not');
   assert.equal(marked[0].text, 'act');
+});
+
+// ============================================================================
+// loadVotesSection — DOM regression test (task-9 re-review round 2, HIGH-1: NOT CLOSED in round
+// 1). The bug: joinFlagBadges keys its join on `row.vote_id`. The profile page feeds it
+// public_vote_feed rows (migration 0016 aliases `v.id AS vote_id` there); this page queries the
+// RAW `votes` table, whose primary key column is plain `id` — no `vote_id` at all. Every
+// `flaggedIds.has(row.vote_id)` check was silently `has(undefined)`. The flags fetch itself was
+// right, joinFlagBadges was right, only the shape handed to it at THIS call site was wrong — and
+// no test caught it, because every prior test in this file exercises PURE functions only, never
+// the actual fetch -> join -> render pipeline. This is that missing test: the exact HB 1623-shaped
+// construction (a raw votes row whose `id` matches an unresolved public_reconciliation_flags row's
+// `vote_id`) — reproduces the live bug (fails against the pre-fix code, where `flagRows` never
+// matched anything), passes once the join is fed the correctly-aliased row shape.
+// ============================================================================
+
+function okResponse(rows) {
+  return {
+    ok: true, status: 200, json: async () => rows, headers: { get: () => null },
+  };
+}
+
+test('loadVotesSection: HIGH-1 regression — a raw votes row whose `id` matches an unresolved reconciliation flag renders the ⚑ badge (the exact join-alias bug the round-1 fix missed)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/votes?')) {
+      // A RAW votes row, exactly as bill-page.js's own VOTES_SELECT returns it — primary key
+      // column is `id`, there is no `vote_id` column on this table at all (that alias only exists
+      // on the public_vote_feed VIEW the profile page reads instead).
+      return okResponse([{
+        id: 'v-hb1623', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '103-48', source_url: null,
+      }]);
+    }
+    if (u.includes('/vote_casts?')) {
+      // The reviewer's own live example: printed 103-48 beside a recorded tally of yea 0 nay 1 —
+      // the DISCREPANCY that makes the flag meaningful in the first place (not asserted here
+      // beyond reproducing the shape; the tally math itself is tallyPositions' own coverage above).
+      return okResponse([{ position: 'nay' }]);
+    }
+    if (u.includes('/public_reconciliation_flags?')) {
+      // Keyed by vote_id, matching the votes row's `id` above — this is the real, correct shape
+      // public_reconciliation_flags (migration 0016) returns; resolved=is.false is already part of
+      // the request URL bill-page.js builds, not re-filtered here.
+      return okResponse([{
+        vote_id: 'v-hb1623', source_a: 'legiscan', source_b: 'mo-house-journal', discrepancy: 'tally mismatch', resolved: false,
+      }]);
+    }
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadVotesSection(container, { billId: 'bill-hb1623' });
+
+  const badge = container.querySelector('.flag-badge');
+  assert.notEqual(badge, null, 'the ⚑ badge must render — this is exactly the bug: without the vote_id alias, flaggedIds.has(row.vote_id) is has(undefined) for every raw votes row');
+  assert.equal(badge.textContent, '⚑ reconciliation flag');
+  assert.equal(badge.getAttribute('href'), '/trust#flags');
+});
+
+test('loadVotesSection: a vote with NO matching flag row renders no badge (the positive control for the regression test above)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/votes?')) {
+      return okResponse([{
+        id: 'v-clean', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '103-48', source_url: null,
+      }]);
+    }
+    if (u.includes('/vote_casts?')) return okResponse([{ position: 'yea' }]);
+    if (u.includes('/public_reconciliation_flags?')) return okResponse([]); // no flags at all
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadVotesSection(container, { billId: 'bill-clean' });
+
+  assert.equal(container.querySelector('.flag-badge'), null);
+  assert.equal(container.querySelector('.flags-unavailable-notice'), null);
 });

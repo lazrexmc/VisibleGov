@@ -367,6 +367,15 @@ function renderSummary(container, {
       }
       container.appendChild(ul);
     }
+    // Fix round 2, NEW-5 (task-9 re-review, cosmetic): the "glossary unavailable" notice only
+    // belongs on THIS branch — the plain-text fallback below never attempts glossary marking at
+    // all (it can't trust the parsed bullet/purpose text it would mark), so a fetch failure there
+    // is moot: no marking would have applied even on a successful fetch, so nothing to apologize
+    // for. LOW-6 (round 1): distinct from "this summary references no glossary terms at all,"
+    // which renders no notice because there is nothing wrong to report.
+    if (glossaryUnavailable) {
+      container.appendChild(el('p', { class: 'bill-glossary-unavailable' }, 'Glossary unavailable for this summary.'));
+    }
   } else {
     // Never render half (task-9 brief, spec-critical): the parse coverage gap (or, per MED-2, a
     // structureless-but-non-empty body) means the structured view — and therefore glossary
@@ -376,13 +385,6 @@ function renderSummary(container, {
     for (const line of structured.plainTextLines) {
       container.appendChild(el('p', { class: 'bill-summary-plain-line' }, line));
     }
-  }
-
-  // Fix round 1, LOW-6: a failed glossary fetch gets its own one-line honest notice — distinct
-  // from "this summary references no glossary terms at all," which renders no notice because
-  // there is nothing wrong to report.
-  if (glossaryUnavailable) {
-    container.appendChild(el('p', { class: 'bill-glossary-unavailable' }, 'Glossary unavailable for this summary.'));
   }
 
   container.appendChild(el('p', { class: 'bill-verification-note' }, buildVerificationNote({ summary, note, noteUnavailable })));
@@ -425,7 +427,11 @@ async function loadSponsorsSection(container, { billId }) {
   }
 }
 
-async function loadVotesSection(container, { billId }) {
+// Exported (task-9 re-review round 2, HIGH-1) so tests/bill-page.test.js can assert the FULL
+// fetch -> join -> render pipeline directly — the reviewer's own point: a fix without a test that
+// exercises the real join call site (a raw votes row shaped exactly like the live HB 1623 case) is
+// the same hole waiting to reopen.
+export async function loadVotesSection(container, { billId }) {
   sectionState(container, { state: 'loading' });
   const reload = () => loadVotesSection(container, { billId }).catch(() => {});
   let votes;
@@ -461,25 +467,52 @@ async function loadVotesSection(container, { billId }) {
   // not an open dispute; only unresolved flags are worth a live badge), joined via
   // person-page.js's own joinFlagBadges (not a lookalike copy). Runs in parallel with the tally
   // fetches above — independent data, no reason to serialize.
+  //
+  // Fix round 2, HIGH-1 (task-9 re-review, reviewer-verified minimal fix — NOT CLOSED in round 1):
+  // joinFlagBadges keys its join on `row.vote_id`. The PROFILE page feeds it public_vote_feed rows,
+  // where migration 0016's view aliases `v.id AS vote_id`; THIS page queries the raw `votes` table
+  // directly, whose own primary key column is plain `id` — there is no `vote_id` column on these
+  // rows at all. Without remapping, every `flaggedIds.has(row.vote_id)` check was
+  // `has(undefined)`, always false — the flags fetch itself was correct, joinFlagBadges was
+  // correct, this ONE alias gap silently discarded every match (0/1668 tests caught it, because no
+  // test exercised the join with a raw-shaped votes row — see the DOM regression test in
+  // tests/bill-page.test.js, which reproduces the HB 1623-shaped construction this bug hid behind).
+  // `votesWithVoteId` is built ONCE, used as the join's input on both the success and failure
+  // paths below; the rows joinFlagBadges RETURNS still carry their real `id` (spread first,
+  // `vote_id` added after — `renderVotes` never reads `vote_id`, only `id`).
+  const votesWithVoteId = votes.map((v) => ({ ...v, vote_id: v.id }));
   const voteIds = votes.map((v) => v.id).filter(Boolean);
-  let flaggedVotes = votes;
+  let flaggedVotes = votesWithVoteId;
   let flagsUnavailable = false;
   const flagsWork = (async () => {
     try {
       const flagRows = voteIds.length > 0
         ? (await restGet(`public_reconciliation_flags?vote_id=in.(${voteIds.join(',')})&resolved=is.false`)).rows
         : [];
-      flaggedVotes = joinFlagBadges(votes, flagRows);
+      flaggedVotes = joinFlagBadges(votesWithVoteId, flagRows);
     } catch {
-      flaggedVotes = joinFlagBadges(votes, []);
+      flaggedVotes = joinFlagBadges(votesWithVoteId, []);
       flagsUnavailable = true;
     }
   })();
 
   await Promise.all([tallyWork, flagsWork]);
 
-  sectionState(container, { state: 'ready' });
-  renderVotes(container, flaggedVotes, tallyByVoteId, flagsUnavailable);
+  // Fix round 2, NEW-4 (task-9 re-review, LOW — mirrors person-page.js's own HIGH-1 fix from its
+  // round 3): the render phase is now INSIDE the same try/catch as everything a render-time throw
+  // should route to 'failed' for. Before this, a throw during renderVotes (e.g. a hostile/
+  // malformed value tripping render.js's attribute guard, outside the per-row containment
+  // renderVotes already has for source links) would escape past the already-painted 'ready' state
+  // and be silently swallowed by bootstrapBillPage's own `.catch(() => {})` — a blank section with
+  // no failed message and no retry, worse than either honest state.
+  try {
+    sectionState(container, { state: 'ready' });
+    renderVotes(container, flaggedVotes, tallyByVoteId, flagsUnavailable);
+  } catch {
+    sectionState(container, {
+      state: 'failed', message: "Couldn't load roll calls — retry", onRetry: reload,
+    });
+  }
 }
 
 async function loadSummarySection(container, { billId }) {
@@ -537,10 +570,20 @@ async function loadSummarySection(container, { billId }) {
     glossaryUnavailable = true;
   }
 
-  sectionState(container, { state: 'ready' });
-  renderSummary(container, {
-    summary, note, noteUnavailable, glossaryTerms, glossaryUnavailable,
-  });
+  // Fix round 2, NEW-4 (task-9 re-review, LOW — same person-page.js HIGH-1 pattern as
+  // loadVotesSection above): render phase inside the fetch's own try/catch, so a render-time throw
+  // routes to 'failed' instead of escaping past the painted 'ready' state into bootstrapBillPage's
+  // swallowing `.catch(() => {})`.
+  try {
+    sectionState(container, { state: 'ready' });
+    renderSummary(container, {
+      summary, note, noteUnavailable, glossaryTerms, glossaryUnavailable,
+    });
+  } catch {
+    sectionState(container, {
+      state: 'failed', message: "Couldn't load the summary — retry", onRetry: reload,
+    });
+  }
 }
 
 // Entry point for site/bill.html — exported, never auto-run at module load (same convention as
