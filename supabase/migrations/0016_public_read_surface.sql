@@ -6,7 +6,8 @@
 
 -- 1) Lock-downs (spec: bill_texts raw text and ingestion_runs internals are not public).
 drop policy anon_read on bill_texts;
-drop policy anon_read on ingestion_runs;
+drop policy if exists anon_read on ingestion_runs;
+-- Note: 0003 already dropped anon_read on ingestion_runs (line 21); if-exists is historical documentation.
 
 -- 2) terms.state (additive; fills-null backfill in the next task). US House terms store bare
 -- district numbers ('2') with no state — unmatchable from an address without this.
@@ -37,6 +38,8 @@ grant select on public_vote_feed to anon, authenticated;
 
 -- 4) Freshness: latest run per source + the quarantined-day COUNT only (never the detail
 -- payload). Owner-bypass over the now-locked ingestion_runs; the column list is the wall.
+-- Supersedes ingestion_freshness (created in 0003); one public freshness surface, not two.
+drop view if exists ingestion_freshness;
 create view public_freshness as
 select distinct on (source)
   source,
@@ -44,7 +47,7 @@ select distinct on (source)
   finished_at,
   coalesce(jsonb_array_length(detail->'counts'->'quarantined_days'), 0) as quarantined_days
 from ingestion_runs
-order by source, started_at desc;
+order by source, started_at desc nulls last;
 grant select on public_freshness to anon, authenticated;
 
 -- 5) Verification notes: exactly what the bill page's receipt renders, nothing more.
