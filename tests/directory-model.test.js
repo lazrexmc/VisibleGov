@@ -99,6 +99,66 @@ test('buildDirectoryEntries: a legislator/person with zero terms still renders a
   assert.equal(entries[0].district, null);
 });
 
+// ---------------------------------------------------------------------------
+// FINAL REVIEW, finding 6: the party fallback for a merged person with no usable anchor term was
+// `anchorLegislator?.party` — i.e. whichever legislator row happened to come first in the fetched
+// array. Party is the single most neutrality-sensitive fact this page renders, and Postgres makes
+// no ordering promise, so the SAME bug already fixed once in profile-model.js's resolveParty was
+// still live on the front door. Live proof from the review: Yvonne Curls rendered no party on the
+// directory and 'D' on her own profile — same person, two pages, two answers.
+//
+// Fixed by reusing profile-model.js's OWN source-precedence ranking (imported, never a second
+// hand-copied list), so the directory and the profile can only ever agree.
+// ---------------------------------------------------------------------------
+
+test('buildDirectoryEntries: FINDING 6 — the Curls construction (null-party mo_senate row + D legiscan row, ZERO terms) resolves to D in EITHER input order', () => {
+  const persons = [{ id: 'person-curls', display_name: 'Yvonne Curls' }];
+  const moSenateRow = {
+    id: 'leg-curls-mo', full_name: 'Yvonne Curls', surname: 'Curls', party: null, person_id: 'person-curls', mo_senate_id: 'S-1',
+  };
+  const legiscanRow = {
+    id: 'leg-curls-ls', full_name: 'Yvonne Curls', surname: 'Curls', party: 'D', person_id: 'person-curls', legiscan_people_id: 4242,
+  };
+  for (const legislators of [[moSenateRow, legiscanRow], [legiscanRow, moSenateRow]]) {
+    const entries = buildDirectoryEntries({ legislators, persons, terms: [] });
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].party, 'D', 'the highest-precedence row that actually CARRIES a party wins, never array position');
+  }
+});
+
+test('buildDirectoryEntries: FINDING 6 — source precedence, not array position, decides between two rows that BOTH carry a party', () => {
+  const persons = [{ id: 'p1', display_name: 'Two Sourced' }];
+  // bioguide outranks legiscan (profile-model.js's SOURCE_PRECEDENCE_COLUMNS, mirroring
+  // person-identity.js's DISPLAY_NAME_PRIORITY) — so 'Republican' wins in either order.
+  const bioguideRow = {
+    id: 'leg-fed', full_name: 'Two Sourced', surname: 'Sourced', party: 'Republican', person_id: 'p1', bioguide_id: 'X000001',
+  };
+  const legiscanRow = {
+    id: 'leg-ls', full_name: 'Two Sourced', surname: 'Sourced', party: 'D', person_id: 'p1', legiscan_people_id: 7,
+  };
+  for (const legislators of [[bioguideRow, legiscanRow], [legiscanRow, bioguideRow]]) {
+    assert.equal(buildDirectoryEntries({ legislators, persons, terms: [] })[0].party, 'Republican');
+  }
+});
+
+test('buildDirectoryEntries: FINDING 6 — a term that carries a party still wins over any legislator row (unchanged precedence)', () => {
+  const persons = [{ id: 'p2', display_name: 'Termed' }];
+  const legislators = [{
+    id: 'leg-t', full_name: 'Termed Person', surname: 'Person', party: 'R', person_id: 'p2', bioguide_id: 'Y000002',
+  }];
+  const terms = [{
+    legislator_id: 'leg-t', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '4', party: 'Democratic', start_date: '2021-01-06', end_date: null,
+  }];
+  assert.equal(buildDirectoryEntries({ legislators, persons, terms })[0].party, 'Democratic');
+});
+
+test('buildDirectoryEntries: FINDING 6 — no party recorded anywhere stays null (never invented)', () => {
+  const legislators = [{
+    id: 'leg-none', full_name: 'No Party', surname: 'Party', party: null, person_id: null, mo_house_id: 'H-9',
+  }];
+  assert.equal(buildDirectoryEntries({ legislators, persons: [], terms: [] })[0].party, null);
+});
+
 test('buildDirectoryEntries: sorted alphabetically by surname (the DB column), not by input order', () => {
   const legislators = [
     {

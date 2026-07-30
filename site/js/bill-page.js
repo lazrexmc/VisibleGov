@@ -455,7 +455,9 @@ export async function loadVotesSection(container, { billId }) {
   const tallyByVoteId = new Map();
   const tallyWork = Promise.all(votes.map(async (vote) => {
     try {
-      const casts = await fetchAllRows(`vote_casts?vote_id=eq.${vote.id}&select=position`);
+      // order = vote_casts' own uuid primary key (FINAL REVIEW, finding 5) — a cast silently lost
+      // in a chunk gap would shift a rendered tally, the one number this page exists to show.
+      const casts = await fetchAllRows(`vote_casts?vote_id=eq.${vote.id}&select=position`, { order: 'id' });
       tallyByVoteId.set(vote.id, tallyPositions(casts));
     } catch {
       tallyByVoteId.set(vote.id, null);

@@ -1120,7 +1120,7 @@ test('mountProfile: H4 — the votes fetch fires even while the charts fetch is 
   _setFetch(async (url) => {
     const u = String(url);
     if (u.includes('/terms?')) return okResponse([]);
-    if (u.includes('/public_freshness?')) return okResponse([]);
+    if (u.includes('/public_freshness')) return okResponse([]);
     if (u.includes('/bill_sponsors?')) return okResponse([]);
     if (u.includes('/public_vote_feed?')) {
       callOrder.push('votes-fetch-fired');
@@ -1167,7 +1167,7 @@ test('mountProfile: L1 — a bar click producing an identical filter state is a 
   _setFetch(async (url) => {
     const u = String(url);
     if (u.includes('/terms?')) return okResponse([]);
-    if (u.includes('/public_freshness?')) return okResponse([]);
+    if (u.includes('/public_freshness')) return okResponse([]);
     if (u.includes('/bill_sponsors?')) return okResponse([]);
     if (u.includes('/public_vote_feed?')) { voteFetchCount += 1; return okResponse([]); }
     if (u.includes('/public_position_totals')) {
@@ -1220,7 +1220,7 @@ test('mountProfile: charts section mounts, and a bar click updates the shared fi
     if (u.includes('/terms?')) return okResponse([]);
     if (u.includes('/public_vote_feed?')) return okResponse([]);
     if (u.includes('/bill_sponsors?')) return okResponse([]);
-    if (u.includes('/public_freshness?')) return okResponse([]);
+    if (u.includes('/public_freshness')) return okResponse([]);
     if (u.includes('/public_position_totals')) {
       return okResponse([totalsRow({
         legislator_id: 'leg-1', chamber: 'house', year: 2024, position: 'not_voting', casts: 3,

@@ -94,13 +94,31 @@ export function chamberLabel(jurisdictionId, chamber) {
 // order is a small, hand-copied constant instead of a shared import. Tradeoff: there is no
 // mechanical link between the two copies; if DISPLAY_NAME_PRIORITY's order ever changes in
 // person-identity.js, this constant must be updated by hand to match (a drift risk, accepted).
-const SOURCE_PRECEDENCE_COLUMNS = [
+// EXPORTED (FINAL REVIEW, finding 6): site/js/directory-page.js needs this exact ranking for the
+// front door's own party fallback, which had the order-dependent bug this constant was introduced
+// to fix — Curls rendered no party on the directory and 'D' on her profile, the same person on two
+// pages giving two answers. Shared as a real import, never a second hand-copied list: two copies of
+// a neutrality-critical ranking is exactly how a page ends up disagreeing with itself again.
+export const SOURCE_PRECEDENCE_COLUMNS = [
   'bioguide_id',
   'mo_senate_id',
   'mo_house_id',
   'legiscan_people_id',
   'openstates_id',
 ];
+
+// partyBySourcePrecedence — the ranking loop itself, exported alongside the constant so both
+// callers run the SAME code, not two loops over the same list. Returns the party carried by the
+// highest-precedence legislator row that actually has one, else null (never a display string —
+// wording stays a UI concern).
+export function partyBySourcePrecedence(legislatorRows) {
+  const rows = Array.isArray(legislatorRows) ? legislatorRows : [];
+  for (const column of SOURCE_PRECEDENCE_COLUMNS) {
+    const row = rows.find((l) => l && l[column] != null && l.party);
+    if (row) return row.party;
+  }
+  return null;
+}
 
 // Fix round 1, finding 1 (task review, execution-proven): the legislator-row fallback used to be
 // "first row in caller-supplied array order with a party" — swapping two rows in the input array
@@ -114,12 +132,7 @@ const SOURCE_PRECEDENCE_COLUMNS = [
 function resolveParty(termRows, legislatorRows) {
   const fromTerm = datedTermsMostRecentFirst(termRows).find((t) => t.party)?.party;
   if (fromTerm) return fromTerm;
-
-  for (const column of SOURCE_PRECEDENCE_COLUMNS) {
-    const row = legislatorRows.find((l) => l && l[column] != null && l.party);
-    if (row) return row.party;
-  }
-  return null;
+  return partyBySourcePrecedence(legislatorRows);
 }
 
 // Which legislator row is handed to receipts.js's photoUrl() later (Task 6) — this module never

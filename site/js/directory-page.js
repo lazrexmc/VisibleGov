@@ -12,7 +12,7 @@ import { fetchAllRows } from './rest.js';
 import {
   el, clearChildren, sectionState, mountFooter,
 } from './render.js';
-import { chamberLabel } from './profile-model.js';
+import { chamberLabel, partyBySourcePrecedence } from './profile-model.js';
 import { slugify } from './slugs.js';
 import {
   parseGeographies, matchReps, termDateEvidence, isMOState,
@@ -97,7 +97,14 @@ export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
     const surname = anchorLegislator?.surname
       || group.legislatorRows.find((r) => r && r.surname)?.surname
       || fallbackSurname(displayName);
-    const party = anchorTerm?.party || anchorLegislator?.party || null;
+    // FINAL REVIEW, finding 6: this used to fall back to `anchorLegislator?.party` — whichever
+    // legislator row happened to be first in the fetched array, since Postgres promises no order.
+    // For a merged person with no dated term (Curls: a null-party mo_senate row and a 'D' legiscan
+    // row) that made the displayed party depend on incidental array position, and the front door
+    // disagreed with the profile page about the same person. Now it reuses profile-model.js's own
+    // source-precedence ranking — the SAME function resolveParty uses, imported rather than
+    // re-listed, so the two surfaces cannot drift apart again.
+    const party = anchorTerm?.party || partyBySourcePrecedence(group.legislatorRows);
     const chamber = anchorTerm ? chamberLabel(anchorTerm.jurisdiction_id, anchorTerm.chamber) : null;
     const district = (anchorTerm && !isSenateDistrictMeaningless(anchorTerm.jurisdiction_id, anchorTerm.chamber))
       ? (anchorTerm.district ?? null)
@@ -344,11 +351,16 @@ async function runAddressLookup(address, {
 
 // The three fetchAllRows calls the directory (list AND address lookup) both depend on, factored
 // out so a retry of either section can re-issue it independently (see dataState below).
+// FINAL REVIEW, finding 5: every one of these passes `order: 'id'` — the deterministic order
+// chunked .range() paging requires (rest.js's own comment, and db.js's selectAll before it). These
+// three are the exact reads the finding named: a legislator silently dropped into a chunk gap here
+// is a wrong answer about who represents someone. All three tables carry a uuid primary key `id`,
+// same property selectAll relies on server-side.
 async function loadDirectoryData() {
   const [legislators, persons, terms] = await Promise.all([
-    fetchAllRows('legislators?select=id,full_name,surname,party,person_id,bioguide_id,mo_senate_id,mo_house_id,openstates_id,legiscan_people_id'),
-    fetchAllRows('persons?select=id,display_name'),
-    fetchAllRows('terms?select=legislator_id,jurisdiction_id,chamber,district,state,party,start_date,end_date'),
+    fetchAllRows('legislators?select=id,full_name,surname,party,person_id,bioguide_id,mo_senate_id,mo_house_id,openstates_id,legiscan_people_id', { order: 'id' }),
+    fetchAllRows('persons?select=id,display_name', { order: 'id' }),
+    fetchAllRows('terms?select=legislator_id,jurisdiction_id,chamber,district,state,party,start_date,end_date', { order: 'id' }),
   ]);
   return { legislators, persons, terms };
 }

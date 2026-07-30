@@ -503,6 +503,11 @@ function voteFeedResponse(rows, contentRange) {
     headers: { get: (name) => (name.toLowerCase() === 'content-range' ? (contentRange || `0-${Math.max(rows.length - 1, 0)}/${rows.length}`) : null) },
   };
 }
+function okResponse(rows) {
+  return {
+    ok: true, status: 200, json: async () => rows, headers: { get: () => null },
+  };
+}
 function emptyOkResponse() {
   return {
     ok: true, status: 200, json: async () => [], headers: { get: () => null },
@@ -585,6 +590,48 @@ test('loadFreshnessSection: a real empty terms array (genuinely unlinked, zero-t
   const container = document.createElement('section');
   await loadFreshnessSection(container, { terms: [] });
   assert.notEqual(container.querySelector('.section-state-empty'), null);
+});
+
+// FINAL REVIEW, finding 4: the profile's own freshness box, end to end. Under the pre-0019 view a
+// run in flight blanked its source's finished_at, so the box asserted "last finished (never)" and
+// zero quarantined days for the whole duration of every run. Both shapes are exercised here — the
+// migration is drafted, not applied, so the fallback is live code today, not dead code.
+test('loadFreshnessSection: FINDING 4 — a source with a run IN FLIGHT still shows its last finished date and its standing quarantine count, plus an in-progress signal', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => okResponse([
+    {
+      source: 'mo-senate-web', status: 'running', finished_at: '2026-07-30T23:09:17.1+00:00', quarantined_days: 6, last_finished_status: 'succeeded',
+    },
+  ]));
+  const container = document.createElement('section');
+  await loadFreshnessSection(container, { terms: [{ jurisdiction_id: 'mo-legislature' }] });
+  const text = container.textContent;
+  assert.ok(text.includes('2026-07-30T23:09:17.1+00:00'), `the last finished date is not masked by the running run: ${text}`);
+  assert.ok(text.includes('ingestion in progress'), text);
+  assert.ok(!text.includes('(never)'), text);
+  assert.ok(text.includes('6 journal days pending human review'), 'the standing quarantine count survives the running run too');
+});
+
+test('loadFreshnessSection: FINDING 4 — a genuinely never-finished source reads "(no completed runs)", not "(never)"', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => okResponse([
+    {
+      source: 'mo-house-xml', status: 'running', finished_at: null, quarantined_days: 0, last_finished_status: null,
+    },
+  ]));
+  const container = document.createElement('section');
+  await loadFreshnessSection(container, { terms: [{ jurisdiction_id: 'mo-legislature' }] });
+  assert.ok(container.textContent.includes('(no completed runs)'), container.textContent);
+});
+
+test('loadFreshnessSection: PRE-0019 fallback — the old four-column shape still renders (this migration is drafted, not applied)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => okResponse([
+    { source: 'mo-house-xml', status: 'succeeded', finished_at: '2026-07-30T23:10:43.773+00:00', quarantined_days: 0 },
+  ]));
+  const container = document.createElement('section');
+  await loadFreshnessSection(container, { terms: [{ jurisdiction_id: 'mo-legislature' }] });
+  assert.ok(container.textContent.includes('succeeded, last finished 2026-07-30T23:10:43.773+00:00'), container.textContent);
 });
 
 // MED-3 (skip != empty): a failed public_reconciliation_flags fetch used to silently default
@@ -774,7 +821,7 @@ test('mountProfile: NEW-A — identity\'s OWN retry button also un-fails freshne
     }
     if (u.includes('/public_vote_feed?')) return voteFeedResponse([]);
     if (u.includes('/bill_sponsors?')) return emptyOkResponse();
-    if (u.includes('/public_freshness?')) return emptyOkResponse();
+    if (u.includes('/public_freshness')) return emptyOkResponse();
     return emptyOkResponse();
   });
 
@@ -821,7 +868,7 @@ test('mountProfile: NEW-B — the votes fetch fires even while freshness\'s fetc
   _setFetch(async (url) => {
     const u = String(url);
     if (u.includes('/terms?')) return emptyOkResponse();
-    if (u.includes('/public_freshness?')) {
+    if (u.includes('/public_freshness')) {
       callOrder.push('freshness-fetch-started');
       await freshnessGate; // deliberately held open until the test releases it
       callOrder.push('freshness-fetch-resolved');

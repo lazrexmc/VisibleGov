@@ -36,6 +36,7 @@ import {
 import { METRIC_DEFINITIONS } from './vote-charts.js';
 import { MO_DISCLAIMER_TEXT } from './bill-page.js';
 import { PRIVACY_CONTRACT_TEXT } from './copy.js';
+import { lastFinishedText, statusText } from './freshness.js';
 
 // ============================================================================
 // #metrics — renders METRIC_DEFINITIONS verbatim (Object.values preserves the module's own
@@ -121,8 +122,11 @@ function renderFreshnessTable(container, rows) {
     const quarantined = Number(row.quarantined_days) || 0;
     const tr = el('tr', { class: quarantined > 0 ? 'freshness-row-quarantine' : 'freshness-row' });
     tr.appendChild(el('td', {}, row.source));
-    tr.appendChild(el('td', {}, row.status));
-    tr.appendChild(el('td', {}, row.finished_at || '(never)'));
+    // FINAL REVIEW, finding 4: both cells go through site/js/freshness.js — the one place that
+    // knows migration 0019's latest-FINISHED semantics (and feature-detects the pre-apply shape),
+    // shared with person-page.js's own box rather than formatted twice.
+    tr.appendChild(el('td', {}, statusText(row)));
+    tr.appendChild(el('td', {}, lastFinishedText(row)));
     tr.appendChild(el('td', {}, String(quarantined)));
     tbody.appendChild(tr);
   }
@@ -133,7 +137,11 @@ function renderFreshnessTable(container, rows) {
 export async function loadFreshnessSection(container) {
   sectionState(container, { state: 'loading' });
   try {
-    const { rows } = await restGet('public_freshness?select=source,status,finished_at,quarantined_days');
+    // No explicit select= (finding 4): the column set is exactly what makes the 0019 shape
+    // detectable, and naming four columns would drop last_finished_status after the migration
+    // lands while ALSO 400-ing if it were named before. The view exposes nothing this page should
+    // not render, so taking every column it offers is both safe and future-proof.
+    const { rows } = await restGet('public_freshness');
     if (rows.length === 0) {
       sectionState(container, { state: 'empty', message: 'No freshness data recorded.' });
       return rows;

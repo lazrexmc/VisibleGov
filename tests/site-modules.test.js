@@ -23,6 +23,9 @@ import {
   COUNT_SPECS, renderMetricDefinitions, loadCountsSection, loadFreshnessSection,
   renderAttributionCopy,
 } from '../site/js/trust-page.js';
+import {
+  hasLatestFinishedShape, lastFinishedText, statusText, freshnessSentence,
+} from '../site/js/freshness.js';
 
 // render.js is a plain browser-native ES module — it reaches for the global `document`, exactly
 // as it will in a real browser tab. jsdom supplies that global here so node:test can drive it
@@ -196,6 +199,100 @@ test('fetchAllRows: a single short first chunk makes exactly one call', async ()
   const rows = await fetchAllRows('bills?select=id');
   assert.equal(rows.length, 2);
   assert.equal(calls, 1);
+});
+
+// ---------------------------------------------------------------------------
+// FINAL REVIEW, finding 5: fetchAllRows is the browser's answer to db.js's selectAll, but it
+// dropped both of that function's load-bearing safety properties. selectAll's own comment says
+// exactly why they matter: "Pagination via .range() is only correct with a DETERMINISTIC order —
+// without one, Postgres makes no promise that two separate .range() calls see the same row
+// ordering, which could silently drop a row into the gap between two pages or return it twice",
+// and it refuses to return a possibly-truncated result rather than one that LOOKS complete.
+// fetchAllRows had neither: no order, and no cross-check that what it accumulated is what the
+// server says exists. The consumers are matchReps and the directory — a silently-dropped
+// legislator there is a wrong answer about who represents someone.
+// ---------------------------------------------------------------------------
+
+test('fetchAllRows: an `order` option is appended to EVERY chunk request (the deterministic order .range() paging requires)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const urls = [];
+  const chunkSizes = [1000, 1000, 5];
+  let calls = 0;
+  _setFetch(async (url) => {
+    urls.push(url);
+    const n = chunkSizes[calls];
+    calls += 1;
+    return mockResponse({ status: 206, rows: Array.from({ length: n }, (_, i) => ({ id: i })), contentRange: `0-${n - 1}/2005` });
+  });
+  const rows = await fetchAllRows('legislators?select=id,full_name', { order: 'id' });
+  assert.equal(rows.length, 2005);
+  assert.equal(urls.length, 3);
+  for (const url of urls) assert.ok(url.includes('order=id'), `every chunk must carry the order: ${url}`);
+  assert.ok(urls[0].includes('select=id,full_name&order=id'), 'appended with & when the path already has a query string');
+});
+
+test('fetchAllRows: with no `order` option the request is unchanged (existing call sites keep working)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  let captured;
+  _setFetch(async (url) => {
+    captured = url;
+    return mockResponse({ status: 200, rows: [{ id: 1 }], contentRange: '0-0/1' });
+  });
+  await fetchAllRows('bills?select=id');
+  assert.ok(!captured.includes('order='), captured);
+});
+
+test('fetchAllRows: CHUNK-GAP SIMULATION — the server says 1500 rows exist but only 1400 arrive, so it THROWS instead of returning a short list that looks complete', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const chunkSizes = [1000, 400];
+  let calls = 0;
+  _setFetch(async () => {
+    const n = chunkSizes[calls];
+    calls += 1;
+    return mockResponse({ status: 206, rows: Array.from({ length: n }, (_, i) => ({ id: i })), contentRange: `0-${n - 1}/1500` });
+  });
+  await assert.rejects(
+    () => fetchAllRows('legislators?select=id', { order: 'id' }),
+    (err) => {
+      assert.ok(err instanceof RestError, 'typed, not a bare Error');
+      assert.equal(err.expected, 1500);
+      assert.equal(err.received, 1400);
+      assert.match(err.message, /1400 of 1500/);
+      return true;
+    },
+  );
+});
+
+test('fetchAllRows: an EXCESS is caught too (1600 rows arriving for a stated total of 1500 — a duplicate across a page boundary)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const chunkSizes = [1000, 600];
+  let calls = 0;
+  _setFetch(async () => {
+    const n = chunkSizes[calls];
+    calls += 1;
+    return mockResponse({ status: 206, rows: Array.from({ length: n }, (_, i) => ({ id: i })), contentRange: `0-${n - 1}/1500` });
+  });
+  await assert.rejects(() => fetchAllRows('legislators?select=id', { order: 'id' }), RestError);
+});
+
+test('fetchAllRows: a matching total passes through silently, and a server that reports NO total is not treated as a mismatch', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const chunkSizes = [1000, 400];
+  let calls = 0;
+  _setFetch(async () => {
+    const n = chunkSizes[calls];
+    calls += 1;
+    return mockResponse({ status: 206, rows: Array.from({ length: n }, (_, i) => ({ id: i })), contentRange: `0-${n - 1}/1400` });
+  });
+  assert.equal((await fetchAllRows('legislators?select=id', { order: 'id' })).length, 1400);
+
+  calls = 0;
+  _setFetch(async () => {
+    const n = chunkSizes[calls];
+    calls += 1;
+    return mockResponse({ status: 206, rows: Array.from({ length: n }, (_, i) => ({ id: i })), contentRange: null });
+  });
+  assert.equal((await fetchAllRows('legislators?select=id', { order: 'id' })).length, 1400, 'no content-range total -> nothing to cross-check against, never a fabricated failure');
 });
 
 test('countOnly: returns the content-range total as a number, no page of rows required', async () => {
@@ -1114,6 +1211,84 @@ test('loadFreshnessSection (trust page): a failed fetch renders FAILED with a wo
   await assert.rejects(() => loadFreshnessSection(container));
   assert.ok(container.textContent.includes("Couldn't load freshness data"));
   assert.ok(container.querySelector('button'), 'a retry button is rendered');
+});
+
+// ---------------------------------------------------------------------------
+// site/js/freshness.js — FINAL REVIEW, finding 4. public_freshness used to serve the newest run
+// per source whether or not it had finished, so during EVERY ingestion run the box read
+// "last finished (never)" with zero quarantined days: two false facts, live, for the duration of
+// every run. Migration 0019 splits the row; these are the words put to it. The old four-column
+// shape must still render correctly until Lance applies 0019 (feature-detected per row).
+// ---------------------------------------------------------------------------
+
+const NEW_SHAPE_RUNNING = {
+  source: 'mo-senate-web', status: 'running', finished_at: '2026-07-30T23:09:17.1+00:00', quarantined_days: 6, last_finished_status: 'succeeded',
+};
+const NEW_SHAPE_IDLE = {
+  source: 'legiscan', status: 'succeeded', finished_at: '2026-07-29T16:32:12.831+00:00', quarantined_days: 0, last_finished_status: 'succeeded',
+};
+const NEW_SHAPE_NEVER_FINISHED = {
+  source: 'brand-new-source', status: 'running', finished_at: null, quarantined_days: 0, last_finished_status: null,
+};
+const OLD_SHAPE_RUNNING = { source: 'mo-senate-web', status: 'running', finished_at: null, quarantined_days: 0 };
+const OLD_SHAPE_IDLE = { source: 'legiscan', status: 'succeeded', finished_at: '2026-07-29T16:32:12.831+00:00', quarantined_days: 0 };
+
+test('freshness: the 0019 shape is detected by the COLUMN\'s presence, never by a truthy value (a never-finished source has a real null there)', () => {
+  assert.equal(hasLatestFinishedShape(NEW_SHAPE_NEVER_FINISHED), true, 'null last_finished_status is still the new shape');
+  assert.equal(hasLatestFinishedShape(NEW_SHAPE_IDLE), true);
+  assert.equal(hasLatestFinishedShape(OLD_SHAPE_RUNNING), false);
+  assert.equal(hasLatestFinishedShape(null), false);
+});
+
+test('freshness: FINDING 4 — a RUNNING source shows its last finished date AND an in-progress signal, never "(never)"', () => {
+  const sentence = freshnessSentence(NEW_SHAPE_RUNNING);
+  assert.ok(sentence.includes('2026-07-30T23:09:17.1+00:00'), `the last finished date survives the running run: ${sentence}`);
+  assert.ok(sentence.includes('ingestion in progress'), sentence);
+  assert.ok(!sentence.includes('(never)'), sentence);
+  assert.ok(!sentence.includes('(no completed runs)'), sentence);
+  assert.equal(lastFinishedText(NEW_SHAPE_RUNNING), '2026-07-30T23:09:17.1+00:00');
+  assert.ok(statusText(NEW_SHAPE_RUNNING).includes('ingestion in progress'));
+});
+
+test('freshness: a source with NO run in flight reads as the last finished run alone, no in-progress noise', () => {
+  const sentence = freshnessSentence(NEW_SHAPE_IDLE);
+  assert.ok(sentence.includes('2026-07-29T16:32:12.831+00:00'), sentence);
+  assert.ok(!sentence.includes('ingestion in progress'), sentence);
+  assert.equal(statusText(NEW_SHAPE_IDLE), 'succeeded');
+});
+
+test('freshness: a GENUINELY never-finished source keeps the honest "(no completed runs)" wording', () => {
+  assert.equal(lastFinishedText(NEW_SHAPE_NEVER_FINISHED), '(no completed runs)');
+  const sentence = freshnessSentence(NEW_SHAPE_NEVER_FINISHED);
+  assert.ok(sentence.includes('(no completed runs)'), sentence);
+  assert.ok(sentence.includes('ingestion in progress'), `it is also in flight right now: ${sentence}`);
+});
+
+test('freshness: PRE-0019 fallback — the old four-column shape still renders (and a running row no longer claims "(never)", which the old shape cannot actually know)', () => {
+  assert.equal(freshnessSentence(OLD_SHAPE_IDLE), 'succeeded, last finished 2026-07-29T16:32:12.831+00:00');
+  assert.equal(statusText(OLD_SHAPE_IDLE), 'succeeded');
+  assert.equal(lastFinishedText(OLD_SHAPE_RUNNING), '(unknown while a run is in progress)');
+  assert.ok(!freshnessSentence(OLD_SHAPE_RUNNING).includes('(never)'));
+  // A non-running old-shape row with no finished_at IS honestly "(never)" — unchanged.
+  assert.equal(lastFinishedText({ source: 'summarize', status: 'succeeded', finished_at: null, quarantined_days: 0 }), '(never)');
+});
+
+test('loadFreshnessSection (trust page): the 0019 shape renders the last finished date beside a running status, and the fetch asks for no explicit column list (so a new column is not silently dropped)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  let requested;
+  _setFetch(async (url) => {
+    requested = url;
+    return mockResponse({ status: 200, rows: [NEW_SHAPE_RUNNING, NEW_SHAPE_NEVER_FINISHED], contentRange: null });
+  });
+  const container = document.createElement('div');
+  await loadFreshnessSection(container);
+  assert.ok(!requested.includes('select='), `an explicit select= would drop last_finished_status pre/post apply: ${requested}`);
+  const text = container.textContent;
+  assert.ok(text.includes('2026-07-30T23:09:17.1+00:00'), 'a running source still shows its last finished date');
+  assert.ok(text.includes('ingestion in progress'), text);
+  assert.ok(text.includes('(no completed runs)'), 'the genuinely never-finished source stays honest');
+  assert.ok(!text.includes('(never)'), text);
+  assert.ok(text.includes('6'), 'the quarantined-day count from the last FINISHED run survives the running run');
 });
 
 // Task-10 review, LOW-1: #attribution's two verbatim quotes render from their OWN single source

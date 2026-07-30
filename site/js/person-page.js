@@ -28,6 +28,7 @@ import {
   summarizeTotals, cohesionFromAlignment, partyComparisonModel, renderChartSection, normalizePartyLabel,
 } from './vote-charts.js';
 import { slugify } from './slugs.js';
+import { freshnessSentence } from './freshness.js';
 
 // ============================================================================
 // Pure helpers (TDD'd in tests/person-page.test.js BEFORE any of the DOM code below existed)
@@ -354,7 +355,10 @@ function renderFreshness(container, rows) {
   for (const row of rows) {
     const li = el('li', {});
     li.appendChild(el('span', { class: 'freshness-source' }, row.source));
-    li.appendChild(el('span', { class: 'freshness-status' }, ` — ${row.status}, last finished ${row.finished_at || '(never)'}`));
+    // FINAL REVIEW, finding 4: the wording lives in site/js/freshness.js, shared with the trust
+    // page's own table — one place that knows migration 0019's latest-FINISHED semantics (and
+    // feature-detects the pre-apply shape), never two format strings that can drift.
+    li.appendChild(el('span', { class: 'freshness-status' }, ` — ${freshnessSentence(row)}`));
     if (row.quarantined_days > 0) {
       li.appendChild(el('p', { class: 'freshness-quarantine' }, `${row.quarantined_days} journal days pending human review`));
     }
@@ -381,8 +385,10 @@ function renderFreshness(container, rows) {
 async function loadIdentitySection(container, { person, legislators, legislatorIds, reload }) {
   sectionState(container, { state: 'loading' });
   try {
+    // FINAL REVIEW, finding 5: `order` is the deterministic paging order chunked .range() reads
+    // require — see rest.js's fetchAllRows comment. terms has a uuid primary key `id`.
     const terms = legislatorIds.length > 0
-      ? await fetchAllRows(`terms?legislator_id=in.(${legislatorIds.join(',')})`)
+      ? await fetchAllRows(`terms?legislator_id=in.(${legislatorIds.join(',')})`, { order: 'id' })
       : [];
     const identity = buildIdentity({ person, legislators, terms });
     sectionState(container, { state: 'ready' });
@@ -626,9 +632,18 @@ export async function loadChartsSection(container, {
   let memberRows;
   let alignmentRows;
   try {
+    // FINAL REVIEW, finding 5: matviews have no `id`, so each passes its OWN unique-index column
+    // set from migration 0018 (public_position_totals_uq / public_party_alignment_uq) — the same
+    // columns that make a row uniquely identifiable are what make the paging order deterministic.
     [memberRows, alignmentRows] = await Promise.all([
-      fetchAllRows(`public_position_totals?legislator_id=in.(${legislatorIds.join(',')})`),
-      fetchAllRows(`public_party_alignment?legislator_id=in.(${legislatorIds.join(',')})`),
+      fetchAllRows(
+        `public_position_totals?legislator_id=in.(${legislatorIds.join(',')})`,
+        { order: 'legislator_id,jurisdiction_id,chamber,year,position' },
+      ),
+      fetchAllRows(
+        `public_party_alignment?legislator_id=in.(${legislatorIds.join(',')})`,
+        { order: 'legislator_id,year,chamber' },
+      ),
     ]);
   } catch {
     // Covers BOTH the pre-apply state (migration 0018 not yet applied — PGRST205, "Could not
@@ -694,7 +709,11 @@ export async function loadChartsSection(container, {
     let rows = [];
     try {
       // N-G: ONE query against the pre-summed party rollup — no legislator-level pagination loop.
-      rows = await fetchAllRows(`public_party_position_totals?${baseParams.join('&')}`);
+      // order = public_party_position_totals_uq's own columns (migration 0018), finding 5.
+      rows = await fetchAllRows(
+        `public_party_position_totals?${baseParams.join('&')}`,
+        { order: 'party,jurisdiction_id,chamber,year,position' },
+      );
     } catch {
       // Best-effort: distribution/cohesion remain independently good data even if this one
       // fetch fails — degrades to "party comparison not computable," never fails the section.
@@ -775,7 +794,9 @@ async function loadSponsorshipsSection(container, { legislatorIds }) {
   sectionState(container, { state: 'loading' });
   try {
     const rows = legislatorIds.length > 0
-      ? await fetchAllRows(`bill_sponsors?legislator_id=in.(${legislatorIds.join(',')})&select=sponsor_type,bills(id,identifier,title,status)`)
+      // order = bill_sponsors' own uuid primary key (finding 5); ordering by a column outside the
+      // select list is fine for PostgREST, and the embedded bills(...) resource rides along.
+      ? await fetchAllRows(`bill_sponsors?legislator_id=in.(${legislatorIds.join(',')})&select=sponsor_type,bills(id,identifier,title,status)`, { order: 'id' })
       : [];
     if (rows.length === 0) {
       sectionState(container, { state: 'empty', message: 'No sponsorships recorded.' });
@@ -819,7 +840,11 @@ export async function loadFreshnessSection(container, { terms, onTermsUnknownRet
     // LOW-7 (task review, fix round 3, accepted deviation, documented): a plain restGet, not
     // fetchAllRows — one row per source (a small, fixed-cardinality set of ingestion sources),
     // never large enough to need pagination.
-    const allRows = (await restGet('public_freshness?select=source,status,finished_at,quarantined_days')).rows;
+    // No explicit select= (finding 4): naming the four old columns would drop 0019's
+    // last_finished_status after the migration lands — and that column is exactly what
+    // freshness.js feature-detects the new shape on — while naming it before the migration would
+    // 400. Every column this view exposes is public by construction.
+    const allRows = (await restGet('public_freshness')).rows;
     const rows = relevantFreshnessRows(allRows, jurisdictionIds);
     if (rows.length === 0) {
       sectionState(container, { state: 'empty', message: 'No freshness data recorded for this profile\'s jurisdictions.' });
@@ -1028,7 +1053,7 @@ export async function bootstrapPersonPage() {
   try {
     const [personRes, legislatorsRes] = await Promise.all([
       restGet(`persons?id=eq.${personId}&select=id,display_name,display_name_source`),
-      fetchAllRows(`legislators?person_id=eq.${personId}`),
+      fetchAllRows(`legislators?person_id=eq.${personId}`, { order: 'id' }), // finding 5
     ]);
     existence = { person: personRes.rows[0] || null, legislators: legislatorsRes };
   } catch {

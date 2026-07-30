@@ -138,17 +138,49 @@ export async function pagedFetch(pathWithFilters, { page = 1, pageSize = 50, ord
 
 const CHUNK_SIZE = 1000;
 
-export async function fetchAllRows(pathWithFilters) {
+// FINAL REVIEW, finding 5: this is the browser's selectAll (src/lib/db.js), and it had dropped
+// both of that function's load-bearing safety properties. Restored here, for the same reasons its
+// own comment gives:
+//
+//   ORDER. "Pagination via .range() is only correct with a DETERMINISTIC order — without one,
+//   Postgres makes no promise that two separate .range() calls see the same row ordering, which
+//   could silently drop a row into the gap between two pages or return it twice." selectAll
+//   appends an `id` tiebreaker unconditionally because every table it touches has a uuid `id`;
+//   this function is also used against MATERIALIZED VIEWS, which have no `id`, so the caller
+//   passes the order instead — their own unique-index column set (migration 0018 defines one per
+//   matview, exactly so CONCURRENTLY refresh works; the same columns are what makes a row
+//   uniquely orderable here). Every call site now passes one.
+//
+//   BACKSTOP. selectAll "throws rather than returning a result that LOOKS complete but might not
+//   be." The equivalent here is the content-range total the server already sends back on every
+//   chunk (doFetch requests count=exact by default): if what we accumulated is not what the server
+//   says exists, a row was dropped into — or duplicated across — a page gap, and the ONLY safe
+//   thing is to fail. Silently returning 1,400 of 1,500 legislators to matchReps means telling
+//   somebody the wrong answer about who represents them. A server that reports no total at all
+//   (`*` or an absent header) leaves nothing to cross-check against, and is never turned into a
+//   fabricated failure.
+export async function fetchAllRows(pathWithFilters, { order } = {}) {
+  const path = order ? appendQueryParam(pathWithFilters, 'order', order) : pathWithFilters;
   const all = [];
   let start = 0;
+  let statedTotal = null;
   for (;;) {
     // Exhaustive pagination is inherently sequential — each chunk's short-read decides whether
     // there is a next chunk at all.
     // eslint-disable-next-line no-await-in-loop
-    const { rows } = await doFetch(pathWithFilters, { range: [start, start + CHUNK_SIZE - 1] });
+    const { rows, total } = await doFetch(path, { range: [start, start + CHUNK_SIZE - 1] });
+    if (typeof total === 'number' && Number.isFinite(total)) statedTotal = total;
     all.push(...rows);
     if (rows.length < CHUNK_SIZE) break;
     start += CHUNK_SIZE;
+  }
+  if (statedTotal !== null && all.length !== statedTotal) {
+    throw new RestError(
+      `fetchAllRows: read ${all.length} of ${statedTotal} rows the server reports for this query — `
+        + 'a row was dropped into or duplicated across a chunk boundary. Refusing to return a '
+        + 'result that would render as complete.',
+      { expected: statedTotal, received: all.length, path },
+    );
   }
   return all;
 }
