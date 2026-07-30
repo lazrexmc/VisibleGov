@@ -162,6 +162,20 @@ test('el: href scheme allowlist still accepts relative paths and http(s)/mailto 
   assert.equal(el('a', { href: 'mailto:someone@example.com' }, 'x').getAttribute('href'), 'mailto:someone@example.com');
 });
 
+// Micro-round (re-review, pre-existing LOW-MEDIUM): a href with NO matched scheme was treated as
+// always-relative, but a protocol-relative URL ('//evil.com/x') has no scheme token either and
+// still resolves cross-origin (browsers inherit the CURRENT page's scheme) — a spoofed-link
+// vector if a DB source_url ever carried a leading '//'. A genuine same-site path never starts
+// with '//' (real receipt URLs are absolute http(s)), so this is rejected outright, not
+// allowlisted to some other scheme.
+test('el: href guard rejects protocol-relative hrefs ("//host/path") — resolves cross-origin', () => {
+  assert.throws(() => el('a', { href: '//evil.com/x' }, 'click'), UnsafeAttributeError);
+});
+
+test('el: href guard still accepts a genuine single-slash same-site path ("/person/x")', () => {
+  assert.equal(el('a', { href: '/person/x' }, 'x').getAttribute('href'), '/person/x');
+});
+
 test('el: rejects any attribute outside the {class, href, id, dataset} allowlist', () => {
   assert.throws(() => el('div', { title: 'hello' }), UnsafeAttributeError);
 });

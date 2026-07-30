@@ -31,6 +31,17 @@ const SCHEME_PATTERN = /^([a-z][a-z0-9+\-.]*:)/i;
 function assertSafeHref(tag, value) {
   if (typeof value !== 'string') return;
   const stripped = value.replace(/[\t\r\n]/g, '').trim();
+  // Micro-round (re-review, pre-existing LOW-MEDIUM): a protocol-relative URL ('//host/path') has
+  // no scheme token either, so it would fall through to the "no scheme -> relative" branch below
+  // — but browsers resolve it against the CURRENT page's scheme, i.e. it still goes cross-origin.
+  // A genuine same-site path never starts with '//' (real DB receipt URLs are absolute http(s)),
+  // so this is rejected outright before the scheme check even runs.
+  if (stripped.startsWith('//')) {
+    throw new UnsafeAttributeError(
+      `el(): refusing a protocol-relative href ("//...") on <${tag}> — resolves cross-origin; DB receipt URLs are absolute http(s), a same-site path never starts with //`,
+      { tag, attr: 'href', value },
+    );
+  }
   const match = stripped.match(SCHEME_PATTERN);
   if (!match) return; // no scheme -> relative, site-internal href; always allowed
   const scheme = match[1].toLowerCase();
