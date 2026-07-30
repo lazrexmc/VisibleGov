@@ -97,6 +97,67 @@ test('buildIdentity: null-date-only terms (real MO-senate-only shape) -> careerS
   assert.equal(identity.districtLabel, '2');
 });
 
+// Fix round 1, finding 2 (task-6 controller live smoke, IMPORTANT — execution-proven on real
+// data): with ALL term dates null, mostRecentTerm() returns null (nothing can be ranked), and the
+// old fallback (`termRows[0]`) silently picked whichever row happened to be first in the
+// caller-supplied array — the live smoke caught this rendering "MO Senate, district 2" for a man
+// CURRENTLY in the U.S. House, because his MO Senate row happened to sort first in an unordered
+// query. Asymmetric-cost doctrine: when the data cannot order the terms, showing ALL of them is
+// honest; picking one is a guess. Fixed: when the term set is date-unproven (no term carries a
+// start_date) AND there is more than one DISTINCT (jurisdiction_id, chamber, district)
+// affiliation, chamberLabel becomes all of them joined (each segment already carries its own
+// "district N" suffix), and districtLabel is null so the caller's existing
+// `chamberLabel + ", district " + districtLabel` rendering never double-appends. A single
+// affiliation (even with multiple term rows, e.g. duplicates) keeps the original single-field
+// shape unchanged.
+const dualUnprovenTerms = [
+  {
+    id: 't1', legislator_id: 'leg-a', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', party: 'Republican', start_date: null, end_date: null,
+  },
+  {
+    id: 't2', legislator_id: 'leg-b', jurisdiction_id: 'us-congress', chamber: 'house', district: '3', party: 'Republican', start_date: null, end_date: null,
+  },
+];
+
+test('buildIdentity: fix round 1 finding 2 — all term dates null AND multiple distinct affiliations -> chamberLabel shows ALL of them joined, never one arbitrary pick', () => {
+  const identity = buildIdentity({ person: null, legislators: [], terms: dualUnprovenTerms });
+  assert.equal(identity.chamberLabel, 'MO Senate, district 2 · U.S. House, district 3');
+  assert.equal(identity.districtLabel, null, 'district is already folded into the joined chamberLabel string, not a separate redundant field');
+  assert.equal(identity.careerSpan, 'service dates unrecorded');
+});
+
+test('buildIdentity: fix round 1 finding 2 — the joined-affiliations order is deterministic regardless of caller-supplied term array order', () => {
+  const forward = buildIdentity({ person: null, legislators: [], terms: dualUnprovenTerms });
+  const swapped = buildIdentity({ person: null, legislators: [], terms: [...dualUnprovenTerms].reverse() });
+  assert.equal(forward.chamberLabel, swapped.chamberLabel, 'array order must never change which text renders — same class of bug as the party-precedence fix');
+});
+
+test('buildIdentity: fix round 1 finding 2 — duplicate (jurisdiction, chamber, district) rows collapse to ONE affiliation, single-field shape unchanged', () => {
+  const duplicateRows = [dualUnprovenTerms[0], { ...dualUnprovenTerms[0], id: 't1b', legislator_id: 'leg-a2' }];
+  const identity = buildIdentity({ person: null, legislators: [], terms: duplicateRows });
+  assert.equal(identity.chamberLabel, 'MO Senate');
+  assert.equal(identity.districtLabel, '2', 'exactly one distinct affiliation keeps the original single-field shape, not a one-item joined string');
+});
+
+test('buildIdentity: fix round 1 finding 2 — a distinct affiliation with no district omits the ", district" suffix in its own segment', () => {
+  const terms = [
+    {
+      jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null,
+    },
+    {
+      jurisdiction_id: 'us-congress', chamber: 'senate', district: null, start_date: null, end_date: null,
+    },
+  ];
+  const identity = buildIdentity({ person: null, legislators: [], terms });
+  assert.equal(identity.chamberLabel, 'MO Senate, district 2 · U.S. Senate');
+});
+
+test('buildIdentity: fix round 1 finding 2 — when dates DO order the terms, single-line anchor-term behavior stands unchanged (no regression)', () => {
+  const identity = buildIdentity({ person: onderPerson, legislators: onderLegislators(), terms: onderTerms() });
+  assert.equal(identity.chamberLabel, 'U.S. House');
+  assert.equal(identity.districtLabel, '3');
+});
+
 test('buildIdentity: party falls back to legislator.party when no term carries a party', () => {
   const identity = buildIdentity({ person: null, legislators: moSenateOnlyLegislator(), terms: moSenateOnlyTerms() });
   assert.equal(identity.party, 'Republican');

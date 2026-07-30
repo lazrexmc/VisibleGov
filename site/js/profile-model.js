@@ -133,6 +133,33 @@ function pickPhotoCandidate(legislatorRows) {
     ?? legislatorRows[0];
 }
 
+// Fix round 1, finding 2 (task-6 controller live smoke, IMPORTANT): the distinct (jurisdiction_id,
+// chamber, district) affiliations carried by a term set, deduped and in a DETERMINISTIC order
+// (sorted by the tuple itself, never by caller-supplied array position — the same class of bug
+// already fixed once for party precedence: Task 6's queries carry no order= guarantee).
+function distinctAffiliations(termRows) {
+  const seen = new Set();
+  const result = [];
+  for (const t of termRows) {
+    if (!t || !t.jurisdiction_id || !t.chamber) continue;
+    const key = `${t.jurisdiction_id}|${t.chamber}|${t.district ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ jurisdiction_id: t.jurisdiction_id, chamber: t.chamber, district: t.district ?? null });
+  }
+  result.sort((a, b) => {
+    const ka = `${a.jurisdiction_id}|${a.chamber}|${a.district ?? ''}`;
+    const kb = `${b.jurisdiction_id}|${b.chamber}|${b.district ?? ''}`;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  return result;
+}
+
+function formatAffiliation(affiliation) {
+  const label = chamberLabel(affiliation.jurisdiction_id, affiliation.chamber);
+  return affiliation.district ? `${label}, district ${affiliation.district}` : label;
+}
+
 export function buildIdentity({ person, legislators, terms }) {
   const legislatorRows = Array.isArray(legislators) ? legislators : [];
   const termRows = Array.isArray(terms) ? terms : [];
@@ -143,13 +170,37 @@ export function buildIdentity({ person, legislators, terms }) {
   // Most-recent-by-date term when one exists; otherwise fall back to the first term row so
   // chamber/district still render plainly (task-5 brief: never attempt a fancier "as of the
   // {session-era} record" qualifier when dates are unproven — just label from the row itself).
-  const anchorTerm = mostRecentTerm(termRows) ?? termRows[0] ?? null;
+  const dateOrderedTerm = mostRecentTerm(termRows);
+  const anchorTerm = dateOrderedTerm ?? termRows[0] ?? null;
+
+  let chamberLabelOut = null;
+  let districtLabelOut = null;
+  if (dateOrderedTerm) {
+    // Dates DO order the terms — single-line anchor-term behavior stands unchanged (no picking
+    // ambiguity: the most-recent-by-date term is a real, evidenced answer, not a guess).
+    chamberLabelOut = chamberLabel(anchorTerm.jurisdiction_id, anchorTerm.chamber);
+    districtLabelOut = anchorTerm.district ?? null;
+  } else if (anchorTerm) {
+    // Date-unproven (no term carries a start_date): the data cannot order the terms, so picking
+    // one (the old `termRows[0]` fallback) is a guess — the live smoke caught exactly this
+    // rendering an arbitrary chamber for a man currently serving in a different one. Asymmetric-
+    // cost doctrine: show every distinct affiliation instead. A single distinct affiliation (even
+    // across duplicate/multiple term rows) keeps the original single-field shape.
+    const affiliations = distinctAffiliations(termRows);
+    if (affiliations.length > 1) {
+      chamberLabelOut = affiliations.map(formatAffiliation).join(' · ');
+      districtLabelOut = null; // already folded into chamberLabelOut; avoids a doubled suffix
+    } else if (affiliations.length === 1) {
+      chamberLabelOut = chamberLabel(affiliations[0].jurisdiction_id, affiliations[0].chamber);
+      districtLabelOut = affiliations[0].district;
+    }
+  }
 
   return {
     displayName,
     party,
-    chamberLabel: anchorTerm ? chamberLabel(anchorTerm.jurisdiction_id, anchorTerm.chamber) : null,
-    districtLabel: anchorTerm ? (anchorTerm.district ?? null) : null,
+    chamberLabel: chamberLabelOut,
+    districtLabel: districtLabelOut,
     careerSpan: careerSpan(termRows),
     photoCandidate: pickPhotoCandidate(legislatorRows),
     rowCount: legislatorRows.length,

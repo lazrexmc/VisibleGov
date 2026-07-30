@@ -107,7 +107,10 @@ function renderPhoto(container, legislatorLike, displayName) {
   }
 }
 
-function renderIdentity(container, identity) {
+// Exported (fix round 1, finding 2) so tests/person-page.test.js can assert directly that a
+// date-unproven multi-affiliation identity (buildIdentity's joined chamberLabel, districtLabel
+// null) renders the full joined string with no redundant/duplicated district suffix.
+export function renderIdentity(container, identity) {
   clearChildren(container);
   const photoBox = el('div', { class: 'profile-photo-box' });
   renderPhoto(photoBox, identity.photoCandidate, identity.displayName);
@@ -252,7 +255,10 @@ async function loadIdentitySection(container, { person, legislators, legislatorI
 
 // filters: { chamber, year, missedOnly, page }. Re-queries the SERVER on every filter/page
 // change (voteFilterQuery + pagedFetch) — never a client-side sort/filter of a partial page.
-async function loadVotesSection(container, { legislatorIds, filters }) {
+// Exported (fix round 1, finding 1) so tests/person-page.test.js can assert directly that a
+// rejecting fetch (rest.js's RestError on a non-2xx, e.g. the live statement-timeout 500) routes
+// to the FAILED state, never the empty one — the exact violation the live smoke caught.
+export async function loadVotesSection(container, { legislatorIds, filters }) {
   sectionState(container, { state: 'loading' });
   let page;
   try {

@@ -19,6 +19,21 @@ export class ConfigError extends Error {
   }
 }
 
+// Fix round 1 (task-6 controller live smoke, LOAD-BEARING): a non-2xx response used to fall
+// through doFetch's array-or-empty fallback silently, turning a real server failure (the live
+// case: a Postgres statement timeout, PostgREST 500) into what every caller saw as a genuine
+// zero-row result — a page-level loader checking `rows.length === 0` then rendered the
+// honestly-empty state for what was actually a FAILED fetch, exactly the violation the plan
+// forbids. Every read in this module goes through doFetch (the one shared primitive), so the fix
+// lives there: any non-2xx throws this typed error before any caller ever sees a rows array.
+export class RestError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'RestError';
+    Object.assign(this, meta); // status, body
+  }
+}
+
 // ---- test-only hooks (see tests/site-modules.test.js) ----
 // Never called by the shipped site: in a real browser getFetch() falls through to the global
 // fetch and getConfig() falls through to the config.js import. Plain module-level mutable state
@@ -82,6 +97,17 @@ async function doFetch(path, { range } = {}) {
   }
   const doRequest = getFetch();
   const res = await doRequest(buildUrl(path), { headers });
+  if (!res.ok) {
+    // PostgREST error bodies are an object ({code, message, details, hint}), not an array — when
+    // present, its message rides along on the thrown error; a non-JSON/unparseable body (e.g. a
+    // proxy's plain-text 502 page) still throws with the status alone, never silently.
+    const body = await res.json().catch(() => null);
+    const detail = body && typeof body === 'object' && typeof body.message === 'string' ? body.message : null;
+    throw new RestError(
+      detail ? `Supabase REST ${res.status}: ${detail}` : `Supabase REST request failed with status ${res.status}`,
+      { status: res.status, body },
+    );
+  }
   const rows = await res.json().catch(() => []);
   return {
     status: res.status,

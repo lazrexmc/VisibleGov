@@ -1,15 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 
 import {
   idFromPath, buildOneLinerMap, joinFlagBadges, relevantFreshnessRows,
+  loadVotesSection, renderIdentity,
 } from '../site/js/person-page.js';
+import { _setFetch, _setConfig } from '../site/js/rest.js';
 
 // Task 6 (docs/superpowers/plans/2026-07-30-public-site.md, task-6-brief.md) — pure helpers for
 // the profile page, TDD'd here BEFORE the DOM-wiring code exists. site/js/person-page.js also
-// exports the page's DOM-orchestration functions (not exercised here — this file covers only the
-// pure logic per the brief's explicit scope: "TDD the brief's pure helpers (idFromPath, one-liner
-// attach map, flag-badge join)").
+// exports the page's DOM-orchestration functions — mostly not exercised here (the brief's
+// explicit scope was the pure helpers: idFromPath, one-liner attach map, flag-badge join), EXCEPT
+// for two fix-round-1 wiring-layer assertions below (the controller's live smoke caught both at
+// the DOM level, so the regression tests live at the DOM level too).
+//
+// jsdom supplies `document` for the two render-touching tests below (same pattern as
+// tests/site-modules.test.js) — set once here, after the static imports, before any test() body
+// runs; person-page.js never touches `document` at its own module-load time.
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://127.0.0.1:8990/' });
+globalThis.document = dom.window.document;
 
 // ============================================================================
 // idFromPath — URL contract: `/person/<uuid>[/<slug-ignored>]`
@@ -182,4 +192,81 @@ test('relevantFreshnessRows: no jurisdictions (zero terms, freshly-ingested unli
 
 test('relevantFreshnessRows: an unrecognized jurisdiction id contributes no matches (never throws, never matches everything)', () => {
   assert.deepEqual(relevantFreshnessRows(FRESHNESS_ROWS, ['ca-legislature']), []);
+});
+
+// ============================================================================
+// Fix round 1 (task-6 controller live smoke) — two wiring-layer regressions caught only by
+// actually rendering, so their regression tests live at the DOM level rather than as pure-helper
+// unit tests.
+// ============================================================================
+
+// Finding 1, LOAD-BEARING: the live vote-feed query hit a Postgres statement timeout (PostgREST
+// 500). Before the fix, rest.js's doFetch silently treated ANY non-array JSON body (a PostgREST
+// error object is {code, message, ...}, not an array) as zero rows, so loadVotesSection's
+// `page.rows.length === 0` check rendered the HONESTLY-EMPTY state for what was actually a FAILED
+// fetch — exactly the violation the plan forbids ("a failed fetch NEVER renders as an empty
+// section"). rest.js now throws a typed RestError on any non-2xx (see tests/site-modules.test.js);
+// this test proves that throw actually reaches loadVotesSection's own catch and renders 'failed'.
+test('loadVotesSection: a rejecting fetch (RestError, mirroring the live statement-timeout 500) renders the FAILED state, never the empty one', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => ({
+    ok: false,
+    status: 500,
+    json: async () => ({ code: '57014', message: 'canceling statement due to statement timeout' }),
+    headers: { get: () => null },
+  }));
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} }).catch(() => {});
+  assert.notEqual(container.querySelector('.section-state-failed'), null, 'must render the failed state');
+  assert.equal(container.querySelector('.section-state-empty'), null, 'must NOT render the empty state');
+  assert.equal(container.textContent.includes('No recorded votes'), false, 'the honestly-empty message must never appear for a failed fetch');
+  assert.notEqual(container.querySelector('button'), null, 'a working retry button must be present (three-state law: a working retry, not a dead end)');
+});
+
+test('loadVotesSection: a genuinely empty (but successful) result still renders the empty state — the fix must not flip the other direction', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => [],
+    headers: { get: (name) => (name.toLowerCase() === 'content-range' ? '*/0' : null) },
+  }));
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
+  assert.notEqual(container.querySelector('.section-state-empty'), null, 'a real zero-row success must still render empty, not failed');
+  assert.equal(container.querySelector('.section-state-failed'), null);
+});
+
+// Finding 2, IMPORTANT: buildIdentity's date-unproven fix (tests/profile-model.test.js) produces
+// a joined multi-affiliation chamberLabel with districtLabel null — this proves renderIdentity
+// (the DOM layer that actually painted the wrong single arbitrary chamber on the live page)
+// renders the full joined string with no duplicated/redundant district suffix.
+test('renderIdentity: a date-unproven multi-affiliation identity (joined chamberLabel, districtLabel null) renders the full joined string, no duplicated district suffix', () => {
+  const container = document.createElement('section');
+  renderIdentity(container, {
+    displayName: 'Robert F. Onder',
+    party: 'Republican',
+    chamberLabel: 'MO Senate, district 2 · U.S. House, district 3',
+    districtLabel: null,
+    careerSpan: 'service dates unrecorded',
+    photoCandidate: null,
+    rowCount: 2,
+  });
+  const chamberText = container.querySelector('.profile-chamber').textContent;
+  assert.equal(chamberText, 'MO Senate, district 2 · U.S. House, district 3');
+  assert.equal(/district \d+, district/.test(chamberText), false, 'must not double-append a redundant district suffix onto the already-joined string');
+});
+
+test('renderIdentity: a single-affiliation (dated or date-unproven-but-unambiguous) identity still renders the original single-line chamber+district format unchanged', () => {
+  const container = document.createElement('section');
+  renderIdentity(container, {
+    displayName: 'Bob Onder',
+    party: 'Republican',
+    chamberLabel: 'MO Senate',
+    districtLabel: '2',
+    careerSpan: 'service dates unrecorded',
+    photoCandidate: null,
+    rowCount: 1,
+  });
+  assert.equal(container.querySelector('.profile-chamber').textContent, 'MO Senate, district 2');
 });

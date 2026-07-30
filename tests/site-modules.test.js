@@ -4,7 +4,7 @@ import http from 'node:http';
 import { JSDOM } from 'jsdom';
 
 import {
-  restGet, pagedFetch, fetchAllRows, countOnly, _setFetch, _setConfig, ConfigError,
+  restGet, pagedFetch, fetchAllRows, countOnly, _setFetch, _setConfig, ConfigError, RestError,
 } from '../site/js/rest.js';
 import {
   el, clearChildren, sectionState, mountFooter, UnsafeAttributeError, InvalidSectionStateError,
@@ -48,6 +48,57 @@ test('restGet: throws a typed ConfigError (never a silent 401) when config is em
   _setConfig({ url: '', anonKey: '' });
   await assert.rejects(() => restGet('legislators?select=id'), ConfigError);
   _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' }); // restore
+});
+
+// Fix round 1 (task-6 controller live smoke, LOAD-BEARING finding): a non-2xx response (the real
+// case was a Postgres statement timeout, PostgREST 500) used to fall through doFetch's
+// `Array.isArray(rows) ? rows : []` fallback silently — a PostgREST error body is an object
+// ({code, message, ...}), not an array, so it became `rows: []`, which every caller (pagedFetch,
+// fetchAllRows, countOnly) then treated as a genuine zero-row result. A page-level loader checking
+// `rows.length === 0` then rendered the HONESTLY-EMPTY state for what was actually a FAILED fetch
+// — exactly the violation the plan forbids ("a failed fetch NEVER renders as an empty section").
+// Fixed at the lowest honest layer (doFetch, the one shared primitive every exported function
+// here builds on): any non-2xx response throws a typed RestError carrying the status and, when
+// the body is a PostgREST-shaped error object, its message — before any caller ever sees a rows
+// array at all.
+test('pagedFetch: a non-2xx response (statement timeout) throws a typed RestError, never a silent empty result', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => mockResponse({
+    status: 500,
+    rows: { code: '57014', message: 'canceling statement due to statement timeout' },
+  }));
+  await assert.rejects(
+    () => pagedFetch('public_vote_feed?legislator_id=in.(x)', { page: 1, pageSize: 50 }),
+    (err) => {
+      assert.ok(err instanceof RestError);
+      assert.equal(err.status, 500);
+      assert.match(err.message, /statement timeout/);
+      return true;
+    },
+  );
+});
+
+test('restGet/fetchAllRows/countOnly all throw the same typed RestError on a non-2xx response (doFetch is the one shared primitive)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => mockResponse({ status: 503, rows: { message: 'server unavailable' } }));
+  await assert.rejects(() => restGet('bills?select=id'), RestError);
+  await assert.rejects(() => fetchAllRows('bills?select=id'), RestError);
+  await assert.rejects(() => countOnly('bills?select=id'), RestError);
+});
+
+test('doFetch: a non-2xx response with a non-JSON/unparseable body still throws RestError with the status (never a silent empty result)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => ({
+    ok: false,
+    status: 502,
+    json: async () => { throw new Error('not json'); },
+    headers: { get: () => null },
+  }));
+  await assert.rejects(() => restGet('bills?select=id'), (err) => {
+    assert.ok(err instanceof RestError);
+    assert.equal(err.status, 502);
+    return true;
+  });
 });
 
 test('pagedFetch: page 3, size 50 sends Range 100-149 and returns total from content-range', async () => {
