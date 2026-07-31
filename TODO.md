@@ -73,7 +73,10 @@
   - **4 unresolved identity flags** — Hank vs. Speaker Mike Johnson; Barry vs. Blake Moore; Dan vs.
     Justin Brown (likely: link Justin's two rows, keep Dan separate — Lance's read, not assumed);
     plus the Menendez informational flag. Local review server, one decision each.
-  - **35 draft/flagged summaries** — the two-axis gate caught real gaps; each needs Lance's read or
+  - **35 unpublished summaries — but "flagged" ≠ "draft", and only ~20 are actual problems.**
+    `status` lives on `summaries`; a *verdict* lives on `summary_verifications`. There is no
+    "flagged" status. Of the 35: ~20 carry an adverse verdict (real gaps), ~14 are clean but simply
+    never published, 1 was never verified. Each needs Lance's read or
     a re-author. 2 of these failed shape validation on a stray line break (newline-injection guard)
     and just need re-authoring.
   - **9 open vote-reconciliation flags** — source discrepancies held out of the clean record.
@@ -173,7 +176,9 @@
     paths) are sub-1000 today.
 
 19. **Summary volume — wave 2+ ($0 subagent path, spends Lance's plan usage not credits).**
-    3,281 passage-vote bills still unsummarized, all with text on hand. Proven wave-1 shape: batches
+    ~3,283 passage-vote bills still unsummarized — but only ~3,261 have text; **22 do not**, so size
+    a batch off the text-bearing set (`npm run status` prints it as "READY to summarize"), never off
+    the passage-vote count, or those 22 fail on missing text. Proven wave-1 shape: batches
     of 5 bills per agent through author (opus) → adversarial verify (sonnet) → two-phase
     completeness (sonnet), pipelined via a workflow, then `summary-queue.js record`. Canonical
     prompts/schemas export from `src/lib/summarizer.js` + `src/lib/verifier.js`; **never** paraphrase
@@ -215,6 +220,40 @@
 24. **Giant bills (11 over the 400k-char gate).** HRB 2467 (561k), HRB 1 (550k), SRB 975 (751k) and
     8 others refused rather than truncated during the text run. Options unchanged: raise toward the
     1M-token context (~$2-4/bill against Lance's ~$6 credits) or design chunked summarization.
+
+---
+
+### Defects found by the 2026-07-31 data audit (docs vs live DB) — none were previously recorded
+
+25. **⚠️ The MO 2026 session is SPLIT IN TWO and the split is actively growing.** Session identifier
+    `'2026'` carries `legiscan_session_id = NULL` — the only MO session missing one — and duplicates
+    session `'261'` (legiscan 2239). All 16 of `'2026'`'s bill identifiers also exist under `'261'`,
+    carrying 17 roll calls / 561 casts, and it grew 15→16 bills *during* the audit: the cron is
+    feeding the duplicate. Contrast MO 2018, where the same adapter's row was correctly merged.
+    **Highest-priority data defect** — it splits one session's record across two sessions on the
+    public site. Fix = merge `'2026'` into `'261'` (draft-then-apply, Lance runs it).
+
+26. **2,005 bills have NULL title AND NULL canonical_url** — 1,986 of them in session `'261'`, i.e.
+    ~63% of the current 2026 Missouri session. 209 are reachable from a roll call, 190 have text,
+    and **3 already have a published summary rendering under a blank title**. Fix = backfill titles
+    from the cached LegiScan datasets ($0, data already on disk).
+
+27. **Party vocabulary is unnormalized at the source table.** `legislators.party` holds `R` 391 /
+    `Republican` 469 / `D` 209 / `Democratic` 463 / NULL 65 / `Independent Democrat` 1 / `''` 1.
+    Migration 0018's matviews normalize R/D/I *for the aggregates*, but ~41.5k casts still fall out
+    of party comparisons silently, and any consumer reading `legislators.party` directly sees the
+    raw mess. Fix = normalize the column itself (same sourced-mapping discipline as the MO status
+    correction), or make every consumer use the documented CASE.
+
+28. **152 roll calls show a result with no member positions** (95 OpenStates 2022, 57 mo-house-xml
+    2026). Affects **52 bills**: 23 also have a real cast-bearing row for the same event (so a bill
+    page shows the same vote twice, e.g. HB 1800 "82-61 / 1 cast" beside "82-61 / 158 casts"), and
+    29 show a printed result with zero names. Not data loss — LegiScan supplies the real casts — but
+    it reads as broken. Fix = suppress or merge stub rows on the bill page.
+
+29. **Hygiene:** 555 of 1,607 legislator rows have zero votes; `districts` table is empty (0 rows,
+    never populated — the site never reads it); 0 rows have `image_url`/`contact` (photos derive
+    from bioguide at render time, by design).
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 

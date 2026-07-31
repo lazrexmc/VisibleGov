@@ -873,3 +873,53 @@ PLAYBOOK_DELTA lesson 14 with the mechanical rule rather than an intention.
 1,975 tests green · zero known data inaccuracies. What's left before Cloudflare is Lance's review
 queue — 4 identity flags, 35 flagged summaries, 9 reconciliation flags — the one category of work
 that is structurally his.
+
+## 2026-07-31 (evening) — "I'm baffled": the data audit, and why the numbers kept moving
+
+Lance, after a string of status reports quoting different figures: *"review the documentation to
+determine if we have all of this information already and then review database and clarify what we
+have then document it so we don't get confused again."*
+
+**Root cause, and it wasn't carelessness.** An ingestion cron writes every 30 minutes. During the
+15-minute audit itself, bills went 38,265 → 38,266, roll calls 9,980 → 9,981, casts
+1,465,300 → 1,465,333. Every count ever typed into a doc was stale within the hour. The fix is
+structural: `scripts/data-status.js` (`npm run status`) is now the single source of truth for
+NUMBERS, and `docs/DATA_INVENTORY.md` is the source of truth for STRUCTURE AND MEANING — what each
+number is and how they relate. Hardcoded counts were stripped from README and ARTIFACTS.
+
+**The denominator traps** — why the same project looked like several different projects:
+- "38k bills" and "39 summaries" are both true and not comparable. Most bills die in committee: only
+  ~10% ever get a recorded vote, ~9% get a passage vote. Text is fetched only for voted bills, so
+  text ⊂ voted — but text is NOT a subset of the passage set (311 text-bearing bills have a vote
+  that isn't a passage vote). Neither set contains the other.
+- "1,607 legislators / 37 persons" read as "37 identified." Wrong. Three numbers all legitimately
+  mean "legislators": 1,607 source ROWS · ~1,568 distinct PEOPLE · 37 MERGE CLUSTERS. Every
+  legislator is identified; a `person` exists only where 2+ source rows are the same human.
+- "35 draft/flagged summaries" collapsed two axes. `status` is on `summaries`; `flagged` is a
+  *verdict* on `summary_verifications`. There is no "flagged" status — of the 35, ~20 have an
+  adverse verdict, ~14 are clean but unpublished, 1 unverified.
+- "847 glossary terms" vs "116 published": all 731 drafts have NULL gloss_md AND NULL source_url —
+  bare stubs, not unreviewed writing. 704 are blocked on an unresolvable citation.
+
+**Vote integrity — asked directly, verified directly.** Every one of ~1.47M casts is attached to a
+real legislator and a real roll call by DATABASE CONSTRAINT (NOT NULL + FK), verified zero orphans,
+with a unique(vote_id, legislator_id) making double-recording impossible. 98.5% of roll calls carry
+full member positions. I first reported "31% have zero casts" from a query whose 1.4M-row pagination
+came back incomplete — corrected to **1.5%** via an embedded-count pass, and the 152 are two known
+cases (OpenStates publishes vote events without member data; the superseded house-XML pipeline's
+action stubs).
+
+**Live defect found and fixed mid-audit:** the aggregate matviews had drifted 231 casts behind, so
+33 MO senators' profile charts were under-reporting their own activity versus the vote list rendered
+beside them. `npm run refresh:aggregates` closed it to zero.
+
+**Real defects found that NOTHING had recorded** (now TODO items 25-29): the MO 2026 session is
+split across two session rows and the cron is actively feeding the duplicate; 2,005 bills have NULL
+title AND canonical_url (~63% of the current MO session, 3 of them already carrying a published
+summary under a blank title); `legislators.party` is unnormalized at the source table so ~41.5k
+casts fall out of party comparisons; 152 roll calls render a result with no names across 52 bills.
+
+**Honest one-line summary the audit produced, and I agree with it:** the vote record is genuinely
+strong and internally consistent; the plain-language layer covers a few dozen bills from 2 of 33
+sessions; and the docs' numbers were stale because a cron writes every 30 minutes while docs sit
+still.

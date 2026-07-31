@@ -6,6 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "status": "node --env-file=.env scripts/data-status.js",
     "test": "node --test",
     "ingest": "node --env-file=.env src/cli/ingest.js",
     "ingest-mo-house": "node --env-file=.env src/cli/ingest-mo-house.js",

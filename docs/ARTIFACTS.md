@@ -82,7 +82,10 @@ trust page shows would restart from zero until those days fail again.
 
 ## What is NOT on disk anywhere but Supabase
 
-The live database is the system of record for all ingested data: 1,465,102 vote casts, 38,260 bills,
-3,630 bill texts, 46,268 sponsorships, 1,607 legislators, 37 persons, 37 published summaries, 116
-glossary entries. **The repo can rebuild the pipelines; it cannot rebuild the database.** Supabase's
-own backups are the safety net there — worth confirming they're enabled and retained.
+The live database is the system of record for all ingested data — roughly 1.47M vote casts, 38k
+bills, 3.6k bill texts, 46k sponsorships and 1,607 legislator rows, plus the whole plain-language
+layer. For exact current numbers run `npm run status`; do not trust counts written here, since an
+ingestion cron writes every 30 minutes.
+
+**The repo can rebuild the pipelines; it cannot rebuild the database.** Supabase's own backups are
+the safety net — worth confirming they're enabled and retained.
