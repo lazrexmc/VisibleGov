@@ -18,6 +18,12 @@ import {
   crossCheckAgainstPrimarySource, LegiscanRollCallReconcileError, VoteIdMapError,
   LegiscanRollCallDateError,
 } from '../adapters/legiscan-votes.js';
+// mapMoStatusCode — data-corrections task (.superpowers/sdd/2026-07-31-data-corrections/brief.md),
+// "fix the writer too": the SAME manual-sourced constant correct-data.js uses to CORRECT the
+// ~37,662 already-numeric rows, imported here (never a second copy) so a bill first-seen by THIS
+// driver from now on stores LegiScan's printed status WORD, not its bare numeric code — the
+// regression correct-data.js's own live pass would otherwise be undone by the very next ingest run.
+import { mapMoStatusCode } from './correct-data.js';
 
 // LegiScan bulk adapter — driver (Task 9 of docs/superpowers/plans/2026-07-29-legiscan-bulk-
 // adapter.md). Composes Tasks 2/4/5/6/7 into the full dataset-bulk backfill pipeline: dataset
@@ -270,10 +276,15 @@ async function ensureLegiscanBillRows(client, runId, sessionRowId, bills) {
     session_id: sessionRowId,
     identifier: normalizeBillIdentifier(b.bill_number),
     title: b.title ?? null,
-    // LegiScan's own `status` is a numeric lifecycle code (no house-style label mapping exists in
-    // this codebase for it, and inventing one would be a guess) — stored as printed, verbatim,
-    // never interpreted. `status_date` is not persisted (bills table has no column for it).
-    status: b.status != null ? String(b.status) : null,
+    // LegiScan's own `status` is a numeric lifecycle code. FIX (data-corrections task, "fix the
+    // writer too"): codes 1-6 are now decoded to their printed word via mapMoStatusCode — the SAME
+    // manual-sourced mapping (LegiScan API User Manual p.42) correct-data.js's mo-status correction
+    // uses on the already-ingested rows, so re-ingestion never reintroduces a numeric code for a
+    // bill this driver first-sees. Code 0 (no honest single word — "N/A pre-filed") and 7-12
+    // (progress-array-only per the manual, never a bill's overall status) fall back to storing the
+    // code verbatim — mapMoStatusCode returns null for exactly those, by design, never a guess.
+    // `status_date` is not persisted (bills table has no column for it).
+    status: b.status != null ? (mapMoStatusCode(b.status) ?? String(b.status)) : null,
     canonical_url: billSourceUrl(b),
     run_id: runId,
   }));

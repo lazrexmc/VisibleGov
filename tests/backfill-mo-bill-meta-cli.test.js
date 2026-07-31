@@ -381,7 +381,9 @@ test('runBackfillMoBillMeta: --dry-run performs the bulk index loads but zero wr
   assert.equal(report.cacheFilesFound, 2);
   assert.deepEqual(report.sessionsSeen, [1608]);
   assert.equal(report.plan.statusPatches.length, 1);
-  assert.deepEqual(report.plan.statusPatches[0].patch, { status: '1' });
+  // FIX (data-corrections task, "fix the writer too"): status 1 now decodes to its printed word
+  // (mapMoStatusCode, correct-data.js) at write time, rather than storing the bare numeric code.
+  assert.deepEqual(report.plan.statusPatches[0].patch, { status: 'Introduced' });
   assert.equal(report.plan.sponsorInserts.length, 2);
   assert.deepEqual(client.calls, [], 'zero writes reachable from dry-run');
 });
@@ -422,7 +424,10 @@ test('runBackfillMoBillMeta: live mode patches bills.status additively (fills nu
   assert.equal(report.plan, undefined, 'plan is a dry-run-only preview');
   const updateOps = client.calls.filter((c) => c.op === 'update');
   assert.equal(updateOps.length, 1);
-  assert.equal(updateOps[0].patch.status, '1', 'LegiScan\'s own printed status code, stringified verbatim');
+  // FIX (data-corrections task, "fix the writer too"): decoded to its printed word via
+  // mapMoStatusCode (correct-data.js) — the bare numeric code is never written for a mapped code
+  // (1-6) anymore, so re-ingestion can never reintroduce the class of bug correct-data.js corrects.
+  assert.equal(updateOps[0].patch.status, 'Introduced', 'LegiScan\'s own printed status word (decoded from its numeric code), not the bare code');
   assert.equal(updateOps[0].patch.run_id, 'run-1', 'run_id stamped on the status write, same convention as every other additivePatch call site');
   const upsertOps = client.calls.filter((c) => c.op === 'upsert');
   assert.equal(upsertOps.length, 2);

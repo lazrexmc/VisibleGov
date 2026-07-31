@@ -4,6 +4,10 @@ import {
 } from '../lib/db.js';
 import { decodeDatasetZip, extractDatasetFiles, normalizeBillIdentifier } from '../adapters/legiscan-dataset.js';
 import { listCachedDatasetFiles } from './backfill-nicknames.js';
+// mapMoStatusCode — data-corrections task (.superpowers/sdd/2026-07-31-data-corrections/brief.md),
+// "fix the writer too": same rationale as ingest-legiscan.js's own import of this — one exported
+// mapping, never a second copy, so a status this backfill fills in from now on is the printed word.
+import { mapMoStatusCode } from './correct-data.js';
 
 // backfill-mo-bill-meta — Task 2 of the profile-completeness plan
 // (.superpowers/sdd/2026-07-29-profile-completeness/task-2-brief.md). Closes two gaps in the
@@ -322,7 +326,13 @@ export async function runBackfillMoBillMeta(client, {
       if (bill.status == null) {
         counts.statusMissingInSource += 1;
       } else {
-        const patch = additivePatch(billRow, { status: String(bill.status) });
+        // FIX (data-corrections task, "fix the writer too"): decode via the SAME manual-sourced
+        // mapMoStatusCode correct-data.js's mo-status correction uses on the already-ingested
+        // numeric rows — a bill this backfill fills status for (typically a bill MO's own primary
+        // driver stubbed first, per this file's STATUS header comment) now gets LegiScan's printed
+        // word, not its bare numeric code. Falls back to the code verbatim for 0/7-12/undocumented
+        // (mapMoStatusCode returns null for exactly those, by design — no honest word exists).
+        const patch = additivePatch(billRow, { status: mapMoStatusCode(bill.status) ?? String(bill.status) });
         if (Object.keys(patch).length === 0) {
           counts.statusAlreadySet += 1;
         } else if (dryRun) {
