@@ -51,20 +51,37 @@
   definitions single-sourced, full attribution). Migrations 0016–0019 applied; four data backfills
   run live. Trail: `.superpowers/sdd/2026-07-30-public-site/progress.md` + CHATLOG 2026-07-30.
 
-- [ ] **NOW — Lance's open items (site is merged, none block each other):**
-  - **Cloudflare Pages setup (T7)** — connect `lazrexmc/VisibleGov`, production branch `main`,
-    build command EMPTY, **Root directory `site`** (required, or `_headers` + the geocode
-    Function are not discovered). Then verify: `/geocode` responds, `_redirects` rewrites hold on
-    hard refresh, CSP headers present (open question: whether `_headers` covers Function
-    responses — check at deploy).
-  - **Data-correction batch (one approval, two corrections)** — (a) ~2,047 MO `bills.status`
-    numeric LegiScan codes → their printed words (1=Introduced … 6=Failed), writer fixed in the
-    same change; (b) 10 MO roll calls stored with LegiScan's `1969-12-31` missing-date sentinel →
-    re-dated from the primary journal's real 2018-03-01 (primary-wins). Both reversible from the
-    cached payloads; ingest guard for (b) already merged.
-  - **Review queue** — flagged summaries + identity attach candidates in the local review server.
-- [ ] Lance review queue (independent of Plan 3): 4 flagged summaries from the $0 night +
-  earlier flagged drafts; attach-candidate flags in the identity queue.
+- [x] ~~Data-correction batch~~ **COMPLETE + VERIFIED LIVE 2026-07-31.** (a) 37,662 MO bills'
+  numeric LegiScan status codes → their printed words, mapping SOURCED from LegiScan's own API
+  manual p.42 (extracted via the repo's own PDF extractor, not from memory); 36 code-`0` bills
+  correctly left untouched; 0 numeric codes remain. (b) 10 votes carrying the `1969-12-31`
+  sentinel → re-dated from their primary journal filenames; 0 deletions, 0 sentinels remain.
+  Both writers fixed in the same change so re-ingestion can't reintroduce either defect. Review
+  caught (and the fix closed) a false-positive delete path in (b) before it ran. Trail:
+  `.superpowers/sdd/2026-07-31-data-corrections/progress.md`.
+- [x] ~~Identity merge pass~~ **COMPLETE 2026-07-31.** persons 7 → 37 (30 real merges, 0 wrong
+  merges). Caught the **Menendez Sr./Jr. dynasty trap** before any write (concurrent service,
+  identical names, different chambers; distinct bioguide IDs M000639/M001226 settle it) and wrote
+  a keep-separate ruling recorded as `controller_automated`. Trail:
+  `.superpowers/sdd/2026-07-31-identity-merge-pass/progress.md`.
+
+- [ ] **NOW — the only thing gating Cloudflare is Lance's review queue.** Lance's standing rule
+  (2026-07-31): *"I'm only interested in starting the cloudflare portion once the entire backend
+  is locked in and accurate, otherwise I'm troubleshooting two systems back and forth."* Cloudflare
+  is a MILESTONE, not a task — do not propose it until Lance says the backend feels solid.
+  Remaining operator decisions, none blocking each other:
+  - **4 unresolved identity flags** — Hank vs. Speaker Mike Johnson; Barry vs. Blake Moore; Dan vs.
+    Justin Brown (likely: link Justin's two rows, keep Dan separate — Lance's read, not assumed);
+    plus the Menendez informational flag. Local review server, one decision each.
+  - **35 draft/flagged summaries** — the two-axis gate caught real gaps; each needs Lance's read or
+    a re-author. 2 of these failed shape validation on a stray line break (newline-injection guard)
+    and just need re-authoring.
+  - **9 open vote-reconciliation flags** — source discrepancies held out of the clean record.
+  - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
+    `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
+    (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:
+    `/geocode` responds, `_redirects` rewrites survive a hard refresh, CSP headers present (open
+    question: whether `_headers` covers Pages Function responses).
 
 ## 🛠 BUILD QUEUE
 
@@ -154,6 +171,50 @@
     rows live, already past the 1000 cap) — its candidate picker is silently incomplete TODAY;
     fix via selectAll before the next summarize run.** Others (verify/extract/golden/ingest
     paths) are sub-1000 today.
+
+19. **Summary volume — wave 2+ ($0 subagent path, spends Lance's plan usage not credits).**
+    3,281 passage-vote bills still unsummarized, all with text on hand. Proven wave-1 shape: batches
+    of 5 bills per agent through author (opus) → adversarial verify (sonnet) → two-phase
+    completeness (sonnet), pipelined via a workflow, then `summary-queue.js record`. Canonical
+    prompts/schemas export from `src/lib/summarizer.js` + `src/lib/verifier.js`; **never** paraphrase
+    them into a dispatch. Wave-1 yield: 26 published / 12 flagged / 2 shape failures per 40.
+
+20. **Prompt v3 — summary polish (designed 2026-07-31, not built).** Lance asked "how do we get more
+    polished summaries?" and chose the completeness axis FIRST (built). Remaining, in value order:
+    (a) an authored `headline` field — one sentence, the thing a reader remembers — replacing the
+    heuristic one-liner extraction (`extractOneLiner` currently takes stated purpose or the first
+    bullet, so a vote row can be labeled by whichever provision happens to be first); (b) order
+    bullets by consequence, not section order (HR 845's most consequential clause — "bars courts
+    from reviewing" — renders last because it's Sec. 3); (c) tiered depth (HR 845 got 2 bullets,
+    S 2 got 31; neither reflects a policy); (d) move stated purpose ABOVE the bullets — orientation
+    currently renders after the detail; (e) juxtapose short title with content where they diverge
+    (the *Pet and Livestock Protection Act* delists gray wolves — two sourced facts side by side is
+    not editorializing). Requires a golden re-snapshot; ledgered stated_purpose long-title
+    inconsistency rules one way here.
+
+21. **Identity matcher: state-qualify federal House districts (latent gap, found 2026-07-31).**
+    `terms.state` exists (added by T8c for address lookup) but was never threaded into
+    `buildEvidenceRows`/`seatEvidencePairStatus`, so US House "district 1" in Alabama and Utah read
+    as the same seat. Surfaced by the Barry Moore / Blake Moore flag. **Cannot cause a wrong merge**
+    (a name mismatch downgrades to `ambiguous` unconditionally) — it can only ever ADD flags, unless
+    two genuinely different people someday share both a full name AND a same-numbered district in
+    different states. Non-blocking; fix when touching the matcher anyway.
+
+22. **Federal history is current-Congress only.** 365,730 federal casts all come from the 119th
+    (2025→). A senator's pre-2025 federal record simply isn't in the DB — e.g. McCaskill's Senate
+    votes. Not wrong, just thin; the site labels dates honestly. Widening means more Congress.gov
+    roll-call ingestion (free, polite, slow).
+
+23. **The 275 undated 2024 MO House roll calls (accepted, ledgered).** Refused at ingest because
+    they carry LegiScan's `0000-00-00` sentinel and their real dates are NOT honestly derivable
+    (sample: a 104-45 perfection vote whose bill history prints no matching tally). All 275 are
+    House roll calls the primary house.mo.gov pipeline supplies WITH real dates — so they arrive on
+    that source's own 30-min-ToU timeline. Decision if ever revisited: leave refused (recommended)
+    vs. store with a null date + honest "date unrecorded" display.
+
+24. **Giant bills (11 over the 400k-char gate).** HRB 2467 (561k), HRB 1 (550k), SRB 975 (751k) and
+    8 others refused rather than truncated during the text run. Options unchanged: raise toward the
+    1M-token context (~$2-4/bill against Lance's ~$6 credits) or design chunked summarization.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 

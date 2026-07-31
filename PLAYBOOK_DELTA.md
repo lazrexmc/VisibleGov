@@ -247,3 +247,50 @@ Why it recurs: `grep` exits 0 when it finds *anything*, and a failing test run s
 lines being grepped for. The failure mode is invisible in the transcript because the numbers scroll
 past in the same output that "succeeded." Recovery cost here was small (caught on the next command,
 fixed and re-pushed within minutes) but the same pattern on a data-writing CLI would not be.
+
+## Lesson 15 — A schema bound is a request, not a guarantee (2026-07-31)
+
+`COMPLETENESS_SCHEMA` declared `minItems: 3, maxItems: 7` for the provision list, and the prompt
+said the same. The assessor never checked. A checker returning **one** trivially-covered provision
+earned the identical "complete" verdict — and the identical public receipt claiming an independent
+check found the summary covers the bill — as a genuine 3-7 provision check.
+
+Generalized: **anything you declare in a schema or ask for in a prompt must be re-verified
+mechanically at the gate if a downstream claim depends on it.** A JSON Schema constrains what a
+well-behaved producer sends; it says nothing about what actually arrives, and it says nothing at
+all about whether the work behind the payload was real. This is the same doctrine as "never trust
+the verifier's self-report," one level lower down — the self-report was already distrusted, but the
+*shape* of the work product was still taken on faith.
+
+## Lesson 16 — Audit output exists to be read, not to be `ok: true` (2026-07-31)
+
+The identity linker's coherence audit returned `ok: true, violations: []` — and every single one of
+the 31 clusters it was about to write was flagged in the same output as `residualOnlyClusters`
+(held together purely by identical-name edges with no corroborating evidence). The code's own
+comments say plainly that this listing exists "so Lance can specifically scrutinize a residual-heavy
+cluster before trusting it."
+
+Trusting the boolean would have merged a sitting U.S. Senator with his son. Reading the *detail*
+caught it. When a system reports both a verdict and its basis, **the basis is the part that
+carries information** — the verdict is a summary of rules that were already known to be incomplete
+(that's why the detail is emitted at all). Budget the time to look.
+
+## Lesson 17 — On correcting production data: source the mapping, guard the write (2026-07-31)
+
+Two corrections against live rows (37,662 status codes, 10 sentinel dates). What made them safe:
+
+1. **The mapping was extracted, not remembered.** LegiScan encodes status as an integer with no
+   printed word anywhere in the payload, so the decode table *is* the correction. It came from
+   their own API manual page 42, pulled with the repo's own PDF extractor, cited in a comment.
+   A remembered mapping would have been a guess wearing a fact's clothes.
+2. **The `.eq()` guard lives on the UPDATE, never in a JS pre-filter.** `update({status: word})
+   .eq('status', '1')` cannot touch a federal bill, an already-corrected row, or anything else,
+   by construction rather than by care.
+3. **Reversibility was established before approval** — originals re-derivable from cached datasets.
+4. **Codes the source says aren't statuses were left alone and counted**, never guessed a word for.
+
+And the near-miss: the delete path in correction B matched a "duplicate" on bill + chamber + exact
+yea/nay **tally**, which a review proved could delete a genuinely different roll call that happened
+to share a tally. The fix used exact set-equality on the *legislator IDs* who voted each way —
+strictly stronger, and still exact rather than fuzzy. **When a heuristic decides whether to delete,
+the bar is identity, not resemblance.**

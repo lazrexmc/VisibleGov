@@ -11,9 +11,23 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
-**Status: slice 1 complete** (see TODO.md NOW for current state). The repo now holds the
-ingestion CLI (`src/`), schema migrations (`supabase/migrations/`), and fixture-backed tests
-(`tests/`).
+**Status (2026-07-31): backend live and accurate; public site built + merged, deploy deferred.**
+See `TODO.md` NOW for the current state and the only open operator decisions. The repo holds the
+ingestion CLIs and adapters (`src/`), the public site (`site/`), schema migrations
+(`supabase/migrations/`, 0001-0020 all applied), and fixture-backed tests (`tests/`, ~1,975 green).
+
+**If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
+17 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open),
+then the most recent `CHATLOG.md` entries (why things are the way they are).
+
+**Two standing rules that are easy to violate without noticing:**
+- **Cloudflare deploy is a MILESTONE, not a task** (Lance, 2026-07-31): *"I'm only interested in
+  starting the cloudflare portion once the entire backend is locked in and accurate, otherwise I'm
+  troubleshooting two systems back and forth and each change takes 3 steps instead of 1."* Do not
+  propose deploying until he says the backend feels solid.
+- **Gate commits on the extracted test fail-count, never on a pipeline's exit status.** `grep`
+  exits 0 when it finds the line reading `fail 15`. This mistake shipped a red suite twice in this
+  repo. See PLAYBOOK_DELTA lesson 14 for the mechanical form.
 
 ## The one non-negotiable
 

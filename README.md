@@ -5,18 +5,24 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-07-28): back end substantially live; public site (Plan 3) not yet started.**
-- **Federal voting records complete for the current Congress**: every recorded roll call, every
-  member's individual position, both chambers (US House via Clerk EVS, US Senate via LIS XML).
-- **Missouri both chambers in progress**: MO House XML/roll-call-PDF pipeline enriching on the
-  source's own 30-minute cadence; MO Senate journals-first pipeline (day-journal PDF parsing
-  with printed-tally reconciliation) merged and backfilling 2018 forward. A LegiScan bulk
-  adapter (individual MO votes confirmed populated, sessions to 2010) is being built to become
-  the primary MO path, with the primary-source parsers as the reconciliation/audit layer.
-- **Plain-language pipeline live under trust model v3**: opus-5 authors facts-only summaries and
-  referenced-law glosses from official text only; sonnet-5 adversarially refutes; verified-clean
-  items auto-publish with per-item audit logs; the owner reviews flagged items only. 104
-  glossary Background entries published; 25 bills summarized.
+**Status (2026-07-31): back end live and accurate; public site built and merged, deploy deliberately
+deferred until the backend is locked in.**
+- **1,465,102 recorded vote casts** across 9,974 roll calls — every one traceable to a clerk's XML,
+  a journal PDF, or an official dataset. Missouri 2015→2026 (both chambers); federal covers the
+  current Congress (both chambers, US House via Clerk EVS, US Senate via LIS XML).
+- **38,260 bills · 3,630 official bill texts · 46,268 sponsorships · 1,607 legislators** (37 unified
+  into cross-source persons). 99.3% of accountability-relevant Missouri bills (3,319 of 3,341 with a
+  passage vote) now have their official text on hand.
+- **Plain-language pipeline live under trust model v3, with two independent trust axes**: opus-5
+  authors facts-only summaries from official text only; sonnet-5 adversarially refutes each claim
+  (*nothing false*); a second checker independently lists the bill's key provisions **before seeing
+  the summary** and verifies coverage (*nothing important missing*). Both axes must pass
+  mechanically for auto-publish; flagged items go to the owner. 37 bills published, 116 glossary
+  entries. Runs on the flat-rate subagent path — $0 in API spend.
+- **The public site is built and merged** (`site/`): directory with address lookup, legislator
+  profiles with vote records and mechanical vote-aggregate charts, bill pages, and a trust page
+  whose prose was fact-checked against the code. Not deployed yet — by the owner's call, deploying
+  before the backend is locked means troubleshooting two intertwined systems at once.
 - Every model-calling run is mechanically gated on explicit per-run owner approval with cost
   stated. See `TODO.md` and `CHATLOG.md` for the live trail.
 

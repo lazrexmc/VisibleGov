@@ -788,3 +788,88 @@ deleted local + remote. VisibleGov now holds the ingestion platform AND its publ
 
 Open for Lance: Cloudflare Pages console (root directory must be `site`); the two-item data
 correction batch (MO status codes, the ten 1969-sentinel dates); the review queue.
+
+## 2026-07-31 — after the merge: text unlock, summary volume, corrections, identity
+
+Lance's framing for the day: **"I'm only interested in starting the cloudflare portion once the
+entire backend is locked in and accurate"** — deploying earlier means troubleshooting two
+intertwined systems and every change costs three steps instead of one. Cloudflare is therefore a
+*milestone*, not a pending task. The rest of the day was spent earning that milestone.
+
+**The live-site honesty bug (found by prediction, confirmed by observation).** The post-0019
+verification workflow caught the freshness box oscillating: every ~30 minutes the MO Senate ingest
+runs a lightweight "journal-index" slot that closed successfully but omitted the quarantine count,
+and a *missing* count rendered as the affirmative "0 days pending review" while 7 were genuinely
+held out. The verifier predicted the exact flip time from two TTLs, then caught it live at 01:09
+with ground truth beside it. Fixed at the source (every close path — including the failure path —
+now reports the standing set) and **confirmed in production at 06:09:24** on the exact run type
+that used to manufacture the zero.
+
+**MO 2024 recovered.** Root cause was operator omission, not a bug: `ingest-legiscan` takes one
+`--session` per invocation and session 2122 was never invoked while its dataset sat cached with 351
+roll calls. Swept all 31 cached sessions to confirm it was the only miss. 76 votes / 2,500 casts
+recovered for $0. The other 275 were **refused by the date guard shipped hours earlier** — they
+carry `0000-00-00`, a *second* LegiScan missing-date sentinel. Verified the real dates aren't
+honestly recoverable (the sample is a 104-45 perfection vote whose bill history prints no matching
+tally), and all 275 are House roll calls the primary house.mo.gov pipeline supplies *with* dates.
+
+**The text unlock — the day's biggest single move.** Summaries were gated on bill text: 154 of
+3,341 accountability-relevant bills had any. house.mo.gov's published ToU caps automated pulls at
+once per 30 minutes (18,336 House bills ⇒ ~382 days), so direct fetching was never a volume
+strategy. Lance chose LegiScan's `getBillText`. Binding rule 6 turned out already satisfied — an
+earlier task had fetched and read the full 43-page API manual and established no per-request rate
+value exists. The pre-flight review caught three blockers before a single query: a Rule-7
+double-download path, a response-identity hole where a document could be stored against the **wrong
+bill** *and* permanently poison the cache, and a 429 that would have kept hammering 500 more times.
+All closed, then: **bill_texts 465 → 3,630; passage-vote bills with text 154 → 3,319 of 3,341
+(99.3%)**, 3,177 queries (~10.6% of the monthly cap), zero wrong-fact events. The 11 oversize
+refusals (HRB 2467 at 561k chars, SRB 975 at 751k) and 1 image-only PDF are the entire gap.
+
+**The completeness axis — "nothing false" was only half the trust story.** Lance chose it over
+prompt rewrites because it protects every summary written afterward. The existing gate proved every
+claim *supported*; nothing proved the summary *covered* the bill. Now a checker forms its list of
+key provisions from the bill text **alone, before it ever sees the summary** (the controller sends
+the bill first and the summary only in a second message), the gate re-derives the verdict rather
+than believing the checker, and every cited section must actually exist in the bill. Migration 0020
+stores it as its own verification row; the public receipt now says a summary was checked for
+accuracy *and* coverage. A review then caught that the declared 3-7 provision bound was never
+*enforced* — a checker naming one trivial provision would have earned the same receipt as a real
+check. Closed mechanically.
+
+**Summary volume at $0.** Chain proven end-to-end on HRES 1175 (7/7 supported, 7/7 covered), then
+wave 1: 40 MO passage-vote bills through author → adversarial verify → two-phase completeness.
+**Published summaries 11 → 37.** 12 landed in the review queue on genuine flags, 2 failed shape
+validation (a stray line break tripping the newline-injection guard from the site's final review).
+The gate held back everything that didn't cleanly pass both axes.
+
+**Both data corrections, live.** The status mapping was *sourced, not remembered* — extracted from
+LegiScan's own manual page 42 via the repo's own PDF extractor. Review 1 passed correction A but
+proved by execution that correction B could **delete the wrong vote** on a coincidental tally match.
+The fix rejected my own suggested fuzzy question-text signal (it violates this project's
+zero-fuzzy-matching identity policy) and used exact set-equality on the legislator IDs who voted
+yea/nay instead — strictly stronger, still exact. Live: **37,662 bills** now show real words, **10
+votes** re-dated from their primary journal filenames, 0 deletions, 0 numeric codes or sentinel
+dates left anywhere.
+
+**Identity merge pass — one dynasty trap caught before writing.** All 31 proposed clusters were
+"residual-only" (identical names, no contradicting seat evidence) — the exact case the code's own
+comments say an operator must scrutinize. Pulled every row before trusting the audit's `ok: true`,
+and found a cluster pairing **Robert Menendez Sr.** (Senator, resigned 2024-08-20) with his son
+**Rob Menendez Jr.** (Representative, NJ-8) — concurrent service, same name, different chambers.
+Congress.gov assigns them different bioguide IDs, so it wasn't a judgment call. Wrote a
+keep-separate ruling (recorded honestly as `controller_automated`, not as Lance clicking a button
+he never saw), re-ran the dry-run to *prove* the downgrade, then ran live: **persons 7 → 37**, 30
+real merges, 0 wrong merges. Three honest new flags for review (Hank vs. Speaker Mike Johnson;
+Barry vs. Blake Moore; Dan vs. Justin Brown). The Moore flag surfaced a ledgered latent gap:
+federal House district numbers aren't state-qualified in the identity matcher's seat evidence, so
+"district 1" in two states reads as one seat. It can only ever *add* flags, never silently merge.
+
+**A mistake I own:** I pushed a red suite by chaining a commit on `grep` succeeding — and `grep`
+succeeds when it finds the line reading `fail 15`. Second occurrence of the identical error in this
+project. Caught it on the next command, fixed and re-pushed green within minutes, and wrote
+PLAYBOOK_DELTA lesson 14 with the mechanical rule rather than an intention.
+
+**Where it stands:** 1,465,102 vote casts · 3,630 bill texts · 37 published summaries · 37 persons ·
+1,975 tests green · zero known data inaccuracies. What's left before Cloudflare is Lance's review
+queue — 4 identity flags, 35 flagged summaries, 9 reconciliation flags — the one category of work
+that is structurally his.
