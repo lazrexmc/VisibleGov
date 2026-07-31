@@ -1,5 +1,5 @@
 import {
-  mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync,
+  mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ import {
   runIngestLegiscanTexts,
   BillTextDecodeError,
 } from '../src/cli/ingest-legiscan-texts.js';
-import { InvalidFlagValueError, SourceFetchError } from '../src/lib/errors.js';
+import { InvalidFlagValueError, SourceFetchError, RateLimitedError } from '../src/lib/errors.js';
 import { OversizeTextError, MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
 import { EmptyExtractionError } from '../src/cli/backfill-mo-bill-texts.js';
 import { normalizeBillIdentifier } from '../src/adapters/legiscan-dataset.js';
@@ -150,12 +150,17 @@ test('resolveTextSourceUrl: real ONE-probe fixture resolves to its own real stat
   assert.equal(resolveTextSourceUrl(REAL_BILLTEXT), REAL_BILLTEXT.state_link);
 });
 
-// ---- planLegiscanTextWork (pure planning: cached-dataset bills -> doc_id worklist, NOT gated by
-// mime/state-host the way backfill-mo-bill-texts.js's own planBillTextWork is — the LegiScan API
-// fetches by doc_id regardless of mime or which host state_link points at) ----
+// ---- planLegiscanTextWork (pure planning: cached-dataset bills -> doc_id worklist. Per MED-1
+// (controller ruling, fix-round review, corpus-verified): the mime gate IS restored here (0 of
+// 2,202 real proxy-placeholder targets are non-PDF; all 6,225 text/html bills sit on state hosts
+// the sibling CLI can already reach). The state-HOST gate stays dropped — the doc_id is all that
+// matters for a proxy-placeholder state_link. ----
 
-function moBill({ billNumber, texts = [] }) {
-  return { bill_number: billNumber, texts };
+// billId defaults to 1050440 to match billTextPayload()'s own default `billId` — every test not
+// specifically exercising HIGH-2 (identity mismatch) gets a naturally-matching legiscanBillId
+// without having to say so.
+function moBill({ billNumber, texts = [], billId = 1050440 }) {
+  return { bill_number: billNumber, bill_id: billId, texts };
 }
 
 function textEntry({
@@ -196,14 +201,39 @@ test('planLegiscanTextWork: a bill already carrying the selected version in bill
   assert.deepEqual(toFetch, []);
 });
 
-test('planLegiscanTextWork: a NON-PDF selected entry is STILL planned (unlike backfill-mo-bill-texts.js\'s planBillTextWork) — the LegiScan API fetches by doc_id regardless of mime', () => {
+test('planLegiscanTextWork: MED-1 (controller ruling, corpus-verified) — a NON-PDF selected entry is now skippedNonPdfMime, never planned', () => {
   const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
   const candidates = [{ sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [textEntry({ docId: 1, date: '2025-12-01', type: 'Introduced', mime: 'text/html' })] }) }];
-  const { toFetch } = planLegiscanTextWork(candidates, {
+  const { counts, toFetch } = planLegiscanTextWork(candidates, {
+    billIndex, textVersionIndex: new Set(), passageBillIds: new Set(),
+  });
+  assert.equal(toFetch.length, 0);
+  assert.equal(counts.skippedNonPdfMime, 1);
+});
+
+test('planLegiscanTextWork: HIGH-1 — the same doc_id appearing in TWO different candidate entries (e.g. a regenerated dataset re-listing the same bill) is deduped; only the FIRST reaches toFetch, counted duplicateDocId', () => {
+  const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
+  const sameEntry = () => textEntry({
+    docId: 1680835, date: '2025-12-01', type: 'Introduced',
+  });
+  const candidates = [
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [sameEntry()] }) },
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [sameEntry()] }) },
+  ];
+  const { counts, toFetch } = planLegiscanTextWork(candidates, {
     billIndex, textVersionIndex: new Set(), passageBillIds: new Set(),
   });
   assert.equal(toFetch.length, 1);
-  assert.equal(toFetch[0].docId, 1);
+  assert.equal(counts.duplicateDocId, 1);
+});
+
+test('planLegiscanTextWork: HIGH-2 — legiscanBillId is carried onto the worklist entry from the candidate bill\'s own bill_id', () => {
+  const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
+  const candidates = [{ sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', billId: 1050440, texts: [textEntry({ docId: 1, date: '2025-12-01', type: 'Introduced' })] }) }];
+  const { toFetch } = planLegiscanTextWork(candidates, {
+    billIndex, textVersionIndex: new Set(), passageBillIds: new Set(),
+  });
+  assert.equal(toFetch[0].legiscanBillId, 1050440);
 });
 
 test('planLegiscanTextWork: a state_link pointing at a LegiScan proxy placeholder is STILL planned (unlike backfill-mo-bill-texts.js\'s skippedNonStateHost) — the doc_id is the only thing that matters', () => {
@@ -457,19 +487,21 @@ test('runIngestLegiscanTexts: a base64 decode failure is counted (decodeFailed),
   });
 });
 
-test('runIngestLegiscanTexts: a non-PDF mime is counted (nonPdfMime), nothing stored, extractFn never called', async () => {
+test('runIngestLegiscanTexts: a RUNTIME non-PDF mime (dataset advertised PDF at planning time, per MED-1\'s gate, but the live response disagrees — the runtime check is a backstop) is counted (nonPdfMime), nothing stored, extractFn never called, and (LOW fix) gets a failures[] entry so a run that spent queries and stored nothing never silently reports "succeeded"', async () => {
   await withScratchDirAsync(async (textCacheDir) => {
     const client = makeFakeWriteClient();
     let extractCalled = false;
     const report = await runIngestLegiscanTexts(client, {
       dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
-      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
-      getBillTextFn: async () => billTextPayload({ mime: 'text/html' }),
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(), // dataset entry says application/pdf
+      getBillTextFn: async () => billTextPayload({ mime: 'text/html' }), // live response disagrees
       extractFn: async () => { extractCalled = true; return 'unreachable'; },
     });
     assert.equal(report.counts.nonPdfMime, 1);
     assert.equal(extractCalled, false);
     assert.deepEqual(client.calls, []);
+    assert.equal(report.failures.length, 1);
+    assert.equal(report.failures[0].step, 'nonPdfMime');
   });
 });
 
@@ -815,8 +847,316 @@ test('runIngestLegiscanTexts: counts reconcile — billsPlanned = docCacheHits +
     const { counts } = report;
     assert.equal(counts.billsPlanned, counts.docCacheHits + counts.queriesSpent + counts.budgetRefused, 'every planned bill lands in exactly one of: cached, queried, or budget-refused');
     const processed = counts.docCacheHits + counts.queriesSpent - counts.statusError;
-    const terminal = counts.decodeFailed + counts.nonPdfMime + counts.extractEmpty + counts.oversizeRefused + counts.inserted + counts.alreadyPresent;
-    assert.equal(processed, terminal, 'every doc that reached decode/store resolves into exactly one terminal bucket');
+    const terminal = counts.decodeFailed + counts.nonPdfMime + counts.extractEmpty + counts.oversizeRefused
+      + counts.inserted + counts.alreadyPresent + counts.identityMismatch + counts.cacheCorrupt + counts.missingSourceUrl;
+    assert.equal(processed, terminal, 'every doc that reached decode/store resolves into exactly one terminal bucket (widened to include the fix-round\'s new buckets)');
+  });
+});
+
+// ---- HIGH-1 (Rule 7 dedup, both halves) — end-to-end, at the orchestrator level ----
+
+test('runIngestLegiscanTexts: HIGH-1 — a regenerated dataset (two cache files both matching --session 1608 via startsWith; ingest-legiscan.js never deletes the prior hash\'s file) must query doc 1680835 at most ONCE, not twice — the reviewer\'s exact executed construction', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    let queryCount = 0;
+    const dataset = ONE_BILL_DATASET(); // both cache files decode to the SAME bill/doc_id
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      listFilesFn: () => ['1608-hashA.json', '1608-hashB.json'],
+      readDatasetFn: async () => dataset,
+      ...baseLoaders(),
+      getBillTextFn: async (docId) => { queryCount += 1; assert.equal(docId, 1680835); return billTextPayload(); },
+      extractFn: async () => 'text',
+    });
+    assert.equal(queryCount, 1, 'doc_id 1680835 must be queried at most once, even though it was planned twice (once per cache file)');
+    assert.equal(report.counts.queriesSpent, 1);
+    assert.equal(report.planCounts.duplicateDocId, 1);
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-1, half 2 — the cache-hit check is re-verified FRESH at each iteration, never a stale pre-loop snapshot: a cache file that materializes DURING the run is honored for a later item, never double-queried', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const dataset = fakeDataset({
+      sessionId: 1608,
+      bills: [
+        moBill({ billNumber: 'HB1', texts: [textEntry({ docId: 1, date: '2025-01-01', type: 'Introduced' })] }),
+        moBill({ billNumber: 'HB2', texts: [textEntry({ docId: 2, date: '2025-01-01', type: 'Introduced' })] }),
+      ],
+    });
+    let doc2QueryCount = 0;
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => dataset,
+      loadSessionIndexFn: async () => new Map([[1608, { id: 'sess-1608' }]]),
+      loadBillIndexFn: async () => new Map([
+        [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-1' }],
+        [`sess-1608|${normalizeBillIdentifier('HB2')}`, { id: 'bill-2' }],
+      ]),
+      loadTextVersionIndexFn: async () => new Set(),
+      loadPassageBillIdsFn: async () => new Set(),
+      getBillTextFn: async (docId) => {
+        if (docId === 1) {
+          // Simulate a cache file for doc 2 materializing DURING this run (this run's own earlier
+          // iteration, or any other process) — landing AFTER the pre-loop snapshot was taken but
+          // BEFORE the loop reaches doc 2's own item.
+          writeFileSync(join(textCacheDir, '2.json'), JSON.stringify({ status: 'OK', text: billTextPayload({ docId: 2 }) }));
+          return billTextPayload({ docId: 1 });
+        }
+        doc2QueryCount += 1;
+        return billTextPayload({ docId: 2 });
+      },
+      extractFn: async () => 'text',
+    });
+    assert.equal(doc2QueryCount, 0, 'doc 2\'s cache file materialized mid-run must be honored — never queried once a cache file exists, even one that appeared after the pre-loop snapshot');
+    assert.equal(report.counts.docCacheHits, 1, 'doc 2 is picked up as a cache hit despite the stale pre-loop snapshot saying otherwise');
+    assert.equal(report.counts.queriesSpent, 1, 'only doc 1 was actually queried');
+  });
+});
+
+// ---- HIGH-2 (response identity check) ----
+
+test('runIngestLegiscanTexts: HIGH-2 — a CACHED file containing a mismatched doc_id/bill_id ("a cache file named 1680835.json containing doc_id:999999/bill_id:777777" — the reviewer\'s exact executed construction) is refused, never stored, never re-queried', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    writeFileSync(join(textCacheDir, '1680835.json'), JSON.stringify({
+      status: 'OK',
+      text: billTextPayload({ docId: 999999, billId: 777777, doc: Buffer.from('WRONG BILL BODY').toString('base64') }),
+    }));
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => { throw new Error('must not query — a cache file already exists for this doc_id'); },
+      extractFn: async () => 'WRONG BILL BODY',
+    });
+    assert.equal(report.counts.identityMismatch, 1);
+    assert.equal(report.counts.inserted, 0);
+    assert.deepEqual(client.calls, [], 'never stored under the wrong bill');
+    assert.equal(report.failures[0].step, 'identity');
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-2 — a mismatched LIVE response is refused, never stored, and never written to the doc cache (never poisons a Rule-7-permanent cache entry)', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload({ docId: 999999, billId: 777777 }),
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.counts.identityMismatch, 1);
+    assert.equal(report.counts.inserted, 0);
+    assert.deepEqual(client.calls, []);
+    assert.equal(existsSync(join(textCacheDir, '1680835.json')), false, 'never cached under the REQUESTED doc_id — a mismatched response must never poison the cache Rule 7 says can never be re-fetched');
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-2 — a doc_id-only mismatch (bill_id matches) is still refused', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload({ docId: 999999 }), // bill_id stays the matching default
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.counts.identityMismatch, 1);
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-2 — a bill_id-only mismatch (doc_id matches) is still refused', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload({ billId: 777777 }), // doc_id stays the matching default
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.counts.identityMismatch, 1);
+  });
+});
+
+// ---- HIGH-3 (rate-limit abort, consecutive-failure circuit breaker, alertMessage) ----
+
+test('runIngestLegiscanTexts: HIGH-3 — a RateLimitedError (429) ABORTS the whole run immediately; the reviewer\'s executed construction was "500 requests issued at 1/s for 8 minutes after LegiScan said stop" — this must never happen again', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    client.runsTable.push({
+      id: 'run-1', source: SOURCE, status: 'running', detail: {},
+    });
+    let queryCount = 0;
+    const dataset = fakeDataset({
+      sessionId: 1608,
+      bills: [
+        moBill({ billNumber: 'HB1', texts: [textEntry({ docId: 1, date: '2025-01-01', type: 'Introduced' })] }),
+        moBill({ billNumber: 'HB2', texts: [textEntry({ docId: 2, date: '2025-01-01', type: 'Introduced' })] }),
+      ],
+    });
+    await assert.rejects(
+      () => runIngestLegiscanTexts(client, {
+        dryRun: false,
+        runId: 'run-1',
+        cacheDir: textCacheDir,
+        listFilesFn: () => ['a.json'],
+        readDatasetFn: async () => dataset,
+        loadSessionIndexFn: async () => new Map([[1608, { id: 'sess-1608' }]]),
+        loadBillIndexFn: async () => new Map([
+          [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-1' }],
+          [`sess-1608|${normalizeBillIdentifier('HB2')}`, { id: 'bill-2' }],
+        ]),
+        loadTextVersionIndexFn: async () => new Set(),
+        loadPassageBillIdsFn: async () => new Set(),
+        getBillTextFn: async () => { queryCount += 1; throw new RateLimitedError('rate limited by legiscan', { source: 'legiscan', status: 429 }); },
+        extractFn: async () => 'text',
+      }),
+      RateLimitedError,
+    );
+    assert.equal(queryCount, 1, 'the run aborts after the FIRST 429 — never continues to the second bill');
+    assert.equal(client.runsTable.find((r) => r.id === 'run-1')?.detail?.queries_used, 1, 'write-ahead already persisted the one query attempted before the abort — queries_used survives through the failure close path');
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-3 — a consecutive-statusError circuit breaker aborts after N=5 consecutive query failures, never burns the whole worklist against a systemic condition (e.g. "Subscription monthly query limit exceeded")', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    let queryCount = 0;
+    const bills = Array.from({ length: 8 }, (_, i) => moBill({ billNumber: `HB${i + 1}`, texts: [textEntry({ docId: i + 1, date: '2025-01-01', type: 'Introduced' })] }));
+    const dataset = fakeDataset({ sessionId: 1608, bills });
+    const billIndexEntries = bills.map((_, i) => [`sess-1608|${normalizeBillIdentifier(`HB${i + 1}`)}`, { id: `bill-${i + 1}` }]);
+    await assert.rejects(
+      () => runIngestLegiscanTexts(client, {
+        dryRun: false,
+        runId: 'run-1',
+        cacheDir: textCacheDir,
+        listFilesFn: () => ['a.json'],
+        readDatasetFn: async () => dataset,
+        loadSessionIndexFn: async () => new Map([[1608, { id: 'sess-1608' }]]),
+        loadBillIndexFn: async () => new Map(billIndexEntries),
+        loadTextVersionIndexFn: async () => new Set(),
+        loadPassageBillIdsFn: async () => new Set(),
+        getBillTextFn: async () => {
+          queryCount += 1;
+          throw new LegiScanApiError('LegiScan API error: status=ERROR', { status: 'ERROR', alertMessage: 'Subscription monthly query limit exceeded' });
+        },
+        extractFn: async () => 'text',
+      }),
+      /consecutive/i,
+    );
+    assert.equal(queryCount, 5, 'aborts after exactly 5 consecutive failures — never issues the 6th-8th requests');
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-3 — a status:ERROR failure carries err.alertMessage into failures[] (e.g. "Subscription monthly query limit exceeded"), so an operator can see WHY', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => { throw new LegiScanApiError('LegiScan API error: status=ERROR', { status: 'ERROR', alertMessage: 'Subscription monthly query limit exceeded' }); },
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.failures[0].alertMessage, 'Subscription monthly query limit exceeded');
+  });
+});
+
+test('runIngestLegiscanTexts: HIGH-3 — a query failure with no alertMessage at all reports null, never throws trying to read it', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => { throw new LegiScanApiError('LegiScan API error: status=ERROR', { status: 'ERROR' }); },
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.failures[0].alertMessage, null);
+  });
+});
+
+// ---- MED-2 (atomic cache writes + cacheCorrupt) ----
+
+test('runIngestLegiscanTexts: MED-2 — a successful cache write leaves no stray temp file, and the final file is valid JSON (atomic temp+rename)', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload(),
+      extractFn: async () => 'text',
+    });
+    const files = readdirSync(textCacheDir);
+    assert.deepEqual(files, ['1680835.json'], 'no leftover .tmp/partial file after a successful write');
+    assert.doesNotThrow(() => JSON.parse(readFileSync(join(textCacheDir, '1680835.json'), 'utf8')));
+  });
+});
+
+test('runIngestLegiscanTexts: MED-2 — a truncated/corrupt cache file is refused (cacheCorrupt), NEVER re-queried (Rule 7 forbids re-fetching a doc_id with a cache file present, corrupt or not), and the run continues', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    writeFileSync(join(textCacheDir, '1680835.json'), '{not valid json, truncated mid-write');
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => { throw new Error('must not query — Rule 7 forbids re-fetching a cached doc_id, corrupt or not'); },
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.counts.cacheCorrupt, 1);
+    assert.equal(report.counts.docCacheHits, 1, 'a cache file WAS found — the hit is real, only the parse is corrupt');
+    assert.equal(report.counts.queriesSpent, 0);
+    assert.equal(report.counts.inserted, 0);
+    assert.equal(report.failures[0].step, 'cacheCorrupt');
+  });
+});
+
+// ---- MED-3 (refuse a receipt-less row) ----
+
+test('runIngestLegiscanTexts: MED-3 — a response with neither a real state_link nor a usable `url` field is refused (missingSourceUrl), never stored with a null/empty receipt', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload({ stateLink: 'http://reflect.legiscan.com/Proxy.php', url: '' }),
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.counts.missingSourceUrl, 1);
+    assert.equal(report.counts.inserted, 0);
+    assert.deepEqual(client.calls, []);
+    assert.equal(report.failures[0].step, 'sourceUrl');
+  });
+});
+
+// ---- MED-4 (surface plan.counts as a sibling field) ----
+
+test('runIngestLegiscanTexts: MED-4 — planCounts surfaces the raw planning-time breakdown as a sibling of counts (never folded into the closed counts list), in BOTH dry-run and live reports', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const dryReport = await runIngestLegiscanTexts(client, {
+      dryRun: true, cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+    });
+    assert.equal(dryReport.planCounts.billsSeen, 1);
+    assert.equal(dryReport.planCounts.billMatched, 1);
+    assert.equal(typeof dryReport.planCounts.billUnmatched, 'number');
+    assert.equal(typeof dryReport.planCounts.noTextEntry, 'number');
+    assert.equal(typeof dryReport.planCounts.noDocId, 'number');
+    assert.equal(typeof dryReport.planCounts.skippedNonPdfMime, 'number');
+    assert.equal(typeof dryReport.planCounts.duplicateDocId, 'number');
+    assert.equal(typeof dryReport.planCounts.alreadyHasVersion, 'number');
+    assert.equal(dryReport.counts.alreadyHasVersion, dryReport.planCounts.alreadyHasVersion, 'the closed-list copy and the raw planning breakdown must agree');
+
+    const liveReport = await runIngestLegiscanTexts(client, {
+      dryRun: false, runId: 'run-1', cacheDir: textCacheDir, listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(), ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload(), extractFn: async () => 'text',
+    });
+    assert.equal(liveReport.planCounts.billsSeen, 1);
   });
 });
 
