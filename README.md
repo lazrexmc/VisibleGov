@@ -17,7 +17,7 @@ deferred until the backend is locked in.**
   authors facts-only summaries from official text only; sonnet-5 adversarially refutes each claim
   (*nothing false*); a second checker independently lists the bill's key provisions **before seeing
   the summary** and verifies coverage (*nothing important missing*). Both axes must pass
-  mechanically for auto-publish; flagged items go to the owner. 37 bills published, 116 glossary
+  mechanically for auto-publish; flagged items go to the owner. 39 bills published, 116 glossary
   entries. Runs on the flat-rate subagent path — $0 in API spend.
 - **The public site is built and merged** (`site/`): directory with address lookup, legislator
   profiles with vote records and mechanical vote-aggregate charts, bill pages, and a trust page

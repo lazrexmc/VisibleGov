@@ -22,3 +22,20 @@ before the summary was shown, per doctrine). All 9 well-formed, all covered 0 un
 6 published, 2 flagged, 1 failed shape (SB 977, same newline-injection class as SCR 21).
 WAVE 1 TOTAL: 40/40 bills processed through both trust axes. 26 published (11->31... final: see
 live count), 12 flagged to review queue, 2 failed shape validation (recoverable via re-author).
+
+WAVE 1 SHAPE-FAILURE RECOVERY (2026-07-31, during the pre-restart preservation pass): the 2 bills
+that failed shape validation were recovered rather than abandoned — 40/40 of wave 1 is now recorded,
+nothing left unrecorded in scratchpad (which is temp and does not survive a system wipe).
+- SCR 21: stated_purpose was a verbatim quote that WRAPPED LINES in the source PDF, tripping the
+  newline-injection guard. Fixed by collapsing whitespace runs in the structural single-line fields
+  only — wording untouched, and still grounds because checkStatedPurposeGrounding normalizes
+  whitespace on BOTH sides. PUBLISHED.
+- SB 977: a DIFFERENT failure, and the gate was catching a CHECKER error, not a summary error —
+  the completeness checker emitted coverage with bullet_index 8 for an 8-bullet summary (valid
+  0..7, an off-by-one). Deliberately NOT papered over by editing the index (that would fabricate a
+  coverage claim the checker never correctly made); the completeness check was RE-RUN from phase 1,
+  returned 7 provisions / 7 covered with all indices in range. PUBLISHED.
+LESSON: the shape guards catch producer errors in BOTH the author and the checker. A "failure" in
+this pipeline is frequently recoverable at near-zero cost by re-running the specific stage that
+produced the bad artifact — worth checking the exact message before discarding an authored summary
+(the authoring is the expensive part; the checks are cheap to redo).
