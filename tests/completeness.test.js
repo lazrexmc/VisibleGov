@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   COMPLETENESS_SCHEMA, COMPLETENESS_SYSTEM_PROMPT, COMPLETENESS_PROMPT_VERSION,
   buildProvisionsMessage, buildCoverageMessage, assessCompleteness,
+  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS,
 } from '../src/lib/verifier.js';
 
 // ---- COMPLETENESS_PROMPT_VERSION ----
@@ -232,4 +233,41 @@ test('assessCompleteness: never throws on garbage bulletCount/billText', () => {
 test('assessCompleteness: a non-empty billText argument of "" cannot ground anything -> malformed', () => {
   const result = assessCompleteness(goodPayload(), 3, '');
   assert.equal(result.overall, 'malformed');
+});
+
+// ---- malformed: the declared 3-7 provision bound, enforced mechanically ----
+// Review finding (2026-07-31): the schema declared minItems/maxItems but assessCompleteness never
+// checked them, so a checker naming ONE trivially-covered provision earned the same 'complete'
+// verdict — and the same public "covers the bill's key provisions" receipt — as a real check.
+// A schema bound is a request to the checker; trust model v3 says never assume compliance.
+
+test('assessCompleteness: fewer than MIN_KEY_PROVISIONS -> malformed (a thin check cannot earn the receipt)', () => {
+  const thin = {
+    key_provisions: [{ section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'covered' }],
+  };
+  const result = assessCompleteness(thin, 3, BILL_TEXT);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons[0], /1 entries, outside the required 3-7/);
+});
+
+test('assessCompleteness: exactly MIN_KEY_PROVISIONS is accepted (the bound is inclusive)', () => {
+  assert.equal(assessCompleteness(goodPayload(), 3, BILL_TEXT).overall, 'complete');
+});
+
+test('assessCompleteness: more than MAX_KEY_PROVISIONS -> malformed (the checker ignored its instructions)', () => {
+  const provisions = [];
+  const coverage = [];
+  for (let i = 0; i < 8; i += 1) {
+    provisions.push({ section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' });
+    coverage.push({ provision_index: i, covered: true, bullet_index: 0, note: 'covered' });
+  }
+  const result = assessCompleteness({ key_provisions: provisions, coverage }, 3, BILL_TEXT);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons[0], /8 entries, outside the required 3-7/);
+});
+
+test('MIN/MAX_KEY_PROVISIONS are the same values the schema declares (no drift between the ask and the enforcement)', () => {
+  assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.minItems, MIN_KEY_PROVISIONS);
+  assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.maxItems, MAX_KEY_PROVISIONS);
 });

@@ -136,6 +136,14 @@ export const COMPLETENESS_SYSTEM_PROMPT = [
   '- When a provision is not covered by any bullet, mark covered false, leave bullet_index null, and explain what is missing in note — never force a weak or partial match to count as coverage.',
 ].join('\n');
 
+// The declared provision bound. Exported because assessCompleteness enforces it MECHANICALLY —
+// a schema minItems/maxItems is a request to the checker, not a guarantee about what arrives at
+// the gate, and trust model v3's rule is that a checker's own compliance is never assumed. A
+// payload naming one trivially-covered provision would otherwise earn the same 'complete' verdict
+// (and the same public "covers the bill's key provisions" receipt) as a real 3-7 provision check.
+export const MIN_KEY_PROVISIONS = 3;
+export const MAX_KEY_PROVISIONS = 7;
+
 export const COMPLETENESS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -143,8 +151,8 @@ export const COMPLETENESS_SCHEMA = {
   properties: {
     key_provisions: {
       type: 'array',
-      minItems: 3,
-      maxItems: 7,
+      minItems: MIN_KEY_PROVISIONS,
+      maxItems: MAX_KEY_PROVISIONS,
       description: 'Phase 1 output: the 3-7 provisions a reader must know, formed from the bill text ONLY, without reference to the summary',
       items: {
         type: 'object',
@@ -217,6 +225,17 @@ export function assessCompleteness(completeness, bulletCount, billText) {
   }
   if (keyProvisions.length === 0) {
     return { overall: 'malformed', missing: [], reasons: ['zero key_provisions — a checker that finds no provisions has not checked anything'] };
+  }
+  // The schema asks for MIN..MAX provisions; this enforces it. Below the floor the check is too
+  // thin to support the receipt it would earn (one covered provision is not evidence a summary
+  // covers the bill); above the ceiling the checker ignored its instructions, so its output is
+  // not the artifact this gate was designed to assess. Either way: malformed, never publishable.
+  if (keyProvisions.length < MIN_KEY_PROVISIONS || keyProvisions.length > MAX_KEY_PROVISIONS) {
+    return {
+      overall: 'malformed',
+      missing: [],
+      reasons: [`key_provisions has ${keyProvisions.length} entries, outside the required ${MIN_KEY_PROVISIONS}-${MAX_KEY_PROVISIONS} — the check does not meet the standard its verdict would claim`],
+    };
   }
 
   const reasons = [];
