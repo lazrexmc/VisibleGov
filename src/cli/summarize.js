@@ -1,5 +1,5 @@
 import { getClient, openRun, closeRun, insertIfAbsent, isMissingRelationError } from '../lib/db.js';
-import { SourceFetchError } from '../lib/errors.js';
+import { SourceFetchError, assertRunApproved, RunNotApprovedError } from '../lib/errors.js';
 import { billTypeSlug } from '../adapters/us-congress.js';
 import { parseTextVersions, pickTextUrl, stripHtml, sha256, fetchBillTextVersions, fetchTextBody } from '../adapters/us-congress-text.js';
 import {
@@ -249,6 +249,22 @@ function isTypedFailure(err) {
   return FAILURE_TYPES.some((T) => err instanceof T);
 }
 
+// checkSummarizeApproval (task 1, 2026-07-31): the mechanical per-run spend gate summarize.js
+// lacked — this file bills Lance's Anthropic account (bill summary authoring) and previously ran
+// with no gate at all, against the owner's standing spend hold and against CLAUDE.md's own stated
+// policy ("Mechanical enforcement exists where possible — extend that pattern to new
+// model-calling tools"). Thin, exported wrapper around the shared assertRunApproved (lib/errors.js)
+// so this exact wiring — env var name, action wording — is directly testable without needing a
+// fake DB/Anthropic client at all. See main() below for the call site: fires after the --dry-run
+// branch has already returned and before getAnthropicClient() is called, so it blocks before any
+// Anthropic client is constructed and before any bill text is fetched for sending (ensureText/
+// createDraftSummary only run further down, inside the try block).
+export function checkSummarizeApproval(envValue) {
+  assertRunApproved(envValue, {
+    envVar: 'SUMMARIZE_RUN_APPROVED', action: 'summarizing', detail: 'bill summary authoring',
+  });
+}
+
 // ---- main ----
 
 async function main() {
@@ -273,6 +289,22 @@ async function main() {
       stale: plan.stale.map((s) => s.bill_id),
     }, null, 2));
     return;
+  }
+
+  // Mechanical per-run approval gate (task 1) — same standing policy as GLOSS_RUN_APPROVED in
+  // gloss.js/extract-terms.js and GOLDEN_CHECK_APPROVED in golden.js: no live, billed Anthropic
+  // call runs without Lance's explicit per-run opt-in. Caught locally (not left to propagate to
+  // main().catch below) so the CLI prints the same clean single BLOCKED line gloss.js does,
+  // never a raw stack trace.
+  try {
+    checkSummarizeApproval(process.env.SUMMARIZE_RUN_APPROVED);
+  } catch (err) {
+    if (err instanceof RunNotApprovedError) {
+      console.log(err.message);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
   }
 
   const anthropic = getAnthropicClient();

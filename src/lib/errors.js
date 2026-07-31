@@ -46,3 +46,35 @@ export function parsePositiveIntegerFlag(rawValue, flag) {
   }
   return n;
 }
+
+// RunNotApprovedError / assertRunApproved — task 1 (2026-07-31), the shared mechanical spend-gate
+// primitive behind summarize.js's SUMMARIZE_RUN_APPROVED and verify.js's VERIFY_RUN_APPROVED.
+// gloss.js's GLOSS_RUN_APPROVED (also reused by extract-terms.js) and golden.js's
+// GOLDEN_CHECK_APPROVED predate this and stay untouched, inline, per-file — this shared pair only
+// backs the two CLIs newly gated here, so their wording can't drift from each other the way two
+// hand-copied message strings eventually would (same rationale as parsePositiveIntegerFlag/
+// InvalidFlagValueError above).
+export class RunNotApprovedError extends Error {
+  constructor(message, { envVar, action } = {}) {
+    super(message);
+    this.name = 'RunNotApprovedError';
+    this.envVar = envVar;
+    this.action = action;
+  }
+}
+
+// Throws unless envValue is exactly 'yes' — mirrors gloss.js's own `!== 'yes'` check, so
+// 'true'/'1'/anything else is refused, not just an unset var. The message keeps gloss.js's voice:
+// what makes the run cost money, that approval is the owner's per-run call, and the exact env var
+// to set. Callers (see summarize.js/verify.js main()) catch RunNotApprovedError locally and print
+// err.message via console.log — never console.error — so the CLI's output stays the same clean
+// single line gloss.js itself prints, not a raw stack trace.
+export function assertRunApproved(envValue, { envVar, action, detail } = {}) {
+  if (envValue === 'yes') return;
+  const detailSuffix = detail ? ` (${detail})` : '';
+  throw new RunNotApprovedError(
+    `BLOCKED: ${action} makes live, billed Anthropic API calls${detailSuffix}. Per the owner's `
+      + `standing policy, each run requires his explicit per-run approval — set ${envVar}=yes to proceed.`,
+    { envVar, action },
+  );
+}

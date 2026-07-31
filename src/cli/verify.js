@@ -1,4 +1,5 @@
 import { getClient, openRun, closeRun, isMissingRelationError } from '../lib/db.js';
+import { assertRunApproved, RunNotApprovedError } from '../lib/errors.js';
 import { pickBillText } from '../review/server.js';
 import {
   getAnthropicClient, MAX_TEXT_CHARS,
@@ -61,6 +62,20 @@ export function checkBulletCoverage(identifier, bodyMd, bullets) {
 
 function isTypedFailure(err) {
   return FAILURE_TYPES.some((T) => err instanceof T);
+}
+
+// checkVerifyApproval (task 1, 2026-07-31): the mechanical per-run spend gate verify.js lacked —
+// this file bills Lance's Anthropic account (adversarial summary verification) and previously ran
+// with no gate at all, against the owner's standing spend hold and against CLAUDE.md's own stated
+// policy ("Mechanical enforcement exists where possible — extend that pattern to new
+// model-calling tools"). Thin, exported wrapper around the shared assertRunApproved (lib/errors.js)
+// so this exact wiring — env var name, action wording — is directly testable without needing a
+// fake DB/Anthropic client at all. See main() below for the call site: fires after the --dry-run
+// branch has already returned and before getAnthropicClient() is called.
+export function checkVerifyApproval(envValue) {
+  assertRunApproved(envValue, {
+    envVar: 'VERIFY_RUN_APPROVED', action: 'verification', detail: 'adversarial summary verification',
+  });
 }
 
 // ---- DB-facing helpers ----
@@ -148,6 +163,22 @@ async function main() {
     if (tableMissing) out.note = '(summary_verifications missing — 0004 not applied; treating all as unverified)';
     console.log(JSON.stringify(out, null, 2));
     return;
+  }
+
+  // Mechanical per-run approval gate (task 1) — same standing policy as GLOSS_RUN_APPROVED in
+  // gloss.js/extract-terms.js and GOLDEN_CHECK_APPROVED in golden.js: no live, billed Anthropic
+  // call runs without Lance's explicit per-run opt-in. Caught locally (not left to propagate to
+  // main().catch below) so the CLI prints the same clean single BLOCKED line gloss.js does,
+  // never a raw stack trace.
+  try {
+    checkVerifyApproval(process.env.VERIFY_RUN_APPROVED);
+  } catch (err) {
+    if (err instanceof RunNotApprovedError) {
+      console.log(err.message);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
   }
 
   const anthropic = getAnthropicClient();

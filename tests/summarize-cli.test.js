@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   planWork, wrapTextFormatError, persistReferencedTermsGracefully, createDraftSummary,
+  checkSummarizeApproval,
 } from '../src/cli/summarize.js';
-import { SourceFetchError } from '../src/lib/errors.js';
+import { SourceFetchError, RunNotApprovedError } from '../src/lib/errors.js';
 
 const bills = [{ id: 'b1', identifier: 'HR 1' }, { id: 'b2', identifier: 'HR 2' }, { id: 'b3', identifier: 'HR 3' }];
 const texts = [{ bill_id: 'b2', content_hash: 'h2' }, { bill_id: 'b3', content_hash: 'h3-new' }];
@@ -311,4 +312,24 @@ test('batch loop over two bills: a non-missing-relation persist error on bill 2 
   assert.equal(glossaryWarnings[0].identifier, 'HR 2');
   assert.equal(glossaryWarnings[0].warning.kind, 'persist_error');
   assert.match(glossaryWarnings[0].warning.message, /duplicate key/);
+});
+
+// ---- checkSummarizeApproval: task 1's spend gate — mirrors gloss.js's GLOSS_RUN_APPROVED shape
+// exactly, wired to SUMMARIZE_RUN_APPROVED. main() calls this before constructing an Anthropic
+// client or fetching any bill text for sending; see summarize.js's main() for the call site. ----
+
+test('checkSummarizeApproval blocks unless SUMMARIZE_RUN_APPROVED is exactly "yes"', () => {
+  assert.throws(() => checkSummarizeApproval(undefined), RunNotApprovedError);
+  assert.throws(() => checkSummarizeApproval('true'), RunNotApprovedError);
+  assert.doesNotThrow(() => checkSummarizeApproval('yes'));
+});
+
+test('checkSummarizeApproval\'s message names SUMMARIZE_RUN_APPROVED specifically, never another CLI\'s var', () => {
+  try {
+    checkSummarizeApproval('no');
+    assert.fail('expected checkSummarizeApproval to throw');
+  } catch (err) {
+    assert.match(err.message, /set SUMMARIZE_RUN_APPROVED=yes to proceed/);
+    assert.doesNotMatch(err.message, /VERIFY_RUN_APPROVED|GLOSS_RUN_APPROVED|GOLDEN_CHECK_APPROVED/);
+  }
 });

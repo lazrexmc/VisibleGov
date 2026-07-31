@@ -6,7 +6,8 @@ import {
   buildVerifyMessage, verifyBill, assessVerdicts, VerificationIncompleteError,
 } from '../src/lib/verifier.js';
 import { MODEL, MAX_TEXT_CHARS, OversizeTextError, renderMarkdown } from '../src/lib/summarizer.js';
-import { parseArgs, parseBullets, checkBulletCoverage } from '../src/cli/verify.js';
+import { parseArgs, parseBullets, checkBulletCoverage, checkVerifyApproval } from '../src/cli/verify.js';
+import { RunNotApprovedError } from '../src/lib/errors.js';
 
 // ---- constants (controller ruling #4: sonnet stays sonnet, deliberately not opus) ----
 
@@ -246,3 +247,23 @@ test('parseArgs rejects unknown flags', () => {
 
 // isMissingRelationError itself now lives in src/lib/db.js (shared with the review server) —
 // see tests/db.test.js for its unit tests. verify.js just imports and uses it.
+
+// ---- checkVerifyApproval: task 1's spend gate — mirrors gloss.js's GLOSS_RUN_APPROVED shape
+// exactly, wired to VERIFY_RUN_APPROVED. main() calls this before constructing an Anthropic
+// client; see verify.js's main() for the call site. ----
+
+test('checkVerifyApproval blocks unless VERIFY_RUN_APPROVED is exactly "yes"', () => {
+  assert.throws(() => checkVerifyApproval(undefined), RunNotApprovedError);
+  assert.throws(() => checkVerifyApproval('true'), RunNotApprovedError);
+  assert.doesNotThrow(() => checkVerifyApproval('yes'));
+});
+
+test('checkVerifyApproval\'s message names VERIFY_RUN_APPROVED specifically, never another CLI\'s var', () => {
+  try {
+    checkVerifyApproval('no');
+    assert.fail('expected checkVerifyApproval to throw');
+  } catch (err) {
+    assert.match(err.message, /set VERIFY_RUN_APPROVED=yes to proceed/);
+    assert.doesNotMatch(err.message, /SUMMARIZE_RUN_APPROVED|GLOSS_RUN_APPROVED|GOLDEN_CHECK_APPROVED/);
+  }
+});

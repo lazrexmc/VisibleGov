@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SourceFetchError, RateLimitedError } from '../src/lib/errors.js';
+import { SourceFetchError, RateLimitedError, RunNotApprovedError, assertRunApproved } from '../src/lib/errors.js';
 import { createLimiter } from '../src/lib/rate-limiter.js';
 import { redactUrl } from '../src/lib/http.js';
 
@@ -64,4 +64,53 @@ test('redactUrl also redacts access_key= (LegiScan\'s per-dataset token from get
 test('redactUrl passes through URLs with no query unchanged', () => {
   assert.equal(redactUrl('https://clerk.house.gov/evs/2025/roll358.xml'), 'https://clerk.house.gov/evs/2025/roll358.xml');
   assert.equal(redactUrl('https://x/y?format=json&limit=250'), 'https://x/y?format=json&limit=250');
+});
+
+// ---- assertRunApproved / RunNotApprovedError: the shared spend-gate primitive behind
+// summarize.js's SUMMARIZE_RUN_APPROVED and verify.js's VERIFY_RUN_APPROVED (task 1, closing the
+// gap CLAUDE.md's own policy flagged — gloss.js's GLOSS_RUN_APPROVED and golden.js's
+// GOLDEN_CHECK_APPROVED predate this and stay untouched, inline, per-file). ----
+
+test('assertRunApproved throws RunNotApprovedError unless the value is exactly "yes"', () => {
+  assert.throws(
+    () => assertRunApproved(undefined, { envVar: 'FOO_RUN_APPROVED', action: 'fooing' }),
+    RunNotApprovedError,
+  );
+  assert.throws(
+    () => assertRunApproved('', { envVar: 'FOO_RUN_APPROVED', action: 'fooing' }),
+    RunNotApprovedError,
+  );
+  // Truthy-looking but not the exact sentinel — same discipline as gloss.js's own `!== 'yes'`.
+  assert.throws(
+    () => assertRunApproved('true', { envVar: 'FOO_RUN_APPROVED', action: 'fooing' }),
+    RunNotApprovedError,
+  );
+});
+
+test('assertRunApproved does not throw when the value is exactly "yes"', () => {
+  assert.doesNotThrow(() => assertRunApproved('yes', { envVar: 'FOO_RUN_APPROVED', action: 'fooing' }));
+});
+
+test('RunNotApprovedError message states the run costs real money, that approval is per-run, and the exact env var to set — gloss.js\'s voice', () => {
+  try {
+    assertRunApproved(undefined, { envVar: 'FOO_RUN_APPROVED', action: 'fooing', detail: 'doing the foo' });
+    assert.fail('expected assertRunApproved to throw');
+  } catch (err) {
+    assert.ok(err instanceof RunNotApprovedError);
+    assert.equal(err.name, 'RunNotApprovedError');
+    assert.match(err.message, /^BLOCKED: fooing makes live, billed Anthropic API calls \(doing the foo\)\./);
+    assert.match(err.message, /owner's standing policy/);
+    assert.match(err.message, /explicit per-run approval/);
+    assert.match(err.message, /set FOO_RUN_APPROVED=yes to proceed/);
+    assert.equal(err.envVar, 'FOO_RUN_APPROVED');
+  }
+});
+
+test('assertRunApproved omits the parenthetical when no detail is given', () => {
+  try {
+    assertRunApproved('no', { envVar: 'FOO_RUN_APPROVED', action: 'fooing' });
+    assert.fail('expected assertRunApproved to throw');
+  } catch (err) {
+    assert.match(err.message, /^BLOCKED: fooing makes live, billed Anthropic API calls\. Per/);
+  }
 });
