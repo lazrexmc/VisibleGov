@@ -1,4 +1,4 @@
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { extractPdfText } from './pdf-text.js';
 
 // Task 4: MO Senate whole-day journal PDF -> multiple recorded votes in one document (unlike
 // mo-rollcall-pdf.js's mo-house-xml.js sibling, which parses ONE roll call per PDF). Architecture
@@ -18,10 +18,10 @@ export class JournalParseError extends Error {
 
 // ---- text extraction ----
 //
-// Same Uint8Array-conversion / sequential-pages pattern as mo-rollcall-pdf.js's
-// extractRollCallText (see that file's own comment for why: pdfjs-dist's LEGACY build is the
-// Node-safe one, and Buffer must be rebuilt as a plain Uint8Array because pdfjs-dist rejects a
-// Node Buffer even though Buffer IS-A Uint8Array).
+// Shared pdfjs plumbing + row-reconstruction now lives in pdf-text.js's extractPdfText/
+// reconstructPageText (extracted from here and from mo-rollcall-pdf.js, which used to each carry
+// their own byte-identical copy - see that module's own header for why). This file layers its own
+// chrome-stripping and vote-block parsing grammar on top.
 //
 // REAL-PDF FINDING (CONTROLLER RULING 4, verified against BOTH real fixtures -
 // tests/fixtures/research/mo-senate/2018-day37-journal-onder-era.pdf and
@@ -31,31 +31,13 @@ export class JournalParseError extends Error {
 // for the vote-block anchor phrase "by the following vote:" (tolerant of an internal line-wrap)
 // finds all 13 blocks in Day 37 and all 11 in Day 39 when text is reconstructed by row (grouping
 // items into rows by descending y, sorting each row left-to-right by x - exactly
-// reconstructPageText below) - but plain stream-order concatenation of the SAME items finds only
-// 9 of 13 in Day 37 and 9 of 11 in Day 39 (the underlying content stream interleaves some items
-// out of visual order, splitting "following" and "vote" across unrelated intervening text so the
-// literal phrase never appears contiguously). Coordinate-based reconstruction is therefore
+// pdf-text.js's reconstructPageText) - but plain stream-order concatenation of the SAME items finds
+// only 9 of 13 in Day 37 and 9 of 11 in Day 39 (the underlying content stream interleaves some
+// items out of visual order, splitting "following" and "vote" across unrelated intervening text so
+// the literal phrase never appears contiguously). Coordinate-based reconstruction is therefore
 // REQUIRED for this document type, not a defensive redundancy - confirmed by running both
 // extraction strategies against both real fixtures and counting anchor matches before writing any
 // parsing logic (see task-4-report.md for the exact counts).
-const ROW_Y_EPSILON = 2; // pt tolerance for "same printed row" - same value/rationale as
-// mo-rollcall-pdf.js's reconstructPageText (font-metric rounding on a shared visual line stays
-// well under this, distinct printed rows are ~13pt apart).
-
-function reconstructPageText(items) {
-  const visible = items.filter((it) => it.str !== '');
-  const sorted = [...visible].sort((a, b) => b.transform[5] - a.transform[5]);
-  const rows = [];
-  for (const item of sorted) {
-    const y = item.transform[5];
-    const current = rows[rows.length - 1];
-    if (current && Math.abs(current.y - y) <= ROW_Y_EPSILON) current.items.push(item);
-    else rows.push({ y, items: [item] });
-  }
-  return rows
-    .map((row) => row.items.slice().sort((a, b) => a.transform[4] - b.transform[4]).map((it) => it.str).join(''))
-    .join('\n');
-}
 
 // REAL-PDF FINDING (task-4-report.md): every page of both real fixtures carries running chrome -
 // a bare page-number line (e.g. '587'), a 'Journal of the Senate <N>' header/footer (with the
@@ -140,15 +122,7 @@ export function stripPageChrome(text) {
 // for a busy day) joined page-by-page in document order, sequential (not Promise.all) so pages
 // stay in reading order.
 export async function extractJournalText(pdfBuffer) {
-  const data = new Uint8Array(pdfBuffer);
-  const doc = await getDocument({ data }).promise;
-  const pageTexts = [];
-  for (let pageNum = 1; pageNum <= doc.numPages; pageNum += 1) {
-    const page = await doc.getPage(pageNum);
-    const content = await page.getTextContent();
-    pageTexts.push(reconstructPageText(content.items));
-  }
-  return stripPageChrome(pageTexts.join('\n\n'));
+  return stripPageChrome(await extractPdfText(pdfBuffer));
 }
 
 // ---- parsing: vote-block anchors ----

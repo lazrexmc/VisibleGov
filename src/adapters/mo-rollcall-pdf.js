@@ -1,5 +1,5 @@
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { fetchWithLimit } from '../lib/http.js';
+import { extractPdfText } from './pdf-text.js';
 import { SOURCE as MO_HOUSE_SOURCE, moHouseLimiter } from './mo-house-xml.js';
 
 // Task 4b: individual MO House votes, extracted from the per-roll-call PDF a bill's own XML links
@@ -21,62 +21,24 @@ export class RollCallParseError extends Error {
 
 // ---- text extraction ----
 //
-// Node has no browser APIs (no DOM, no Worker by default in this usage) - pdfjs-dist's STANDARD
-// build assumes them; the LEGACY build (pdfjs-dist/legacy/build/pdf.mjs) is the one meant for
-// exactly this environment. getDocument({data}) -> getPage(n) -> getTextContent() -> items[].str,
-// per pdfjs-dist's own documented API.
-//
 // REAL-PDF FINDING (verified against tests/fixtures/research/mo-house-xml/rollcall-034.008.pdf,
 // a genuine 4-column roll-call layout): pdfjs-dist's own text-item STREAM order for this PDF is
 // ALREADY correct row-major reading order - each printed row's 4 columns come out left-to-right
 // before the next row starts, not column-by-column. That is a property of how this PDF's content
 // stream happens to have been generated, not a pdfjs-dist guarantee (nothing in the text-content
 // API promises reading order for a multi-column layout). Rather than depend on that happening to
-// hold for every MO House roll-call PDF, reconstruction below ALWAYS re-derives line order from
-// each item's own transform coordinates: group items into rows by descending y (PDF y grows
-// upward - a smaller/later y is further down the page), sort each row's items by ascending x. For
-// the real fixture this produces byte-identical output to "just concatenate items in stream
-// order" - confirmed while building this adapter - but it is the only approach actually guaranteed
-// correct if a future MO House PDF's generator writes its content stream in a different order.
-const ROW_Y_EPSILON = 2; // pt tolerance for "same printed row". Real grid rows in the fixture share
-// the exact same y across all 4 columns; a couple of unrelated header items (independently-sized
-// text on the same visual line) differ by <0.3pt due to font-metric rounding - both comfortably
-// under this tolerance, while distinct rows are ~13pt apart.
-
-function reconstructPageText(items) {
-  const visible = items.filter((it) => it.str !== '');
-  const sorted = [...visible].sort((a, b) => b.transform[5] - a.transform[5]);
-  const rows = [];
-  for (const item of sorted) {
-    const y = item.transform[5];
-    const current = rows[rows.length - 1];
-    if (current && Math.abs(current.y - y) <= ROW_Y_EPSILON) current.items.push(item);
-    else rows.push({ y, items: [item] });
-  }
-  return rows
-    .map((row) => row.items.slice().sort((a, b) => a.transform[4] - b.transform[4]).map((it) => it.str).join(''))
-    .join('\n');
-}
-
-// pdfBuffer: a Buffer/Uint8Array/ArrayBuffer of raw PDF bytes (never a file path - callers decide
-// whether that came from a local fixture read or a live fetch). Multi-page PDFs (not needed by the
-// 163-seat MO House on one page, but not assumed away) are joined page-by-page in document order.
+// hold for every MO House roll-call PDF, extraction always re-derives line order from each item's
+// own transform coordinates (pdf-text.js's reconstructPageText, shared with mo-senate-journal-
+// pdf.js and the MO bill-text fetcher - see that module's own header for why this lives there now
+// instead of a third hand-copy here). For this real fixture it produces byte-identical output to
+// "just concatenate items in stream order" - confirmed while building this adapter - but it is the
+// only approach actually guaranteed correct if a future MO House PDF's generator writes its content
+// stream in a different order.
 //
-// Always rebuilt as a plain `Uint8Array` (never passed through as-is): pdfjs-dist explicitly
-// rejects a Node `Buffer` ("Please provide binary data as Uint8Array, rather than Buffer") even
-// though Buffer IS-A Uint8Array - readFileSync (the fixture/live-fetch-buffer path in
-// ingest-mo-house.js) returns a Buffer, so this conversion is required, not defensive filler.
+// pdfBuffer: a Buffer/Uint8Array/ArrayBuffer of raw PDF bytes (never a file path - callers decide
+// whether that came from a local fixture read or a live fetch).
 export async function extractRollCallText(pdfBuffer) {
-  const data = new Uint8Array(pdfBuffer);
-  const doc = await getDocument({ data }).promise;
-  const pageTexts = [];
-  for (let pageNum = 1; pageNum <= doc.numPages; pageNum += 1) {
-    // sequential (not Promise.all) is deliberate: pages must be read in document order.
-    const page = await doc.getPage(pageNum);
-    const content = await page.getTextContent();
-    pageTexts.push(reconstructPageText(content.items));
-  }
-  return pageTexts.join('\n\n');
+  return extractPdfText(pdfBuffer);
 }
 
 // ---- parsing ----
