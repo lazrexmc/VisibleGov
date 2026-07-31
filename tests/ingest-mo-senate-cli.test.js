@@ -1,5 +1,5 @@
 import {
-  readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync,
+  readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, mkdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +18,7 @@ import {
   ensureSessionRow, ensureRosterIdentities,
   ensureRosterForRun, ensureIndexForRun,
   processJournalDay, replayJournalArtifacts, dryRunReport,
+  runMoSenate,
 } from '../src/cli/ingest-mo-senate.js';
 import { SourceFetchError } from '../src/lib/errors.js';
 
@@ -1403,4 +1404,238 @@ test('effectiveMaxAge: closed years never expire, current year keeps its TTL', (
   assert.equal(shouldRefetch(new Date(0).toISOString(), Infinity), false);
   // but NO cache at all must still fetch, even for a closed year
   assert.equal(shouldRefetch(null, Infinity), true);
+});
+
+// ---- runMoSenate: freshness-honesty fix on EVERY close path (job 1, 2026-07-31,
+// .superpowers/sdd/2026-07-30-public-site/progress.md POST-0019 LIVE VERIFICATION finding) ----
+//
+// public_freshness (migration 0016/0019) reads
+// coalesce(jsonb_array_length(detail->'counts'->'quarantined_days'), 0) off the LATEST closed run.
+// Before this fix, the roster-slot and journal-index-slot early-succeeds below, and the
+// catch/failure path, all closed a run with a `counts` object that OMITTED quarantined_days
+// entirely — a missing key coalesces to 0, rendering a false "0 days pending human review" on the
+// public site while a real backlog stood quarantined (live-caught oscillating 7 -> 0 -> 7 twice an
+// hour, per the ledger). These tests drive runMoSenate end-to-end through a fake
+// ingestion_runs/sessions/bills/votes/vote_casts client and assert on exactly what gets passed to
+// closeRun — proving the WIRING, not just a pure helper's isolated output (the Task 9 HIGH-1
+// lesson: a pure-function-only test suite already missed one real wiring bug in this codebase).
+
+function seedCache(dir, year, payload) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${year}.json`), JSON.stringify({ fetched_at: new Date().toISOString(), ...payload }, null, 2));
+}
+
+function seedQuarantinedDays(journalDir, pdfBasenames) {
+  const failures = [Object.assign(new Error('boom'), { ordinal: 1, category: 'yeas' })];
+  for (const basename of pdfBasenames) {
+    writeDayFailureArtifact(basename, `https://x/${basename}.pdf`, failures, journalDir);
+    writeDayFailureArtifact(basename, `https://x/${basename}.pdf`, failures, journalDir);
+    writeDayFailureArtifact(basename, `https://x/${basename}.pdf`, failures, journalDir);
+  }
+}
+
+// Generic upsert-then-select-back table, same shape as the existing makeFakeDb (processJournalDay
+// integration tests above) — generalized across table name so one fake client can cover
+// sessions/bills/votes/vote_casts without four near-identical copies.
+function makeGenericTable(store, idPrefix) {
+  let counter = 0;
+  return {
+    upsert: async (rows, opts) => {
+      const conflictCols = (opts?.onConflict || '').split(',').filter(Boolean);
+      for (const row of rows) {
+        const exists = conflictCols.length > 0
+          && store.some((r) => conflictCols.every((c) => r[c] === row[c]));
+        if (!exists) { counter += 1; store.push({ id: `${idPrefix}-${counter}`, ...row }); }
+      }
+      return { error: null };
+    },
+    select() {
+      const filters = [];
+      const builder = {
+        eq(col, val) { filters.push([col, val]); return builder; },
+        single: async () => {
+          const found = store.filter((r) => filters.every(([c, v]) => r[c] === v));
+          if (found.length !== 1) return { data: null, error: { message: `expected 1 row for a fake table, got ${found.length}` } };
+          return { data: found[0], error: null };
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+// Covers exactly the tables runMoSenate's own steps touch when the roster carries zero members
+// (ensureRosterIdentities then never reaches the legislators table at all — sidesteps faking it
+// here, same simplification the roster-slot/index-slot tests below rely on): ingestion_runs
+// (openRun / the durable-cooldown lookup / closeRun, captured into closeCalls), sessions, bills,
+// votes, vote_casts.
+function makeFakeMoSenateRunClient() {
+  const store = {
+    sessions: [], bills: [], votes: [], vote_casts: [],
+  };
+  const closeCalls = [];
+  let runCounter = 0;
+  return {
+    store,
+    closeCalls,
+    client: {
+      from(table) {
+        if (table === 'ingestion_runs') {
+          return {
+            insert: () => ({
+              select: () => ({
+                single: async () => {
+                  runCounter += 1;
+                  return { data: { id: `run-${runCounter}` }, error: null };
+                },
+              }),
+            }),
+            select: () => {
+              const builder = {
+                eq: () => builder,
+                order: () => builder,
+                limit: () => builder,
+                maybeSingle: async () => ({ data: null, error: null }), // no prior run -> zero cooldown wait
+              };
+              return builder;
+            },
+            update: (detail) => ({
+              eq: async (col, val) => {
+                closeCalls.push({ id: val, ...detail });
+                return { error: null };
+              },
+            }),
+          };
+        }
+        if (table in store) return makeGenericTable(store[table], table);
+        throw new Error(`fake mo-senate run client: unexpected table ${table}`);
+      },
+    },
+  };
+}
+
+test('runMoSenate: roster-slot close path reports counts.quarantined_days = the standing set (was omitted entirely)', async () => {
+  await withScratchDirAsync(async (base) => {
+    const journalDir = join(base, 'journal');
+    const rosterDir = join(base, 'roster'); // empty -> forces a live roster fetch this invocation
+    const indexDir = join(base, 'index');
+    seedQuarantinedDays(journalDir, ['RDayA', 'RDayB']);
+
+    const { client, closeCalls } = makeFakeMoSenateRunClient();
+    const result = await runMoSenate(client, {
+      year: 2018, limit: 1, dryRun: false, journalPdfFile: null,
+    }, {
+      journalDir,
+      rosterDir,
+      indexDir,
+      fetchRosterLive: async () => ({ members: [], vacancies: 0 }),
+      fetchIndexLive: async () => { throw new Error('must not fetch the journal index — the roster slot returns before this'); },
+    });
+
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.slot, 'roster');
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].status, 'succeeded');
+    assert.ok('quarantined_days' in closeCalls[0].detail.counts, 'quarantined_days key must be PRESENT, not omitted');
+    assert.deepEqual(closeCalls[0].detail.counts.quarantined_days.slice().sort(), ['RDayA', 'RDayB']);
+  });
+});
+
+test('runMoSenate: journal-index-slot close path reports counts.quarantined_days = the standing set (was omitted entirely)', async () => {
+  await withScratchDirAsync(async (base) => {
+    const journalDir = join(base, 'journal');
+    const rosterDir = join(base, 'roster');
+    const indexDir = join(base, 'index'); // empty -> forces a live index fetch this invocation
+    seedQuarantinedDays(journalDir, ['RDayC']);
+    seedCache(rosterDir, 2018, { members: [], vacancies: 0 }); // roster cache-hit: never fetches live
+
+    const { client, closeCalls } = makeFakeMoSenateRunClient();
+    const result = await runMoSenate(client, {
+      year: 2018, limit: 1, dryRun: false, journalPdfFile: null,
+    }, {
+      journalDir,
+      rosterDir,
+      indexDir,
+      fetchRosterLive: async () => { throw new Error('must not fetch roster live on a cache hit'); },
+      fetchIndexLive: async () => [],
+    });
+
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.slot, 'journal-index');
+    assert.equal(closeCalls.length, 1);
+    assert.deepEqual(closeCalls[0].detail.counts.quarantined_days, ['RDayC']);
+  });
+});
+
+test('runMoSenate: the failure/catch close path carries BOTH the error and the standing quarantined set (was {error} alone)', async () => {
+  await withScratchDirAsync(async (base) => {
+    const journalDir = join(base, 'journal');
+    const rosterDir = join(base, 'roster');
+    const indexDir = join(base, 'index');
+    seedQuarantinedDays(journalDir, ['RDayD', 'RDayE']);
+    seedCache(rosterDir, 2018, { members: [], vacancies: 0 });
+    seedCache(indexDir, 2018, {
+      rows: [{ day_label: 'Day 1', journal_url: 'https://x/RDayFail.pdf', journal_date: '2018-01-01' }],
+    });
+
+    const { client, closeCalls } = makeFakeMoSenateRunClient();
+    await assert.rejects(
+      () => runMoSenate(client, {
+        year: 2018, limit: 1, dryRun: false, journalPdfFile: null,
+      }, {
+        journalDir,
+        rosterDir,
+        indexDir,
+        fetchJournalPdf: async () => { throw new Error('simulated transient failure fetching the journal PDF'); },
+      }),
+      /simulated transient failure/,
+    );
+
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].status, 'failed');
+    assert.match(closeCalls[0].detail.error, /simulated transient failure/);
+    assert.deepEqual(closeCalls[0].detail.counts.quarantined_days.slice().sort(), ['RDayD', 'RDayE']);
+  });
+});
+
+test('runMoSenate: a mid-loop failure carries forward PARTIAL progress into the failed close, not just the error (a failed run no longer discards its whole ledger)', async () => {
+  await withScratchDirAsync(async (base) => {
+    const journalDir = join(base, 'journal');
+    const rosterDir = join(base, 'roster');
+    const indexDir = join(base, 'index');
+    seedQuarantinedDays(journalDir, ['RDayF']);
+    seedCache(rosterDir, 2018, { members: [], vacancies: 0 });
+    seedCache(indexDir, 2018, {
+      rows: [
+        { day_label: 'Day 37', journal_url: 'https://www.senate.mo.gov/18info/Journals/RDay370308587-610.pdf', journal_date: '2018-03-08' },
+        { day_label: 'Day 99', journal_url: 'https://x/RDay99.pdf', journal_date: '2018-04-01' },
+      ],
+    });
+
+    let calls = 0;
+    const { client, closeCalls } = makeFakeMoSenateRunClient();
+    await assert.rejects(
+      () => runMoSenate(client, {
+        year: 2018, limit: 2, dryRun: false, journalPdfFile: null,
+      }, {
+        journalDir,
+        rosterDir,
+        indexDir,
+        fetchJournalPdf: async () => {
+          calls += 1;
+          if (calls === 1) return day37Pdf; // real Day 37 fixture — 13 real votes, 0 failures
+          throw new Error('simulated failure on the second day');
+        },
+      }),
+      /simulated failure on the second day/,
+    );
+
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].status, 'failed');
+    // Day 1 (the real Day 37 fixture, 13 real votes) completed and was folded into partialCounts
+    // BEFORE day 2 threw — the failed close must carry that progress forward, not discard it.
+    assert.equal(closeCalls[0].detail.counts.days, 1);
+    assert.equal(closeCalls[0].detail.counts.votes, 13);
+    assert.deepEqual(closeCalls[0].detail.counts.quarantined_days, ['RDayF']);
+  });
 });

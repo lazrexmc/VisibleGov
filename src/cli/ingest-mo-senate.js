@@ -617,15 +617,24 @@ export async function ensureRosterForRun(client, runId, year, {
   return { fetchedLive: false, members: cache.members, identities };
 }
 
-// dir is injectable, same rationale as ensureRosterForRun.
+// Paired fetch+parse, same convention as fetchAndParseRosterLive above — factored out so
+// ensureIndexForRun can take an injectable fetchLive (needed to unit-test the journal-index close
+// path in main()/runMoSenate without a live network call, same rationale as ensureRosterForRun's
+// own fetchLive param).
+async function fetchAndParseIndexLive(url) {
+  const html = await senateWeb.fetchJournalIndex(url);
+  return senateWeb.parseJournalIndex(html);
+}
+
+// dir is injectable, same rationale as ensureRosterForRun. fetchLive likewise (job 1 fix,
+// 2026-07-31 — see runMoSenate's own comment for why this seam is needed).
 export async function ensureIndexForRun(year, {
-  dir = INDEX_ARTIFACT_DIR, maxAgeMs = MO_SENATE_INDEX_MAX_AGE_MS,
+  dir = INDEX_ARTIFACT_DIR, maxAgeMs = MO_SENATE_INDEX_MAX_AGE_MS, fetchLive = fetchAndParseIndexLive,
 } = {}) {
   const cacheKey = String(year);
   const cache = readCache(dir, cacheKey);
   if (shouldRefetch(cache?.fetched_at ?? null, effectiveMaxAge(year, maxAgeMs))) {
-    const html = await senateWeb.fetchJournalIndex(buildJournalIndexUrl(year));
-    const rows = senateWeb.parseJournalIndex(html);
+    const rows = await fetchLive(buildJournalIndexUrl(year));
     writeCache(dir, cacheKey, { rows });
     return { fetchedLive: true, rows };
   }
@@ -998,6 +1007,199 @@ export async function dryRunReport(client, year) {
   };
 }
 
+// ---- orchestration (extracted from main(), 2026-07-31 job-1 fix, mirrors backfill-mo-bill-
+// texts.js's runBackfillMoBillTexts convention) ----
+//
+// FIX (public freshness honesty — .superpowers/sdd/2026-07-30-public-site/progress.md's POST-0019
+// LIVE VERIFICATION finding): migration 0016/0019's public_freshness view reads
+// coalesce(jsonb_array_length(detail->'counts'->'quarantined_days'), 0) off the LATEST closed run.
+// Three close paths in this function used to close a run with a `counts` object that OMITTED
+// quarantined_days entirely (the roster-slot and journal-index-slot early-succeeds below, and the
+// catch/failure path) — a MISSING key coalesces to 0, rendered as the affirmative "0 days pending
+// human review" while listQuarantinedDays() (a cheap, slot-independent filesystem scan — see its
+// own comment) reports a real, nonzero standing backlog. Because the roster/index slots trade off
+// with the day-processing slot on roughly every other invocation (MO_SENATE_MIN_INTERVAL_MS 30min
+// vs MO_SENATE_INDEX_MAX_AGE_MS 1h), the public count oscillated 7 -> 0 -> 7 twice an hour — this
+// was caught LIVE, not hypothetically (progress.md: "01:09:20 with listQuarantinedDays ground
+// truth = 7"). FIX: every path that closes a run below now calls listQuarantinedDays(journalDir),
+// including the catch path, which ALSO now carries forward `partialCounts` (whatever this run had
+// already accomplished before the throw) instead of discarding its whole ledger down to
+// `{error}` alone — a second, previously-ledgered defect fixed in the same pass since the catch
+// path is the one place both defects live.
+//
+// deps default to the real artifact directories / live fetchers (unchanged runtime behavior);
+// overridable purely for testability, same convention as ensureRosterForRun's own fetchLive/dir.
+export async function runMoSenate(client, args, {
+  journalDir = JOURNAL_ARTIFACT_DIR,
+  rosterDir = ROSTER_ARTIFACT_DIR,
+  indexDir = INDEX_ARTIFACT_DIR,
+  fetchRosterLive = fetchAndParseRosterLive,
+  fetchIndexLive = fetchAndParseIndexLive,
+  fetchJournalPdf = senateWeb.fetchSenateJournalPdf,
+  currentCalendarYear = new Date().getFullYear(),
+} = {}) {
+  await enforceDurableCooldown(client);
+  const runId = await openRun(client, senateWeb.SOURCE);
+  // Updated at every point below where this run's own progress becomes durably known — read by
+  // the catch block if a later step throws, so a mid-run failure reports what actually happened
+  // instead of an empty `{error}` shell. Stays null if the throw happens before ANY step below
+  // completes (e.g. ensureSessionRow itself fails) — the catch still reports quarantined_days in
+  // that case, just no other counts (honestly, since none are known).
+  let partialCounts = null;
+  try {
+    const sessionRow = await ensureSessionRow(client, runId, args.year);
+
+    // At most ONE live network fetch per invocation (roster > journal-index > journal-day PDF,
+    // priority order) — see the "local caches" comment block above for why. A slot spent on
+    // roster or index closes the run immediately; the very next invocation continues.
+    const rosterResult = await ensureRosterForRun(client, runId, args.year, {
+      fetchLive: fetchRosterLive, dir: rosterDir, currentCalendarYear,
+    });
+
+    // FIX ROUND 2 (CRITICAL): replay moved to AFTER this run's own roster ensure (was: before
+    // ensureSessionRow, using a global era-blind roster query) so that when a queued artifact's
+    // year matches THIS run's --year, replay can use this run's own freshly-ensured
+    // identities/resolutionRoster directly — see replayJournalArtifacts's own comment for the
+    // concrete misattribution this closes. Still pure DB + filesystem for any OTHER year (reads
+    // that year's own roster cache, never a live fetch) — safe and cheap every invocation
+    // regardless of which branch below ends up running this slot.
+    const artifactReplay = await replayJournalArtifacts(client, runId, {
+      dir: journalDir, rosterDir, currentYear: args.year, currentYearIdentities: rosterResult.identities, currentCalendarYear,
+    });
+
+    if (rosterResult.fetchedLive) {
+      const counts = {
+        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
+        artifact_replay: artifactReplay, slot: 'roster',
+        // FIX: this early-close used to omit quarantined_days entirely — see the module comment
+        // above for the exact public-facing consequence.
+        quarantined_days: listQuarantinedDays(journalDir),
+      };
+      partialCounts = counts;
+      await closeRun(client, runId, 'succeeded', { counts, roster: rosterResult.identities });
+      console.log(JSON.stringify({
+        mode: 'live', run_id: runId, status: 'succeeded', counts, roster: rosterResult.identities,
+      }, null, 2));
+      return { runId, status: 'succeeded', counts };
+    }
+
+    const indexResult = await ensureIndexForRun(args.year, { dir: indexDir, fetchLive: fetchIndexLive });
+    if (indexResult.fetchedLive) {
+      const counts = {
+        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
+        artifact_replay: artifactReplay, slot: 'journal-index',
+        // FIX: same omission as the roster slot above, same fix.
+        quarantined_days: listQuarantinedDays(journalDir),
+      };
+      partialCounts = counts;
+      await closeRun(client, runId, 'succeeded', { counts });
+      console.log(JSON.stringify({
+        mode: 'live', run_id: runId, status: 'succeeded', counts,
+      }, null, 2));
+      return { runId, status: 'succeeded', counts };
+    }
+
+    // FIX ROUND 1 (Critical): the resolution roster is now the IN-MEMORY mapping
+    // ensureRosterIdentities just built for THIS era's own members — never a global
+    // district-scoped DB query (loadSenateRosterForResolution, deleted). See
+    // ensureRosterIdentities's own comment for why a district-only query would still risk mixing
+    // two different eras' occupants of the same seat.
+    const resolutionRoster = rosterResult.identities.gated ? [] : rosterResult.identities.resolutionRoster;
+
+    const worklist = selectJournalDayWorklist(indexResult.rows, args, journalDir);
+    const dayResults = [];
+    let totalVotes = 0;
+    let totalFailures = 0;
+    let totalCastsResolved = 0;
+    let totalCastsUnresolved = 0;
+    let anyGated = rosterResult.identities.gated;
+    const unresolvedSample = [];
+    const attribution = { motion: 0, preceding_taken_up: 0 };
+
+    for (const dayRow of worklist.days) {
+      const result = await processJournalDay(client, runId, args.year, sessionRow, dayRow, args, {
+        gated: rosterResult.identities.gated, roster: resolutionRoster,
+      }, journalDir, { fetchPdf: fetchJournalPdf });
+      dayResults.push(result);
+      totalVotes += result.votes_written;
+      // Finding 4: `failures` now honestly includes a whole-day fetch/extraction failure (folded
+      // in by buildDayFailureResult as failures:1), not just per-vote-block parse failures — a
+      // fetch failure used to report failures:0 and vanish from this total entirely, letting a run
+      // that failed to even fetch a day's PDF report status:'succeeded'.
+      totalFailures += result.failures;
+      // Finding 4: guard aggregation — every processJournalDay return path now always carries an
+      // `attribution` object (buildDayFailureResult populates a zeroed one), but this fallback is
+      // kept as a second, defensive layer rather than relying solely on that contract: the ORIGINAL
+      // bug was exactly this unconditional `result.attribution.motion` dereference crashing with a
+      // TypeError on the old fetch-failure return shape (which had no `attribution` key at all),
+      // masking the real error and dropping the rest of this run's detail.
+      const resultAttribution = result.attribution ?? { motion: 0, preceding_taken_up: 0 };
+      attribution.motion += resultAttribution.motion ?? 0;
+      attribution.preceding_taken_up += resultAttribution.preceding_taken_up ?? 0;
+      if (result.casts) {
+        totalCastsResolved += result.casts.resolved;
+        totalCastsUnresolved += result.casts.unresolved;
+        if (result.casts.gated) anyGated = true;
+        for (const s of result.casts.unresolvedSample) if (unresolvedSample.length < 10) unresolvedSample.push(s);
+      }
+      // Carry-forward for the catch block: reflects progress through THIS day, so if a LATER
+      // day's write throws, the catch's closeRun still reports what this run actually accomplished
+      // rather than discarding it (see runMoSenate's own top-of-function comment).
+      partialCounts = {
+        days: dayResults.length,
+        votes: totalVotes,
+        casts: totalCastsResolved,
+        unresolved: totalCastsUnresolved,
+        failures: totalFailures,
+        gated: anyGated,
+        attribution: { ...attribution },
+        quarantined_days: listQuarantinedDays(journalDir),
+        total_pending_days: worklist.totalPending,
+      };
+    }
+
+    const counts = {
+      days: dayResults.length,
+      votes: totalVotes,
+      casts: totalCastsResolved,
+      unresolved: totalCastsUnresolved,
+      failures: totalFailures,
+      gated: anyGated,
+      attributed_from_context: attribution.preceding_taken_up,
+      attribution,
+      // FIX (freshness-honesty, 2026-07-30): worklist.skippedQuarantinedKeys is scoped to THIS
+      // run's --year candidates only — listQuarantinedDays() reports the STANDING quarantined set
+      // across the whole artifacts directory, so the public_freshness view (which reads only the
+      // latest run's detail) never under-reports a backlog that happens to live in a year this
+      // particular run isn't processing. See listQuarantinedDays's own comment for the full trace.
+      quarantined_days: listQuarantinedDays(journalDir),
+      total_pending_days: worklist.totalPending,
+      artifact_replay: artifactReplay,
+    };
+    partialCounts = counts;
+    const status = totalFailures === 0 ? 'succeeded' : 'partial';
+    await closeRun(client, runId, status, {
+      counts, dayResults, roster: rosterResult.identities, unresolvedSample,
+    });
+    console.log(JSON.stringify({
+      mode: 'live', run_id: runId, status, counts, dayResults,
+    }, null, 2));
+    if (totalFailures > 0) process.exitCode = 2;
+    return { runId, status, counts };
+  } catch (err) {
+    // FIX: this used to be `await closeRun(client, runId, 'failed', { error: String(err) });` —
+    // the standing quarantined set was entirely absent (not even coalesced to 0 by the view, the
+    // key plus a whole SIBLING) whenever a run failed, and any progress this run had made before
+    // the throw was discarded along with it. quarantined_days is recomputed fresh here (cheap,
+    // slot-independent fs scan) rather than trusting a possibly-stale partialCounts snapshot;
+    // partialCounts supplies everything else this run is known to have accomplished, or nothing
+    // (honestly) if the throw happened before any step above completed.
+    const counts = { ...(partialCounts ?? {}), quarantined_days: listQuarantinedDays(journalDir) };
+    await closeRun(client, runId, 'failed', { error: String(err), counts });
+    throw err;
+  }
+}
+
 // ---- main ----
 
 async function main() {
@@ -1049,127 +1251,7 @@ async function main() {
     return;
   }
 
-  await enforceDurableCooldown(client);
-  const runId = await openRun(client, senateWeb.SOURCE);
-  try {
-    const sessionRow = await ensureSessionRow(client, runId, args.year);
-
-    // At most ONE live network fetch per invocation (roster > journal-index > journal-day PDF,
-    // priority order) — see the "local caches" comment block above for why. A slot spent on
-    // roster or index closes the run immediately; the very next invocation continues.
-    const rosterResult = await ensureRosterForRun(client, runId, args.year);
-
-    // FIX ROUND 2 (CRITICAL): replay moved to AFTER this run's own roster ensure (was: before
-    // ensureSessionRow, using a global era-blind roster query) so that when a queued artifact's
-    // year matches THIS run's --year, replay can use this run's own freshly-ensured
-    // identities/resolutionRoster directly — see replayJournalArtifacts's own comment for the
-    // concrete misattribution this closes. Still pure DB + filesystem for any OTHER year (reads
-    // that year's own roster cache, never a live fetch) — safe and cheap every invocation
-    // regardless of which branch below ends up running this slot.
-    const artifactReplay = await replayJournalArtifacts(client, runId, {
-      currentYear: args.year, currentYearIdentities: rosterResult.identities,
-    });
-
-    if (rosterResult.fetchedLive) {
-      const counts = {
-        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
-        artifact_replay: artifactReplay, slot: 'roster',
-      };
-      await closeRun(client, runId, 'succeeded', { counts, roster: rosterResult.identities });
-      console.log(JSON.stringify({
-        mode: 'live', run_id: runId, status: 'succeeded', counts, roster: rosterResult.identities,
-      }, null, 2));
-      return;
-    }
-
-    const indexResult = await ensureIndexForRun(args.year);
-    if (indexResult.fetchedLive) {
-      const counts = {
-        days: 0, votes: 0, casts: 0, unresolved: 0, failures: 0, gated: rosterResult.identities.gated,
-        artifact_replay: artifactReplay, slot: 'journal-index',
-      };
-      await closeRun(client, runId, 'succeeded', { counts });
-      console.log(JSON.stringify({
-        mode: 'live', run_id: runId, status: 'succeeded', counts,
-      }, null, 2));
-      return;
-    }
-
-    // FIX ROUND 1 (Critical): the resolution roster is now the IN-MEMORY mapping
-    // ensureRosterIdentities just built for THIS era's own members — never a global
-    // district-scoped DB query (loadSenateRosterForResolution, deleted). See
-    // ensureRosterIdentities's own comment for why a district-only query would still risk mixing
-    // two different eras' occupants of the same seat.
-    const resolutionRoster = rosterResult.identities.gated ? [] : rosterResult.identities.resolutionRoster;
-
-    const worklist = selectJournalDayWorklist(indexResult.rows, args);
-    const dayResults = [];
-    let totalVotes = 0;
-    let totalFailures = 0;
-    let totalCastsResolved = 0;
-    let totalCastsUnresolved = 0;
-    let anyGated = rosterResult.identities.gated;
-    const unresolvedSample = [];
-    const attribution = { motion: 0, preceding_taken_up: 0 };
-
-    for (const dayRow of worklist.days) {
-      const result = await processJournalDay(client, runId, args.year, sessionRow, dayRow, args, {
-        gated: rosterResult.identities.gated, roster: resolutionRoster,
-      });
-      dayResults.push(result);
-      totalVotes += result.votes_written;
-      // Finding 4: `failures` now honestly includes a whole-day fetch/extraction failure (folded
-      // in by buildDayFailureResult as failures:1), not just per-vote-block parse failures — a
-      // fetch failure used to report failures:0 and vanish from this total entirely, letting a run
-      // that failed to even fetch a day's PDF report status:'succeeded'.
-      totalFailures += result.failures;
-      // Finding 4: guard aggregation — every processJournalDay return path now always carries an
-      // `attribution` object (buildDayFailureResult populates a zeroed one), but this fallback is
-      // kept as a second, defensive layer rather than relying solely on that contract: the ORIGINAL
-      // bug was exactly this unconditional `result.attribution.motion` dereference crashing with a
-      // TypeError on the old fetch-failure return shape (which had no `attribution` key at all),
-      // masking the real error and dropping the rest of this run's detail.
-      const resultAttribution = result.attribution ?? { motion: 0, preceding_taken_up: 0 };
-      attribution.motion += resultAttribution.motion ?? 0;
-      attribution.preceding_taken_up += resultAttribution.preceding_taken_up ?? 0;
-      if (result.casts) {
-        totalCastsResolved += result.casts.resolved;
-        totalCastsUnresolved += result.casts.unresolved;
-        if (result.casts.gated) anyGated = true;
-        for (const s of result.casts.unresolvedSample) if (unresolvedSample.length < 10) unresolvedSample.push(s);
-      }
-    }
-
-    const counts = {
-      days: dayResults.length,
-      votes: totalVotes,
-      casts: totalCastsResolved,
-      unresolved: totalCastsUnresolved,
-      failures: totalFailures,
-      gated: anyGated,
-      attributed_from_context: attribution.preceding_taken_up,
-      attribution,
-      // FIX (freshness-honesty, 2026-07-30): worklist.skippedQuarantinedKeys is scoped to THIS
-      // run's --year candidates only — listQuarantinedDays() reports the STANDING quarantined set
-      // across the whole artifacts directory, so the public_freshness view (which reads only the
-      // latest run's detail) never under-reports a backlog that happens to live in a year this
-      // particular run isn't processing. See listQuarantinedDays's own comment for the full trace.
-      quarantined_days: listQuarantinedDays(),
-      total_pending_days: worklist.totalPending,
-      artifact_replay: artifactReplay,
-    };
-    const status = totalFailures === 0 ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, {
-      counts, dayResults, roster: rosterResult.identities, unresolvedSample,
-    });
-    console.log(JSON.stringify({
-      mode: 'live', run_id: runId, status, counts, dayResults,
-    }, null, 2));
-    if (totalFailures > 0) process.exitCode = 2;
-  } catch (err) {
-    await closeRun(client, runId, 'failed', { error: String(err) });
-    throw err;
-  }
+  await runMoSenate(client, args);
 }
 
 const invokedDirectly = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
