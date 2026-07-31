@@ -955,12 +955,60 @@ export async function buildFailureCloseDetail(client, runId, err) {
   // Best-effort re-read of whatever the write-ahead path already persisted — survives even a
   // runLegiscanIngest throw, since recordQueryUsage's own write happens BEFORE the live call it
   // counts, not after. A re-read failure here must never mask the ORIGINAL error being closed out.
+  //
+  // FIX (coordinator ruling, IMPORTANT-1, live-execution-proven): the original version destructured
+  // ONLY {data} from this re-read, discarding `error` entirely — postgrest-js RESOLVES (never
+  // throws) on a query failure, so a transient 500/504/statement-timeout (Postgres 57014,
+  // "query_canceled") on THIS SINGLE select silently produced queriesUsedSoFar=0 regardless of the
+  // real ledger value. Since closeRun wholesale-REPLACES detail (never merges — see closeRun's own
+  // header comment in src/lib/db.js), a caller writing that false 0 through closeRun would ERASE the
+  // true write-ahead-persisted count from getMonthlyQueryUsage's sum — the undercount direction the
+  // terms call a violation, and one that could let a LATER run pass a budget gate that should have
+  // refused. Proven by execution: a 6-query run closed with detail.queries_used=0 while
+  // counts.queriesSpent=6.
+  //
+  // FIX: a read ERROR is now distinguished from "genuinely no row / no queries yet" —
+  // ledgerReadFailed:true (+ ledgerReadError, the raw message) signals every caller of this function
+  // to skip closeRun entirely and leave the run 'running' rather than close over an unverifiable
+  // value — getMonthlyQueryUsage sums detail.queries_used regardless of status (see its own header
+  // comment), so the row's own last-known-good write-ahead value keeps counting correctly without
+  // this function ever needing to guess at it. See closeRunOnFailure below for the composition that
+  // acts on this signal.
   let queriesUsedSoFar = 0;
+  let ledgerReadFailed = false;
+  let ledgerReadError = null;
   try {
-    const { data: runRow } = await client.from('ingestion_runs').select('detail').eq('id', runId).maybeSingle();
-    queriesUsedSoFar = Number(runRow?.detail?.queries_used) || 0;
-  } catch { /* best-effort only — the original err below is what matters */ }
-  return { error: String(err), queries_used: queriesUsedSoFar };
+    const { data: runRow, error: readErr } = await client.from('ingestion_runs').select('detail').eq('id', runId).maybeSingle();
+    if (readErr) {
+      ledgerReadFailed = true;
+      ledgerReadError = readErr.message ?? String(readErr);
+    } else {
+      queriesUsedSoFar = Number(runRow?.detail?.queries_used) || 0;
+    }
+  } catch (cause) {
+    ledgerReadFailed = true;
+    ledgerReadError = cause?.message ?? String(cause);
+  }
+  return {
+    error: String(err), queries_used: queriesUsedSoFar, ledgerReadFailed, ledgerReadError,
+  };
+}
+
+// closeRunOnFailure — the composition main() uses after a throw: never closes over an unverifiable
+// ledger. When the DB re-read itself failed (ledgerReadFailed), closing would risk wholesale-
+// replacing a real nonzero detail with a false zero (closeRun never merges) — so this deliberately
+// does NOT closeRun in that case, leaving the row 'running' with whatever detail.queries_used the
+// write-ahead path already durably persisted; getMonthlyQueryUsage sums that regardless of status.
+// Every other case closes normally. Extracted as its own function so this exact decision is
+// directly unit-testable, same "extract for testability" precedent as buildSuccessCloseDetail/
+// buildFailureCloseDetail themselves.
+export async function closeRunOnFailure(client, runId, err) {
+  const closeDetail = await buildFailureCloseDetail(client, runId, err);
+  if (closeDetail.ledgerReadFailed) {
+    return { closed: false, reason: 'ledger_read_failed', ledgerReadError: closeDetail.ledgerReadError };
+  }
+  await closeRun(client, runId, 'failed', closeDetail);
+  return { closed: true, closeDetail };
 }
 
 // ---- main ----
@@ -1029,7 +1077,17 @@ async function main() {
     }, null, 2));
     if (status !== 'succeeded') process.exitCode = 2;
   } catch (err) {
-    await closeRun(client, runId, 'failed', await buildFailureCloseDetail(client, runId, err));
+    const result = await closeRunOnFailure(client, runId, err);
+    if (!result.closed) {
+      // FIX (coordinator ruling, IMPORTANT-1): never closeRun over an unverifiable ledger — see
+      // closeRunOnFailure's own header comment. The run stays 'running'; its own last-known-good
+      // write-ahead detail keeps counting correctly via getMonthlyQueryUsage.
+      console.error(
+        'WARNING: could not verify the query-usage ledger before closing this run — leaving it '
+          + '"running" rather than risk erasing a real nonzero count:',
+        result.ledgerReadError,
+      );
+    }
     throw err;
   }
 }

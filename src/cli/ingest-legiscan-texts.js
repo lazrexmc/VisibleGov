@@ -325,6 +325,16 @@ function atomicWriteJson(path, obj) {
 
 function emptyCounts() {
   return {
+    // FIX (coordinator ruling, IMPORTANT-2, live-execution-proven): datasetsRead/datasetsMissing
+    // used to live ONLY in baseReport, a sibling of counts never picked up by main()'s own
+    // hand-picked closeRun detail — a dataset cache file that fails to read (a corrupt/truncated
+    // ZIP, a permissions error, etc.) vanished from the ledger entirely, with nothing in the closed
+    // run's detail recording that a whole session's worth of bills was silently skipped. The sibling
+    // backfill-mo-bill-texts.js keeps these INSIDE its own emptyCounts() for exactly this reason —
+    // moved back here to match (verified this doesn't disturb the closed-list reconciliation
+    // invariants: they're new, independent fields, not read by either reconciliation equation).
+    datasetsRead: 0,
+    datasetsMissing: 0,
     billsPlanned: 0,
     alreadyHasVersion: 0,
     docCacheHits: 0,
@@ -495,15 +505,14 @@ export async function runIngestLegiscanTexts(client, {
   const textVersionIndex = await loadTextVersionIndexFn(client);
   const passageBillIds = await loadPassageBillIdsFn(client);
 
-  let datasetsRead = 0;
-  let datasetsMissing = 0;
+  const counts = emptyCounts();
   const candidates = [];
   for (const filePath of files) {
     // eslint-disable-next-line no-await-in-loop -- sequential, same "small/infrequent backlog"
     // precedent as every other batch CLI in this codebase.
     const decoded = await readDatasetFn(filePath);
-    if (!decoded.ok) { datasetsMissing += 1; continue; }
-    datasetsRead += 1;
+    if (!decoded.ok) { counts.datasetsMissing += 1; continue; }
+    counts.datasetsRead += 1;
     const sessionRow = sessionIndex.get(decoded.sessionId);
     for (const bill of decoded.bills) {
       candidates.push({ sessionRowId: sessionRow ? sessionRow.id : null, bill });
@@ -523,7 +532,6 @@ export async function runIngestLegiscanTexts(client, {
   const docCacheHitSnapshot = toProcess.filter((w) => existsSync(docCachePath(cacheDir, w.docId))).length;
   const plannedFreshQueries = toProcess.length - docCacheHitSnapshot;
 
-  const counts = emptyCounts();
   counts.billsPlanned = toProcess.length;
   counts.alreadyHasVersion = plan.counts.alreadyHasVersion;
 
@@ -534,8 +542,9 @@ export async function runIngestLegiscanTexts(client, {
       identifier: w.identifier, version: w.version, docId: w.docId, priority: w.priority,
     })),
     toProcessCount: toProcess.length,
-    datasetsRead,
-    datasetsMissing,
+    // sessionUncached stays a top-level sibling field (matches backfill-mo-bill-texts.js's OWN
+    // convention exactly — it is not inside that file's emptyCounts() either), unlike
+    // datasetsRead/datasetsMissing which ARE inside counts (see emptyCounts's own comment above).
     sessionUncached,
   };
 
@@ -682,14 +691,13 @@ export async function runIngestLegiscanTexts(client, {
 // detail that shows BOTH why the run stopped (abort_reason) and exactly how far it got
 // (counts/planCounts/passagePriority/failures), never just an opaque error string. Reuses
 // buildFailureCloseDetail's own best-effort queries_used re-read verbatim (imported from
-// ingest-legiscan.js, unchanged — queries_used already survives via write-ahead regardless of this
-// fix) and folds in whatever `err.partialReport` the throw site attached (see the RateLimitedError/
-// TooManyConsecutiveQueryFailuresError throw sites above). Gracefully degrades to
-// buildFailureCloseDetail's own plain `{error, queries_used}` shape when err carries no
-// partialReport at all — a genuinely unexpected crash (a bug) that never reached either abort site,
-// or one that happened before the loop started. Extracted as its own function so this composition
-// is directly unit-testable without process.argv/getClient(), same precedent as
-// buildSuccessCloseDetail/buildFailureCloseDetail themselves.
+// ingest-legiscan.js) and folds in whatever `err.partialReport` the throw site attached (see the
+// RateLimitedError/TooManyConsecutiveQueryFailuresError throw sites above). Gracefully degrades to
+// buildFailureCloseDetail's own plain `{error, queries_used, ledgerReadFailed, ledgerReadError}`
+// shape when err carries no partialReport at all — a genuinely unexpected crash (a bug) that never
+// reached either abort site, or one that happened before the loop started. Extracted as its own
+// function so this composition is directly unit-testable without process.argv/getClient(), same
+// precedent as buildSuccessCloseDetail/buildFailureCloseDetail themselves.
 export async function buildAbortCloseDetail(client, runId, err) {
   const base = await buildFailureCloseDetail(client, runId, err);
   if (!err?.partialReport) return base;
@@ -697,8 +705,58 @@ export async function buildAbortCloseDetail(client, runId, err) {
     counts, planCounts, passagePriority, failures, abortReason,
   } = err.partialReport;
   return {
-    ...base, counts, planCounts, passagePriority, failures, abort_reason: abortReason,
+    ...base,
+    // FIX (coordinator ruling, IMPORTANT-1(a), live-execution-proven): a 6-query run closed with
+    // detail.queries_used=0 while counts.queriesSpent=6 — buildFailureCloseDetail's own re-read can
+    // silently under-report (a transient read error defaults to 0; see its own header comment for
+    // the full root cause). counts.queriesSpent is the TRUE in-process number regardless of whether
+    // that re-read succeeded — never take the (possibly stale/false-zero) DB re-read over a KNOWN
+    // higher in-process value. This is the undercount direction the terms call a violation.
+    queries_used: Math.max(base.queries_used ?? 0, counts?.queriesSpent ?? 0),
+    counts, planCounts, passagePriority, failures, abort_reason: abortReason,
   };
+}
+
+// computeLiveRunStatus — FIX (coordinator ruling, IMPORTANT-2, live-execution-proven): a dataset
+// cache file that fails to read (counts.datasetsMissing>0) or a --session with NO matching cached
+// file at all (sessionUncached) used to be invisible to main()'s own inline status expression
+// entirely — a run could close 'succeeded' with exit 0 while whole sessions' worth of bills
+// silently vanished from the worklist (proven: 1 of 3 cache files readable -> billsPlanned=2,
+// inserted=2, failures=[], 'succeeded', exit 0, with nothing recording that two whole sessions
+// vanished). Neither condition produces a failures[] entry (there is no per-bill failure to report
+// — the bills were never even SEEN), so this is checked separately from report.failures.length, and
+// named explicitly via partialReason so an operator can tell this apart from an ordinary per-bill
+// 'partial'. Extracted as its own pure function (same "extract for testability" precedent as
+// buildAbortCloseDetail/closeRunOnAbort) so this exact decision is directly unit-testable against a
+// synthetic report, without needing the full runIngestLegiscanTexts pipeline.
+export function computeLiveRunStatus(report) {
+  const datasetIssue = report.counts.datasetsMissing > 0 || report.sessionUncached;
+  const status = report.refused
+    ? 'failed'
+    : (report.failures.length === 0 && !datasetIssue ? 'succeeded' : 'partial');
+  const partialReason = (!report.refused && report.failures.length === 0 && datasetIssue)
+    ? 'dataset_read_failure'
+    : undefined;
+  return { status, partialReason };
+}
+
+// closeRunOnAbort — the composition main() uses after a throw: never closes over an unverifiable
+// ledger. When err carries NO partialReport (a genuinely unexpected crash with no in-process
+// fallback) AND the DB re-read itself failed (ledgerReadFailed), closing would risk wholesale-
+// replacing a real nonzero detail with a false zero (closeRun never merges — see its own header
+// comment) — so this deliberately does NOT closeRun in that one narrow case, leaving the row
+// 'running' with whatever detail.queries_used the write-ahead path already durably persisted;
+// getMonthlyQueryUsage sums that regardless of status. Every OTHER case (an ordinary failure, or an
+// abort WITH a partialReport, whose queries_used is already recovered via the Math.max fix above)
+// closes normally. Extracted as its own function so this exact decision is directly unit-testable,
+// same "extract for testability" precedent as buildAbortCloseDetail itself.
+export async function closeRunOnAbort(client, runId, err) {
+  const closeDetail = await buildAbortCloseDetail(client, runId, err);
+  if (closeDetail.ledgerReadFailed && !err?.partialReport) {
+    return { closed: false, reason: 'ledger_read_failed', ledgerReadError: closeDetail.ledgerReadError };
+  }
+  await closeRun(client, runId, 'failed', closeDetail);
+  return { closed: true, closeDetail };
 }
 
 // ---- main ----
@@ -725,22 +783,34 @@ async function main() {
     const report = await runIngestLegiscanTexts(client, {
       dryRun: false, runId, limit: args.limit, session: args.session, priorityOnly: args.priorityOnly,
     });
-    const status = report.refused ? 'failed' : (report.failures.length === 0 ? 'succeeded' : 'partial');
+    const { status, partialReason } = computeLiveRunStatus(report);
     await closeRun(client, runId, status, {
       counts: report.counts,
       passagePriority: report.passagePriority,
       planCounts: report.planCounts,
       failures: report.failures,
       budgetError: report.budgetError,
+      sessionUncached: report.sessionUncached,
+      partialReason,
       queries_used: report.counts.queriesSpent,
       attribution: ATTRIBUTION,
     });
     console.log(JSON.stringify({
-      source: SOURCE, run_id: runId, status, ...report,
+      source: SOURCE, run_id: runId, status, partialReason, ...report,
     }, null, 2));
     if (status !== 'succeeded') process.exitCode = 2;
   } catch (err) {
-    await closeRun(client, runId, 'failed', await buildAbortCloseDetail(client, runId, err));
+    const result = await closeRunOnAbort(client, runId, err);
+    if (!result.closed) {
+      // FIX (coordinator ruling, IMPORTANT-1(b)): never closeRun over an unverifiable ledger — see
+      // closeRunOnAbort's own header comment. The run stays 'running'; its own last-known-good
+      // write-ahead detail keeps counting correctly via getMonthlyQueryUsage.
+      console.error(
+        'WARNING: could not verify the query-usage ledger before closing this run — leaving it '
+          + '"running" rather than risk erasing a real nonzero count:',
+        result.ledgerReadError,
+      );
+    }
     // A NAMED abort (rate_limited | consecutive_status_errors) is a controlled, informative stop —
     // exit 2, matching this file's own "not succeeded but not a crash" convention above, rather
     // than the generic exit 1 an unhandled rejection would otherwise produce (see the bottom-level

@@ -12,6 +12,8 @@ import {
   resolveTextSourceUrl,
   runIngestLegiscanTexts,
   buildAbortCloseDetail,
+  closeRunOnAbort,
+  computeLiveRunStatus,
   BillTextDecodeError,
 } from '../src/cli/ingest-legiscan-texts.js';
 import { InvalidFlagValueError, SourceFetchError, RateLimitedError } from '../src/lib/errors.js';
@@ -1266,6 +1268,177 @@ test('full composition: a consecutive-statusError circuit-breaker abort ALSO clo
     assert.equal(row.detail.counts.inserted, 1, 'the cache-hit bill (HB100) completed before the breaker tripped');
     assert.equal(row.detail.counts.statusError, 5, 'the breaker trips at exactly 5 consecutive query failures');
     assert.equal(row.detail.counts.queriesSpent, 5);
+  });
+});
+
+// ---- fix-round-3 (coordinator ruling, IMPORTANT-1(a)): buildAbortCloseDetail's queries_used must
+// never regress BELOW the TRUE in-process counts.queriesSpent already known from err.partialReport,
+// even when the underlying DB re-read fails (mirrors the same reviewer-proven regression fixed in
+// buildFailureCloseDetail/closeRunOnFailure — IMPORTANT-1(b), src/cli/ingest-legiscan.js). ----
+
+function makeLedgerReadFailureClient(seedRow) {
+  const runsTable = seedRow ? [{ ...seedRow }] : [];
+  return {
+    runsTable,
+    from(table) {
+      assert.equal(table, 'ingestion_runs');
+      return {
+        select() { return this; },
+        eq() { return this; },
+        // The reviewer's exact construction: a transient read error (57014, statement_timeout),
+        // never thrown — postgrest-js resolves.
+        maybeSingle: async () => ({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }),
+        update(patch) {
+          return {
+            eq: async (col, val) => {
+              const row = runsTable.find((r) => r[col] === val);
+              if (row) Object.assign(row, patch);
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+test('buildAbortCloseDetail: IMPORTANT-1(a) — a ledger read failure (base.queries_used defaults to 0) never regresses BELOW the true in-process counts.queriesSpent already known from err.partialReport', async () => {
+  const client = makeLedgerReadFailureClient({
+    id: 'run-a', source: SOURCE, status: 'running', detail: { queries_used: 6 },
+  });
+  const err = new RateLimitedError('rate limited', { source: 'legiscan', status: 429 });
+  err.partialReport = {
+    counts: { inserted: 2, queriesSpent: 6 }, planCounts: {}, passagePriority: { passage: 0, other: 6 }, failures: [], abortReason: 'rate_limited',
+  };
+  const detail = await buildAbortCloseDetail(client, 'run-a', err);
+  assert.equal(detail.ledgerReadFailed, true, 'the underlying re-read DID fail');
+  assert.equal(detail.queries_used, 6, 'recovered from the in-process partialReport, never the read-failure default of 0');
+});
+
+test('closeRunOnAbort: on a ledger read failure with NO partialReport (a genuinely unexpected crash, no in-process fallback), closeRun is SKIPPED — the row stays \'running\' with its prior nonzero detail intact', async () => {
+  const client = makeLedgerReadFailureClient({
+    id: 'run-b', source: SOURCE, status: 'running', detail: { queries_used: 6 },
+  });
+  const result = await closeRunOnAbort(client, 'run-b', new Error('a totally unrelated bug'));
+  assert.equal(result.closed, false);
+  assert.equal(result.reason, 'ledger_read_failed');
+  const row = client.runsTable.find((r) => r.id === 'run-b');
+  assert.equal(row.status, 'running', 'never closed — closeRun must never be called over an unverifiable ledger');
+  assert.deepEqual(row.detail, { queries_used: 6 });
+});
+
+test('closeRunOnAbort: on a ledger read failure WITH a partialReport (a named abort), closeRun still proceeds — the Math.max recovery already guarantees a correct queries_used', async () => {
+  const client = makeLedgerReadFailureClient({
+    id: 'run-c', source: SOURCE, status: 'running', detail: { queries_used: 6 },
+  });
+  const err = new RateLimitedError('rate limited', { source: 'legiscan', status: 429 });
+  err.partialReport = {
+    counts: { inserted: 2, queriesSpent: 6 }, planCounts: {}, passagePriority: { passage: 0, other: 6 }, failures: [], abortReason: 'rate_limited',
+  };
+  const result = await closeRunOnAbort(client, 'run-c', err);
+  assert.equal(result.closed, true);
+  const row = client.runsTable.find((r) => r.id === 'run-c');
+  assert.equal(row.status, 'failed');
+  assert.equal(row.detail.queries_used, 6, 'the recovered value, never a false 0');
+  assert.equal(row.detail.abort_reason, 'rate_limited');
+});
+
+// ---- fix-round-3 (coordinator ruling, IMPORTANT-2, live-execution-proven): a dataset-cache read
+// failure or an uncached --session used to be invisible to status/exit-code — a run could close
+// 'succeeded' with exit 0 while whole sessions' worth of bills silently vanished. Sharp case proven:
+// 1 of 3 cache files readable -> billsPlanned=2, inserted=2, failures=[], 'succeeded', exit 0. ----
+
+test('computeLiveRunStatus: a clean run (no failures, no dataset issues) is succeeded, no partialReason', () => {
+  const report = {
+    refused: false, failures: [], counts: { datasetsMissing: 0 }, sessionUncached: false,
+  };
+  const { status, partialReason } = computeLiveRunStatus(report);
+  assert.equal(status, 'succeeded');
+  assert.equal(partialReason, undefined);
+});
+
+test('computeLiveRunStatus: datasetsMissing > 0 with ZERO per-bill failures is still \'partial\', named "dataset_read_failure" — the exact regression that used to close \'succeeded\'', () => {
+  const report = {
+    refused: false, failures: [], counts: { datasetsMissing: 2 }, sessionUncached: false,
+  };
+  const { status, partialReason } = computeLiveRunStatus(report);
+  assert.equal(status, 'partial');
+  assert.equal(partialReason, 'dataset_read_failure');
+});
+
+test('computeLiveRunStatus: sessionUncached with ZERO per-bill failures is also \'partial\', named "dataset_read_failure"', () => {
+  const report = {
+    refused: false, failures: [], counts: { datasetsMissing: 0 }, sessionUncached: true,
+  };
+  const { status, partialReason } = computeLiveRunStatus(report);
+  assert.equal(status, 'partial');
+  assert.equal(partialReason, 'dataset_read_failure');
+});
+
+test('computeLiveRunStatus: an ordinary per-bill failure still reports \'partial\' with no partialReason (unrelated to the dataset-read fix)', () => {
+  const report = {
+    refused: false, failures: [{ step: 'query' }], counts: { datasetsMissing: 0 }, sessionUncached: false,
+  };
+  const { status, partialReason } = computeLiveRunStatus(report);
+  assert.equal(status, 'partial');
+  assert.equal(partialReason, undefined);
+});
+
+test('computeLiveRunStatus: a budget refusal is always \'failed\', regardless of dataset issues', () => {
+  const report = {
+    refused: true, failures: [], counts: { datasetsMissing: 3 }, sessionUncached: true,
+  };
+  const { status, partialReason } = computeLiveRunStatus(report);
+  assert.equal(status, 'failed');
+  assert.equal(partialReason, undefined);
+});
+
+test('runIngestLegiscanTexts + computeLiveRunStatus: the reviewer\'s exact sharp case — 1 of 3 dataset cache files readable closes \'partial\' (not \'succeeded\'), with datasetsMissing surfacing in counts (moved back in, matching the sibling)', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      listFilesFn: () => ['good.json', 'bad1.json', 'bad2.json'],
+      readDatasetFn: async (filePath) => (filePath === 'good.json' ? ONE_BILL_DATASET() : { ok: false, filePath }),
+      ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload(),
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.counts.datasetsRead, 1);
+    assert.equal(report.counts.datasetsMissing, 2, 'two whole sessions\' worth of bills silently vanished — must be visible in the ledger, not just baseReport');
+    assert.equal(report.counts.billsPlanned, 1);
+    assert.equal(report.counts.inserted, 1);
+    assert.deepEqual(report.failures, [], 'no per-bill failures — the dataset read failures never produce one');
+
+    const { status, partialReason } = computeLiveRunStatus(report);
+    assert.equal(status, 'partial', 'must NEVER close \'succeeded\' when whole sessions vanished from the worklist');
+    assert.equal(partialReason, 'dataset_read_failure');
+  });
+});
+
+test('runIngestLegiscanTexts + computeLiveRunStatus: --session with NO matching cached file (sessionUncached) also forces \'partial\', never a silent \'succeeded\'', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      session: 9999,
+      listFilesFn: () => ['1608-hashA.json'], // none of these match --session 9999
+      readDatasetFn: async () => ONE_BILL_DATASET(),
+      ...baseLoaders(),
+      getBillTextFn: async () => billTextPayload(),
+      extractFn: async () => 'text',
+    });
+    assert.equal(report.sessionUncached, true);
+    assert.equal(report.counts.billsPlanned, 0);
+    assert.deepEqual(report.failures, []);
+
+    const { status, partialReason } = computeLiveRunStatus(report);
+    assert.equal(status, 'partial');
+    assert.equal(partialReason, 'dataset_read_failure');
   });
 });
 

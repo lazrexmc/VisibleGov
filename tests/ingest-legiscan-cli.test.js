@@ -13,7 +13,7 @@ import {
   ensureLegiscanSessionRow, AmbiguousLegiscanSessionMatchError, LegiscanSessionIdentityConflictError,
   runLegiscanIngest, resolveDatasetBytes, assertRunUnderBudget, dryRunReportFromDb,
   planFromParsedDataset, retractLegiscanVoteIfStored, recordQueryUsage,
-  buildSuccessCloseDetail, buildFailureCloseDetail,
+  buildSuccessCloseDetail, buildFailureCloseDetail, closeRunOnFailure,
 } from '../src/cli/ingest-legiscan.js';
 import {
   QueryBudgetExceededError, DatasetHashMismatchError, getMonthlyQueryUsage, ATTRIBUTION,
@@ -594,6 +594,72 @@ test('CRITICAL 1 — full composition: recordQueryUsage -> closeRun(failed, buil
 
   const usage = await getMonthlyQueryUsage(client, { source: 'legiscan' });
   assert.equal(usage, 1, 'Ruling 3 — "crash must overcount, never undercount": the one query genuinely spent before the crash must still be visible in the durable ledger');
+});
+
+// ---- fix-round-3 (coordinator ruling, IMPORTANT-1, live-execution-proven): buildFailureCloseDetail
+// used to destructure ONLY {data} from the ingestion_runs re-read, discarding `error` — postgrest-js
+// RESOLVES (never throws) on a query failure, so a transient 500/504/statement-timeout on that
+// single select silently produced queries_used:0 regardless of the real ledger value, and closeRun's
+// own wholesale detail-replace then ERASED the true write-ahead-persisted count. Proven by
+// execution: a 6-query run closed with detail.queries_used=0 while counts.queriesSpent=6. Tested
+// with the reviewer's exact construction: maybeSingle resolving {data:null, error:{code:'57014'}}
+// (Postgres "query_canceled", a statement-timeout shape) via a bespoke minimal client — the shared
+// makeFakeLegiscanClient's own query builder always resolves error:null, so it cannot express this
+// scenario. ------------------------------------------------------------------------------------
+
+function makeLedgerReadFailureClient(seedRow) {
+  const runsTable = seedRow ? [{ ...seedRow }] : [];
+  return {
+    runsTable,
+    from(table) {
+      assert.equal(table, 'ingestion_runs');
+      return {
+        select() { return this; },
+        eq() { return this; },
+        // The reviewer's exact construction: a transient read error (57014, statement_timeout),
+        // never thrown — postgrest-js resolves.
+        maybeSingle: async () => ({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }),
+        update(patch) {
+          return {
+            eq: async (col, val) => {
+              const row = runsTable.find((r) => r[col] === val);
+              if (row) Object.assign(row, patch);
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+test('buildFailureCloseDetail: a read ERROR (not just an absent row) is distinguished — ledgerReadFailed:true, ledgerReadError carries the message, and queries_used is NEVER silently reported as a confident 0 masquerading as the truth', async () => {
+  const client = makeLedgerReadFailureClient({ id: 'run-x', source: 'legiscan', status: 'running', detail: { queries_used: 6 } });
+  const closeDetail = await buildFailureCloseDetail(client, 'run-x', new Error('mid-flight crash'));
+  assert.equal(closeDetail.ledgerReadFailed, true);
+  assert.match(closeDetail.ledgerReadError, /statement timeout/);
+  assert.match(closeDetail.error, /mid-flight crash/);
+});
+
+test('closeRunOnFailure: on a ledger read failure, closeRun is SKIPPED entirely — the row stays \'running\' with its own prior nonzero detail intact (never wholesale-replaced with a false 0)', async () => {
+  const client = makeLedgerReadFailureClient({ id: 'run-y', source: 'legiscan', status: 'running', detail: { queries_used: 6 } });
+  const result = await closeRunOnFailure(client, 'run-y', new Error('mid-flight crash'));
+  assert.equal(result.closed, false);
+  assert.equal(result.reason, 'ledger_read_failed');
+
+  const row = client.runsTable.find((r) => r.id === 'run-y');
+  assert.equal(row.status, 'running', 'never closed — closeRun must never be called over an unverifiable ledger');
+  assert.deepEqual(row.detail, { queries_used: 6 }, 'the row\'s own prior detail is untouched — the exact regression this fix closes: a 6-query run must never close with detail.queries_used=0');
+});
+
+test('closeRunOnFailure: an ORDINARY failure (ledger read succeeds) still closes \'failed\' normally, unaffected by this fix', async () => {
+  const { client, tables } = makeFakeLegiscanClient();
+  tables.ingestion_runs.push({ id: 'run-z', source: 'legiscan', status: 'running', detail: { queries_used: 3 } });
+  const result = await closeRunOnFailure(client, 'run-z', new Error('ordinary crash'));
+  assert.equal(result.closed, true);
+  const row = tables.ingestion_runs.find((r) => r.id === 'run-z');
+  assert.equal(row.status, 'failed');
+  assert.equal(row.detail.queries_used, 3);
 });
 
 // ---- IMPORTANT 7 fix (final-review-findings.md): the cache path never re-verified the dataset
