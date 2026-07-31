@@ -113,6 +113,15 @@ import { isUniqueViolation } from './link-persons.js';
 // own err.alertMessage (LegiScan's own human-readable reason, e.g. the subscription-limit text
 // above) is carried into failures[] so an operator can see WHY, not just that something failed.
 //
+// FIX (coordinator ruling, fix-round-2): keeping the throw semantics above still left a real gap —
+// the exact defect class already fixed in ingest-mo-senate.js's own `partialCounts` pattern (a
+// failed run discarding its whole ledger). Both abort throw sites now attach `.partialReport`
+// (counts/planCounts/passagePriority/failures/abortReason) onto the thrown error BEFORE throwing;
+// buildAbortCloseDetail (below) reads it back so the run still closes 'failed' with a detail
+// showing BOTH the abort_reason (rate_limited | consecutive_status_errors) and exactly how far this
+// run got, never collapsing to an opaque `{error}` shell — graceful at the LEDGER level even though
+// the run itself still ends failed (exit 2, not a bare crash's exit 1 — see main()'s own catch).
+//
 // BUDGET REFUSAL SHAPE (rule 1: "refuses to start"): plannedQueries for the pre-flight
 // assertRunUnderBudget check counts ONLY the doc_ids that would need a FRESH query (cache hits are
 // free and never counted against the cap). If that check throws QueryBudgetExceededError, this
@@ -597,7 +606,20 @@ export async function runIngestLegiscanTexts(client, {
         // is never continued past, even once. This throw propagates out of runIngestLegiscanTexts
         // entirely, through main()'s own failure close path; queries_used already survived via the
         // write-ahead persist just above.
-        if (err instanceof RateLimitedError) throw err;
+        //
+        // FIX (coordinator ruling, fix-round-2 — the same "a failed run discarding its whole
+        // ledger" class already fixed in ingest-mo-senate.js's own partialCounts pattern): the
+        // error carries this run's own progress-so-far forward via `.partialReport` (mirrors that
+        // file's `partialCounts` carried into its catch block) — buildAbortCloseDetail below reads
+        // it back so the closed run's detail shows BOTH why it stopped (abort_reason) and exactly
+        // how far it got, instead of collapsing to an opaque `{error}` shell. counts/failures are
+        // referenced directly (not cloned) since nothing mutates them again after this throw.
+        if (err instanceof RateLimitedError) {
+          err.partialReport = {
+            counts, planCounts: plan.counts, passagePriority: plan.passagePriority, failures, abortReason: 'rate_limited',
+          };
+          throw err;
+        }
         // Only the query step's own OTHER real, typed failure modes (a non-OK/ERROR status or
         // missing-key from checkStatus/buildUrl, or a network-level SourceFetchError) are counted
         // and continue the run — a genuinely unexpected error (a bug) still propagates.
@@ -611,13 +633,18 @@ export async function runIngestLegiscanTexts(client, {
         // systemic condition (an exhausted subscription quota, an outage) than N independently-
         // broken documents; abort rather than burning the rest of the budget retrying blind.
         if (consecutiveStatusErrors >= maxConsecutiveStatusErrors) {
-          throw new TooManyConsecutiveQueryFailuresError(
+          const breakerErr = new TooManyConsecutiveQueryFailuresError(
             `aborting after ${consecutiveStatusErrors} consecutive query failures (limit `
               + `${maxConsecutiveStatusErrors}) — a systemic condition is far more likely than this `
               + 'many independently-broken documents; never worth burning the rest of the budget '
               + 'retrying blind',
             { consecutiveFailures: consecutiveStatusErrors },
           );
+          // Same ledger-preservation fix as the RateLimitedError branch above.
+          breakerErr.partialReport = {
+            counts, planCounts: plan.counts, passagePriority: plan.passagePriority, failures, abortReason: 'consecutive_status_errors',
+          };
+          throw breakerErr;
         }
         continue;
       }
@@ -647,6 +674,30 @@ export async function runIngestLegiscanTexts(client, {
     budgetError,
     queriesUsed: detail.queries_used,
     ...baseReport,
+  };
+}
+
+// ---- abort close detail (coordinator ruling, fix-round-2) — mirrors ingest-mo-senate.js's own
+// partialCounts pattern: a RateLimitedError/circuit-breaker abort must close 'failed' with a
+// detail that shows BOTH why the run stopped (abort_reason) and exactly how far it got
+// (counts/planCounts/passagePriority/failures), never just an opaque error string. Reuses
+// buildFailureCloseDetail's own best-effort queries_used re-read verbatim (imported from
+// ingest-legiscan.js, unchanged — queries_used already survives via write-ahead regardless of this
+// fix) and folds in whatever `err.partialReport` the throw site attached (see the RateLimitedError/
+// TooManyConsecutiveQueryFailuresError throw sites above). Gracefully degrades to
+// buildFailureCloseDetail's own plain `{error, queries_used}` shape when err carries no
+// partialReport at all — a genuinely unexpected crash (a bug) that never reached either abort site,
+// or one that happened before the loop started. Extracted as its own function so this composition
+// is directly unit-testable without process.argv/getClient(), same precedent as
+// buildSuccessCloseDetail/buildFailureCloseDetail themselves.
+export async function buildAbortCloseDetail(client, runId, err) {
+  const base = await buildFailureCloseDetail(client, runId, err);
+  if (!err?.partialReport) return base;
+  const {
+    counts, planCounts, passagePriority, failures, abortReason,
+  } = err.partialReport;
+  return {
+    ...base, counts, planCounts, passagePriority, failures, abort_reason: abortReason,
   };
 }
 
@@ -689,12 +740,23 @@ async function main() {
     }, null, 2));
     if (status !== 'succeeded') process.exitCode = 2;
   } catch (err) {
-    await closeRun(client, runId, 'failed', await buildFailureCloseDetail(client, runId, err));
+    await closeRun(client, runId, 'failed', await buildAbortCloseDetail(client, runId, err));
+    // A NAMED abort (rate_limited | consecutive_status_errors) is a controlled, informative stop —
+    // exit 2, matching this file's own "not succeeded but not a crash" convention above, rather
+    // than the generic exit 1 an unhandled rejection would otherwise produce (see the bottom-level
+    // .catch() below, which now respects an already-set exitCode instead of stomping it).
+    if (err?.partialReport?.abortReason) process.exitCode = 2;
     throw err;
   }
 }
 
 const invokedDirectly = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
 if (invokedDirectly) {
-  main().catch((err) => { console.error(err); process.exitCode = 1; });
+  main().catch((err) => {
+    console.error(err);
+    // Only fall back to the generic crash exit code if main()'s own catch block didn't already set
+    // a more specific one (e.g. 2 for a named abort, above) — a bare overwrite here would silently
+    // discard that signal.
+    if (process.exitCode == null) process.exitCode = 1;
+  });
 }

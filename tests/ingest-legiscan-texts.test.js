@@ -11,6 +11,7 @@ import {
   decodeBillTextDoc,
   resolveTextSourceUrl,
   runIngestLegiscanTexts,
+  buildAbortCloseDetail,
   BillTextDecodeError,
 } from '../src/cli/ingest-legiscan-texts.js';
 import { InvalidFlagValueError, SourceFetchError, RateLimitedError } from '../src/lib/errors.js';
@@ -18,6 +19,7 @@ import { OversizeTextError, MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
 import { EmptyExtractionError } from '../src/cli/backfill-mo-bill-texts.js';
 import { normalizeBillIdentifier } from '../src/adapters/legiscan-dataset.js';
 import { QueryBudgetExceededError, LegiScanApiError, SOURCE } from '../src/adapters/legiscan.js';
+import { closeRun } from '../src/lib/db.js';
 
 // LegiScan getBillText volume path (.superpowers/sdd/2026-07-31-legiscan-bill-text/brief.md).
 // EXACTLY ONE live LegiScan query was permitted for this whole task and was already spent capturing
@@ -300,6 +302,14 @@ function makeFakeWriteClient({ rejectVersions = [] } = {}) {
           range(from, to) {
             const filtered = runsTable.filter((r) => predicates.every((p) => p(r)));
             return Promise.resolve({ data: filtered.slice(from, to + 1), error: null });
+          },
+          // maybeSingle — needed by buildFailureCloseDetail/buildAbortCloseDetail's own best-effort
+          // re-read of ingestion_runs.detail.queries_used (src/cli/ingest-legiscan.js). Without this,
+          // the real function's own try/catch would silently swallow the missing method and default
+          // queriesUsedSoFar to 0 — exactly the kind of false-negative a fake client must not produce.
+          maybeSingle: async () => {
+            const matched = runsTable.filter((r) => predicates.every((p) => p(r)));
+            return { data: matched[0] ? { ...matched[0] } : null, error: null };
           },
           update(patch) {
             return {
@@ -1076,6 +1086,186 @@ test('runIngestLegiscanTexts: HIGH-3 — a query failure with no alertMessage at
       extractFn: async () => 'text',
     });
     assert.equal(report.failures[0].alertMessage, null);
+  });
+});
+
+// ---- fix-round-2 (coordinator ruling): an abort must not discard the run's own ledger — mirrors
+// ingest-mo-senate.js's own partialCounts fix for the same defect class. Both abort throw sites
+// attach `.partialReport` (counts/planCounts/passagePriority/failures/abortReason) onto the thrown
+// error; buildAbortCloseDetail reads it back into the failed-close detail. ----
+
+test('runIngestLegiscanTexts: a RateLimitedError abort attaches .partialReport (counts/planCounts/passagePriority/failures/abortReason) onto the thrown error itself', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    const dataset = fakeDataset({
+      sessionId: 1608,
+      bills: [
+        moBill({ billNumber: 'HB1', texts: [textEntry({ docId: 1, date: '2025-01-01', type: 'Introduced' })] }),
+        moBill({ billNumber: 'HB2', texts: [textEntry({ docId: 2, date: '2025-01-01', type: 'Introduced' })] }),
+      ],
+    });
+    const err = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => dataset,
+      loadSessionIndexFn: async () => new Map([[1608, { id: 'sess-1608' }]]),
+      loadBillIndexFn: async () => new Map([
+        [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-1' }],
+        [`sess-1608|${normalizeBillIdentifier('HB2')}`, { id: 'bill-2' }],
+      ]),
+      loadTextVersionIndexFn: async () => new Set(),
+      loadPassageBillIdsFn: async () => new Set(),
+      getBillTextFn: async (docId) => {
+        if (docId === 1) return billTextPayload({ docId: 1 });
+        throw new RateLimitedError('rate limited by legiscan', { source: 'legiscan', status: 429 });
+      },
+      extractFn: async () => 'text',
+    }).then(
+      () => { throw new Error('expected the run to reject'); },
+      (e) => e,
+    );
+    assert.ok(err instanceof RateLimitedError);
+    assert.equal(err.partialReport.abortReason, 'rate_limited');
+    assert.equal(err.partialReport.counts.inserted, 1, 'HB1 completed before the abort');
+    assert.equal(err.partialReport.counts.queriesSpent, 2, 'HB1 succeeded, HB2 triggered the 429');
+    assert.equal(typeof err.partialReport.planCounts.billsSeen, 'number');
+    assert.deepEqual(err.partialReport.passagePriority, { passage: 0, other: 2 });
+  });
+});
+
+test('buildAbortCloseDetail: carries err.partialReport forward (abort_reason, counts, planCounts, passagePriority, failures) alongside the base queries_used re-read', async () => {
+  const client = makeFakeWriteClient();
+  client.runsTable.push({
+    id: 'run-x', source: SOURCE, status: 'running', detail: { queries_used: 4 },
+  });
+  const err = new RateLimitedError('rate limited', { source: 'legiscan', status: 429 });
+  err.partialReport = {
+    counts: { inserted: 2, queriesSpent: 3 },
+    planCounts: { billsSeen: 5 },
+    passagePriority: { passage: 1, other: 2 },
+    failures: [{ step: 'query', message: 'x' }],
+    abortReason: 'rate_limited',
+  };
+  const detail = await buildAbortCloseDetail(client, 'run-x', err);
+  assert.equal(detail.abort_reason, 'rate_limited');
+  assert.equal(detail.queries_used, 4, 'the base queries_used re-read (write-ahead) is preserved');
+  assert.equal(detail.counts.inserted, 2);
+  assert.deepEqual(detail.planCounts, { billsSeen: 5 });
+  assert.deepEqual(detail.passagePriority, { passage: 1, other: 2 });
+  assert.equal(detail.failures.length, 1);
+  assert.match(detail.error, /rate limited/);
+});
+
+test('buildAbortCloseDetail: gracefully degrades to buildFailureCloseDetail\'s own plain {error, queries_used} shape when err carries no partialReport (a genuinely unexpected crash)', async () => {
+  const client = makeFakeWriteClient();
+  client.runsTable.push({
+    id: 'run-y', source: SOURCE, status: 'running', detail: { queries_used: 1 },
+  });
+  const err = new Error('a totally unrelated bug');
+  const detail = await buildAbortCloseDetail(client, 'run-y', err);
+  assert.equal(detail.queries_used, 1);
+  assert.equal(detail.abort_reason, undefined);
+  assert.equal(detail.counts, undefined);
+  assert.match(detail.error, /a totally unrelated bug/);
+});
+
+test('full composition (mirrors ingest-mo-senate.js\'s own partialCounts fix): an abort at item 3 of 3 closes \'failed\' with a detail carrying the abort reason, queries_used, AND the partial counts reflecting the N-1 (2) completed items — a specific bucket, not just presence', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    client.runsTable.push({
+      id: 'run-1', source: SOURCE, status: 'running', detail: {},
+    });
+    const dataset = fakeDataset({
+      sessionId: 1608,
+      bills: [
+        moBill({ billNumber: 'HB1', texts: [textEntry({ docId: 1, date: '2025-01-01', type: 'Introduced' })] }),
+        moBill({ billNumber: 'HB2', texts: [textEntry({ docId: 2, date: '2025-01-01', type: 'Introduced' })] }),
+        moBill({ billNumber: 'HB3', texts: [textEntry({ docId: 3, date: '2025-01-01', type: 'Introduced' })] }),
+      ],
+    });
+    const caughtErr = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => dataset,
+      loadSessionIndexFn: async () => new Map([[1608, { id: 'sess-1608' }]]),
+      loadBillIndexFn: async () => new Map([
+        [`sess-1608|${normalizeBillIdentifier('HB1')}`, { id: 'bill-1' }],
+        [`sess-1608|${normalizeBillIdentifier('HB2')}`, { id: 'bill-2' }],
+        [`sess-1608|${normalizeBillIdentifier('HB3')}`, { id: 'bill-3' }],
+      ]),
+      loadTextVersionIndexFn: async () => new Set(),
+      loadPassageBillIdsFn: async () => new Set(),
+      getBillTextFn: async (docId) => {
+        // Item 3 of 3 triggers the abort (N=3) — items 1 and 2 (N-1=2) complete first.
+        if (docId === 3) throw new RateLimitedError('rate limited by legiscan', { source: 'legiscan', status: 429 });
+        return billTextPayload({ docId });
+      },
+      extractFn: async () => 'text',
+    }).then(
+      () => { throw new Error('expected the run to reject'); },
+      (e) => e,
+    );
+
+    const closeDetail = await buildAbortCloseDetail(client, 'run-1', caughtErr);
+    await closeRun(client, 'run-1', 'failed', closeDetail);
+
+    const row = client.runsTable.find((r) => r.id === 'run-1');
+    assert.equal(row.status, 'failed');
+    assert.equal(row.detail.abort_reason, 'rate_limited');
+    assert.equal(row.detail.queries_used, 3, 'write-ahead recorded 3 queries: HB1, HB2 succeeded, HB3 triggered the abort');
+    assert.equal(row.detail.counts.inserted, 2, 'the partial counts reflect the N-1 (2) completed items before the abort');
+    assert.equal(row.detail.counts.queriesSpent, 3);
+  });
+});
+
+test('full composition: a consecutive-statusError circuit-breaker abort ALSO closes \'failed\' with abort_reason "consecutive_status_errors" and the partial counts up to the break', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const client = makeFakeWriteClient();
+    client.runsTable.push({
+      id: 'run-2', source: SOURCE, status: 'running', detail: {},
+    });
+    // 1 cache hit (inserted) + 5 fresh failures (the N=5 breaker limit) + 2 more bills never reached.
+    writeFileSync(join(textCacheDir, '100.json'), JSON.stringify({ status: 'OK', text: billTextPayload({ docId: 100 }) }));
+    const bills = [
+      moBill({ billNumber: 'HB100', texts: [textEntry({ docId: 100, date: '2025-01-01', type: 'Introduced' })] }),
+      ...Array.from({ length: 7 }, (_, i) => moBill({ billNumber: `HB${i + 1}`, texts: [textEntry({ docId: i + 1, date: '2025-01-01', type: 'Introduced' })] })),
+    ];
+    const dataset = fakeDataset({ sessionId: 1608, bills });
+    const billIndexEntries = [
+      [`sess-1608|${normalizeBillIdentifier('HB100')}`, { id: 'bill-100' }],
+      ...Array.from({ length: 7 }, (_, i) => [`sess-1608|${normalizeBillIdentifier(`HB${i + 1}`)}`, { id: `bill-${i + 1}` }]),
+    ];
+    const caughtErr = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-2',
+      cacheDir: textCacheDir,
+      listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => dataset,
+      loadSessionIndexFn: async () => new Map([[1608, { id: 'sess-1608' }]]),
+      loadBillIndexFn: async () => new Map(billIndexEntries),
+      loadTextVersionIndexFn: async () => new Set(),
+      loadPassageBillIdsFn: async () => new Set(),
+      getBillTextFn: async (docId) => {
+        throw new LegiScanApiError('LegiScan API error: status=ERROR', { status: 'ERROR', alertMessage: `boom ${docId}` });
+      },
+      extractFn: async () => 'text',
+    }).then(
+      () => { throw new Error('expected the run to reject'); },
+      (e) => e,
+    );
+
+    const closeDetail = await buildAbortCloseDetail(client, 'run-2', caughtErr);
+    await closeRun(client, 'run-2', 'failed', closeDetail);
+
+    const row = client.runsTable.find((r) => r.id === 'run-2');
+    assert.equal(row.detail.abort_reason, 'consecutive_status_errors');
+    assert.equal(row.detail.counts.inserted, 1, 'the cache-hit bill (HB100) completed before the breaker tripped');
+    assert.equal(row.detail.counts.statusError, 5, 'the breaker trips at exactly 5 consecutive query failures');
+    assert.equal(row.detail.counts.queriesSpent, 5);
   });
 });
 
