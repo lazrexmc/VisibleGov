@@ -42,13 +42,27 @@
   hardened (origin-marked flags, all-member vetoes, keep-separate binding on every path),
   summary queue + record gate proven at $0 (8 bills: 4 published / 4 flagged). Trail:
   `.superpowers/sdd/2026-07-29-profile-completeness/progress.md` + CHATLOG 2026-07-30.
-- [ ] **NOW: Plan 3 — the public site, profile-first** (Lance: "the politician profile is the
-  product"). Onder's page = who he is + votes cast/missed with plain-language bill one-liners +
-  sponsored bills + MO history; bill pages as click-through support; directory + address lookup;
-  static pre-render on publish; freshness footer. Walked-back requirements (2026-07-29 ruling):
-  per-fact receipts rendering, reconciliation-flags surface, address-lookup privacy
-  (geocode-and-discard, never log), attribution footer (LegiScan CC-BY + MO not-official-copies
-  disclaimer), rollover-aware freshness. Brainstorm with Lance before any code.
+- [x] ~~Plan 3 — the public site~~ **COMPLETE + MERGED TO MAIN 2026-07-30** (c4e7320, 1726/1726,
+  final whole-branch adversarial review clean after a 6-finding fix wave, all closures
+  execution-verified). Five pages live in `site/`: directory + address lookup, person profiles
+  (identity, votes with receipts + one-liners, sponsorships, vote-aggregate charts, freshness),
+  legislator forwarding, bill pages (printed result beside recorded tallies, verified summaries,
+  inline glossary, flag badges), trust page (pipeline prose fact-checked against the code, metric
+  definitions single-sourced, full attribution). Migrations 0016–0019 applied; four data backfills
+  run live. Trail: `.superpowers/sdd/2026-07-30-public-site/progress.md` + CHATLOG 2026-07-30.
+
+- [ ] **NOW — Lance's open items (site is merged, none block each other):**
+  - **Cloudflare Pages setup (T7)** — connect `lazrexmc/VisibleGov`, production branch `main`,
+    build command EMPTY, **Root directory `site`** (required, or `_headers` + the geocode
+    Function are not discovered). Then verify: `/geocode` responds, `_redirects` rewrites hold on
+    hard refresh, CSP headers present (open question: whether `_headers` covers Function
+    responses — check at deploy).
+  - **Data-correction batch (one approval, two corrections)** — (a) ~2,047 MO `bills.status`
+    numeric LegiScan codes → their printed words (1=Introduced … 6=Failed), writer fixed in the
+    same change; (b) 10 MO roll calls stored with LegiScan's `1969-12-31` missing-date sentinel →
+    re-dated from the primary journal's real 2018-03-01 (primary-wins). Both reversible from the
+    cached payloads; ingest guard for (b) already merged.
+  - **Review queue** — flagged summaries + identity attach candidates in the local review server.
 - [ ] Lance review queue (independent of Plan 3): 4 flagged summaries from the $0 night +
   earlier flagged drafts; attach-candidate flags in the identity queue.
 

@@ -778,3 +778,13 @@ Data landed along the way: 193 MO terms (address lookup's backbone), 441 real na
 bioguide codes, 893 federal terms with real service dates, at-large districts, three applied
 migrations (0016/0017/0018+a). Remaining Lance items: Cloudflare console (T7), the MO
 status-code correction approval, and the merge menu after the final whole-branch review.
+
+## 2026-07-30 (late) — Lance: "I like option 1 to merge" — public site MERGED to main
+
+0019 applied first; the extended probe went exit 1 → exit 0 (23 unpublished verification records
+exposed to anon → 0; freshness reporting real finish times instead of "(never)"). Merge was a
+fast-forward to c4e7320, full suite re-run green on the merged tree (1726/1726), pushed, branch
+deleted local + remote. VisibleGov now holds the ingestion platform AND its public site on main.
+
+Open for Lance: Cloudflare Pages console (root directory must be `site`); the two-item data
+correction batch (MO status codes, the ten 1969-sentinel dates); the review queue.
