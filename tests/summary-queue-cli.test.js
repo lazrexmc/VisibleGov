@@ -6,6 +6,7 @@ import {
   autoPublishSummary, MalformedSummaryError, TextHashMismatchError, MissingBillTextError,
 } from '../src/cli/summary-queue.js';
 import { MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
+import { VERIFY_PROMPT_VERSION, COMPLETENESS_PROMPT_VERSION } from '../src/lib/verifier.js';
 import { InvalidFlagValueError } from '../src/lib/errors.js';
 
 // ---- parseArgs ----
@@ -345,12 +346,36 @@ function goodVerdicts(overrides = []) {
   return overrides.length ? overrides : base;
 }
 
+// goodCompleteness — the completeness-axis sibling of goodVerdicts. Sections are copied verbatim
+// from BILL_TEXT_CONTENT's own casing ("SEC. 1." not "Sec. 1") on purpose: assessCompleteness's
+// grounding check is case-sensitive substring matching, same discipline as
+// checkStatedPurposeGrounding, so a fixture using the summary bullet's own "Sec. 1" casing would
+// NOT ground against the stored text and would malform every test that uses this default.
+function goodCompleteness(overrides = {}) {
+  return {
+    key_provisions: [
+      { section: 'SEC. 1.', provision: 'Does X.' },
+      { section: 'SEC. 2.', provision: 'Does Y.' },
+    ],
+    coverage: [
+      { provision_index: 0, covered: true, bullet_index: 0, note: 'covered by bullet 0' },
+      { provision_index: 1, covered: true, bullet_index: 1, note: 'covered by bullet 1' },
+    ],
+    ...overrides,
+  };
+}
+
+// baseItem's completeness defaults to a well-formed, fully-covered payload so every PRE-EXISTING
+// test below (written before the completeness axis existed) keeps exercising exactly what it always
+// tested — the support-verdict axis — without also having to reason about completeness. Tests that
+// specifically exercise the completeness axis override it explicitly.
 function baseItem(overrides = {}) {
   return {
     bill_id: 'b1',
     bill_text_hash: 'h1',
     summary: goodSummary(),
     verdicts: goodVerdicts(),
+    completeness: goodCompleteness(),
     ...overrides,
   };
 }
@@ -568,11 +593,13 @@ test('applyRecordDecision: publish inserts a draft summary, a clean verification
   assert.equal(summaryInsert.args[0].bill_text_hash, 'h1');
   assert.equal(summaryInsert.args[0].run_id, 'run-1');
 
-  const verInsert = calls.find((c) => c.table === 'summary_verifications' && c.method === 'insert');
-  assert.ok(verInsert, 'expected a summary_verifications insert');
+  const verInserts = calls.filter((c) => c.table === 'summary_verifications' && c.method === 'insert');
+  assert.equal(verInserts.length, 1, 'no completeness row when the decision never carried one');
+  const verInsert = verInserts[0];
   assert.equal(verInsert.args[0].overall, 'clean');
   assert.equal(verInsert.args[0].summary_id, 'sum-1');
   assert.equal(verInsert.args[0].model, 'subagent:claude-sonnet-5');
+  assert.equal(verInsert.args[0].kind, 'support');
 
   const statusUpdates = calls.filter((c) => c.table === 'summaries' && c.method === 'update');
   assert.deepEqual(statusUpdates.map((u) => u.args[0].status), ['approved', 'published']);
@@ -599,6 +626,63 @@ test('applyRecordDecision: flagDraft inserts a draft summary + a flagged verific
   assert.equal(statusUpdates.length, 0, 'a flagged summary must stay in draft — no auto-publish');
   const notes = calls.filter((c) => c.table === 'summary_notes' && c.method === 'insert');
   assert.equal(notes.length, 0);
+});
+
+// ---- completeness axis: applyRecordDecision writes it as its OWN row (kind='completeness'),
+// migration 0020's shape — never merged into the support row, never silently dropped. ----
+
+test('applyRecordDecision: publish ALSO inserts a completeness row (kind=\'completeness\') alongside the support row (kind=\'support\') when the decision carries a completeness payload', async () => {
+  const calls = [];
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-1' }, error: null },
+  }, (table, method, args) => calls.push({ table, method, args }));
+
+  const completeness = { key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }], coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }] };
+  const result = await applyRecordDecision(client, 'run-1', writeDecision('publish', { completeness, completenessOverall: 'complete' }));
+  assert.equal(result.outcome, 'published');
+
+  const verInserts = calls.filter((c) => c.table === 'summary_verifications' && c.method === 'insert');
+  assert.equal(verInserts.length, 2);
+  const supportRow = verInserts.find((c) => c.args[0].kind === 'support');
+  const completenessRow = verInserts.find((c) => c.args[0].kind === 'completeness');
+  assert.ok(supportRow, 'expected a support-kind row');
+  assert.ok(completenessRow, 'expected a completeness-kind row');
+  assert.equal(supportRow.args[0].overall, 'clean');
+  assert.equal(completenessRow.args[0].overall, 'complete');
+  assert.equal(completenessRow.args[0].summary_id, 'sum-1');
+  assert.deepEqual(completenessRow.args[0].verdicts, completeness);
+  assert.equal(completenessRow.args[0].prompt_version, COMPLETENESS_PROMPT_VERSION);
+  assert.equal(supportRow.args[0].prompt_version, VERIFY_PROMPT_VERSION);
+});
+
+test('applyRecordDecision: flagDraft with an INCOMPLETE completeness payload still writes the completeness row (kind=\'completeness\', overall=\'incomplete\'), and never auto-publishes', async () => {
+  const calls = [];
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-1' }, error: null },
+  }, (table, method, args) => calls.push({ table, method, args }));
+
+  const completeness = { key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }], coverage: [{ provision_index: 0, covered: false, bullet_index: null, note: 'missing' }] };
+  const result = await applyRecordDecision(client, 'run-1', writeDecision('flagDraft', { completeness, completenessOverall: 'incomplete' }));
+  assert.equal(result.outcome, 'flaggedDraft');
+
+  const verInserts = calls.filter((c) => c.table === 'summary_verifications' && c.method === 'insert');
+  assert.equal(verInserts.length, 2);
+  const completenessRow = verInserts.find((c) => c.args[0].kind === 'completeness');
+  assert.equal(completenessRow.args[0].overall, 'incomplete');
+
+  const statusUpdates = calls.filter((c) => c.table === 'summaries' && c.method === 'update');
+  assert.equal(statusUpdates.length, 0, 'still no auto-publish just because a completeness row was written');
+});
+
+test('applyRecordDecision: leaveUnverified writes NO completeness row either — the whole verification tier is skipped', async () => {
+  const calls = [];
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-1' }, error: null },
+  }, (table, method, args) => calls.push({ table, method, args }));
+
+  const result = await applyRecordDecision(client, 'run-1', writeDecision('leaveUnverified', { completeness: { key_provisions: [], coverage: [] }, completenessOverall: 'complete' }));
+  assert.equal(result.outcome, 'unverifiedDraft');
+  assert.equal(calls.filter((c) => c.table === 'summary_verifications').length, 0);
 });
 
 test('applyRecordDecision: leaveUnverified inserts a draft summary ONLY — no verification row, no status update', async () => {
@@ -764,13 +848,16 @@ test('recordOne end-to-end: first pass records+publishes a clean summary; second
   assert.equal(first.outcome, 'published');
   assert.equal(client.state.summaries.length, 1);
   assert.equal(client.state.summaries[0].status, 'published');
-  assert.equal(client.state.summary_verifications.length, 1);
+  // Two rows: kind='support' (the adversarial verification) + kind='completeness' (baseItem()'s
+  // default completeness payload is well-formed and fully covered) — migration 0020's shape.
+  assert.equal(client.state.summary_verifications.length, 2);
+  assert.deepEqual(client.state.summary_verifications.map((v) => v.kind).sort(), ['completeness', 'support']);
 
   const second = await recordOne(client, 'run-1', item);
   assert.equal(second.outcome, 'alreadySummarized');
   assert.equal(second.summaryId, first.summaryId);
   assert.equal(client.state.summaries.length, 1, 'no duplicate summary row on replay');
-  assert.equal(client.state.summary_verifications.length, 1, 'no duplicate verification row on replay');
+  assert.equal(client.state.summary_verifications.length, 2, 'no duplicate verification rows on replay');
 });
 
 // ---- loadPlanState: selectAll pagination survives past the 1000-row server cap ----
@@ -944,7 +1031,15 @@ test('classifyRecordItem: FINAL REVIEW FINDING 5 — line breaks and indentation
   });
   const summary = goodSummary();
   summary.stated_purpose = 'To do X and Y.';
-  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  // This test's own bill_texts row (above) carries only "SEC. 1." — not "SEC. 2." — so the default
+  // baseItem() completeness fixture (grounded against BILL_TEXT_CONTENT, which has both) would fail
+  // assessCompleteness's grounding check against THIS test's different text. Override with a
+  // completeness payload grounded in what this test actually stores.
+  const completeness = goodCompleteness({
+    key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }],
+  });
+  const decision = await classifyRecordItem(client, baseItem({ summary, completeness }));
   assert.equal(decision.action, 'publish');
 });
 
@@ -967,6 +1062,128 @@ test('classifyRecordItem: FINAL REVIEW FINDING 5 — a stored bill_texts row wit
   const decision = await classifyRecordItem(client, baseItem());
   assert.equal(decision.action, 'flagDraft');
   assert.match(decision.gateReason, /stated_purpose/);
+});
+
+// ============================================================================================
+// COMPLETENESS AXIS (.superpowers/sdd/2026-07-31-completeness-axis/brief.md): the second half of
+// trust-model v3 — proving a summary COVERS the bill, not just that it is true of it. The record
+// gate re-derives with assessCompleteness rather than trusting anything the item claims, exactly
+// like it already re-derives assessVerdicts for the support axis above.
+// ============================================================================================
+
+test('classifyRecordItem: completeness REQUIRED for publish — an item with NO completeness payload at all lands as a flagged draft, honest reason, NEVER auto-published (the safe rollout default)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const item = baseItem();
+  delete item.completeness;
+  const decision = await classifyRecordItem(client, item);
+  assert.equal(decision.action, 'flagDraft');
+  assert.match(decision.gateReason, /completeness_check_absent/);
+  assert.equal(decision.completeness, undefined, 'no completeness row should be written when none was ever assessed');
+});
+
+test('classifyRecordItem: a MALFORMED completeness payload rejects the whole item (same class as a malformed summary — the checker\'s own output is untrustworthy), never a draft write', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const completeness = goodCompleteness({ key_provisions: [], coverage: [] }); // vacuous-empty
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ completeness })),
+    (err) => {
+      assert.ok(err instanceof MalformedSummaryError);
+      assert.match(err.message, /malformed/);
+      assert.match(err.message, /zero key_provisions/);
+      return true;
+    },
+  );
+});
+
+test('classifyRecordItem: a completeness payload citing a section absent from the bill text rejects the whole item (the checker invented a section it never read)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const completeness = goodCompleteness();
+  completeness.key_provisions[1].section = 'SEC. 402.'; // not present in BILL_TEXT_CONTENT
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ completeness })),
+    (err) => {
+      assert.ok(err instanceof MalformedSummaryError);
+      assert.match(err.message, /SEC\. 402\./);
+      return true;
+    },
+  );
+});
+
+test('classifyRecordItem: completeness INCOMPLETE (a real provision uncovered) lands as a flagged draft naming exactly what is missing, never publishes even though the support verdicts are clean', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const completeness = goodCompleteness();
+  completeness.coverage[1] = { provision_index: 1, covered: false, bullet_index: null, note: 'no bullet mentions Y' };
+  const decision = await classifyRecordItem(client, baseItem({ completeness }));
+  assert.equal(decision.action, 'flagDraft');
+  assert.equal(decision.completenessOverall, 'incomplete');
+  assert.match(decision.gateReason, /SEC\. 2\./);
+  assert.match(decision.gateReason, /Does Y\./);
+});
+
+test('classifyRecordItem: completeness COMPLETE and support verdicts clean -> publish, carrying the completeness payload for the record gate to write', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const decision = await classifyRecordItem(client, baseItem());
+  assert.equal(decision.action, 'publish');
+  assert.equal(decision.completenessOverall, 'complete');
+  assert.deepEqual(decision.completeness, goodCompleteness());
+});
+
+test('classifyRecordItem: completeness COMPLETE but support verdicts flagged -> still flagDraft (both axes are required for publish; completeness being fine does not override a failed support check)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const verdicts = [
+    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'not supported', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts }));
+  assert.equal(decision.action, 'flagDraft');
+  assert.equal(decision.overall, 'flagged');
+  assert.equal(decision.completenessOverall, 'complete');
+});
+
+test('classifyRecordItem: NEVER trusts a self-reported "overall" on the completeness payload — coverage data says incomplete even though the payload itself claims overall:"complete"; the gate re-derives and flags', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const completeness = goodCompleteness();
+  completeness.coverage[1] = { provision_index: 1, covered: false, bullet_index: null, note: 'missing' };
+  completeness.overall = 'complete'; // spurious self-report outside the schema — must never be read
+  const decision = await classifyRecordItem(client, baseItem({ completeness }));
+  assert.equal(decision.action, 'flagDraft');
+  assert.equal(decision.completenessOverall, 'incomplete');
+});
+
+test('classifyRecordItem: malformed-completeness rejection is a typed failure (MalformedSummaryError), the same bucket a malformed summary lands in — counts reconcile, nothing falls through uncounted', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const completeness = goodCompleteness();
+  completeness.coverage = completeness.coverage.slice(0, 1); // count mismatch
+  try {
+    await classifyRecordItem(client, baseItem({ completeness }));
+    assert.fail('expected classifyRecordItem to throw');
+  } catch (err) {
+    assert.ok(err instanceof MalformedSummaryError);
+  }
 });
 
 // ---- FINDING 7: a newline inside a what_it_does point injects extra public bullets ----

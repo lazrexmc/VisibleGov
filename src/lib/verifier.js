@@ -97,6 +97,189 @@ export function buildVerifyMessage(identifier, bulletsJson, text) {
   return `Bill ${identifier}\n\n<bullets_to_verify>\n${bulletsJson}\n</bullets_to_verify>\n\n<bill_text>\n${text}\n</bill_text>\n\nAttempt to refute each bullet against ONLY its cited section. Return one verdict per bullet, in bullet_index order, per your schema.`;
 }
 
+// ============================================================
+// Completeness axis (trust model v3, Lance 2026-07-31): proves a summary COVERS the bill, the
+// direct sibling of the verification pass above proving a summary is TRUE of the bill. Same
+// conventions as VERIFY_SYSTEM_PROMPT/VERIFY_SCHEMA/assessVerdicts: a prompt + schema exported for
+// a CONTROLLER-ORCHESTRATED SUBAGENT to consume (the $0 path — this file makes no model call for
+// this axis, exactly like every other export below buildVerifyMessage), and a pure mechanical
+// assessor that re-derives the outcome from structured data rather than trusting the checker's own
+// word for it.
+// ============================================================
+
+export const COMPLETENESS_PROMPT_VERSION = 'v1';
+
+// COMPLETENESS_SYSTEM_PROMPT — a HARD ORCHESTRATION CONTRACT, not just a prompt. Two phases,
+// dispatched by the CONTROLLER as two SEPARATE subagent turns against this SAME system prompt (this
+// file makes no model calls for this axis at all — see the header comment — so nothing here can
+// enforce the separation itself):
+//   Phase 1 (provisions): dispatch with buildProvisionsMessage — bill text ONLY. The checker must
+//     never see the summary's bullets while forming this list; seeing them first would let the
+//     checker's "coverage" answer bend to match whatever the summary already says, instead of
+//     forming an independent judgment of what a reader needs to know.
+//   Phase 2 (coverage): a SECOND, separate dispatch with buildCoverageMessage — phase 1's own
+//     provisions list (fed back, not re-derived) plus the summary's bullets, asking only which
+//     provisions the bullets cover.
+// Sending both bill text and summary in one dispatch defeats the whole check — the checker could
+// "find" a provisions list that just happens to already match the summary. Whoever wires the
+// dispatch owns this contract; classifyRecordItem/assessCompleteness cannot verify it was honored.
+export const COMPLETENESS_SYSTEM_PROMPT = [
+  'You are a completeness checker for a plain-language bill summary written by another model. Your job is to catch omissions, not to fact-check claims already made — a different pass already does that.',
+  'You work in two separate phases, dispatched to you as two separate messages. Only do the phase named in the CURRENT message; do not anticipate the other phase.',
+  'PHASE 1 — key provisions (you will be given ONLY the bill text for this phase; you have not been shown any summary and must not assume one, guess one, or write as if you have seen one):',
+  '- Read the bill text and list the provisions a reader must know to understand what this bill actually does — bounded to between 3 and 7 of the most consequential provisions.',
+  '- For each provision, name the section it lives in, copied from the bill text, and give a short, factual statement of what it does.',
+  '- Facts only: state what the text does, nothing more. No significance language beyond what the text itself supports — write "bars judicial review of the reissuance," never "an alarming limitation on judicial review."',
+  'PHASE 2 — coverage (you will be given your own phase 1 key_provisions list back, plus the summary\'s bullets, in a later message):',
+  '- For every provision in the list, decide whether any bullet in the summary covers it.',
+  '- When a provision is covered, cite the bullet_index of the bullet that covers it, and explain why in note.',
+  '- When a provision is not covered by any bullet, mark covered false, leave bullet_index null, and explain what is missing in note — never force a weak or partial match to count as coverage.',
+].join('\n');
+
+export const COMPLETENESS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['key_provisions', 'coverage'],
+  properties: {
+    key_provisions: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 7,
+      description: 'Phase 1 output: the 3-7 provisions a reader must know, formed from the bill text ONLY, without reference to the summary',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['section', 'provision'],
+        properties: {
+          section: { type: 'string', description: 'The bill section this provision lives in, copied from the bill text' },
+          provision: { type: 'string', description: 'A short, factual statement of what this provision does — facts only, no significance language beyond what the text supports' },
+        },
+      },
+    },
+    coverage: {
+      type: 'array',
+      description: "Phase 2 output: exactly one entry per key_provisions entry, deciding whether the summary's bullets cover it",
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['provision_index', 'covered', 'bullet_index', 'note'],
+        properties: {
+          provision_index: { type: 'integer', description: '0-based index into key_provisions' },
+          covered: { type: 'boolean', description: 'true if some bullet in the summary covers this provision' },
+          bullet_index: { type: ['integer', 'null'], description: "0-based index into the summary's what_it_does array that covers this provision; null exactly when covered is false" },
+          note: { type: 'string', description: 'One short plain-language sentence explaining the covered/not-covered decision' },
+        },
+      },
+    },
+  },
+};
+
+export function buildProvisionsMessage(identifier, billText) {
+  return `Bill ${identifier}\n\n<bill_text>\n${billText}\n</bill_text>\n\nPHASE 1 ONLY. List the 3-7 key provisions a reader must know, per your schema's key_provisions shape. Do not reference any summary — none has been shown to you.`;
+}
+
+export function buildCoverageMessage(identifier, provisionsJson, bulletsJson) {
+  return `Bill ${identifier}\n\n<key_provisions>\n${provisionsJson}\n</key_provisions>\n\n<summary_bullets>\n${bulletsJson}\n</summary_bullets>\n\nPHASE 2 ONLY. For each provision above, decide whether a bullet covers it, per your schema's coverage shape. Return one coverage entry per provision, in provision_index order.`;
+}
+
+// collapseWhitespace mirrors summary-queue.js's checkStatedPurposeGrounding EXACTLY (read it,
+// match it — the task brief's own instruction): whitespace runs collapse to a single space on BOTH
+// sides, nothing else normalized. Duplicated rather than imported: summary-queue.js already imports
+// FROM this file, and this axis's grounding check has no reason to invert that direction.
+function collapseWhitespace(value) {
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+// assessCompleteness — the completeness axis's own mechanical, never-trust-the-checker's-self-report
+// gate, the direct sibling of assessVerdicts above. Pure, no I/O, never throws: given the checker's
+// raw {key_provisions, coverage} payload, the number of bullets actually in the summary, and the
+// hash-pinned bill text, independently re-derives whether the check itself can be trusted at all
+// (malformed — collects EVERY structural problem found, not just the first, so one call gives a full
+// diagnostic), and if so, whether the summary actually covers the bill (complete) or not (incomplete,
+// naming exactly what's missing).
+//
+// malformed, in full (task brief, verbatim):
+//   - coverage.length !== key_provisions.length
+//   - any provision_index out of range or duplicated
+//   - covered===true with a null/out-of-range bullet_index
+//   - covered===false with a non-null bullet_index
+//   - zero key_provisions (the vacuous-empty class this codebase has hit four times — a checker
+//     that finds no provisions has not checked anything, and must never read as "nothing to cover,
+//     so complete")
+//   - grounding: any key_provisions[].section absent from billText (same normalize-whitespace-
+//     then-substring discipline as checkStatedPurposeGrounding) — a provision citing a section that
+//     isn't in the bill means the checker invented it.
+export function assessCompleteness(completeness, bulletCount, billText) {
+  const keyProvisions = completeness && Array.isArray(completeness.key_provisions) ? completeness.key_provisions : null;
+  const coverage = completeness && Array.isArray(completeness.coverage) ? completeness.coverage : null;
+  if (!keyProvisions || !coverage) {
+    return { overall: 'malformed', missing: [], reasons: ['completeness payload must have key_provisions and coverage arrays'] };
+  }
+  if (keyProvisions.length === 0) {
+    return { overall: 'malformed', missing: [], reasons: ['zero key_provisions — a checker that finds no provisions has not checked anything'] };
+  }
+
+  const reasons = [];
+  if (coverage.length !== keyProvisions.length) {
+    reasons.push(`coverage has ${coverage.length} entries but key_provisions has ${keyProvisions.length} — exactly one coverage entry is required per provision`);
+  }
+
+  const seenIndices = new Set();
+  coverage.forEach((c, i) => {
+    const idx = c && c.provision_index;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= keyProvisions.length) {
+      reasons.push(`coverage[${i}].provision_index ${JSON.stringify(idx ?? null)} is out of range for ${keyProvisions.length} provision(s)`);
+      return;
+    }
+    if (seenIndices.has(idx)) {
+      reasons.push(`coverage[${i}].provision_index ${idx} duplicates an earlier entry — every provision must be covered exactly once`);
+      return;
+    }
+    seenIndices.add(idx);
+  });
+
+  coverage.forEach((c, i) => {
+    if (!c || typeof c.covered !== 'boolean') {
+      reasons.push(`coverage[${i}].covered must be a boolean`);
+      return;
+    }
+    const bulletIndex = c.bullet_index;
+    if (c.covered) {
+      if (!Number.isInteger(bulletIndex) || bulletIndex < 0 || bulletIndex >= bulletCount) {
+        reasons.push(`coverage[${i}] is covered=true but bullet_index ${JSON.stringify(bulletIndex ?? null)} is not a valid index into ${bulletCount} bullet(s)`);
+      }
+    } else if (bulletIndex !== null) {
+      reasons.push(`coverage[${i}] is covered=false but bullet_index is ${JSON.stringify(bulletIndex)}, not null`);
+    }
+  });
+
+  const normalizedBillText = collapseWhitespace(billText ?? '');
+  keyProvisions.forEach((p, i) => {
+    const section = p && p.section;
+    if (typeof section !== 'string' || section.trim() === '' || !normalizedBillText.includes(collapseWhitespace(section))) {
+      reasons.push(`key_provisions[${i}].section ${JSON.stringify(section ?? null)} does not appear in the bill text — the checker invented a section it never read`);
+    }
+  });
+
+  if (reasons.length > 0) {
+    return { overall: 'malformed', missing: [], reasons };
+  }
+
+  const missing = [];
+  coverage.forEach((c) => {
+    if (!c.covered) {
+      const p = keyProvisions[c.provision_index];
+      missing.push({
+        provision_index: c.provision_index, section: p.section, provision: p.provision, note: c.note ?? null,
+      });
+    }
+  });
+  if (missing.length > 0) {
+    return { overall: 'incomplete', missing, reasons: [] };
+  }
+  return { overall: 'complete', missing: [], reasons: [] };
+}
+
 export async function verifyBill(client, { identifier, bullets, text }) {
   if (text.length > MAX_TEXT_CHARS) {
     throw new OversizeTextError(`bill text ${text.length} chars exceeds ${MAX_TEXT_CHARS}; will not truncate silently`, { identifier, length: text.length });

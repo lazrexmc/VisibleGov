@@ -7,6 +7,7 @@ import {
 } from '../lib/summarizer.js';
 import {
   VERIFIER_MODEL, VERIFY_PROMPT_VERSION, VERIFY_SCHEMA, assessVerdicts,
+  COMPLETENESS_PROMPT_VERSION, assessCompleteness,
 } from '../lib/verifier.js';
 import { parsePositiveIntegerFlag } from '../lib/errors.js';
 import { nextStatus, mapNoteAction } from '../review/server.js';
@@ -542,8 +543,55 @@ export async function classifyRecordItem(client, item) {
     };
   }
 
-  if (overall === 'clean') return { action: 'publish', ...base, verdicts: item.verdicts, overall };
-  return { action: 'flagDraft', ...base, verdicts: item.verdicts, overall };
+  // ---- completeness axis (task brief .superpowers/sdd/2026-07-31-completeness-axis/brief.md,
+  // trust model v3): proves the summary COVERS the bill, not just that its claims are true.
+  // REQUIRED for publish. Three outcomes, re-derived here — assessCompleteness's return value is
+  // trusted, item.completeness's own shape/self-report never is:
+  //   - absent entirely (item.completeness === undefined): the safe rollout default while
+  //     orchestration is still being wired up — flagged draft, honest named reason, never publish.
+  //   - malformed (assessCompleteness): the checker's own output is untrustworthy — reject the
+  //     WHOLE item, same class/severity as a malformed summary (MalformedSummaryError, zero writes),
+  //     never merely a flagged draft.
+  //   - incomplete: flagged draft naming exactly which provisions the summary omits.
+  //   - complete: this axis clears; publish still additionally requires the support axis (`overall`)
+  //     to be 'clean' — completeness passing never overrides a failed support check.
+  if (item.completeness === undefined) {
+    return {
+      action: 'flagDraft',
+      ...base,
+      verdicts: item.verdicts,
+      overall,
+      gateReason: 'completeness_check_absent: no completeness payload was supplied for this item — trust-model v3 requires both axes (support and completeness) verified before auto-publish',
+    };
+  }
+  const completenessResult = assessCompleteness(item.completeness, summary.what_it_does.length, currentText.content);
+  if (completenessResult.overall === 'malformed') {
+    throw new MalformedSummaryError(
+      `completeness check for bill ${identifier} is malformed — the checker's own output cannot be trusted: ${completenessResult.reasons.join('; ')}`,
+      { billId, reasons: completenessResult.reasons },
+    );
+  }
+  if (completenessResult.overall === 'incomplete') {
+    const missingDesc = completenessResult.missing.map((m) => `${m.section} (${m.provision})`).join('; ');
+    return {
+      action: 'flagDraft',
+      ...base,
+      verdicts: item.verdicts,
+      overall,
+      completeness: item.completeness,
+      completenessOverall: 'incomplete',
+      gateReason: `summary omits ${completenessResult.missing.length} key provision(s) present in the bill text: ${missingDesc}`,
+    };
+  }
+
+  if (overall === 'clean') {
+    return {
+      action: 'publish', ...base, verdicts: item.verdicts, overall, completeness: item.completeness, completenessOverall: 'complete',
+    };
+  }
+  return {
+    action: 'flagDraft', ...base, verdicts: item.verdicts, overall, completeness: item.completeness, completenessOverall: 'complete',
+  };
 }
 
 const OUTCOME_BY_ACTION = {
@@ -618,10 +666,23 @@ export async function applyRecordDecision(client, runId, decision) {
   }
 
   const { error: verErr } = await client.from('summary_verifications').insert({
-    summary_id: summaryId, verdicts: decision.verdicts, overall: decision.overall,
+    summary_id: summaryId, kind: 'support', verdicts: decision.verdicts, overall: decision.overall,
     model: verifierModelLabel, prompt_version: VERIFY_PROMPT_VERSION,
   });
   if (verErr) throw new Error(`summary_verifications insert failed for bill ${identifier}: ${verErr.message}`);
+
+  // Completeness axis: its OWN row (migration 0020, kind='completeness') — never merged into the
+  // support row above. Only written when classifyRecordItem actually ran assessCompleteness
+  // (decision.completeness set); the 'completeness_check_absent' flagDraft path carries no
+  // completeness payload at all, so nothing to write here for it — an honest absence, not a
+  // fabricated one.
+  if (decision.completeness) {
+    const { error: compErr } = await client.from('summary_verifications').insert({
+      summary_id: summaryId, kind: 'completeness', verdicts: decision.completeness, overall: decision.completenessOverall,
+      model: verifierModelLabel, prompt_version: COMPLETENESS_PROMPT_VERSION,
+    });
+    if (compErr) throw new Error(`summary_verifications (completeness) insert failed for bill ${identifier}: ${compErr.message}`);
+  }
 
   if (decision.action === 'flagDraft') {
     return {
