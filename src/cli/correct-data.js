@@ -132,11 +132,18 @@ async function correctOneStatusCode(client, code, {
     const ids = (idRows ?? []).map((r) => r.id);
     if (ids.length === 0) return { matched: 0, error: null };
     if (dryRun) return { matched: ids.length, error: null };
-    const { error: updErr } = await client
+    // FIX (review, MEDIUM finding): use the update's own returned `count`, not `ids.length` — a
+    // race between the id-select above and this update (another process changing one of those
+    // rows' status in between) would make the actual number of rows this update matched/changed
+    // LESS than the id list it was given (the `.eq('status', codeStr)` guard on the update itself
+    // would simply exclude that row) — trusting `ids.length` would silently OVERCOUNT. Same
+    // count-vs-data-cap reasoning as the unlimited branch below: `count` (from `{count:'exact'}`)
+    // is the actual server-side truth, never assumed from what was merely requested.
+    const { count, error: updErr } = await client
       .from('bills').update({ status: word, run_id: runId })
       .eq('status', codeStr).in('id', ids).select('id', { count: 'exact' });
-    if (updErr) return { matched: ids.length, error: updErr };
-    return { matched: ids.length, error: null };
+    if (updErr) return { matched: 0, error: updErr };
+    return { matched: count ?? 0, error: null };
   }
 
   if (dryRun) {
@@ -254,14 +261,49 @@ export function parseMoSenateJournalDateFromUrl(url) {
   return `${year}-${mm}-${dd}`;
 }
 
-function summarizeCastTallies(castRows) {
-  let yea = 0;
-  let nay = 0;
+// summarizeCastsForMatch — position -> SET of casting legislator_ids (not just a count), plus the
+// tally (set size) for human-readable reporting.
+//
+// REVIEW FIX (false-positive, proven by execution): a bare yea/nay COUNT match is not a reliable
+// duplicate signal — two genuinely DIFFERENT senate roll calls on the SAME bill/chamber can
+// coincidentally share a tally (e.g. 20-5), and the original count-only comparison accepted that
+// coincidence as a confident single-candidate match, deleting the wrong (a genuinely different,
+// real) row. `vote_casts.legislator_id` is our OWN canonical identity — the SAME `legislators.id`
+// regardless of which source resolved it (LegiScan side via legiscan_people_id, mo-senate-web side
+// via surname/district — see legislator-identity.js / ingest-mo-senate.js's own roster-gating) —
+// so comparing the EXACT SET of yea-voting ids and the EXACT SET of nay-voting ids between two
+// rows is an exact-identity comparison, not a fuzzy one: two different real roll calls sharing a
+// tally by coincidence would need the SAME 20 legislators voting yea AND the SAME different 5
+// voting nay to also coincidentally pass this check, which is not realistically possible by chance
+// (and a genuine duplicate of the SAME real event necessarily has identical casters on both sides,
+// since both sources are describing the same legislators voting on the same day).
+//
+// QUESTION-TEXT WAS CONSIDERED AND REJECTED as the corroborating signal (per the review's own
+// escape hatch): LegiScan's `roll_call.desc` (e.g. "House: HB 2  HBs FOR THIRD READING") and
+// mo-senate-web's own parsed `motion` sentence (mo-senate-journal-pdf.js's extractMotionSentence —
+// a full prose sentence pulled from the journal's own narrative text, e.g. "On motion of Senator
+// X, SB 1 was read the third time and passed") are produced by two structurally unrelated
+// extraction pipelines with no shared vocabulary or format to compare mechanically — matching them
+// would require fuzzy/substring/similarity text matching, which this codebase's identity machinery
+// explicitly never does anywhere (CONTROLLER RULING 3 lineage: exact match only). The legislator-
+// id-set comparison below is the strongest signal that IS reliably, exactly comparable between a
+// legiscan-sourced row and a mo-senate-web-sourced row.
+function summarizeCastsForMatch(castRows) {
+  const yeaIds = new Set();
+  const nayIds = new Set();
   for (const row of castRows ?? []) {
-    if (row.position === 'yea') yea += 1;
-    else if (row.position === 'nay') nay += 1;
+    if (row.position === 'yea') yeaIds.add(row.legislator_id);
+    else if (row.position === 'nay') nayIds.add(row.legislator_id);
   }
-  return { yea, nay };
+  return {
+    yeaIds, nayIds, tally: { yea: yeaIds.size, nay: nayIds.size },
+  };
+}
+
+function setsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
 }
 
 // findPrimaryDuplicate — the primary-wins duplicate check (brief, correction B step 1): does the
@@ -272,15 +314,15 @@ function summarizeCastTallies(castRows) {
 // The existing cross-check machinery (legiscan-votes.js's crossCheckAgainstPrimarySource) matches
 // on (bill, chamber, DATE, tallies) — unusable here verbatim, since the sentinel row's own date is
 // exactly the broken field under investigation. This matches on (bill_id, chamber) to find
-// candidates, then requires an EXACT yea/nay tally match to a SINGLE candidate — the same "hard"
-// comparison legiscan-votes.js's own compareTalliesForCrossCheck uses for its yea/nay bucket, the
-// only two categories both sources define identically. Zero or more-than-one matching candidate is
-// NOT a confident duplicate (never guessed which one) — falls through to the URL-derive path.
-async function findPrimaryDuplicate(client, sentinelRow, sentinelTallies) {
+// candidates, then requires the candidate's EXACT yea-voter-id-set AND nay-voter-id-set to match
+// the sentinel's (see summarizeCastsForMatch above for why this, not a bare tally, is the accepted
+// corroborating signal). Zero or more-than-one matching candidate is NOT a confident duplicate
+// (never guessed which one) — falls through to the URL-derive path.
+async function findPrimaryDuplicate(client, sentinelRow, sentinelCasts) {
   const { data: candidateRows, error } = await client
     .from('votes').select('id,vote_date,chamber,source_key')
     .eq('bill_id', sentinelRow.bill_id).eq('chamber', sentinelRow.chamber);
-  if (error) return { matched: null, error };
+  if (error) return { matched: null, matchedCasts: null, error };
 
   const primaryCandidates = (candidateRows ?? []).filter((row) => (
     PRIMARY_SOURCE_KEY_PREFIXES.some((prefix) => String(row.source_key ?? '').startsWith(prefix))
@@ -291,30 +333,47 @@ async function findPrimaryDuplicate(client, sentinelRow, sentinelTallies) {
     // eslint-disable-next-line no-await-in-loop -- a handful at most per bill/chamber, same bound
     // legiscan-votes.js's own crossCheckAgainstPrimarySource comment documents for this exact query.
     const { data: castRows, error: castErr } = await client
-      .from('vote_casts').select('position').eq('vote_id', candidate.id);
-    if (castErr) return { matched: null, error: castErr };
-    const tallies = summarizeCastTallies(castRows);
-    if (tallies.yea === sentinelTallies.yea && tallies.nay === sentinelTallies.nay) matches.push(candidate);
+      .from('vote_casts').select('position,legislator_id').eq('vote_id', candidate.id);
+    if (castErr) return { matched: null, matchedCasts: null, error: castErr };
+    const candidateCasts = summarizeCastsForMatch(castRows);
+    if (setsEqual(sentinelCasts.yeaIds, candidateCasts.yeaIds) && setsEqual(sentinelCasts.nayIds, candidateCasts.nayIds)) {
+      matches.push({ candidate, candidateCasts });
+    }
   }
 
-  if (matches.length === 1) return { matched: matches[0], error: null };
-  return { matched: null, error: null };
+  if (matches.length === 1) return { matched: matches[0].candidate, matchedCasts: matches[0].candidateCasts, error: null };
+  return { matched: null, matchedCasts: null, error: null };
 }
 
 // processSentinelRow — one sentinel votes row -> { outcome: 'deleted'|'redated'|'unresolvable', ... }
 // or throws-into-failure via the caller's try/catch. `dryRun` performs every READ this would (the
-// duplicate check + the URL parse) but never a delete/update.
+// duplicate check + the URL parse) but never a delete/update. `matchDetail` is populated whenever a
+// duplicate was accepted (dry-run or live) — the human-review surface (review requirement 2): with
+// only ~10 rows ever in scope, Lance can eyeball every delete DECISION, not just trust an aggregate
+// count.
 async function processSentinelRow(client, row, { dryRun, runId }) {
   const { data: sentinelCastRows, error: castErr } = await client
-    .from('vote_casts').select('position').eq('vote_id', row.id);
+    .from('vote_casts').select('position,legislator_id').eq('vote_id', row.id);
   if (castErr) return { outcome: 'failed', reason: 'sentinel_cast_lookup_failed', error: castErr };
-  const sentinelTallies = summarizeCastTallies(sentinelCastRows);
+  const sentinelCasts = summarizeCastsForMatch(sentinelCastRows);
 
-  const dup = await findPrimaryDuplicate(client, row, sentinelTallies);
+  const dup = await findPrimaryDuplicate(client, row, sentinelCasts);
   if (dup.error) return { outcome: 'failed', reason: 'duplicate_check_failed', error: dup.error };
 
   if (dup.matched) {
-    if (dryRun) return { outcome: 'deleted', matchedVoteId: dup.matched.id };
+    const matchDetail = {
+      sentinelVoteId: row.id,
+      matchedPrimaryVoteId: dup.matched.id,
+      billId: row.bill_id,
+      chamber: row.chamber,
+      sentinelTally: sentinelCasts.tally,
+      primaryTally: dup.matchedCasts.tally,
+      // question-text was considered and rejected as a signal (see summarizeCastsForMatch's own
+      // header comment) — this documents WHAT signal actually backed the decision, for a human
+      // reviewer reading this record without re-reading the source.
+      signal: 'exact_legislator_id_set_match',
+    };
+    if (dryRun) return { outcome: 'deleted', matchedVoteId: dup.matched.id, matchDetail };
     const { error: castDelErr } = await client.from('vote_casts').delete().eq('vote_id', row.id);
     if (castDelErr) return { outcome: 'failed', reason: 'cast_delete_failed', error: castDelErr };
     const { data: deletedVotes, error: voteDelErr } = await client
@@ -325,7 +384,7 @@ async function processSentinelRow(client, row, { dryRun, runId }) {
         outcome: 'failed', reason: 'vote_delete_guard_mismatch', error: { message: `expected exactly 1 row deleted for votes.id=${row.id}, got ${deletedVotes?.length ?? 0}` },
       };
     }
-    return { outcome: 'deleted', matchedVoteId: dup.matched.id };
+    return { outcome: 'deleted', matchedVoteId: dup.matched.id, matchDetail };
   }
 
   const parsedDate = parseMoSenateJournalDateFromUrl(row.source_url);
@@ -362,6 +421,7 @@ export async function runCorrectMo1969Dates(client, {
 
   const rows = sentinelRows ?? [];
   const failures = [];
+  const matches = [];
   let deletedAsDuplicate = 0;
   let redatedFromSource = 0;
   let unresolvableDate = 0;
@@ -371,8 +431,12 @@ export async function runCorrectMo1969Dates(client, {
     // (brief: "touch ONLY these ≤10 rows"), same "small/infrequent backlog" precedent used
     // throughout this codebase's batch CLIs.
     const result = await processSentinelRow(client, row, { dryRun, runId });
-    if (result.outcome === 'deleted') deletedAsDuplicate += 1;
-    else if (result.outcome === 'redated') redatedFromSource += 1;
+    if (result.outcome === 'deleted') {
+      deletedAsDuplicate += 1;
+      // Review requirement 2: every delete DECISION (dry-run or live) is recorded here, not just
+      // counted — the human-review surface for a 10-row-total correction.
+      matches.push(result.matchDetail);
+    } else if (result.outcome === 'redated') redatedFromSource += 1;
     else if (result.outcome === 'unresolvable') unresolvableDate += 1;
     else {
       failures.push({
@@ -382,7 +446,7 @@ export async function runCorrectMo1969Dates(client, {
   }
 
   return {
-    seen: rows.length, deletedAsDuplicate, redatedFromSource, unresolvableDate, failures,
+    seen: rows.length, deletedAsDuplicate, redatedFromSource, unresolvableDate, matches, failures,
   };
 }
 

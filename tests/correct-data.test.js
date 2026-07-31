@@ -26,7 +26,7 @@ import {
 // update+select(count:exact), delete+select) against three small tables (bills, votes,
 // vote_casts) — mirrors real supabase-js closely enough (fluent + thenable) to exercise this
 // module's actual query construction, not just its counting arithmetic.
-function makeFakeClient(seed = {}, { forceError = null } = {}) {
+function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = {}) {
   const tables = { bills: [], votes: [], vote_casts: [], ...seed };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
   const calls = [];
@@ -63,14 +63,16 @@ function makeFakeClient(seed = {}, { forceError = null } = {}) {
     };
 
     function execute() {
-      calls.push({
+      const callInfo = {
         table, mode, patch, filters: [...filters], select: selectCols, selectOpts, orderCol, limitVal,
-      });
+      };
+      calls.push(callInfo);
       const injected = forceError && forceError(table, mode, filters);
       if (injected) return { data: null, error: injected, count: null };
 
       const rows = tables[table];
       let matched = rows.filter((r) => matchesFilters(r, filters));
+      let result;
 
       if (mode === 'select') {
         if (orderCol) {
@@ -78,29 +80,32 @@ function makeFakeClient(seed = {}, { forceError = null } = {}) {
         }
         let out = matched;
         if (limitVal != null) out = out.slice(0, limitVal);
-        if (selectOpts.head) return { data: null, error: null, count: matched.length };
-        if (selectOpts.count === 'exact') return { data: out.map((r) => ({ ...r })), error: null, count: matched.length };
-        return { data: out.map((r) => ({ ...r })), error: null };
-      }
-
-      if (mode === 'update') {
+        if (selectOpts.head) result = { data: null, error: null, count: matched.length };
+        else if (selectOpts.count === 'exact') result = { data: out.map((r) => ({ ...r })), error: null, count: matched.length };
+        else result = { data: out.map((r) => ({ ...r })), error: null };
+      } else if (mode === 'update') {
         for (const row of matched) Object.assign(row, patch);
         if (selectCols) {
           const data = matched.map((r) => ({ id: r.id }));
-          if (selectOpts.count === 'exact') return { data, error: null, count: matched.length };
-          return { data, error: null };
+          result = selectOpts.count === 'exact' ? { data, error: null, count: matched.length } : { data, error: null };
+        } else {
+          result = { data: null, error: null };
         }
-        return { data: null, error: null };
-      }
-
-      if (mode === 'delete') {
+      } else if (mode === 'delete') {
         const idsToDelete = new Set(matched.map((r) => r.id));
         tables[table] = rows.filter((r) => !idsToDelete.has(r.id));
-        if (selectCols) return { data: matched.map((r) => ({ id: r.id })), error: null };
-        return { data: null, error: null };
+        result = selectCols ? { data: matched.map((r) => ({ id: r.id })), error: null } : { data: null, error: null };
+      } else {
+        throw new Error(`unsupported mode ${mode}`);
       }
 
-      throw new Error(`unsupported mode ${mode}`);
+      // Fires AFTER this call's own result is already computed (a snapshot, unaffected by any
+      // mutation the hook makes below) but BEFORE returning — lets a test simulate a concurrent
+      // writer racing between two awaited calls (e.g. mutating a row's status right after an
+      // id-select returns, so a LATER update in the same code path sees the raced-away state).
+      if (afterExecute) afterExecute(callInfo, tables);
+
+      return result;
     }
 
     return builder;
@@ -273,6 +278,37 @@ test('runCorrectMoStatus: --limit caps how many rows get corrected per code, det
   assert.equal(client.tables.bills.find((b) => b.id === 'b4').status, '2', 'code 2 never attempted once budget hit 0');
 });
 
+// REVIEW FIX (MEDIUM finding): the --limit-active live branch used to report `matched: ids.length`
+// (the pre-update SELECT count) instead of the update's own returned `count` — a race between the
+// id-select and the update (another process changing one of those exact rows' status in between)
+// would silently OVERCOUNT. This simulates that race directly: right after the id-select for code 1
+// returns (3 ids), a "concurrent process" mutates one of those rows away from status '1' before the
+// update executes — the update's own `.eq('status','1')` guard then correctly excludes it, and the
+// reported count must reflect that (2, not 3).
+test('runCorrectMoStatus: --limit live path reports the update\'s ACTUAL returned count, not the pre-update selected id count — proven with a simulated select-then-update race', async () => {
+  const client = makeFakeClient(
+    { bills: [billRow('b1', '1'), billRow('b2', '1'), billRow('b3', '1')] },
+    {
+      afterExecute(callInfo, tables) {
+        // Only the id-fetch select for code 1 (select 'id' with no count/head option) triggers the
+        // simulated race — not the subsequent update itself.
+        if (callInfo.table === 'bills' && callInfo.mode === 'select' && callInfo.select === 'id' && !callInfo.selectOpts.count) {
+          const raced = tables.bills.find((b) => b.id === 'b2');
+          if (raced) raced.status = 'Introduced'; // a concurrent process already corrected it
+        }
+      },
+    },
+  );
+
+  const report = await runCorrectMoStatus(client, { dryRun: false, limit: 3, runId: 'run-1' });
+
+  assert.equal(report.perCode[1], 2, 'the update itself only actually matched/changed 2 rows — b2 raced away between select and update');
+  assert.equal(report.updated, 2);
+  assert.equal(client.tables.bills.find((b) => b.id === 'b1').status, 'Introduced');
+  assert.equal(client.tables.bills.find((b) => b.id === 'b3').status, 'Introduced');
+  assert.equal(client.tables.bills.find((b) => b.id === 'b2').status, 'Introduced', 'still corrected — just NOT by this update, and not counted as if it were');
+});
+
 test('runCorrectMoStatus: a query failure for one code is an honest, named failure — other codes still process (skip != empty), never thrown out of the whole run', async () => {
   const client = makeFakeClient(
     { bills: [billRow('b1', '1'), billRow('b2', '2')] },
@@ -290,7 +326,7 @@ test('runCorrectMoStatus: a query failure for one code is an honest, named failu
 
 const SENTINEL = VOTE_DATE_1969_SENTINEL;
 
-test('runCorrectMo1969Dates: a sentinel row with a dated primary duplicate (same bill/chamber, matching yea/nay tallies) -> delete path (votes row + its casts), never re-dated', async () => {
+test('runCorrectMo1969Dates: a sentinel row with a dated primary duplicate (same bill/chamber, matching yea/nay tallies AND the exact same set of casting legislators) -> delete path (votes row + its casts), never re-dated; report.matches records the decision', async () => {
   const client = makeFakeClient({
     votes: [
       {
@@ -301,12 +337,14 @@ test('runCorrectMo1969Dates: a sentinel row with a dated primary duplicate (same
       },
     ],
     vote_casts: [
-      { id: 'c1', vote_id: 'v-sentinel', position: 'yea' },
-      { id: 'c2', vote_id: 'v-sentinel', position: 'yea' },
-      { id: 'c3', vote_id: 'v-sentinel', position: 'nay' },
-      { id: 'c4', vote_id: 'v-primary', position: 'yea' },
-      { id: 'c5', vote_id: 'v-primary', position: 'yea' },
-      { id: 'c6', vote_id: 'v-primary', position: 'nay' },
+      { id: 'c1', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L1' },
+      { id: 'c2', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L2' },
+      { id: 'c3', vote_id: 'v-sentinel', position: 'nay', legislator_id: 'L3' },
+      // SAME legislators voting the SAME way — the corroborating signal a genuine duplicate (two
+      // sources describing the SAME real event) actually has.
+      { id: 'c4', vote_id: 'v-primary', position: 'yea', legislator_id: 'L1' },
+      { id: 'c5', vote_id: 'v-primary', position: 'yea', legislator_id: 'L2' },
+      { id: 'c6', vote_id: 'v-primary', position: 'nay', legislator_id: 'L3' },
     ],
   });
 
@@ -322,6 +360,55 @@ test('runCorrectMo1969Dates: a sentinel row with a dated primary duplicate (same
   assert.equal(client.tables.votes.some((v) => v.id === 'v-primary'), true, 'primary row untouched');
   assert.equal(client.tables.vote_casts.some((c) => c.vote_id === 'v-sentinel'), false, 'sentinel casts deleted too');
   assert.equal(client.tables.vote_casts.filter((c) => c.vote_id === 'v-primary').length, 3, 'primary casts untouched');
+
+  assert.equal(report.matches.length, 1, 'the delete decision is recorded in the human-review surface');
+  assert.deepEqual(report.matches[0], {
+    sentinelVoteId: 'v-sentinel',
+    matchedPrimaryVoteId: 'v-primary',
+    billId: 'bill-1',
+    chamber: 'senate',
+    sentinelTally: { yea: 2, nay: 1 },
+    primaryTally: { yea: 2, nay: 1 },
+    signal: 'exact_legislator_id_set_match',
+  });
+});
+
+// REVIEW FIX (false-positive proven by execution): two DIFFERENT real senate roll calls on the
+// SAME bill/chamber that coincidentally share a yea/nay TALLY (2 yea / 1 nay here — the reviewer's
+// own construction used 20/5, the bug class is identical at any scale) but are cast by DIFFERENT
+// legislators. The original tally-only check accepted this as a confident single-candidate match
+// and deleted the sentinel row even though the "duplicate" was a genuinely different vote. The
+// legislator-id-set signal must now correctly refuse this — 0 confident matches, falls through to
+// the URL-derive path (given an unparseable URL here, so the outcome is unambiguously
+// unresolvableDate, proving the row was NOT deleted).
+test('runCorrectMo1969Dates: false-positive proof — a candidate that coincidentally shares the sentinel\'s yea/nay TALLY but NOT its actual casters is correctly rejected, never deleted', async () => {
+  const client = makeFakeClient({
+    votes: [
+      {
+        id: 'v-sentinel', bill_id: 'bill-fp', chamber: 'senate', vote_date: SENTINEL, jurisdiction_id: 'mo-legislature', source_url: 'https://www.senate.mo.gov/18info/Journals/T1Day0109101-18.pdf',
+      },
+      {
+        id: 'v-different-rollcall', bill_id: 'bill-fp', chamber: 'senate', vote_date: '2018-04-10', jurisdiction_id: 'mo-legislature', source_key: 'mo-senate-web-2018-y-vote1',
+      },
+    ],
+    vote_casts: [
+      { id: 'c1', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L1' },
+      { id: 'c2', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L2' },
+      { id: 'c3', vote_id: 'v-sentinel', position: 'nay', legislator_id: 'L3' },
+      // same 2-1 tally, but a completely different set of legislators — a genuinely different vote
+      { id: 'c4', vote_id: 'v-different-rollcall', position: 'yea', legislator_id: 'L4' },
+      { id: 'c5', vote_id: 'v-different-rollcall', position: 'yea', legislator_id: 'L5' },
+      { id: 'c6', vote_id: 'v-different-rollcall', position: 'nay', legislator_id: 'L6' },
+    ],
+  });
+
+  const report = await runCorrectMo1969Dates(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.deletedAsDuplicate, 0, 'never deletes on a bare tally coincidence');
+  assert.equal(report.unresolvableDate, 1, 'falls through — no confident duplicate, and this URL does not parse');
+  assert.deepEqual(report.matches, [], 'nothing was accepted as a duplicate, so nothing is recorded as one');
+  assert.equal(client.tables.votes.some((v) => v.id === 'v-sentinel'), true, 'the sentinel row is UNTOUCHED — the wrong-vote deletion the review caught is fixed');
+  assert.equal(client.tables.votes.some((v) => v.id === 'v-different-rollcall'), true, 'the genuinely different roll call is also untouched');
 });
 
 test('runCorrectMo1969Dates: a sentinel row with NO duplicate but a parseable primary source_url -> re-dated to the parsed date, never deleted', async () => {
@@ -331,7 +418,7 @@ test('runCorrectMo1969Dates: a sentinel row with NO duplicate but a parseable pr
         id: 'v-sentinel', bill_id: 'bill-2', chamber: 'senate', vote_date: SENTINEL, jurisdiction_id: 'mo-legislature', source_url: 'https://www.senate.mo.gov/18info/Journals/RDay330301462-486.pdf#470',
       },
     ],
-    vote_casts: [{ id: 'c1', vote_id: 'v-sentinel', position: 'yea' }],
+    vote_casts: [{ id: 'c1', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L1' }],
   });
 
   const report = await runCorrectMo1969Dates(client, { dryRun: false, runId: 'run-1' });
@@ -340,6 +427,7 @@ test('runCorrectMo1969Dates: a sentinel row with NO duplicate but a parseable pr
   assert.equal(report.deletedAsDuplicate, 0);
   assert.equal(report.redatedFromSource, 1);
   assert.equal(report.unresolvableDate, 0);
+  assert.deepEqual(report.matches, []);
   assert.deepEqual(report.failures, []);
 
   const row = client.tables.votes.find((v) => v.id === 'v-sentinel');
@@ -355,7 +443,7 @@ test('runCorrectMo1969Dates: a sentinel row whose url won\'t parse AND has no du
         id: 'v-sentinel', bill_id: 'bill-3', chamber: 'senate', vote_date: SENTINEL, jurisdiction_id: 'mo-legislature', source_url: 'https://www.senate.mo.gov/18info/Journals/T1Day0109101-18.pdf',
       },
     ],
-    vote_casts: [{ id: 'c1', vote_id: 'v-sentinel', position: 'yea' }],
+    vote_casts: [{ id: 'c1', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L1' }],
   });
 
   const report = await runCorrectMo1969Dates(client, { dryRun: false, runId: 'run-1' });
@@ -364,6 +452,7 @@ test('runCorrectMo1969Dates: a sentinel row whose url won\'t parse AND has no du
   assert.equal(report.deletedAsDuplicate, 0);
   assert.equal(report.redatedFromSource, 0);
   assert.equal(report.unresolvableDate, 1);
+  assert.deepEqual(report.matches, []);
   assert.deepEqual(report.failures, []);
 
   const row = client.tables.votes.find((v) => v.id === 'v-sentinel');
@@ -371,7 +460,7 @@ test('runCorrectMo1969Dates: a sentinel row whose url won\'t parse AND has no du
   assert.equal(row.vote_date, SENTINEL, 'never overwritten with a guess');
 });
 
-test('runCorrectMo1969Dates: ambiguous duplicate match (0 or >1 tally-matching candidates) falls through to the URL-parse path rather than deleting speculatively', async () => {
+test('runCorrectMo1969Dates: ambiguous duplicate match (0 or >1 candidates whose caster sets EXACTLY match the sentinel) falls through to the URL-parse path rather than deleting speculatively', async () => {
   const client = makeFakeClient({
     votes: [
       {
@@ -385,20 +474,23 @@ test('runCorrectMo1969Dates: ambiguous duplicate match (0 or >1 tally-matching c
       },
     ],
     vote_casts: [
-      { id: 'c1', vote_id: 'v-sentinel', position: 'yea' },
-      { id: 'c2', vote_id: 'v-sentinel', position: 'nay' },
-      // both primary candidates coincidentally share the SAME (yea,nay) tally as the sentinel —
-      // ambiguous, never guessed which one it corresponds to
-      { id: 'c3', vote_id: 'v-primary-a', position: 'yea' },
-      { id: 'c4', vote_id: 'v-primary-a', position: 'nay' },
-      { id: 'c5', vote_id: 'v-primary-b', position: 'yea' },
-      { id: 'c6', vote_id: 'v-primary-b', position: 'nay' },
+      { id: 'c1', vote_id: 'v-sentinel', position: 'yea', legislator_id: 'L1' },
+      { id: 'c2', vote_id: 'v-sentinel', position: 'nay', legislator_id: 'L2' },
+      // both primary candidates coincidentally have the EXACT SAME caster-id sets as the sentinel
+      // (contrived to prove the ambiguity path specifically, not the tally-only false positive —
+      // see the false-positive proof test above for that) — genuinely ambiguous, never guessed
+      // which one it corresponds to.
+      { id: 'c3', vote_id: 'v-primary-a', position: 'yea', legislator_id: 'L1' },
+      { id: 'c4', vote_id: 'v-primary-a', position: 'nay', legislator_id: 'L2' },
+      { id: 'c5', vote_id: 'v-primary-b', position: 'yea', legislator_id: 'L1' },
+      { id: 'c6', vote_id: 'v-primary-b', position: 'nay', legislator_id: 'L2' },
     ],
   });
 
   const report = await runCorrectMo1969Dates(client, { dryRun: false, runId: 'run-1' });
   assert.equal(report.deletedAsDuplicate, 0);
   assert.equal(report.redatedFromSource, 1, 'falls through to the URL-derive path instead');
+  assert.deepEqual(report.matches, []);
   assert.equal(client.tables.votes.length, 3, 'nothing deleted');
 });
 
@@ -440,8 +532,8 @@ test('runCorrectMo1969Dates: --dry-run performs ZERO writes/deletes for either p
       },
     ],
     vote_casts: [
-      { id: 'c1', vote_id: 'v-dup', position: 'yea' },
-      { id: 'c2', vote_id: 'v-dup-primary', position: 'yea' },
+      { id: 'c1', vote_id: 'v-dup', position: 'yea', legislator_id: 'L1' },
+      { id: 'c2', vote_id: 'v-dup-primary', position: 'yea', legislator_id: 'L1' },
     ],
   });
   const before = JSON.stringify([client.tables.votes, client.tables.vote_casts]);
@@ -455,6 +547,19 @@ test('runCorrectMo1969Dates: --dry-run performs ZERO writes/deletes for either p
   assert.equal(JSON.stringify([client.tables.votes, client.tables.vote_casts]), before, 'zero writes — both tables byte-for-byte unchanged');
   assert.equal(client.calls.some((c) => c.mode === 'delete'), false);
   assert.equal(client.calls.some((c) => c.mode === 'update'), false);
+
+  // review requirement 2: the human-review surface is populated in DRY-RUN too, not just live —
+  // Lance should be able to eyeball every delete decision BEFORE authorizing the live pass.
+  assert.equal(report.matches.length, 1, 'exactly the one duplicate decision, not the redate/unresolvable rows');
+  assert.deepEqual(report.matches[0], {
+    sentinelVoteId: 'v-dup',
+    matchedPrimaryVoteId: 'v-dup-primary',
+    billId: 'bill-1',
+    chamber: 'senate',
+    sentinelTally: { yea: 1, nay: 0 },
+    primaryTally: { yea: 1, nay: 0 },
+    signal: 'exact_legislator_id_set_match',
+  });
 });
 
 // ---- runCorrectData (top-level dispatcher) ----
