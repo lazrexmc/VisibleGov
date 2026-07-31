@@ -325,7 +325,10 @@ function fakeClient(resultsByTable, onCall) {
 // so a fixture that omits the content is a fixture asserting "we cannot verify the stated purpose"
 // — which is exactly the flag path, not the publish path. goodSummary's stated_purpose is printed
 // here verbatim, the way a real bill's own purpose section would be.
-const BILL_TEXT_CONTENT = 'SEC. 1. Does X.\nSEC. 2. Does Y.\n\nPURPOSE.—To do X and Y.\n';
+// Carries SEC. 3 so the default completeness fixture can name the mechanically-required minimum of
+// three grounded provisions (assessCompleteness enforces the schema's 3-7 bound rather than
+// trusting the checker to have honored it).
+const BILL_TEXT_CONTENT = 'SEC. 1. Does X.\nSEC. 2. Does Y.\nSEC. 3. Does Z.\n\nPURPOSE.—To do X and Y.\n';
 
 const textRow = (contentHash = 'h1', retrievedAt = '2026-01-01T00:00:00Z') => ({
   content: BILL_TEXT_CONTENT, content_hash: contentHash, retrieved_at: retrievedAt,
@@ -356,10 +359,15 @@ function goodCompleteness(overrides = {}) {
     key_provisions: [
       { section: 'SEC. 1.', provision: 'Does X.' },
       { section: 'SEC. 2.', provision: 'Does Y.' },
+      { section: 'SEC. 3.', provision: 'Does Z.' },
     ],
+    // Two bullets cover three provisions: bullet_index repeats by design (a single bullet can
+    // legitimately cover more than one provision; assessCompleteness constrains provision_index
+    // uniqueness and bullet_index RANGE, never bullet_index uniqueness).
     coverage: [
       { provision_index: 0, covered: true, bullet_index: 0, note: 'covered by bullet 0' },
       { provision_index: 1, covered: true, bullet_index: 1, note: 'covered by bullet 1' },
+      { provision_index: 2, covered: true, bullet_index: 1, note: 'also covered by bullet 1' },
     ],
     ...overrides,
   };
@@ -1035,9 +1043,20 @@ test('classifyRecordItem: FINAL REVIEW FINDING 5 — line breaks and indentation
   // baseItem() completeness fixture (grounded against BILL_TEXT_CONTENT, which has both) would fail
   // assessCompleteness's grounding check against THIS test's different text. Override with a
   // completeness payload grounded in what this test actually stores.
+  // All three provisions cite SEC. 1. — the only section THIS test's stored text contains. Distinct
+  // sections are not required (grounding is per-provision presence), and three are, since the bound
+  // is enforced mechanically.
   const completeness = goodCompleteness({
-    key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }],
-    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }],
+    key_provisions: [
+      { section: 'SEC. 1.', provision: 'Does X.' },
+      { section: 'SEC. 1.', provision: 'States the purpose.' },
+      { section: 'SEC. 1.', provision: 'Does Y.' },
+    ],
+    coverage: [
+      { provision_index: 0, covered: true, bullet_index: 0, note: 'ok' },
+      { provision_index: 1, covered: true, bullet_index: 0, note: 'ok' },
+      { provision_index: 2, covered: true, bullet_index: 1, note: 'ok' },
+    ],
   });
   const decision = await classifyRecordItem(client, baseItem({ summary, completeness }));
   assert.equal(decision.action, 'publish');
