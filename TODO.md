@@ -223,6 +223,36 @@
 
 ---
 
+### Live landmines recovered from the ledgers 2026-07-31 — these had fallen OUT of TODO entirely
+
+30. **⚠️ `npm run summarize` and `npm run verify` SPEND MONEY WITH NO GATE.** `gloss.js`,
+    `extract-terms.js` and `golden.js` all carry mechanical env gates
+    (`GLOSS_RUN_APPROVED` / `GOLDEN_CHECK_APPROVED`), but `src/cli/summarize.js` and
+    `src/cli/verify.js` have none and both default `dryRun: false` — they call
+    `getAnthropicClient()` and bill straight through. This is the unfinished half of CLAUDE.md's
+    own stated policy ("Mechanical enforcement exists where possible — extend that pattern to new
+    model-calling tools") and it sits directly against Lance's standing spend hold. Fix = add the
+    same guard clause both files, mirroring gloss.js:234.
+
+31. **⚠️ MO HOUSE cross-era misattribution trap is STILL LIVE.** `0005_mo_house_id.sql` declares
+    `mo_house_id text unique` — table-wide unique, never dropped (0009 dropped only the *senate*
+    equivalent) — and `ingest-mo-house.js:794` still does `insertIfAbsent(..., 'mo_house_id')`
+    against a current-only roster. This is the EXACT defect that was a reproduced CRITICAL on the
+    Senate side: the unique index freezes each district to its first-ingested person, so a
+    same-surname successor's votes silently attribute to the WRONG person. Dormant only because
+    House ingestion has been single-era. **It fires the moment anyone runs a MO House
+    historical/multi-era backfill** — a natural next step. Fix BEFORE any such backfill.
+
+32. **`summarize.js` unbounded selects — the ledger said URGENT-WHEN-SUMMARIES-RESUME, and
+    summaries HAVE resumed.** `src/cli/summarize.js:89` (bills), `:96` (`votes`), `:117`
+    (summaries) are bare `.select()` with no `selectAll`, no `.range()`, no `.limit()`; `votes` is
+    now ~10,000 rows, well past the 1,000 cap, so its candidate picker silently returns an
+    arbitrary truncated subset. Wave 1 was safe only because it used `summary-queue.js` instead.
+    Fix before anyone reaches for `summarize.js` again. (TODO 18 tracks this as "hygiene" — the
+    ledger's own word was URGENT.)
+
+---
+
 ### Defects found by the 2026-07-31 data audit (docs vs live DB) — none were previously recorded
 
 25. **⚠️ The MO 2026 session is SPLIT IN TWO and the split is actively growing.** Session identifier
