@@ -1,0 +1,16 @@
+### Task 5: Glosser + gloss verifier
+
+**Files:** Create `src/lib/glosser.js`, `src/cli/gloss.js`; tests
+- glosser: for glossary_terms with a parsed citation and no gloss: fetchUscSection → opus-5 authors {gloss_md (1-2 sentences), supported_by_quote} via JSON schema from the EXCERPT ONLY (system prompt: facts-only, no characterization, plain language, 'from this excerpt alone'); store with source_url/source_hash/provenance. Typed refusal/truncation/oversize errors (reuse conventions).
+- verifier: sonnet-5 refutes each gloss sentence against the same excerpt; assessVerdicts-style derived overall; results into summary_verifications? NO — new rows in a glossary_verifications table? AVOID second migration: store verdicts in glossary_terms-adjacent... RULING: reuse `summary_verifications`? Its FK targets summaries — wrong. ADD glossary_verifications to migration 0007 (Task 1): same shape as summary_verifications but FK glossary_terms. (Task 1 implementer: include it.)
+- needs_mapping terms are SKIPPED with honest counts (they await curation/mapping — surfaced in the review page).
+- [ ] TDD pure parts → implement → green → commit. LIVE RUN GATES on Lance (unique terms × ~$0.16 authoring+verify).
+
+
+## CONTROLLER RULINGS (binding, appended)
+
+1. Full requirements: the plan's Task 5 section. Author model claude-opus-5, verifier claude-sonnet-5 (the established pair); glossary_verifications rows via the 0007 shape; needs_mapping terms SKIPPED with honest counts; GLOSS_RUN_APPROVED mechanical gate; typed errors reused; NO live model calls this task — STOP at READY_FOR_LIVE_GATE.
+2. OVERSIZE SECTIONS (ledgered from Task 2, reviewer-confirmed feasible): when extractSectionText throws OversizeExcerptError AND parseCitation captured a subsection suffix (e.g. 1396b(i) — extend parseCitation's return to carry the suffix; it currently drops it — coordinate: modify uscode.js to ALSO return {subsection} without changing existing behavior for section-level callers), excerpt at the cited subsection using the OLRC substructure-location_<X> anchors (fixture-verified to exist at full hierarchical granularity: substructure-location_i is literally present in the 1396b fixture). Slice from the cited anchor to the next same-or-higher-level anchor. If no subsection was cited and the section oversizes → typed skip recorded honestly (no silent handling). Fixture-first: the existing 1396b fixture is your test bed for subsection slicing — assert the (i) excerpt is <100k, non-empty, and contains recognizable text.
+3. Provenance on every gloss row: model, prompt_version ('gloss-v1'), source_url (the granule URL + subsection fragment if sliced), source_hash (sha256 of the EXACT excerpt used), run_id. The published-completeness constraint depends on these being set here.
+4. Gloss prompt: 1-2 sentences, plain language, FROM THE EXCERPT ALONE, no adjectives about merit, no characterization beyond function — carry the facts-only markers ('from this excerpt alone', 'never infer') and TEST them like Tasks 3/4 (marker assertions).
+5. Verifier: refute-stance vs the same excerpt; derived overall via an assessVerdicts-equivalent (never model-self-reported); completeness gates like the summary verifier.

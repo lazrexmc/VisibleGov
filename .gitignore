@@ -4,6 +4,18 @@ PrivateData/
 *.log
 .DS_Store
 Thumbs.db
-.superpowers/
+# .superpowers/ is agent scratch — BUT the per-task ledgers (progress.md, briefs, reports) are the
+# synthesized "why" behind every ruling, fix round, and accepted residual in this project, and they
+# cannot be re-derived at any price. Those .md files are preserved in git (Lance, 2026-07-31:
+# "Preserve all info"). Everything else here stays ignored: review .diff packages (regenerable from
+# git via scripts/review-package) and artifacts/ (~959M of cached source payloads — re-fetchable,
+# see docs/ARTIFACTS.md for the cost of doing so).
+.superpowers/*
+!.superpowers/sdd/
+.superpowers/sdd/*
+!.superpowers/sdd/*/
+.superpowers/sdd/*/*
+!.superpowers/sdd/**/*.md
+!.superpowers/sdd/*.md
 node_modules/
 .playwright-mcp/
