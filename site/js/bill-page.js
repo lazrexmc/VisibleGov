@@ -128,25 +128,84 @@ export function renderSummaryStructured(bodyMd) {
 
 export const NO_SUMMARY_NOTE = 'No plain-language summary yet — the facts above are the record.';
 
-// buildVerificationNote({summary, note, noteUnavailable}) -> the exact receipt sentence (task-9
-// brief, verbatim): "Summary by {summaries.model}, adversarially verified {overall} by
-// {note.model} on {date}" — the trust-model-v3 receipt that this text passed adversarial
-// verification. `note` is a public_verification_notes row (migration 0016: summary_id, model,
-// prompt_version, overall, created_at) or null.
+// ============================================================================
+// Completeness axis follow-up (2026-07-31): public_verification_notes (migration 0016/0019/0020)
+// can now carry TWO kinds of row per summary — a support row (trust-model v2/v3's adversarial
+// fact-check) and a completeness row (proves the summary COVERS the bill, not just that it's true
+// of it). The view never exposes `verdicts`/`coverage` detail to anon (0004/0019: "verification
+// detail ... is a staff review tool, not a public-facing claim in its own right"), so this page
+// cannot discriminate rows by verdict SHAPE the way src/review/server.js does against the raw
+// table. It discriminates by `overall`'s own value domain instead: migration 0020's compound CHECK
+// makes support rows always clean/flagged and completeness rows always complete/incomplete — a
+// disjoint domain that has been on this view since 0004, so it needs no coordination with whether
+// 0020 (draft-then-apply — may land hours after this code ships) has actually been applied. Before
+// 0020 ships, or before any completeness check has ever run for a given summary, no row will ever
+// classify as 'completeness' — selectVerificationNotes then returns completenessNote: null and the
+// receipt renders exactly as it always has.
+// ============================================================================
+
+const SUPPORT_OVERALL_VALUES = new Set(['clean', 'flagged']);
+const COMPLETENESS_OVERALL_VALUES = new Set(['complete', 'incomplete']);
+
+export function classifyVerificationOverall(value) {
+  if (SUPPORT_OVERALL_VALUES.has(value)) return 'support';
+  if (COMPLETENESS_OVERALL_VALUES.has(value)) return 'completeness';
+  return null;
+}
+
+// selectVerificationNotes(noteRows) -> {supportNote, completenessNote}. Rows are fetched
+// order=created_at.desc (loadSummarySection below), so the FIRST row of each shape is already the
+// latest one of that shape — no separate re-sort needed. Pure, never throws.
+export function selectVerificationNotes(noteRows) {
+  const rows = Array.isArray(noteRows) ? noteRows : [];
+  const supportNote = rows.find((r) => classifyVerificationOverall(r?.overall) === 'support') || null;
+  const completenessNote = rows.find((r) => classifyVerificationOverall(r?.overall) === 'completeness') || null;
+  return { supportNote, completenessNote };
+}
+
+// buildCompletenessClause(completenessNote) -> '' when no completeness row is on file (every
+// summary published before this axis shipped, or an orchestration gap) — the receipt then reads
+// EXACTLY as it did before this task, no false claim of a check that never ran. When one exists,
+// states exactly what the gate did, nothing more:
+//   - complete: an independent check found the summary covers the bill's key provisions.
+//   - incomplete: the record gate (src/cli/summary-queue.js's classifyRecordItem) NEVER publishes
+//     an incomplete result, so this branch should be unreachable for a real published summary. If
+//     it somehow appears anyway, say so honestly rather than hiding it — a canary that the gate
+//     misfired, not a state worth polishing copy for.
+function buildCompletenessClause(completenessNote) {
+  if (!completenessNote) return '';
+  if (completenessNote.overall === 'complete') {
+    return " A separate independent check found the summary covers the bill's key provisions.";
+  }
+  return ` Note: an on-file completeness check for this summary reports "${completenessNote.overall}" — that should never happen for a published summary.`;
+}
+
+// buildVerificationNote({summary, note, noteUnavailable, completenessNote}) -> the exact receipt
+// sentence (task-9 brief, verbatim): "Summary by {summaries.model}, adversarially verified
+// {overall} by {note.model} on {date}" — the trust-model-v3 receipt that this text passed
+// adversarial verification — with an OPTIONAL second clause (buildCompletenessClause above) when a
+// completeness-shaped row is also on file. `note` is a public_verification_notes row (support-
+// shaped: summary_id, model, prompt_version, overall, created_at) or null; `completenessNote` is
+// the completeness-shaped row (or null/omitted).
 //
 // Fix round 1, LOW-6 (task-9 review): "no verification record on file" (the fetch SUCCEEDED and
 // legitimately found zero rows) and "verification record could not be loaded" (the fetch itself
 // FAILED) are different facts — collapsing them into one string would claim more certainty than
 // either case alone supports. `noteUnavailable` is the caller's own signal for which happened;
-// `note === null` with `noteUnavailable` false/omitted means the former.
+// `note === null` with `noteUnavailable` false/omitted means the former. Both of these branches
+// return before completenessNote is ever consulted — an unloadable/absent support record makes any
+// claim about coverage moot too.
 // Pure: never throws, never touches the DOM.
-export function buildVerificationNote({ summary, note, noteUnavailable } = {}) {
+export function buildVerificationNote({
+  summary, note, noteUnavailable, completenessNote,
+} = {}) {
   if (!summary) return NO_SUMMARY_NOTE;
   const model = summary.model || '(model unrecorded)';
   if (noteUnavailable) return `Summary by ${model} — verification record could not be loaded.`;
   if (!note) return `Summary by ${model} — no verification record on file.`;
   const date = String(note.created_at || '').slice(0, 10) || '(date unrecorded)';
-  return `Summary by ${model}, adversarially verified ${note.overall} by ${note.model} on ${date}.`;
+  const base = `Summary by ${model}, adversarially verified ${note.overall} by ${note.model} on ${date}.`;
+  return `${base}${buildCompletenessClause(completenessNote)}`;
 }
 
 export const MO_DISCLAIMER_TEXT = 'Bill text and status shown are not official copies; the official record is at the linked source.';
@@ -319,7 +378,7 @@ function renderVotes(container, votes, tallyByVoteId, flagsUnavailable) {
 }
 
 function renderSummary(container, {
-  summary, note, noteUnavailable, glossaryTerms, glossaryUnavailable,
+  summary, note, noteUnavailable, completenessNote, glossaryTerms, glossaryUnavailable,
 }) {
   clearChildren(container);
 
@@ -387,7 +446,9 @@ function renderSummary(container, {
     }
   }
 
-  container.appendChild(el('p', { class: 'bill-verification-note' }, buildVerificationNote({ summary, note, noteUnavailable })));
+  container.appendChild(el('p', { class: 'bill-verification-note' }, buildVerificationNote({
+    summary, note, noteUnavailable, completenessNote,
+  })));
 }
 
 // ============================================================================
@@ -517,7 +578,12 @@ export async function loadVotesSection(container, { billId }) {
   }
 }
 
-async function loadSummarySection(container, { billId }) {
+// Exported (completeness axis follow-up, 2026-07-31) for the SAME reason loadVotesSection already
+// is: a pure-function-only test suite is structurally unable to catch a bug that lives entirely in
+// how two already-correct pieces (the public_verification_notes fetch, buildVerificationNote) get
+// wired together at this orchestration layer — see the DOM regression tests in
+// tests/bill-page.test.js.
+export async function loadSummarySection(container, { billId }) {
   sectionState(container, { state: 'loading' });
   const reload = () => loadSummarySection(container, { billId }).catch(() => {});
   let summary;
@@ -547,12 +613,14 @@ async function loadSummarySection(container, { billId }) {
   // honest "could not be loaded" fallback / a visible "glossary unavailable" notice (LOW-6), never
   // fails this section outright.
   let note = null;
+  let completenessNote = null;
   let noteUnavailable = false;
   try {
     const noteRows = (await restGet(`public_verification_notes?summary_id=eq.${summary.id}&order=created_at.desc`)).rows;
-    note = noteRows[0] || null;
+    ({ supportNote: note, completenessNote } = selectVerificationNotes(noteRows));
   } catch {
     note = null;
+    completenessNote = null;
     noteUnavailable = true;
   }
 
@@ -579,7 +647,7 @@ async function loadSummarySection(container, { billId }) {
   try {
     sectionState(container, { state: 'ready' });
     renderSummary(container, {
-      summary, note, noteUnavailable, glossaryTerms, glossaryUnavailable,
+      summary, note, noteUnavailable, completenessNote, glossaryTerms, glossaryUnavailable,
     });
   } catch {
     sectionState(container, {

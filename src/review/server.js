@@ -196,6 +196,26 @@ export function resolveVerificationRows({ data, error }, table = 'summary_verifi
   return data ?? [];
 }
 
+// isSupportShapedVerification — completeness axis follow-up (2026-07-31): migration 0020 (draft,
+// not yet applied when this code ships) adds completeness rows to this SAME summary_verifications
+// table, distinguished at the schema level by a `kind` column. Filtering `.eq('kind','support')`
+// would 400 against a database 0020 hasn't reached yet — draft-then-apply means this code and that
+// migration can land hours apart, in either order, and this file must work correctly in BOTH
+// states without knowing which one it's talking to. So: discriminate by the DATA'S OWN SHAPE
+// instead of a column that may not exist. A support row's `verdicts` is the array VERIFY_SCHEMA
+// defines, each entry carrying `.supported`; a completeness row's `verdicts` holds
+// COMPLETENESS_SCHEMA's {key_provisions, coverage} object instead — never an array at all, so
+// `Array.isArray` alone already disambiguates them, and the per-entry `.supported` check below is
+// belt-and-suspenders. deriveVerificationBadge must never see a coverage row: it would read
+// `.supported` as undefined on every entry and silently report "0 of N supported" for a summary
+// nothing actually found unsupported.
+export function isSupportShapedVerification(row) {
+  const verdicts = row?.verdicts;
+  if (!Array.isArray(verdicts)) return false;
+  if (verdicts.length === 0) return true; // vacuous case: an (empty) array is still support-shaped
+  return verdicts.every((v) => v && typeof v.supported === 'boolean');
+}
+
 // Task 6, controller ruling #2: migration 0007's glossary_terms_published_complete CHECK (source_url
 // / source_hash / gloss_md all required once status='published') will reject a publish attempt on a
 // bare stub. That must be surfaced honestly, not pre-filtered away silently — but per this file's
@@ -325,7 +345,10 @@ async function handleQueue(client, res) {
       // a newer flagged verification could be invisible to this queue. Routed through selectAll
       // (src/lib/db.js), the one shared pagination helper every full-table-ish select now uses.
       const verResult = await selectAll(client, 'summary_verifications', 'summary_id,overall,verdicts,created_at');
-      const rows = resolveVerificationRows(verResult).filter((r) => idSet.has(r.summary_id));
+      // isSupportShapedVerification (see its own comment): completeness rows share this table and
+      // must never reach latestVerificationBySummary/verificationBadge, which are written for the
+      // support axis's verdict shape only.
+      const rows = resolveVerificationRows(verResult).filter((r) => idSet.has(r.summary_id) && isSupportShapedVerification(r));
       latestVerification = latestVerificationBySummary(rows);
     }
 
@@ -374,13 +397,21 @@ async function handleItem(client, res, id) {
       vote = { question: latestVote.question, result: latestVote.result, yeas, nays };
     }
 
+    // No .limit(1) here (deliberately, completeness-axis follow-up 2026-07-31): applyRecordDecision
+    // (src/cli/summary-queue.js) inserts the completeness row immediately AFTER the support row, so
+    // the completeness row's created_at is typically the LATER of the two — a DB-side
+    // order+limit(1) would very often hand this endpoint the completeness row, not the support one.
+    // A single summary_id's verification history is small (never anywhere near the pagination cap
+    // selectAll exists for), so fetching all of it and filtering/picking in JS is cheap and correct.
     const verResult = await client
       .from('summary_verifications')
       .select('overall,verdicts,model,created_at')
       .eq('summary_id', id)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    const verRows = resolveVerificationRows(verResult);
+      .order('created_at', { ascending: false });
+    // isSupportShapedVerification: same shape-not-schema discrimination as handleQueue above — see
+    // that function's comment. Rows are already newest-first, so the first support-shaped one is
+    // the latest support verification.
+    const verRows = resolveVerificationRows(verResult).filter(isSupportShapedVerification);
     const verification = verRows[0] ?? null;
 
     sendJson(res, 200, {

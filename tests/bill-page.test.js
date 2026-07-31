@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 
 import {
   tallyPositions, renderSummaryStructured, buildVerificationNote, NO_SUMMARY_NOTE, PLAIN_TEXT_FALLBACK_NOTE,
-  loadVotesSection,
+  loadVotesSection, loadSummarySection, classifyVerificationOverall, selectVerificationNotes,
 } from '../site/js/bill-page.js';
 import { markTerms } from '../site/js/glossary-inline.js';
 import { renderMarkdown } from '../src/lib/summarizer.js';
@@ -210,6 +210,124 @@ test('buildVerificationNote: LOW-6 — the verification-note FETCH ITSELF FAILED
     failedMessage,
     buildVerificationNote({ summary, note: null }),
     'the two honest-uncertainty cases must render as two DIFFERENT strings',
+  );
+});
+
+// ============================================================================
+// classifyVerificationOverall / selectVerificationNotes — completeness axis follow-up (2026-07-31).
+// public_verification_notes (migration 0016/0019/0020) never exposes `verdicts`/`coverage` detail
+// to anon (0004/0019: "verification detail ... is a staff review tool, not a public-facing claim in
+// its own right"), so bill-page.js cannot discriminate rows by verdict SHAPE the way
+// src/review/server.js does against the raw table. It discriminates by `overall`'s own value
+// domain instead — disjoint by construction (migration 0020's compound CHECK: support rows are
+// always clean/flagged, completeness rows are always complete/incomplete) and present on this view
+// since 0004, so it is exactly as reliable a signal as a `kind` column would be, without requiring
+// 0020 (draft-then-apply, may land hours after this code ships) to have been applied at all.
+// ============================================================================
+
+test('classifyVerificationOverall: clean/flagged -> support; complete/incomplete -> completeness; anything else -> null', () => {
+  assert.equal(classifyVerificationOverall('clean'), 'support');
+  assert.equal(classifyVerificationOverall('flagged'), 'support');
+  assert.equal(classifyVerificationOverall('complete'), 'completeness');
+  assert.equal(classifyVerificationOverall('incomplete'), 'completeness');
+  assert.equal(classifyVerificationOverall('bogus'), null);
+  assert.equal(classifyVerificationOverall(undefined), null);
+  assert.equal(classifyVerificationOverall(null), null);
+});
+
+test('selectVerificationNotes: a support row and a completeness row both present -> both selected', () => {
+  const rows = [
+    { summary_id: 's1', overall: 'complete', model: 'claude-sonnet-5', created_at: '2026-07-16T00:00:00.000Z' },
+    { summary_id: 's1', overall: 'clean', model: 'claude-sonnet-5', created_at: '2026-07-15T18:22:00.000Z' },
+  ];
+  const { supportNote, completenessNote } = selectVerificationNotes(rows);
+  assert.equal(supportNote.overall, 'clean');
+  assert.equal(completenessNote.overall, 'complete');
+});
+
+test('selectVerificationNotes: rows already ordered created_at DESC — the FIRST matching row of each shape wins (the latest one)', () => {
+  const rows = [
+    { summary_id: 's1', overall: 'complete', model: 'm', created_at: '2026-07-16T00:00:00.000Z' }, // latest completeness
+    { summary_id: 's1', overall: 'clean', model: 'm', created_at: '2026-07-15T18:22:00.000Z' }, // latest support
+    { summary_id: 's1', overall: 'incomplete', model: 'm', created_at: '2026-07-10T00:00:00.000Z' }, // older completeness
+    { summary_id: 's1', overall: 'flagged', model: 'm', created_at: '2026-07-01T00:00:00.000Z' }, // older support
+  ];
+  const { supportNote, completenessNote } = selectVerificationNotes(rows);
+  assert.equal(supportNote.created_at, '2026-07-15T18:22:00.000Z');
+  assert.equal(completenessNote.created_at, '2026-07-16T00:00:00.000Z');
+});
+
+test('selectVerificationNotes: only a support row present (every summary published before this axis shipped) -> completenessNote is null', () => {
+  const rows = [{ summary_id: 's1', overall: 'clean', model: 'm', created_at: '2026-01-01T00:00:00.000Z' }];
+  const { supportNote, completenessNote } = selectVerificationNotes(rows);
+  assert.equal(supportNote.overall, 'clean');
+  assert.equal(completenessNote, null);
+});
+
+test('selectVerificationNotes: empty/absent rows -> both null, never throws', () => {
+  assert.deepEqual(selectVerificationNotes([]), { supportNote: null, completenessNote: null });
+  assert.deepEqual(selectVerificationNotes(null), { supportNote: null, completenessNote: null });
+  assert.deepEqual(selectVerificationNotes(undefined), { supportNote: null, completenessNote: null });
+});
+
+// ============================================================================
+// buildVerificationNote + completenessNote — the visible payoff of the completeness axis: when a
+// completeness-shaped row is ALSO on file, the receipt gains a second, honest clause. Wording must
+// be exactly true of what the gate did (coordinator instruction, 2026-07-31): complete means an
+// independent check found the summary covers the bill's key provisions; incomplete should be
+// IMPOSSIBLE on a published summary (classifyRecordItem never publishes one), so it is rendered
+// honestly rather than hidden if it somehow appears.
+// ============================================================================
+
+test('buildVerificationNote: no completenessNote at all (every summary published before this axis shipped) -> renders EXACTLY today\'s receipt, byte for byte, no mention of coverage', () => {
+  const summary = { model: 'claude-opus-5' };
+  const note = { model: 'claude-sonnet-5', overall: 'clean', created_at: '2026-07-15T18:22:00.000Z' };
+  assert.equal(
+    buildVerificationNote({ summary, note }),
+    'Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.',
+  );
+  assert.equal(
+    buildVerificationNote({
+      summary, note, completenessNote: null,
+    }),
+    'Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.',
+    'an explicit null completenessNote must render identically to omitting the field entirely',
+  );
+});
+
+test('buildVerificationNote: a "complete" completenessNote adds a second, honest clause reporting the coverage check', () => {
+  const summary = { model: 'claude-opus-5' };
+  const note = { model: 'claude-sonnet-5', overall: 'clean', created_at: '2026-07-15T18:22:00.000Z' };
+  const completenessNote = { overall: 'complete', model: 'claude-sonnet-5', created_at: '2026-07-16T00:00:00.000Z' };
+  const text = buildVerificationNote({ summary, note, completenessNote });
+  assert.ok(text.startsWith('Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.'), 'the original receipt sentence must appear unchanged as the first clause');
+  assert.match(text, /covers the bill/i);
+});
+
+test('buildVerificationNote: an "incomplete" completenessNote is rendered HONESTLY, never hidden — this should never happen on a published summary, and the text says so rather than silently omitting it', () => {
+  const summary = { model: 'claude-opus-5' };
+  const note = { model: 'claude-sonnet-5', overall: 'clean', created_at: '2026-07-15T18:22:00.000Z' };
+  const completenessNote = { overall: 'incomplete', model: 'claude-sonnet-5', created_at: '2026-07-16T00:00:00.000Z' };
+  const text = buildVerificationNote({ summary, note, completenessNote });
+  assert.ok(text.startsWith('Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.'));
+  assert.match(text, /incomplete/i);
+  assert.doesNotMatch(text, /covers the bill/i, 'must not claim coverage was confirmed when the on-file result says otherwise');
+});
+
+test('buildVerificationNote: the no-summary / no-record / unavailable branches are unaffected by completenessNote (they return before it is ever consulted)', () => {
+  assert.equal(buildVerificationNote({ summary: null, completenessNote: { overall: 'complete' } }), NO_SUMMARY_NOTE);
+  const summary = { model: 'claude-opus-5' };
+  assert.equal(
+    buildVerificationNote({
+      summary, note: null, completenessNote: { overall: 'complete' },
+    }),
+    'Summary by claude-opus-5 — no verification record on file.',
+  );
+  assert.equal(
+    buildVerificationNote({
+      summary, note: null, noteUnavailable: true, completenessNote: { overall: 'complete' },
+    }),
+    'Summary by claude-opus-5 — verification record could not be loaded.',
   );
 });
 
@@ -436,4 +554,69 @@ test('loadVotesSection: a vote with NO matching flag row renders no badge (the p
 
   assert.equal(container.querySelector('.flag-badge'), null);
   assert.equal(container.querySelector('.flags-unavailable-notice'), null);
+});
+
+// ============================================================================
+// loadSummarySection — DOM regression test, completeness axis follow-up (2026-07-31), same reason
+// the loadVotesSection regression test above exists: buildVerificationNote and selectVerificationNotes
+// are both independently correct in isolation, but the real risk is in how loadSummarySection WIRES
+// the single public_verification_notes fetch into them. This exercises the actual fetch -> select ->
+// render pipeline, not just the pure pieces.
+// ============================================================================
+
+test('loadSummarySection: a summary with BOTH a support row and a completeness row on file renders the support receipt PLUS the coverage clause', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/summaries?')) {
+      return okResponse([{
+        id: 'sum-both', bill_id: 'bill-both', model: 'claude-opus-5', body_md: '**What it does:**\n- Does X. (Sec. 1)',
+      }]);
+    }
+    if (u.includes('/public_verification_notes?')) {
+      // Real applyRecordDecision insert order (src/cli/summary-queue.js): support row first,
+      // completeness row second — so in a real DB (order=created_at.desc) the completeness row
+      // comes back FIRST. Reproduced here on purpose.
+      return okResponse([
+        { summary_id: 'sum-both', overall: 'complete', model: 'claude-sonnet-5', created_at: '2026-07-16T00:00:00.000Z' },
+        { summary_id: 'sum-both', overall: 'clean', model: 'claude-sonnet-5', created_at: '2026-07-15T18:22:00.000Z' },
+      ]);
+    }
+    if (u.includes('/summary_terms?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadSummarySection(container, { billId: 'bill-both' });
+
+  const note = container.querySelector('.bill-verification-note');
+  assert.notEqual(note, null);
+  assert.ok(note.textContent.startsWith('Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.'));
+  assert.match(note.textContent, /covers the bill/i);
+});
+
+test('loadSummarySection: a summary with ONLY a support row on file (every summary published before this axis shipped) renders EXACTLY today\'s receipt, no coverage clause', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/summaries?')) {
+      return okResponse([{
+        id: 'sum-support-only', bill_id: 'bill-support-only', model: 'claude-opus-5', body_md: '**What it does:**\n- Does X. (Sec. 1)',
+      }]);
+    }
+    if (u.includes('/public_verification_notes?')) {
+      return okResponse([
+        { summary_id: 'sum-support-only', overall: 'clean', model: 'claude-sonnet-5', created_at: '2026-07-15T18:22:00.000Z' },
+      ]);
+    }
+    if (u.includes('/summary_terms?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadSummarySection(container, { billId: 'bill-support-only' });
+
+  const note = container.querySelector('.bill-verification-note');
+  assert.notEqual(note, null);
+  assert.equal(note.textContent, 'Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.');
 });

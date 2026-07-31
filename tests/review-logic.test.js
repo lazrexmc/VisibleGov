@@ -7,7 +7,7 @@ import {
   pickBillText, readBody, BodyTooLargeError, requestListener, isAllowedDecisionRequest,
   verificationBadge, latestVerificationBySummary, resolveVerificationRows,
   validateGlossaryDecisionInput, glossVerificationBadge, latestVerificationByTerm,
-  isPublishCompletenessViolation,
+  isPublishCompletenessViolation, isSupportShapedVerification,
   formatCandidateDistrict, formatCandidateEraSpan, findCandidateEvidence,
   buildLanceLinkEvidence, buildLanceAttachEvidence, appendResolution, validateIdentityDecisionInput,
   HOST, PORT,
@@ -221,6 +221,52 @@ test('resolveVerificationRows rethrows an error naming a DIFFERENT missing table
   assert.throws(() => resolveVerificationRows({ data: null, error: err }), (thrown) => thrown === err);
 });
 
+// ---- isSupportShapedVerification (completeness axis follow-up, 2026-07-31): discriminates a
+// support-kind summary_verifications row from a completeness-kind one by the SHAPE of its verdicts
+// column, never by a `kind` column that migration 0020 (draft-then-apply) may not have added yet.
+// A support row's verdicts is VERIFY_SCHEMA's array (entries carry .supported); a completeness
+// row's verdicts is COMPLETENESS_SCHEMA's {key_provisions, coverage} object (coverage entries carry
+// .covered instead) — deriveVerificationBadge must never see the latter. ----
+
+test('isSupportShapedVerification: a real support row (array of {supported}) -> true', () => {
+  const row = {
+    verdicts: [
+      { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q' },
+      { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'no', evidence_quote: 'q2' },
+    ],
+  };
+  assert.equal(isSupportShapedVerification(row), true);
+});
+
+test('isSupportShapedVerification: a real completeness row ({key_provisions, coverage} object, never an array) -> false', () => {
+  const row = {
+    verdicts: {
+      key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }],
+      coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }],
+    },
+  };
+  assert.equal(isSupportShapedVerification(row), false);
+});
+
+test('isSupportShapedVerification: coverage entries carry .covered, not .supported — even if verdicts were coerced into an array shape, per-entry inspection still refuses it', () => {
+  // Defensive: this shape should never actually occur (completeness rows always store the
+  // {key_provisions, coverage} object, never a bare array) — but the per-entry .supported check is
+  // belt-and-suspenders against exactly this kind of malformed/unexpected row.
+  const row = { verdicts: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }] };
+  assert.equal(isSupportShapedVerification(row), false);
+});
+
+test('isSupportShapedVerification: an empty verdicts array is still support-shaped (vacuous case)', () => {
+  assert.equal(isSupportShapedVerification({ verdicts: [] }), true);
+});
+
+test('isSupportShapedVerification: null/undefined verdicts, or a null row -> false, never throws', () => {
+  assert.equal(isSupportShapedVerification({ verdicts: null }), false);
+  assert.equal(isSupportShapedVerification({}), false);
+  assert.equal(isSupportShapedVerification(null), false);
+  assert.equal(isSupportShapedVerification(undefined), false);
+});
+
 // ---- readBody / 1MB cap ----
 
 test('readBody resolves with the concatenated buffer under the limit', async () => {
@@ -363,6 +409,69 @@ test('GET /api/item/:id returns verification:null (200, not 500) when summary_ve
     const body = await res.json();
     assert.equal(body.verification, null);
     assert.equal(body.summary.id, 'sum1');
+  }, client);
+});
+
+// ---- completeness axis follow-up (2026-07-31): a completeness-kind row shares summary_verifications
+// with support-kind rows. applyRecordDecision (src/cli/summary-queue.js) inserts the completeness
+// row immediately AFTER the support row, so in a real DB the completeness row's created_at is
+// typically the LATER of the two — "the most recent row" is often the WRONG one for these endpoints.
+// Both must select the support-shaped row by its DATA'S SHAPE, never by a `kind` column (migration
+// 0020 is draft-then-apply and may not exist on the database this code is talking to).
+
+const SUPPORT_ROW = {
+  summary_id: 's1', overall: 'clean', model: 'subagent:claude-sonnet-5', created_at: '2026-01-01T00:00:00.000Z',
+  verdicts: [{ bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q' }],
+};
+const COMPLETENESS_ROW = {
+  summary_id: 's1', overall: 'complete', model: 'subagent:claude-sonnet-5', created_at: '2026-01-01T00:00:01.000Z', // later than SUPPORT_ROW
+  verdicts: {
+    key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }],
+  },
+};
+
+test('GET /api/queue: a later completeness-kind row never wins over the support row for the badge — real "clean" state, never misread as unverified/flagged', () => {
+  const client = fakeClient({
+    summaries: {
+      data: [{ id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z', bills: { identifier: 'HR 1', title: 'A Bill' } }],
+      error: null,
+    },
+    // DB order is newest-first, same as a real .order('created_at', {ascending:false}) — the
+    // completeness row (later) comes back before the support row.
+    summary_verifications: { data: [COMPLETENESS_ROW, SUPPORT_ROW], error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/queue`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), [{
+      id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z',
+      bill: { identifier: 'HR 1', title: 'A Bill' }, verified: 'clean',
+    }]);
+  }, client);
+});
+
+test('GET /api/item/:id: the later completeness-kind row is skipped; the response carries the support row (a real verdicts array with .supported entries), never the coverage object', () => {
+  const client = fakeClient({
+    summaries: {
+      data: {
+        id: 'sum1', bill_id: 'b1', status: 'draft', body_md: '- x (Sec 1)', model: 'claude-opus-5',
+        prompt_version: 'v1', bill_text_hash: 'h1', created_at: '2026-01-01T00:00:00Z', published_at: null,
+      },
+      error: null,
+    },
+    bills: { data: { identifier: 'HR 1', title: 'A Bill', canonical_url: 'https://example.test/hr1' }, error: null },
+    bill_texts: { data: [], error: null },
+    votes: { data: [], error: null },
+    summary_verifications: { data: [{ ...COMPLETENESS_ROW, summary_id: 'sum1' }, { ...SUPPORT_ROW, summary_id: 'sum1' }], error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/item/sum1`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.verification.overall, 'clean');
+    assert.ok(Array.isArray(body.verification.verdicts), 'verification.verdicts must be the support row\'s array, not the completeness row\'s {key_provisions,coverage} object');
+    assert.equal(body.verification.verdicts[0].supported, true);
   }, client);
 });
 
