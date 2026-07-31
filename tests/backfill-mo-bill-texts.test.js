@@ -16,6 +16,10 @@ import { OversizeTextError, MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
 import { normalizeBillIdentifier } from '../src/adapters/legiscan-dataset.js';
 import { SOURCE as MO_HOUSE_SOURCE, moHouseLimiter } from '../src/adapters/mo-house-xml.js';
 import { SOURCE as MO_SENATE_SOURCE, moSenateLimiter } from '../src/adapters/mo-senate-web.js';
+import { listCachedDatasetFiles } from '../src/cli/backfill-nicknames.js';
+import { readCachedDatasetBills } from '../src/cli/backfill-mo-bill-meta.js';
+
+const REAL_CACHE_DIR = '.superpowers/artifacts/legiscan-datasets';
 
 // MO bill-text fetcher (.superpowers/sdd/2026-07-31-mo-bill-texts/brief.md): closes the bottleneck
 // between VisibleGov's vote data and its plain-language summaries by fetching bill PDFs from the
@@ -75,10 +79,10 @@ test('pickLatestTextEntry: multi-entry, out-of-order dates — the latest date w
     doc_id: 1, date: '2025-11-01', type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/1.pdf',
   };
   const newer = {
-    doc_id: 2, date: '2025-12-15', type: 'Truly Agreed to and Finally Passed', mime: 'application/pdf', state_link: 'https://x/2.pdf',
+    doc_id: 2, date: '2025-12-15', type: 'Enrolled', mime: 'application/pdf', state_link: 'https://x/2.pdf',
   };
   const middle = {
-    doc_id: 3, date: '2025-12-01', type: 'Perfected', mime: 'application/pdf', state_link: 'https://x/3.pdf',
+    doc_id: 3, date: '2025-12-01', type: 'Engrossed', mime: 'application/pdf', state_link: 'https://x/3.pdf',
   };
   assert.deepEqual(pickLatestTextEntry([older, newer, middle]), newer);
   assert.deepEqual(pickLatestTextEntry([newer, middle, older]), newer);
@@ -97,15 +101,88 @@ test('pickLatestTextEntry: a date tie is broken by the HIGHER doc_id', () => {
 
 test('pickLatestTextEntry: version is the selected entry\'s printed `type` string verbatim, never normalized', () => {
   const entry = {
-    doc_id: 1, date: '2025-12-01', type: 'Truly Agreed to and Finally Passed', mime: 'application/pdf', state_link: 'https://x/1.pdf',
+    doc_id: 1, date: '2025-12-01', type: 'Conference Sub', mime: 'application/pdf', state_link: 'https://x/1.pdf',
   };
-  assert.equal(pickLatestTextEntry([entry]).type, 'Truly Agreed to and Finally Passed');
+  assert.equal(pickLatestTextEntry([entry]).type, 'Conference Sub');
 });
 
 test('pickLatestTextEntry: empty or missing texts[] returns null, never throws', () => {
   assert.equal(pickLatestTextEntry([]), null);
   assert.equal(pickLatestTextEntry(undefined), null);
   assert.equal(pickLatestTextEntry(null), null);
+});
+
+// ---- pickLatestTextEntry: robust version selection (MED, code review — the reviewer's six
+// constructions). Bug: `entry.date > best.date` is always false when EITHER side's date is
+// null/undefined/non-ISO (JS `>` against a non-comparable value never succeeds), so a bad-date
+// entry seen FIRST (arbitrary array order) could never be displaced by a later, perfectly good
+// entry. A same-date tie was also broken by a bare `doc_id >`, wrong when doc_id is a string. ----
+
+test('pickLatestTextEntry: a null-date entry seen FIRST is displaced by a later entry with a real date (the core bug — was: never displaced, every comparison against null is false)', () => {
+  const badFirst = {
+    doc_id: 1, date: null, type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/1.pdf',
+  };
+  const goodLater = {
+    doc_id: 2, date: '2025-12-01', type: 'Enrolled', mime: 'application/pdf', state_link: 'https://x/2.pdf',
+  };
+  assert.deepEqual(pickLatestTextEntry([badFirst, goodLater]), goodLater);
+});
+
+test('pickLatestTextEntry: a null-date entry seen LATER never displaces an earlier real-dated entry (no regression from the fix)', () => {
+  const good = {
+    doc_id: 1, date: '2025-12-01', type: 'Enrolled', mime: 'application/pdf', state_link: 'https://x/1.pdf',
+  };
+  const badLater = {
+    doc_id: 2, date: null, type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/2.pdf',
+  };
+  assert.deepEqual(pickLatestTextEntry([good, badLater]), good);
+});
+
+test('pickLatestTextEntry: an absent/missing `date` key (undefined, not just null) and a non-ISO string ("TBD") are BOTH treated as unusable, never win over a real date regardless of position', () => {
+  const missingDate = {
+    doc_id: 1, type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/1.pdf',
+  }; // no `date` property at all
+  const malformed = {
+    doc_id: 2, date: 'TBD', type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/2.pdf',
+  };
+  const real = {
+    doc_id: 3, date: '2025-06-01', type: 'Engrossed', mime: 'application/pdf', state_link: 'https://x/3.pdf',
+  };
+  assert.deepEqual(pickLatestTextEntry([missingDate, malformed, real]), real);
+  assert.deepEqual(pickLatestTextEntry([real, malformed, missingDate]), real);
+});
+
+test('pickLatestTextEntry: when EVERY entry has an unusable date, falls back to the numeric doc_id tiebreak rather than throwing or picking arbitrarily', () => {
+  const a = {
+    doc_id: 5, date: null, type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/5.pdf',
+  };
+  const b = {
+    doc_id: 9, date: undefined, type: 'Enrolled', mime: 'application/pdf', state_link: 'https://x/9.pdf',
+  };
+  assert.deepEqual(pickLatestTextEntry([a, b]), b);
+  assert.deepEqual(pickLatestTextEntry([b, a]), b);
+});
+
+test('pickLatestTextEntry: a same-date tie with STRING doc_ids breaks NUMERICALLY, not lexicographically ("10" > "9" numerically, even though "10" < "9" as strings)', () => {
+  const nine = {
+    doc_id: '9', date: '2025-12-01', type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/9.pdf',
+  };
+  const ten = {
+    doc_id: '10', date: '2025-12-01', type: 'Enrolled', mime: 'application/pdf', state_link: 'https://x/10.pdf',
+  };
+  assert.deepEqual(pickLatestTextEntry([nine, ten]), ten);
+  assert.deepEqual(pickLatestTextEntry([ten, nine]), ten);
+});
+
+test('pickLatestTextEntry: a genuinely later ISO date wins even when its doc_id is numerically smaller than the earlier entry\'s (date always outranks doc_id when both dates are usable and distinct)', () => {
+  const earlierHighId = {
+    doc_id: 999, date: '2025-01-01', type: 'Introduced', mime: 'application/pdf', state_link: 'https://x/999.pdf',
+  };
+  const laterLowId = {
+    doc_id: 1, date: '2025-12-01', type: 'Enrolled', mime: 'application/pdf', state_link: 'https://x/1.pdf',
+  };
+  assert.deepEqual(pickLatestTextEntry([earlierHighId, laterLowId]), laterLowId);
+  assert.deepEqual(pickLatestTextEntry([laterLowId, earlierHighId]), laterLowId);
 });
 
 // ---- pickLimiterForUrl (politeness: reuse the SAME shared limiters mo-house-xml.js/
@@ -223,7 +300,7 @@ test('planBillTextWork: version selection is applied BEFORE the mime gate — th
   const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
   const olderPdf = pdfEntry({ docId: 1, date: '2025-11-01', type: 'Introduced' });
   const latestHtml = {
-    doc_id: 2, date: '2025-12-01', type: 'Perfected', mime: 'text/html', mime_id: 1, state_link: 'https://documents.house.mo.gov/2.htm',
+    doc_id: 2, date: '2025-12-01', type: 'Amended', mime: 'text/html', mime_id: 1, state_link: 'https://documents.house.mo.gov/2.htm',
   };
   const candidates = [{ sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [olderPdf, latestHtml] }) }];
   const { counts, toFetch } = planBillTextWork(candidates, {
@@ -233,14 +310,73 @@ test('planBillTextWork: version selection is applied BEFORE the mime gate — th
   assert.deepEqual(toFetch, []);
 });
 
-test('planBillTextWork: a matched bill with NO text entries at all is counted matched but generates no toFetch item, and never crashes', () => {
+test('planBillTextWork: a matched bill with NO text entries at all lands in the noTextEntry bucket (HIGH, code review — was: silently uncounted, billMatched never reconciled)', () => {
   const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
   const candidates = [{ sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [] }) }];
   const { counts, toFetch } = planBillTextWork(candidates, {
     billIndex, textVersionIndex: new Set(), passageBillIds: new Set(),
   });
   assert.equal(counts.billMatched, 1);
+  assert.equal(counts.noTextEntry, 1);
   assert.deepEqual(toFetch, []);
+});
+
+test('planBillTextWork: a matched bill whose selected entry\'s state_link is a non-state host (the LegiScan reflect.legiscan.com/Proxy.php placeholder) is refused at PLANNING TIME as skippedNonStateHost — excluded from toFetch, never burns a --limit slot, never mislabeled fetchFailed (HIGH, code review)', () => {
+  const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
+  const placeholderEntry = pdfEntry({
+    docId: 1, date: '2025-12-01', type: 'Introduced', url: 'http://reflect.legiscan.com/Proxy.php',
+  });
+  const candidates = [{ sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [placeholderEntry] }) }];
+  const { counts, toFetch } = planBillTextWork(candidates, {
+    billIndex, textVersionIndex: new Set(), passageBillIds: new Set(),
+  });
+  assert.equal(counts.billMatched, 1);
+  assert.equal(counts.skippedNonStateHost, 1);
+  assert.deepEqual(toFetch, []);
+});
+
+test('planBillTextWork: a matched bill whose selected entry resolves to a REAL state host (documents.house.mo.gov) is NOT refused — reaches toFetch normally', () => {
+  const billIndex = new Map([[`sess-1|${normalizeBillIdentifier('HB1607')}`, { id: 'bill-1' }]]);
+  const candidates = [{ sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1607', texts: [pdfEntry({ docId: 1, date: '2025-12-01', type: 'Introduced' })] }) }];
+  const { counts, toFetch } = planBillTextWork(candidates, {
+    billIndex, textVersionIndex: new Set(), passageBillIds: new Set(),
+  });
+  assert.equal(counts.skippedNonStateHost, 0);
+  assert.equal(toFetch.length, 1);
+});
+
+test('planBillTextWork: reconciliation invariant — billMatched EXACTLY equals alreadyHasVersion + skippedNonPdf + noTextEntry + skippedNonStateHost + toFetch.length (a mixed batch exercising every bucket, nothing silently vanishes)', () => {
+  const billIndex = new Map([
+    [`sess-1|${normalizeBillIdentifier('HB1')}`, { id: 'bill-1' }], // -> alreadyHasVersion
+    [`sess-1|${normalizeBillIdentifier('HB2')}`, { id: 'bill-2' }], // -> skippedNonPdf
+    [`sess-1|${normalizeBillIdentifier('HB3')}`, { id: 'bill-3' }], // -> noTextEntry
+    [`sess-1|${normalizeBillIdentifier('HB4')}`, { id: 'bill-4' }], // -> skippedNonStateHost
+    [`sess-1|${normalizeBillIdentifier('HB5')}`, { id: 'bill-5' }], // -> toFetch
+    // HB6 has no billIndex entry at all -> billUnmatched (outside the reconciliation equation)
+  ]);
+  const textVersionIndex = new Set(['bill-1|Introduced']);
+  const candidates = [
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB1', texts: [pdfEntry({ docId: 1, date: '2025-12-01', type: 'Introduced' })] }) },
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB2', texts: [{ doc_id: 2, date: '2025-12-01', type: 'Introduced', mime: 'text/html', state_link: 'https://documents.house.mo.gov/2.htm' }] }) },
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB3', texts: [] }) },
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB4', texts: [pdfEntry({ docId: 4, date: '2025-12-01', type: 'Introduced', url: 'http://reflect.legiscan.com/Proxy.php' })] }) },
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB5', texts: [pdfEntry({ docId: 5, date: '2025-12-01', type: 'Introduced' })] }) },
+    { sessionRowId: 'sess-1', bill: moBill({ billNumber: 'HB6', texts: [pdfEntry({ docId: 6, date: '2025-12-01', type: 'Introduced' })] }) },
+  ];
+  const { counts, toFetch } = planBillTextWork(candidates, {
+    billIndex, textVersionIndex, passageBillIds: new Set(),
+  });
+  assert.equal(counts.billsSeen, 6);
+  assert.equal(counts.billUnmatched, 1);
+  assert.equal(counts.alreadyHasVersion, 1);
+  assert.equal(counts.skippedNonPdf, 1);
+  assert.equal(counts.noTextEntry, 1);
+  assert.equal(counts.skippedNonStateHost, 1);
+  assert.equal(toFetch.length, 1);
+  assert.equal(
+    counts.billMatched,
+    counts.alreadyHasVersion + counts.skippedNonPdf + counts.noTextEntry + counts.skippedNonStateHost + toFetch.length,
+  );
 });
 
 test('planBillTextWork: passage-priority ordering — a bill carrying a passage/third-reading vote sorts ahead of a non-voted bill, regardless of input order; both counts reported', () => {
@@ -503,8 +639,10 @@ test('runBackfillMoBillTexts: --dry-run performs zero fetches and zero writes, a
     billsSeen: 1,
     billMatched: 1,
     billUnmatched: 0,
+    noTextEntry: 0,
     alreadyHasVersion: 0,
     skippedNonPdf: 0,
+    skippedNonStateHost: 0,
     fetched: 0,
     fetchFailed: 0,
     extractEmpty: 0,
@@ -612,11 +750,11 @@ test('runBackfillMoBillTexts: oversize extraction is counted oversizeRefused, no
   assert.equal(report.counts.fetched, 1, 'the fetch itself succeeded; only the content-quality gate refused it');
   assert.equal(report.counts.inserted, 0);
   assert.equal(report.failures.length, 1);
-  assert.equal(report.failures[0].step, 'extract');
+  assert.equal(report.failures[0].step, 'oversize');
   assert.deepEqual(client.calls, []);
 });
 
-test('runBackfillMoBillTexts: empty extraction is counted extractEmpty, nothing stored', async () => {
+test('runBackfillMoBillTexts: empty extraction is counted extractEmpty, nothing stored; failures[].step is "extract" by default when the thrown error carries no step meta', async () => {
   const client = makeFakeWriteClient();
   const report = await runBackfillMoBillTexts(client, {
     dryRun: false,
@@ -631,7 +769,75 @@ test('runBackfillMoBillTexts: empty extraction is counted extractEmpty, nothing 
   });
   assert.equal(report.counts.extractEmpty, 1);
   assert.equal(report.counts.inserted, 0);
+  assert.equal(report.failures[0].step, 'extract');
   assert.deepEqual(client.calls, []);
+});
+
+// FIX (MED, code review): failures[].step used to collapse a raw pdfjs PARSE exception (corrupted/
+// non-PDF bytes) and a legitimately-EMPTY text layer into the SAME 'extract' string — an operator
+// reading failures[] could not tell "this PDF is corrupt" from "this PDF genuinely has no text
+// layer." Both still count as extractEmpty (no 14th count field — the fix is to failures[].step
+// only), driven end-to-end here through the REAL fetchAndStoreMoBillText (not a stubbed fetchTextFn)
+// so the step actually reaches runBackfillMoBillTexts's catch via err.step, proving the wiring.
+test('runBackfillMoBillTexts: failures[].step differentiates "parse" (a raw pdfjs exception on corrupted bytes) from "extract" (a legitimately empty text layer) — both still count as extractEmpty', async () => {
+  const client = makeFakeWriteClient();
+  const reportParse = await runBackfillMoBillTexts(client, {
+    dryRun: false,
+    runId: 'run-1',
+    listFilesFn: () => ['a.json'],
+    readDatasetFn: async () => fakeDataset({
+      sessionId: 1608,
+      bills: [billFixture({ billNumber: 'HB1607', texts: [pdfEntry({ docId: 1, date: '2025-12-01', type: 'Introduced' })] })],
+    }),
+    ...baseLoaders(),
+    fetchTextFn: (c, runId, work) => fetchAndStoreMoBillText(c, runId, work, {
+      fetchFn: async () => new ArrayBuffer(10),
+      extractFn: async () => { throw new Error('bad XRef entry'); }, // real pdfjs-style parse exception
+    }),
+  });
+  assert.equal(reportParse.counts.extractEmpty, 1);
+  assert.equal(reportParse.failures[0].step, 'parse');
+
+  const client2 = makeFakeWriteClient();
+  const reportEmpty = await runBackfillMoBillTexts(client2, {
+    dryRun: false,
+    runId: 'run-1',
+    listFilesFn: () => ['a.json'],
+    readDatasetFn: async () => fakeDataset({
+      sessionId: 1608,
+      bills: [billFixture({ billNumber: 'HB1607', texts: [pdfEntry({ docId: 1, date: '2025-12-01', type: 'Introduced' })] })],
+    }),
+    ...baseLoaders(),
+    fetchTextFn: (c, runId, work) => fetchAndStoreMoBillText(c, runId, work, {
+      fetchFn: async () => new ArrayBuffer(10),
+      extractFn: async () => '   \n\n  ', // parses fine, zero usable characters
+    }),
+  });
+  assert.equal(reportEmpty.counts.extractEmpty, 1);
+  assert.equal(reportEmpty.failures[0].step, 'extract');
+});
+
+test('runBackfillMoBillTexts: failures[] entries carry billId and url alongside identifier (identifier alone repeats across the 31 cached sessions)', async () => {
+  const client = makeFakeWriteClient();
+  const report = await runBackfillMoBillTexts(client, {
+    dryRun: false,
+    runId: 'run-1',
+    listFilesFn: () => ['a.json'],
+    readDatasetFn: async () => fakeDataset({
+      sessionId: 1608,
+      bills: [billFixture({
+        billNumber: 'HB1607',
+        texts: [pdfEntry({
+          docId: 1, date: '2025-12-01', type: 'Introduced', url: 'https://documents.house.mo.gov/billtracking/bills261/hlrbillspdf/5106H.01I.pdf',
+        })],
+      })],
+    }),
+    ...baseLoaders(),
+    fetchTextFn: async () => { throw new SourceFetchError('HTTP 404', { status: 404 }); },
+  });
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].billId, 'bill-1');
+  assert.equal(report.failures[0].url, 'https://documents.house.mo.gov/billtracking/bills261/hlrbillspdf/5106H.01I.pdf');
 });
 
 test('runBackfillMoBillTexts: a fetch non-200 is a counted failure (fetchFailed); the run continues to the next bill; nothing is stored for the failed one', async () => {
@@ -753,6 +959,36 @@ test('runBackfillMoBillTexts: --session filters to only the matching cached data
   });
   assert.deepEqual(readCalls, ['1608-bbb.json'], 'only the session-1608 file was ever read');
   assert.equal(report.counts.datasetsRead, 1);
+  assert.equal(report.sessionUncached, false, 'a session that DID match a cached file is honestly reported as not-uncached');
+});
+
+// FIX (LOW, code review): --session <a legiscan_session_id with no matching cached file at all>
+// used to fall straight through to an all-zero report — mechanically indistinguishable from "the
+// session was found and genuinely had zero bills." sessionUncached makes that distinction honest.
+test('runBackfillMoBillTexts: --session <not cached> reports sessionUncached:true rather than a silently indistinguishable all-zero report', async () => {
+  const client = makeFakeWriteClient();
+  const report = await runBackfillMoBillTexts(client, {
+    dryRun: false,
+    runId: 'run-1',
+    session: 9999,
+    listFilesFn: () => ['1579-aaa.json', '1608-bbb.json'],
+    readDatasetFn: async () => { throw new Error('must never read a dataset file — no file matches session 9999'); },
+    ...baseLoaders(),
+    fetchTextFn: async () => ({ outcome: 'inserted' }),
+  });
+  assert.equal(report.sessionUncached, true);
+  assert.equal(report.counts.datasetsRead, 0);
+  assert.equal(report.counts.billsSeen, 0);
+});
+
+test('runBackfillMoBillTexts: --session omitted entirely reports sessionUncached:false (not applicable, never a false positive)', async () => {
+  const client = makeFakeWriteClient();
+  const report = await runBackfillMoBillTexts(client, {
+    dryRun: true,
+    listFilesFn: () => [],
+    ...baseLoaders(),
+  });
+  assert.equal(report.sessionUncached, false);
 });
 
 test('runBackfillMoBillTexts: passagePriority breakdown is reported in BOTH dry-run and live mode', async () => {
@@ -792,7 +1028,7 @@ test('runBackfillMoBillTexts: real cache dir end-to-end file decode — every on
   const report = await runBackfillMoBillTexts(client, {
     dryRun: false,
     runId: 'run-1',
-    cacheDir: '.superpowers/artifacts/legiscan-datasets',
+    cacheDir: REAL_CACHE_DIR,
     loadSessionIndexFn: async () => new Map(),
     loadBillIndexFn: async () => new Map(),
     loadTextVersionIndexFn: async () => new Set(),
@@ -805,6 +1041,60 @@ test('runBackfillMoBillTexts: real cache dir end-to-end file decode — every on
   assert.equal(report.counts.billMatched, 0);
   assert.equal(report.counts.fetched, 0);
   assert.deepEqual(client.calls, []);
+});
+
+// FIX (HIGH, code review): a matched bill with an empty/absent texts[] used to fall through
+// `if (!entry) continue;` uncounted — 252 real bills in the live 31-session corpus do exactly
+// this — so billMatched never reconciled against its own sub-buckets. This test builds a
+// self-consistent synthetic session/bill index FROM the real corpus itself (every real bill
+// resolves — no live DB needed) so the reconciliation equation is exercised on the actual data
+// shape, not a hand-picked toy case, and pins the corpus's own known noTextEntry/
+// skippedNonStateHost counts (independently verified against the raw cache: 252 bills with no
+// text entries at all; 2,202 bills whose selected PDF entry points at one of two LegiScan-hosted
+// placeholder hosts — reflect.legiscan.com/Proxy.php x2,177, proxy2.legiscan.com/Proxy.php x25 —
+// neither is a real state document server).
+test('runBackfillMoBillTexts: real cache dir RECONCILIATION — billMatched EXACTLY equals alreadyHasVersion + skippedNonPdf + noTextEntry + skippedNonStateHost + toFetch.length over the full real 31-session corpus; noTextEntry pins the known 252; skippedNonStateHost is visible in --dry-run', async () => {
+  const files = listCachedDatasetFiles(REAL_CACHE_DIR);
+  const sessionIndex = new Map();
+  const billIndex = new Map();
+  let nextSessionRowId = 1;
+  let nextBillRowId = 1;
+  for (const filePath of files) {
+    // eslint-disable-next-line no-await-in-loop -- one-time synthetic-index build over 31 files, test setup only
+    const decoded = await readCachedDatasetBills(filePath);
+    if (!decoded.ok) continue;
+    if (!sessionIndex.has(decoded.sessionId)) {
+      sessionIndex.set(decoded.sessionId, { id: `sess-${nextSessionRowId}` });
+      nextSessionRowId += 1;
+    }
+    const sessionRowId = sessionIndex.get(decoded.sessionId).id;
+    for (const bill of decoded.bills) {
+      const key = `${sessionRowId}|${normalizeBillIdentifier(bill.bill_number)}`;
+      if (!billIndex.has(key)) {
+        billIndex.set(key, { id: `bill-${nextBillRowId}` });
+        nextBillRowId += 1;
+      }
+    }
+  }
+
+  const client = makeFakeWriteClient();
+  const report = await runBackfillMoBillTexts(client, {
+    dryRun: true, // zero live fetches — we only need the PLAN's counts, per this file's own $0-network law
+    cacheDir: REAL_CACHE_DIR,
+    loadSessionIndexFn: async () => sessionIndex,
+    loadBillIndexFn: async () => billIndex,
+    loadTextVersionIndexFn: async () => new Set(),
+    loadPassageBillIdsFn: async () => new Set(),
+  });
+
+  assert.equal(report.counts.billUnmatched, 0, 'the synthetic index resolves every real bill in the corpus');
+  assert.equal(report.counts.noTextEntry, 252, 'known real-corpus count of bills with an empty/absent texts[]');
+  assert.equal(report.counts.skippedNonStateHost, 2202, 'known real-corpus count of LegiScan-placeholder-hosted selected entries (2,177 reflect.legiscan.com + 25 proxy2.legiscan.com)');
+  assert.equal(
+    report.counts.billMatched,
+    report.counts.alreadyHasVersion + report.counts.skippedNonPdf + report.counts.noTextEntry + report.counts.skippedNonStateHost + report.toProcessCount,
+    'every one of the corpus\'s real matched bills is accounted for by exactly one bucket',
+  );
 });
 
 test('runBackfillMoBillTexts: zero cache files found -> all-zero counts, no client calls, never fetches', async () => {
@@ -822,8 +1112,10 @@ test('runBackfillMoBillTexts: zero cache files found -> all-zero counts, no clie
     billsSeen: 0,
     billMatched: 0,
     billUnmatched: 0,
+    noTextEntry: 0,
     alreadyHasVersion: 0,
     skippedNonPdf: 0,
+    skippedNonStateHost: 0,
     fetched: 0,
     fetchFailed: 0,
     extractEmpty: 0,

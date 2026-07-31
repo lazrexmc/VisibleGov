@@ -38,13 +38,25 @@ import { SOURCE as MO_SENATE_SOURCE, moSenateLimiter } from '../adapters/mo-sena
 // mo-senate-journal-pdf.js by THIS task specifically so a bill-PDF consumer would not become a
 // third hand-copy of that plumbing; see that module's own header).
 //
-// POLITENESS: state_link URLs resolve to exactly the two hosts mo-rollcall-pdf.js (documents.
-// house.mo.gov, via mo-house-xml.js's moHouseLimiter) and mo-senate-web.js (senate.mo.gov, via its
-// own moSenateLimiter) already fetch from — pickLimiterForUrl below reuses those SAME shared
-// singleton limiter instances (not new ones), which is what makes house.mo.gov's documented
-// half-hour ToU cooldown durable across every document type fetched in one process, exactly the way
-// mo-rollcall-pdf.js's own header comment describes for roll-call PDFs. A state_link resolving to
-// neither known host is refused loudly (fetchFailed, never fetched through an ungated path).
+// POLITENESS: state_link URLs resolve to the *.house.mo.gov / *.senate.mo.gov host families —
+// pickLimiterForUrl's suffix match (below) routes both, matching mo-house-xml.js's moHouseLimiter
+// or mo-senate-web.js's moSenateLimiter (the SAME shared singleton limiter instances, not new
+// ones), which is what makes house.mo.gov's documented half-hour ToU cooldown durable across every
+// document type fetched in one process, exactly the way mo-rollcall-pdf.js's own header comment
+// describes for roll-call PDFs. CORRECTED (final-review fact-check against the real 31-session
+// cache): the real per-host distribution of each bill's SELECTED PDF text entry is www.house.mo.gov
+// 12,733, www.senate.mo.gov 10,673, documents.house.mo.gov 5,583, senate.mo.gov 68, house.mo.gov
+// 20 — the two DOMINANT hosts (www.house.mo.gov, www.senate.mo.gov) were never previously fetched
+// by ANY code in this codebase (mo-rollcall-pdf.js/mo-senate-web.js only ever fetched
+// documents.house.mo.gov and senate.mo.gov respectively, for roll-call PDFs and journals/rosters —
+// a narrower document type than bill text). Both are still `*.house.mo.gov`/`*.senate.mo.gov`
+// suffix matches, so pickLimiterForUrl already routes them correctly; the original "exactly the two
+// hosts" phrasing here was simply wrong about which hosts those state_links actually use. A
+// state_link resolving to neither host family is refused loudly, now AT PLANNING TIME
+// (skippedNonStateHost, never fetched through an ungated path, never silently miscounted as a fetch
+// failure — see planBillTextWork's own comment) — 2,202 of the real corpus's bills carry one of two
+// LegiScan-hosted placeholder links (http://reflect.legiscan.com/Proxy.php ×2,177,
+// http://proxy2.legiscan.com/Proxy.php ×25) with no usable state document at all.
 //
 // VERSION SELECTION (v1 ruling, verbatim from the brief): the LATEST text entry by date (ties ->
 // highest doc_id) is selected first — the most operative form of the bill — and `version` is stored
@@ -106,14 +118,39 @@ export function parseArgs(argv) {
 // duplication the brief's pdfjs-triple-copy warning calls out, just in a different module. ----
 
 // ---- version selection (v1 ruling) ----
+//
+// FIX (MED, code review): the original comparison (`entry.date > best.date`) breaks whenever
+// EITHER side's date is null/undefined/absent/non-ISO — a JS `>` against a non-comparable value is
+// always false, so a bad-date entry that happens to be seen FIRST (arbitrary array/JSON order, not
+// guaranteed chronological) could never be displaced by a later entry with a perfectly good date,
+// silently selecting the wrong "latest" version. A same-date tie was also broken by `doc_id >`
+// directly, which does the WRONG thing when doc_id arrives as a string ('10' < '9' lexically). Both
+// fixed by an explicit comparator: an entry with an unusable date (not a string starting
+// YYYY-MM-DD) ALWAYS sorts behind one with a usable date, regardless of encounter order; a usable-
+// date comparison is a plain ISO string compare (correct for YYYY-MM-DD, which sorts identically as
+// string or date); any tie (including "both unusable") falls back to a NUMERIC doc_id compare
+// (Number(...), never a bare string `>`).
+function hasUsableDate(entry) {
+  return typeof entry?.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(entry.date);
+}
+
+// >0 when `a` should be preferred over `b`, <0 when `b` wins, 0 when genuinely tied.
+function compareTextEntries(a, b) {
+  const aUsable = hasUsableDate(a);
+  const bUsable = hasUsableDate(b);
+  if (aUsable !== bUsable) return aUsable ? 1 : -1;
+  if (aUsable && a.date !== b.date) return a.date > b.date ? 1 : -1;
+  const aId = Number(a?.doc_id);
+  const bId = Number(b?.doc_id);
+  if (aId !== bId) return aId > bId ? 1 : -1;
+  return 0;
+}
 
 export function pickLatestTextEntry(texts) {
   if (!texts || texts.length === 0) return null;
   return texts.reduce((best, entry) => {
     if (!best) return entry;
-    if (entry.date > best.date) return entry;
-    if (entry.date === best.date && entry.doc_id > best.doc_id) return entry;
-    return best;
+    return compareTextEntries(entry, best) > 0 ? entry : best;
   }, null);
 }
 
@@ -142,9 +179,31 @@ export function pickLimiterForUrl(rawUrl) {
 // planQueue uses). A session that never resolved (sessionRowId null) can never match any bill —
 // folded into billUnmatched rather than a separate bucket, since the brief's honest-count list has
 // no dedicated "sessionNotFound" field for this task (unlike backfill-mo-bill-meta.js's).
+//
+// HONEST-COUNT RECONCILIATION (HIGH, code review): every billMatched bill now lands in EXACTLY one
+// of alreadyHasVersion / skippedNonPdf / noTextEntry / skippedNonStateHost / toFetch — no path
+// silently `continue`s without incrementing a named bucket. Before this fix, a matched bill with an
+// empty/absent `texts[]` fell through `if (!entry) continue;` uncounted (252 real bills in the live
+// corpus do exactly this — NOT the "not observed in real data" the original comment assumed), so
+// billMatched never reconciled against its own sub-buckets.
+//
+// HOST REFUSAL AT PLANNING TIME (HIGH, code review): pickLimiterForUrl is pure (a hostname check,
+// no I/O) — calling it here, before an item ever reaches toFetch, means a policy-placeholder
+// state_link (2,202 real bills point at one of two LegiScan-hosted proxy placeholders with no
+// usable state document at all — see this file's header comment) is knowable during PLANNING: it
+// never burns a --limit slot ahead of a genuinely fetchable bill, it is visible to --dry-run (was
+// previously invisible — the refusal only happened inside the live fetch step), and it is counted
+// as skippedNonStateHost rather than fetchFailed (indistinguishable, before this fix, from a real
+// state-host 404/500).
 export function planBillTextWork(candidates, { billIndex, textVersionIndex, passageBillIds }) {
   const counts = {
-    billsSeen: 0, billMatched: 0, billUnmatched: 0, alreadyHasVersion: 0, skippedNonPdf: 0,
+    billsSeen: 0,
+    billMatched: 0,
+    billUnmatched: 0,
+    noTextEntry: 0,
+    alreadyHasVersion: 0,
+    skippedNonPdf: 0,
+    skippedNonStateHost: 0,
   };
   const toFetch = [];
 
@@ -156,13 +215,18 @@ export function planBillTextWork(candidates, { billIndex, textVersionIndex, pass
     counts.billMatched += 1;
 
     const entry = pickLatestTextEntry(bill.texts);
-    // A matched bill with zero text entries at all is not observed in the verified real data (every
-    // bill in session 2239 carries >=1), but is handled here rather than assumed away: nothing to
-    // plan, no new count bucket invented, never a crash.
-    if (!entry) continue;
+    if (!entry) { counts.noTextEntry += 1; continue; }
 
     if (textVersionIndex.has(`${billRow.id}|${entry.type}`)) { counts.alreadyHasVersion += 1; continue; }
     if (entry.mime !== 'application/pdf') { counts.skippedNonPdf += 1; continue; }
+
+    try {
+      pickLimiterForUrl(entry.state_link);
+    } catch (err) {
+      if (!(err instanceof SourceFetchError)) throw err;
+      counts.skippedNonStateHost += 1;
+      continue;
+    }
 
     const priority = passageBillIds.has(billRow.id) ? 'passage' : 'other';
     toFetch.push({
@@ -232,17 +296,24 @@ export async function fetchAndStoreMoBillText(client, runId, work, {
     text = await extractFn(arrayBuffer);
   } catch (cause) {
     // A raw pdfjs parse exception (corrupted/non-PDF bytes despite a successful, non-empty fetch)
-    // is folded into the SAME EmptyExtractionError bucket as a genuinely-empty text layer — both
-    // mean "bytes were obtained, but no usable text resulted," and the brief's closed honest-count
-    // list has no separate bucket for this rarer failure mode. The underlying cause is preserved in
-    // the message for failures[] visibility.
+    // is folded into the SAME EmptyExtractionError bucket (counts.extractEmpty — MED, code review:
+    // do NOT add a 14th count field) as a genuinely-empty text layer, since both mean "bytes were
+    // obtained, but no usable text resulted" and the brief's closed honest-count list has no
+    // separate bucket for this rarer failure mode. `step: 'parse'` distinguishes the two for
+    // failures[] visibility (an operator can now tell a corrupt/malformed PDF apart from a
+    // legitimately text-free one, even though both count identically) — see the sibling throw
+    // below (step: 'extract') and runBackfillMoBillTexts's own catch, which reads err.step.
     throw new EmptyExtractionError(
       `could not extract text from the PDF for ${identifier} (${version}): ${cause.message}`,
-      { identifier, version, cause },
+      {
+        identifier, version, cause, step: 'parse',
+      },
     );
   }
   if (!text || text.trim() === '') {
-    throw new EmptyExtractionError(`extracted zero characters of text for ${identifier} (${version})`, { identifier, version });
+    throw new EmptyExtractionError(`extracted zero characters of text for ${identifier} (${version})`, {
+      identifier, version, step: 'extract',
+    });
   }
   if (text.length > MAX_TEXT_CHARS) {
     throw new OversizeTextError(
@@ -277,8 +348,10 @@ function emptyCounts() {
     billsSeen: 0,
     billMatched: 0,
     billUnmatched: 0,
+    noTextEntry: 0,
     alreadyHasVersion: 0,
     skippedNonPdf: 0,
+    skippedNonStateHost: 0,
     fetched: 0,
     fetchFailed: 0,
     extractEmpty: 0,
@@ -305,7 +378,18 @@ export async function runBackfillMoBillTexts(client, {
   // --session scopes the READ itself down to one file (not a post-decode filter) — ingest-
   // legiscan.js's own documented cachePath convention (`${legiscanSessionId}-${datasetHash}.json`,
   // src/cli/ingest-legiscan.js) makes this a safe, mechanical, zero-decode filter.
-  if (session != null) files = files.filter((f) => basename(f).startsWith(`${session}-`));
+  //
+  // FIX (LOW, code review): a --session with NO matching cached file used to fall straight through
+  // to an all-zero report — mechanically indistinguishable from "the session was found and
+  // genuinely had zero bills." sessionUncached makes the "we never found a matching cache file at
+  // all" case an honest, visible fact instead of a silent all-zero (skip != empty, same principle
+  // datasetsMissing already applies to an individual corrupt/unreadable file).
+  let sessionUncached = false;
+  if (session != null) {
+    const matched = files.filter((f) => basename(f).startsWith(`${session}-`));
+    sessionUncached = matched.length === 0;
+    files = matched;
+  }
 
   const sessionIndex = await loadSessionIndexFn(client);
   const billIndex = await loadBillIndexFn(client);
@@ -342,17 +426,31 @@ export async function runBackfillMoBillTexts(client, {
         if (result.outcome === 'inserted') counts.inserted += 1;
         else counts.alreadyPresent += 1;
       } catch (err) {
+        // FIX (LOW, code review): failures[] entries now also carry billId/url alongside
+        // identifier — identifier alone repeats across the 31 cached sessions (the same MO bill
+        // number is reused every biennium), so it cannot uniquely locate a failure on its own.
         if (err instanceof SourceFetchError) {
           counts.fetchFailed += 1;
-          failures.push({ step: 'fetch', identifier: work.identifier, message: err.message });
+          failures.push({
+            step: 'fetch', identifier: work.identifier, billId: work.billId, url: work.url, message: err.message,
+          });
         } else if (err instanceof EmptyExtractionError) {
           counts.fetched += 1;
           counts.extractEmpty += 1;
-          failures.push({ step: 'extract', identifier: work.identifier, message: err.message });
+          // FIX (MED, code review): step now differentiates 'parse' (a raw pdfjs exception on
+          // corrupted/non-PDF bytes) from 'extract' (bytes parsed fine, but the text layer was
+          // genuinely empty) — err.step is set at both throw sites in fetchAndStoreMoBillText.
+          // Both still count as extractEmpty (no 14th count field); only failures[].step gains the
+          // distinction an operator needs to tell the two apart.
+          failures.push({
+            step: err.step ?? 'extract', identifier: work.identifier, billId: work.billId, url: work.url, message: err.message,
+          });
         } else if (err instanceof OversizeTextError) {
           counts.fetched += 1;
           counts.oversizeRefused += 1;
-          failures.push({ step: 'extract', identifier: work.identifier, message: err.message });
+          failures.push({
+            step: 'oversize', identifier: work.identifier, billId: work.billId, url: work.url, message: err.message,
+          });
         } else {
           throw err;
         }
@@ -369,6 +467,7 @@ export async function runBackfillMoBillTexts(client, {
     })),
     toProcessCount: toProcess.length,
     failures,
+    sessionUncached,
   };
 }
 
