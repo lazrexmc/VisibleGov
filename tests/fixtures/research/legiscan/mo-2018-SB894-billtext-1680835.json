@@ -1,0 +1,26 @@
+{
+  "_provenance": "ONE real getBillText probe (permitted exactly once, .superpowers/sdd/2026-07-31-legiscan-bill-text/brief.md), doc_id=1680835 taken from the already-committed mo-2018-SB894.json fixture's own texts[] array (SB894, type 'Introduced', 2018-01-10). text.doc truncated to 400 base64 chars (~300 bytes) below per the brief's fixture instructions; doc_full_length records the REAL full base64 length (174440 chars) observed live. Captured 2026-07-31, HTTP 200.",
+  "status": "OK",
+  "text": {
+    "doc_id": 1680835,
+    "bill_id": 1050440,
+    "date": "2018-01-10",
+    "type": "Introduced",
+    "type_id": 1,
+    "mime": "application/pdf",
+    "mime_id": 2,
+    "url": "https://legiscan.com/MO/text/SB894/id/1680835",
+    "state_link": "https://www.senate.mo.gov/18info/pdf-bill/intro/SB894.pdf",
+    "text_size": 130829,
+    "text_hash": "f1b2c358cf394ff59ba9b10c3f58ed41",
+    "doc": "JVBERi0xLjQNCiXi48/TDQoyMSAwIG9iag0KPDwNCi9MaW5lYXJpemVkIDENCi9MIDEzMDgyOSAgICANCi9IIFsgODUwIDM0NCAgICAgICAgICAgICAgXQ0KL08gMjMNCi9FIDcxNjk3ICAgICANCi9OIDMNCi9UIDEzMDI4NSAgICANCj4+DQplbmRvYmoNCnhyZWYNCjIxIDIxDQowMDAwMDAwMDE3IDAwMDAwIG4NCjAwMDAwMDA3NDggMDAwMDAgbg0KMDAwMDAwMTE5NCAwMDAwMCBuDQowMDAwMDAxNTM0IDAwMDAwIG4NCjAwMDAwMDU3NTMgMDAwMDAgbg0KMDAwMDAyNTk2MCAwMDAwMCBuDQowMDAwMDI2MjA2IDAwMDAwIG4NCjAw",
+    "doc_full_length": 174440,
+    "alt_bill_text": 0,
+    "alt_mime": "",
+    "alt_mime_id": 0,
+    "alt_state_link": "",
+    "alt_text_size": 0,
+    "alt_text_hash": "",
+    "alt_doc": ""
+  }
+}

@@ -162,6 +162,28 @@ export async function getRollCall(rollCallId, { key, limiter = legiscanLimiter }
   return checkStatus(payload).roll_call;
 }
 
+// getBillText — LegiScan bill-text volume path (.superpowers/sdd/2026-07-31-legiscan-bill-text/
+// brief.md). Fetches ONE document blob by its own `doc_id` (NOT a bill_id) — LegiScan's own
+// getBillText Pull API operation. REAL response shape (the ONE live probe this task is permitted,
+// captured against a known-real MO doc_id already sitting in the committed mo-2018-SB894.json
+// fixture's own texts[] array — never guessed): tests/fixtures/research/legiscan/
+// mo-2018-SB894-billtext-1680835.json —
+//   {status:'OK', text:{doc_id, bill_id, date, type, type_id, mime, mime_id, url, state_link,
+//     text_size, text_hash, doc:'<base64>', alt_bill_text, alt_mime, alt_mime_id, alt_state_link,
+//     alt_text_size, alt_text_hash, alt_doc}}
+// This DIFFERS from the brief's own originally-assumed shape in two ways, both real and verbatim,
+// never renamed: (1) `url` and `state_link` are ALSO present directly on the text object (not just
+// on the dataset ZIP's texts[] entry) — `url` is LegiScan's own ready-made
+// https://legiscan.com/MO/text/<bill>/id/<doc_id> link, reused verbatim as this task's fallback
+// source_url rather than hand-constructed; (2) a full `alt_*` sibling-document family (an
+// alternate-format companion, e.g. an HTML version alongside a PDF) — empty/0 on this probe's
+// PDF-only bill, never observed non-empty yet, so v1 does not attempt to use it.
+export async function getBillText(docId, { key, limiter = legiscanLimiter } = {}) {
+  const url = buildUrl('getBillText', { id: docId }, key);
+  const payload = await fetchWithLimit(url, { source: SOURCE, limiter, as: 'json' });
+  return checkStatus(payload).text;
+}
+
 // decodeDatasetHashGate — THE mandatory suspension-level gate (terms doc rule 2: "failure to do so
 // will result in suspended access"). Pure, no DB/network — ledgerRow is whatever the caller already
 // read from legiscan_datasets for this legiscan_session_id (or null if never fetched). sessionId is

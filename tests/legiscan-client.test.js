@@ -6,13 +6,14 @@ import {
   SOURCE, ATTRIBUTION, LEGISCAN_MIN_INTERVAL_MS, legiscanLimiter,
   LegiScanApiError, DatasetHashMismatchError, QueryBudgetExceededError,
   checkStatus, decodeDatasetHashGate, getMonthlyQueryUsage, assertUnderBudget,
-  getSessionList, getDatasetList, getDataset, getBill, getRollCall,
+  getSessionList, getDatasetList, getDataset, getBill, getRollCall, getBillText,
 } from '../src/adapters/legiscan.js';
 
 const FIXDIR = 'tests/fixtures/research/legiscan';
 const sessionsFixture = JSON.parse(readFileSync(`${FIXDIR}/mo-sessions.json`, 'utf8'));
 const billFixture = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-SB894.json`, 'utf8'));
 const rollCallFixture = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-rollcall-747209.json`, 'utf8'));
+const billTextFixture = JSON.parse(readFileSync(`${FIXDIR}/mo-2018-SB894-billtext-1680835.json`, 'utf8'));
 
 // ---- module shape sanity (SOURCE/ATTRIBUTION/limiter constant, no live network) ----
 
@@ -109,6 +110,22 @@ test('getRollCall shape (747209): roll_call.votes[].{people_id,vote_id,vote_text
   assert.equal(tally.absent, 21);
 });
 
+// ---- getBillText shape (real ONE-probe fixture — LegiScan bill-text volume path,
+// .superpowers/sdd/2026-07-31-legiscan-bill-text/brief.md): doc_id 1680835, SB894 "Introduced" ----
+
+test('getBillText shape: checkStatus passes on the real ONE-probe fixture; fields verbatim, '
+  + 'including the real-but-originally-unassumed url/state_link/alt_* fields', () => {
+  const payload = checkStatus(billTextFixture);
+  assert.equal(payload.text.doc_id, 1680835);
+  assert.equal(payload.text.bill_id, 1050440);
+  assert.equal(payload.text.type, 'Introduced');
+  assert.equal(payload.text.mime, 'application/pdf');
+  assert.equal(payload.text.url, 'https://legiscan.com/MO/text/SB894/id/1680835');
+  assert.equal(payload.text.state_link, 'https://www.senate.mo.gov/18info/pdf-bill/intro/SB894.pdf');
+  assert.equal(typeof payload.text.doc, 'string');
+  assert.equal(payload.text.alt_bill_text, 0);
+});
+
 // ---- redactUrl coverage of LegiScan's real URL shape (verified, not assumed — brief's explicit
 // ask) — Pull API: "https://api.legiscan.com/?key=APIKEY&op=OPERATION&PARAMS" per the manual ----
 
@@ -134,6 +151,14 @@ test('redactUrl redacts BOTH key= and access_key= on a getDataset-shaped URL —
 test('redactUrl redacts key= on a getBill-shaped URL regardless of trailing params', () => {
   const url = 'https://api.legiscan.com/?key=SUPERSECRET123&op=getBill&id=1050440';
   assert.equal(redactUrl(url), 'https://api.legiscan.com/?key=REDACTED&op=getBill&id=1050440');
+});
+
+test('redactUrl redacts key= on a getBillText-shaped URL (the volume path\'s own op) regardless of '
+  + 'trailing params — the key must never survive into a redacted URL', () => {
+  const url = 'https://api.legiscan.com/?key=SUPERSECRET123&op=getBillText&id=1680835';
+  const redacted = redactUrl(url);
+  assert.equal(redacted, 'https://api.legiscan.com/?key=REDACTED&op=getBillText&id=1680835');
+  assert.ok(!redacted.includes('SUPERSECRET123'));
 });
 
 // ---- decodeDatasetHashGate (pure, no DB/network — THE mandatory suspension-level gate) ----
@@ -306,6 +331,7 @@ test('buildUrl missing-key fail-fast: every live-call wrapper rejects with LegiS
   await assert.rejects(() => getDataset(1608, 'ak', { key: null }), /missing API key/);
   await assert.rejects(() => getBill(1050440, { key: undefined }), /missing API key/);
   await assert.rejects(() => getRollCall(747209, { key: undefined }), /missing API key/);
+  await assert.rejects(() => getBillText(1680835, { key: undefined }), /missing API key/);
 });
 
 // ---- DatasetHashMismatchError (defined/exported per interface; throw site belongs to Task 9) ----
