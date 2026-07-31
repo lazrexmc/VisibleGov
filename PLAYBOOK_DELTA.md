@@ -227,3 +227,23 @@ it is. Revisit this section before shipping any summarization or scoring logic.
     matching rule, write MUST/NEVER conditions, not compact alternates a reader can interpret
     permissively. The post-run spot-check protocol (sample and eyeball N groupings before
     declaring success) is what contained it — keep it mandatory for any bulk-linking run.
+
+## Lesson 14 — `&&` after a `grep` is not a test gate (recurrence, 2026-07-31)
+
+Ran `node --test | grep -E "^ℹ (tests|pass|fail)" && git commit && git push`. The grep *succeeded*
+(it found the summary lines — including `fail 15`), so the chain proceeded and pushed a red suite.
+This is the SECOND occurrence of this exact mistake in this project; the first was ledgered during
+the LegiScan wave and evidently not internalized.
+
+The rule, mechanically: **gate on the extracted fail count, never on a command's exit status when
+that command is a filter.**
+
+```bash
+FAILCOUNT=$(node --test 2>&1 | grep -E "^ℹ fail" | awk '{print $3}')
+if [ "$FAILCOUNT" = "0" ]; then git commit ... && git push; else echo "RED — NOT COMMITTING"; fi
+```
+
+Why it recurs: `grep` exits 0 when it finds *anything*, and a failing test run still prints the
+lines being grepped for. The failure mode is invisible in the transcript because the numbers scroll
+past in the same output that "succeeded." Recovery cost here was small (caught on the next command,
+fixed and re-pushed within minutes) but the same pattern on a data-writing CLI would not be.
