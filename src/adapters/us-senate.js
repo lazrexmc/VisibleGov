@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { fetchWithLimit } from '../lib/http.js';
 import { createLimiter } from '../lib/rate-limiter.js';
+import { SourceFetchError } from '../lib/errors.js';
 import { normalizeBillIdentifier } from './us-congress.js';
 
 export const SOURCE = 'us-senate';
@@ -75,9 +76,55 @@ export function parseSenateVoteMenu(xmlString) {
   }));
 }
 
+// Thrown by parseSenateRollCall for a not-yet-cast vote number. Extends SourceFetchError (not a
+// bare Error, unlike uscode.js's UscSectionNotFoundError) so it flows through collectUsSenate's
+// existing `if (!(err instanceof SourceFetchError)) throw err;` per-vote catch unchanged - same
+// expected-miss handling us-congress already gets for a real HTTP 404 on a tail roll number.
+export class RollCallNotYetPublishedError extends SourceFetchError {
+  constructor(message, meta = {}) {
+    super(message, meta);
+    this.name = 'RollCallNotYetPublishedError';
+  }
+}
+
+// Verified live 2026-08-01 against real senate.gov (session 119-2, vote numbers 220/250/999 -
+// all three byte-identical: one generic template, not per-vote content; see tests/fixtures/
+// us-senate/roll-call-unavailable.html for the captured body). A not-yet-cast/not-yet-published
+// roll call number is HTTP 200 (NOT a 404 - fetchWithLimit's !res.ok check never fires) with an
+// HTML page instead of roll-call XML: <title>U.S. Senate: Roll Call Vote Unavailable</title>,
+// <h1>Roll Call Vote Unavailable</h1>, body text "Results of roll call votes are published
+// approximately an hour after they have been announced." fast-xml-parser is lenient and does not
+// throw on this (confirmed empirically against this exact payload plus several other malformed
+// inputs - it never throws with this module's parser config); it silently parses the HTML into a
+// tree with no roll_call_vote key at all, which used to surface downstream as
+// `TypeError: Cannot read properties of undefined (reading 'congress')` the moment root.congress
+// was read - a crash, not a classified miss, on every hourly scheduler probe during a recess.
+const ROLL_CALL_UNAVAILABLE_MARKER = 'Roll Call Vote Unavailable';
+
 export function parseSenateRollCall(xmlString) {
   const doc = xmlParser.parse(xmlString);
   const root = doc.roll_call_vote;
+  if (!root) {
+    // Distinguish the known "not yet published" stub (expected miss - honestly counted, run
+    // stays healthy-partial) from any other reason the root might be missing (truncated
+    // transfer, senate.gov template change, genuine corruption on what should be a real,
+    // existing vote) - the latter must still fail loudly, never silently reclassified as a
+    // routine miss. Only the recognized stub shape gets the typed SourceFetchError-style error;
+    // anything else falls through to a plain thrown Error below.
+    if (String(xmlString).includes(ROLL_CALL_UNAVAILABLE_MARKER)) {
+      throw new RollCallNotYetPublishedError(
+        'senate.gov has no roll call at this vote number yet (LIS returns HTTP 200 with an HTML '
+        + '"Roll Call Vote Unavailable" stub, not a 404, for a not-yet-cast vote) - expected miss, '
+        + 'not a parse bug',
+        { source: SOURCE },
+      );
+    }
+    throw new Error(
+      'parseSenateRollCall: response has no <roll_call_vote> root and does not match the known '
+      + '"Roll Call Vote Unavailable" not-yet-published stub either - genuine parse failure, not '
+      + `an expected miss (first 200 chars: ${JSON.stringify(String(xmlString).slice(0, 200))})`,
+    );
+  }
   const congress = Number(root.congress);
   const session = Number(root.session);
   const number = Number(root.vote_number);

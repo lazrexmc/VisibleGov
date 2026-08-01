@@ -2,11 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { normalizeBillIdentifier } from '../src/adapters/us-congress.js';
-import { parseSenateVoteMenu, parseSenateRollCall, mapSenatePosition } from '../src/adapters/us-senate.js';
+import {
+  parseSenateVoteMenu, parseSenateRollCall, mapSenatePosition, RollCallNotYetPublishedError,
+} from '../src/adapters/us-senate.js';
+import { SourceFetchError } from '../src/lib/errors.js';
 
 const cfg = JSON.parse(readFileSync('slice.config.json', 'utf8'));
 const menuXml = readFileSync('tests/fixtures/us-senate/vote-menu.xml', 'utf8');
 const rollXml = readFileSync('tests/fixtures/us-senate/roll-call.xml', 'utf8');
+// Live-captured 2026-08-01 against real senate.gov (session 119-2, vote numbers 220/250/999 -
+// byte-identical across all three, confirming it's a fixed template, not per-vote content): the
+// HTML "Roll Call Vote Unavailable" stub LIS serves with HTTP 200 for a vote number not yet cast.
+const notYetPublishedHtml = readFileSync('tests/fixtures/us-senate/roll-call-unavailable.html', 'utf8');
 
 const POSITIONS = new Set(['yea', 'nay', 'present', 'not_voting', 'other']);
 
@@ -58,6 +65,70 @@ test('parseSenateRollCall yields a full-chamber cast list including both MO sena
   const moSenators = casts.filter((c) => c.state === 'MO');
   assert.ok(moSenators.length > 0, 'at least one MO senator must be present');
   assert.ok(moSenators.some((c) => c.last_name === 'Hawley'));
+});
+
+// ---- defect fix (live scheduler crash, us-senate ingestion_runs row 2026-08-01T05:45:29Z):
+// probing one vote number ahead of the last-cast vote during a recess used to crash the whole
+// run with `TypeError: Cannot read properties of undefined (reading 'congress')`, because
+// senate.gov's LIS system answers a not-yet-cast vote number with HTTP 200 (never a 404) and an
+// HTML "Roll Call Vote Unavailable" stub instead of roll-call XML - so fetchSenateRollCall never
+// throws, and parseSenateRollCall blew up reading a property off the (nonexistent) XML root.
+// us-congress's sibling tail-probe already survives this exact scenario because clerk.house.gov
+// answers with a real 404, which fetchWithLimit already turns into a SourceFetchError that
+// collectUsSenate's per-vote `if (!(err instanceof SourceFetchError)) throw err;` catches,
+// counts, and continues past. The fix makes parseSenateRollCall raise that same typed error for
+// the equivalent senate.gov shape, so the existing catch handles it identically. ----
+
+test('parseSenateRollCall throws RollCallNotYetPublishedError (a SourceFetchError) on the real senate.gov "Roll Call Vote Unavailable" stub, not a TypeError', () => {
+  assert.throws(
+    () => parseSenateRollCall(notYetPublishedHtml),
+    (err) => {
+      assert.ok(err instanceof RollCallNotYetPublishedError, `expected RollCallNotYetPublishedError, got ${err.constructor.name}`);
+      // The load-bearing property: collectUsSenate's per-vote catch is `if (!(err instanceof
+      // SourceFetchError)) throw err;` - unless this holds, the crash reproduces unchanged.
+      assert.ok(err instanceof SourceFetchError, 'must be a SourceFetchError so collectUsSenate treats it as an expected miss, not a crash');
+      assert.notEqual(err.constructor.name, 'TypeError');
+      assert.equal(err.source, 'us-senate');
+      assert.match(err.message, /not yet|unavailable/i);
+      return true;
+    },
+  );
+});
+
+test('parseSenateRollCall still fails loudly (not a SourceFetchError) on a genuinely malformed payload for an existing vote, never confused with the not-yet-published stub', () => {
+  // Well-formed enough for fast-xml-parser to accept without a parser-level exception (a raw XML
+  // syntax error, e.g. an unclosed tag from mid-stream truncation, already fails loudly on its
+  // own - fast-xml-parser throws directly and parseSenateRollCall does not wrap that call in a
+  // try/catch, so nothing here needs to convert it). This is the OTHER malformed shape: a
+  // response that parses fine but is neither a real roll call NOR the recognized "Roll Call Vote
+  // Unavailable" stub (e.g. an unexpected error page, a differently-shaped upstream response) -
+  // proving the fix's guard is scoped to the one recognized stub, not a blanket swallow of every
+  // rootless payload.
+  const corrupted = '<?xml version="1.0" encoding="UTF-8"?><corrupted_response>truncated mid-stream</corrupted_response>';
+  assert.throws(
+    () => parseSenateRollCall(corrupted),
+    (err) => {
+      assert.ok(!(err instanceof RollCallNotYetPublishedError), 'must not be misclassified as the not-yet-published case');
+      assert.ok(!(err instanceof SourceFetchError), 'must NOT be a SourceFetchError - collectUsSenate must not swallow real corruption as an expected miss');
+      assert.match(err.message, /genuine parse failure/);
+      return true;
+    },
+  );
+});
+
+test('parseSenateRollCall lets a raw XML syntax error (e.g. mid-stream truncation cutting off the XML declaration itself) propagate unmodified - never reclassified as an expected miss', () => {
+  // Real observed behavior: fast-xml-parser itself throws ("Pi Tag is not closed.") for input
+  // this badly truncated, before parseSenateRollCall's own root-check ever runs. Confirms the fix
+  // does not wrap xmlParser.parse() in a try/catch anywhere - a genuine parser-level exception
+  // must reach the caller exactly as fast-xml-parser raised it.
+  const truncated = rollXml.slice(0, 20);
+  assert.throws(
+    () => parseSenateRollCall(truncated),
+    (err) => {
+      assert.ok(!(err instanceof SourceFetchError), 'a raw parser exception must not be a SourceFetchError either');
+      return true;
+    },
+  );
 });
 
 test('mapSenatePosition covers the documented enum, including impeachment-style Guilty/Not Guilty', () => {
