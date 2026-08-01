@@ -1014,3 +1014,14 @@ itself) was the third catch — that's what `--dry-run` is for.
 
 Batch shape: 3 × 20 bills, ~210 subagents total, all four stages green on every completed bill.
 Batch flag rates: 9/20, 11/20, 9/20 — the completeness axis is doing real work.
+
+## 2026-08-01 (08:15Z) — the hotfix's first live run: 7 new Senate votes, 700 casts, every gate green
+
+The post-fix us-senate probe ran on schedule: **votes 211-217 ingested** (they'd been cast since
+July 28 and were sitting unfetched behind the crash), 700 casts all resolved to members, 4 bills
+linked, and votes 218-220 classified with the new typed expected-miss — log reads *"3 tail 404(s)
+past vote 210 — expected from the probe window, not a failure"*, healthy:true. The per-source
+write-detection then fired refresh-aggregates automatically (15s), so senators' charts include the
+new casts. Every layer the three review rounds built — honest failure records, healthy-partial
+classification, per-source refresh gating — plus the overnight hotfix, all working together
+unattended. First scheduler-driven federal Senate ingestion in the project's history.
