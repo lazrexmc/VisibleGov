@@ -70,3 +70,40 @@ detail, only rows started within the tick); doc gains per-source values + deriva
 "stop task if longer than" must EXCEED 75 min (recommend do-not-stop; our timeouts are the real
 enforcement). Red-first: 75-min lock not reclaimed at 15 min / 480s lock still is / corrupt lock
 still is; orphan-closing. One scoped re-review will cover rounds 1+2 together.
+
+## Fix round 2 — complete (commit a6d94bc, ℹ fail 0, 2073 tests = 2057 + 16)
+Per-source timeoutMs (legiscan 75 min, default 480s), lock-declared maxDurationMs with corrupt/
+missing-field fallback to fixed 10-min, orphan-'running'-row closing on kill (tick-scoped only),
+doc gains derivations + Windows stop-if-longer-than must exceed 75 min. Implementer's residual
+note (accepted): any fixed timeout can be outgrown by future data volume; the honest-recovery
+path (orphan-close + self-record + loud log) makes that fail-loud-and-retry, not silent — accepted
+as inherent, revisit the number if legiscan durations trend up.
+
+## Scoped re-review (rounds 1+2 together) — dispatched (resumed original opus reviewer)
+Package: re-review-package.md (3e12a1e..a6d94bc, -U10). Scope: per-finding verification of
+C1/C2/I1-I5/M1-M4, round-2 soundness (75-min lock vs +15-min tick reclaim, corrupt-lock fallback,
+tick-scoped orphan-close), new-defect sweep (C1 double-record risk, I4b refresh-gate row
+selection), mechanical suite + dry-run re-verification. SHIP / DO-NOT-SHIP verdict requested for
+the full 4-commit stack as unattended-forever code.
+
+## Scoped re-review (rounds 1+2) — DO NOT SHIP; one new Critical, three new minors
+All 11 original findings verified addressed; round-2 lock mechanics verified sound AT RUNTIME
+(not stale through +76 min on a 76-min declaration, stale at +77; default lock unaffected; all 7
+corrupt-field shapes fall back safely; orphan-close triple-scoped, history untouchable). Suite +
+dry-run independently re-verified (ℹ fail 0, 2073; exit 0, byte-identical count-headers on 6
+tables). Shared-blast-radius honored (zero diff on http.js/db.js/adapters/other CLIs).
+- 🔴 NEW-1 (Critical, REGRESSION): refresh gate reads detail.counts.votes; legiscan spreads
+  counters top-level with no vote key — measured 0/52 real runs trigger; legiscan owns 82.3% of
+  votes → weekly dataset would land with NO aggregate refresh, silently, log claiming healthy.
+- 🟡 NEW-2 no clamp on declared maxDurationMs; NEW-3 updateLockMaxDuration failure ignored
+  (spawns under 10-min placeholder); NEW-4 orphan-close local-clock vs DB-clock skew no-op.
+- NEW-5 (hard-crash strands 'running' row): controller-adjudicated ACCEPTED, documented scope.
+- Task 1 (41936f0 + M4) independently shippable.
+
+## Fix round 3 — dispatched (same implementer; final resume round per SDD)
+Rulings: NEW-1 = per-registry-entry wroteSomething(detail) predicate, FAIL-OPEN on unknown shape
+(over-refresh accepted, silent-never rejected), legiscan predicate derived from real close-detail
+keys and verified vs the 52 live rows, fixture tests from real detail rows for all 5 sources,
+fix the :378-388 comment. NEW-2 = 2h ceiling → default beyond. NEW-3 = can't-record → don't
+spawn (log, release, exit 0). NEW-4 = 5-min skew grace + written safety argument (≥30-min
+intervals make pre-tick capture impossible) or DB-derived now(). Next: scoped re-review round 3.

@@ -424,3 +424,275 @@ fire on import) and under a real spawn.
    + **I2** (`timeout` on `spawnSync`).
 
 Task 1 (`41936f0`) can ship independently and immediately.
+
+
+---
+
+# Re-review (rounds 1+2)
+
+Scope: fix commits `9a4eb66` (round 1: C1, C2, I1-I5, M1-M4) and `a6d94bc` (round 2: per-source
+timeouts, lock-declared duration, orphan-close). Full stack under verdict: `41936f0..a6d94bc`.
+Reviewer: session 8ecd5d8c. Date 2026-07-31.
+
+## Mechanical re-verification
+
+**Test suite** — bare `node --test` from `F:\VisibleGov`, re-run by the reviewer:
+
+```
+ℹ tests 2073
+ℹ suites 0
+ℹ pass 2073
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22239.9298
+```
+
+Extracted fail-count line: **`ℹ fail 0`**. Corroborated by `grep -c "^not ok"` = **0**.
+2073 tests, matching the claim (2025 + 32 round-1 + 16 round-2).
+
+**Dry run** — `node --env-file=.env scripts/scheduled-ingest.js --dry-run`: **exit code 0**, zero
+stderr, lock released at rest. Count-header on six tables immediately before and after this
+invocation:
+
+```
+BEFORE {"ingestion_runs":403,"votes":9988,"vote_casts":1465564,"bills":38273,"sessions":33,"legislators":1607}
+AFTER  {"ingestion_runs":403,"votes":9988,"vote_casts":1465564,"bills":38273,"sessions":33,"legislators":1607}
+```
+
+Byte-identical — **zero writes**. (Absolute numbers moved since the first review because Lance's
+existing manual loop is still running; the before/after pair bracketing *this* invocation is what
+is being asserted.) `--dry-run --only us-senate` also exits 0 with zero writes.
+
+**Commits** — `git log` confirms `a6d94bc` on `9a4eb66` on `3e12a1e` on `41936f0` on `de2bf54`.
+Per-commit `--stat` matches the re-review package. Shared-blast-radius ruling honored: `git diff
+3e12a1e..a6d94bc` on `src/lib/http.js`, `src/lib/db.js`, `src/adapters/`, `src/cli/ingest.js`,
+`src/cli/ingest-mo-senate.js` returns **zero changes** — the timeout work stayed inside the
+scheduler via its own `getSchedulerClient` (`scripts/scheduled-ingest.js:873-878`).
+
+## (a) Per-finding verification
+
+| # | Finding | Verdict | Evidence |
+|---|---|---|---|
+| **C1** | Starvation via missing run row | ✅ **FIXED** | `recordSchedulerAttemptFailure` (`:688-699`) writes a real `ingestion_runs` row via the shared `openRun`/`closeRun`, `status='failed'`, `detail.scheduler_attempt=true` — never a fake success. `runChosenSource` (`:757-832`) catches launch/timeout/buffer errors rather than letting them propagate, so the "did a new row appear" check is never skipped. Because `queryLatestStartedAt` has no status filter, the row advances the durable signal and the source falls back to its own interval instead of winning every 15-min tick. |
+| **C2** | Doc claimed scheduler unrelated to TODO-25 | ✅ **FIXED** | `docs/SCHEDULED_INGESTION.md:247-268` is now a warning-headed section: *"⚠️ This scheduler CONTINUES feeding a known, currently-open data defect (TODO item 25) — read before registering"*, *"**The feeder is `mo-senate-web`, which IS in this registry.**"*, cites `ensureSessionRow`'s `identifier: String(year)` mechanism, quotes TODO.md's own "the cron is feeding the duplicate", and closes with *"The honest framing is neutral-vs-today, not 'unrelated.'"* No residual overclaim anywhere in the file. |
+| **I1** | Ownership-blind `releaseLock` | ✅ **FIXED** | `acquireLock` mints a `crypto.randomUUID()` nonce into the lock payload (`:232-235`); `releaseLock` (`:274-284`) re-reads and deletes **only** on nonce match; missing/corrupt/non-matching are all silent no-ops. `main()`'s `finally` threads `lockResult.nonce` (`:1017`). |
+| **I2** | No child/fetch timeout | ✅ **FIXED** | `spawnSync` now gets `timeout: timeoutMs` (`:639-641`), per-source. The scheduler's own Supabase client applies `AbortSignal.timeout(30s)` to every REST call (`:861-878`). Shared `http.js`/`db.js` deliberately untouched, per the ruling — verified zero diff. |
+| **I3** | One lookup rejection killed the tick | ✅ **FIXED** | `safeLookup` (`:501-508`) converts a rejection into `{ok:false, error}`; all eight lookups are wrapped, so the `Promise.all` (`:529-538`) can no longer reject. Each entry's own `resolvable` / `unresolvedReason` now reflects only *its* lookup (`:543-616`), so one source's failure genuinely no longer blocks the others — which is what the doc always claimed. |
+| **I4** | Tail-404 noise + unconditional refresh | ✅ **FIXED (mechanism)** — but see **NEW-1** | I4a: `isExpectedTailProbeOutcome` (`:368-376`) requires *every* failure to match `roll N`/`vote N` strictly past `windowMaxKnown`, so a genuine regression can't be laundered as "expected". I4b: `countsShowRowsWritten` (`:389-397`) reads the child's own run row instead of mode/status. Correct for mo-senate-web, mo-house-xml (**both** branches), us-congress, us-senate — **broken for legiscan** (NEW-1). |
+| **I5** | us-senate unscheduled | ✅ **FIXED** | Registry entry `:586-598` + `resolveUsSenateVoteWindow` `:480-493`. Verified end to end live: `--dry-run --only us-senate` emits `--source us-senate --session 2 --votes 211-220`, which is exactly right (210 rows on file under `us-senate-119-2-*`; 659 under session 1). `US_SENATE_SESSION = 2` is correct for 2026. `collectUsSenate` honors `--votes` (`ingest.js:503-505`), so the run stays bounded to 10. |
+| **M1** | UTC log naming | ✅ **FIXED** | Code comments at `:76-78` and `:847`; doc `:199-205` spells out *"The date in the filename is UTC, not local time — Central time is 5-6 hours behind UTC…"* and tells Lance to check both today's-UTC and tomorrow's-UTC files. |
+| **M2** | 1 MB maxBuffer misreported | ✅ **FIXED** | `CHILD_MAX_BUFFER = 16 MB` (`:121`) passed to `spawnSync` (`:640`); ENOBUFS now throws its own distinct, accurate message (`:657-662`) instead of "could not launch". |
+| **M3** | Lookups ran regardless of `--only` | ✅ **FIXED** | `only` threaded into `buildRegistry` (`:523-524`) and gated per lookup by `safeLookup(need(key), …)` (`:530-537`); a skipped lookup returns `{ok:true, value:null}` and the entry's `cliArgs` correctly collapses to `[]` rather than dereferencing null (`:576-582`). |
+| **M4** | No cost estimate before the gate | ✅ **FIXED** | `summarize.js:298-301` and `verify.js:173-176` print a `Cost estimate: N × ~$0.11 = ~$X` line in gloss.js's voice, before the gate and after the `--dry-run` return — so gate ordering is unchanged. The $0.11 figure is reused from golden.js's existing estimate for the identical `summarizeBill` call rather than invented. |
+
+## (b) Round-2 mechanism — verified at runtime, not by reading
+
+Executed the real exported `isLockStale` against constructed locks (no DB, no network):
+
+```
+legiscan declared lock duration = 4560000 ms = 76 min   (LEGISCAN_CHILD_TIMEOUT_MS 75min + LOCK_GRACE_MS 1min)
+default  declared lock duration =  540000 ms =  9 min   (CHILD_TIMEOUT_MS 8min + LOCK_GRACE_MS 1min)
+
+  legiscan lock @ +15min -> stale=false     legiscan lock @ +75min -> stale=false
+  legiscan lock @ +30min -> stale=false     legiscan lock @ +76min -> stale=false
+  legiscan lock @ +45min -> stale=false     legiscan lock @ +77min -> stale=true
+  legiscan lock @ +60min -> stale=false     legiscan lock @ +90min -> stale=true
+
+  default(9min) lock @ +9min  -> stale=false
+  default(9min) lock @ +10min -> stale=true
+```
+
+**A +15-minute tick cannot reclaim a live legiscan lock.** ✅ Confirmed — and the window still
+closes at +77 min, so a genuinely dead legiscan run cannot wedge the schedule indefinitely. The
+default 9-minute declaration still reclaims promptly at +10 min, so raising legiscan's budget did
+not loosen anything for the other four sources.
+
+**Corrupt/missing `maxDurationMs` falls back to the 10-minute default.** ✅ Confirmed across every
+malformed shape:
+
+```
+  missing field / null / 'abc' / 0 / negative / NaN / Infinity
+      -> @ +9min stale=false, @ +11min stale=true   (i.e. MAX_RUN_DURATION_MS = 10 min)
+  unparseable startedAt -> stale=true always
+```
+
+`Number.isFinite(declared) && declared > 0` (`:208-209`) rejects all of them into
+`fallbackMaxDurationMs`, and a lock file that fails `JSON.parse` outright is synthesized with an
+epoch `startedAt` (`:250-252`) so it is always stale. Fail-safe direction throughout. (One gap:
+NEW-2 below.)
+
+**The orphan-close touches only rows this tick could have created.** ✅ Confirmed.
+`closeOrphanedRunningRows` (`:721-732`) filters on all three of `source = chosen.key`,
+`status = 'running'`, and `started_at >= sinceIso`, where `sinceIso` is `nowIsoAtTickStart` —
+captured once at `:888`, *before* `acquireLock`, and threaded through `runChosenSource`'s
+`tickStartIso`. A `'running'` row from any earlier tick has `started_at < tickStart` and is
+excluded; there is no code path that widens or omits that predicate. It is additionally called only
+when `killedByScheduler` is true (`:782`), i.e. only for ETIMEDOUT/ENOBUFS. Pre-existing history is
+untouchable. (Secondary caveat: NEW-4 below.)
+
+## (c) New defects introduced by the fixes
+
+### 🔴 NEW-1 (Critical) — `countsShowRowsWritten` can never return true for `legiscan`, so the aggregate refresh will never fire after a LegiScan dataset lands
+
+`scripts/scheduled-ingest.js:389-397` — the fallthrough at `:396` is
+`return (counts.votes ?? 0) > 0;`, reading `detail.counts` (`:390`).
+`src/cli/ingest-legiscan.js:1085` closes its run with `buildSuccessCloseDetail(result.counts)`,
+and that helper (`:961-963`) is:
+
+```js
+export function buildSuccessCloseDetail(counts) {
+  return { ...counts, attribution: ATTRIBUTION, queries_used: counts.queriesUsed };
+}
+```
+
+It **spreads `counts` at the top level of `detail`** — there is no `detail.counts` object at all —
+and the counts it spreads are the document/text-pipeline counters, which contain no vote counter.
+Measured against all 52 real legiscan runs in `ingestion_runs`:
+
+```
+legiscan runs total: 52
+UNION of all legiscan detail.counts keys:
+   alreadyHasVersion, alreadyPresent, billsPlanned, budgetRefused, cacheCorrupt, datasetsMissing,
+   datasetsRead, decodeFailed, docCacheHits, extractEmpty, identityMismatch, inserted,
+   missingSourceUrl, nonPdfMime, oversizeRefused, queriesSpent, statusError
+votes-like keys present?: NONE
+distinct counts shapes: (50 runs) (no detail.counts)   (2 runs) <the 17 keys above>
+>>> runs where countsShowRowsWritten('legiscan', detail) === true : 0 / 52
+```
+
+So it is **0 for 52**, and structurally incapable of ever being anything else. Meanwhile LegiScan
+is by a wide margin the largest vote writer in this database — it calls
+`insertIfAbsent(client, 'votes', …)` at `ingest-legiscan.js:604` and
+`insertIfAbsent(client, 'vote_casts', …)` at `:617`, and live:
+
+```
+votes table: 8221 of 9988 rows have a legiscan* source_key (82.3%)
+```
+
+**Consequence:** when the weekly dataset hash changes and a real reprocessing lands thousands of
+new casts, `run.outcome.wroteRows` is `false`, `refresh-aggregates.js` is skipped
+(`scheduled-ingest.js:982`), and `public_position_totals` / `public_party_alignment` silently drift
+behind the vote lists — the exact user-visible chart-drift defect of 2026-07-31 that the brief
+names as the entire reason the standing practice exists. The log will read
+`healthy: true, aggregatesRefreshed: false`, so nothing signals it.
+
+**This is a regression, not a pre-existing gap.** The pre-round-1 `runWroteSomething` returned
+`true` for `{mode:'live', status:'succeeded'}`, so the refresh *did* fire after legiscan runs
+before this fix. I4b's tightening is correct in principle and correct for four of five sources; it
+silently disabled the refresh for the one that matters most.
+
+The comment at `:378-388` states the mapping was *"verified against each one's real closeRun()
+call site, not guessed."* For legiscan that is not accurate — 50 of 52 runs have no
+`detail.counts` at all. Worth correcting alongside the code so the next reader doesn't trust it.
+
+(Note for whoever fixes it: legiscan's counts do carry `inserted`, but that counts documents/texts,
+not votes or casts. There may be no honest votes-written counter in that CLI's detail today —
+picking the right signal is a design call, not a one-token swap.)
+
+### 🟡 NEW-2 (Minor) — no upper clamp on the lock's declared `maxDurationMs`
+
+`scripts/scheduled-ingest.js:205-211`. The guard is `Number.isFinite(declared) && declared > 0`,
+which rejects garbage in the *low* direction but honors any finite positive value. Verified:
+
+```
+  absurdly large (1e12)  @ +9min stale=false  @ +11min stale=false
+```
+
+A lock declaring ~31 years would never be reclaimed, permanently wedging every future tick into
+`already-running` + exit 0 — silent, and indistinguishable from a healthy quiet period in Task
+Scheduler's history. Only reachable by hand-editing the lock (the doc does tell Lance he may delete
+it by hand) or an exotic corruption that still parses as valid JSON. Clamping at, say,
+`LEGISCAN_CHILD_TIMEOUT_MS + LOCK_GRACE_MS` would close it in one line.
+
+### 🟡 NEW-3 (Minor) — `updateLockMaxDuration`'s failure return is ignored
+
+`scripts/scheduled-ingest.js:973` calls it purely for effect. It returns `false` when the lock is
+missing, corrupt, or no longer nonce-matched (`:295-306`). In that case `main()` still spawns the
+child — and for legiscan that means a 75-minute run proceeding under a lock that still declares the
+10-minute selection-phase placeholder, which re-opens precisely the +15-min stale-reclaim stacking
+window round 2 exists to close. Low probability (requires losing the lock between acquire and
+selection) and it fails open rather than dangerously, but the one call site that makes round 2 work
+is also the one whose result is discarded.
+
+### 🟡 NEW-4 (Minor) — the orphan-close scope compares a local clock against DB-assigned timestamps
+
+`scripts/scheduled-ingest.js:888` builds `nowIsoAtTickStart` from `Date.now()` (the local machine
+clock), and it is compared via `.gte('started_at', sinceIso)` (`:723`) against `ingestion_runs.
+started_at`, which is **not** client-supplied: `openRun` (`src/lib/db.js:20-28`) inserts only
+`{source, status}`, so `started_at` comes from the column default `now()`
+(`supabase/migrations/0001_core_schema.sql:117`) — the Supabase server clock.
+
+The child reaches its own `openRun` within a second or two of tick start (legiscan's is at
+`ingest-legiscan.js:1064`, right after the client check), so if the local clock runs even a couple
+of seconds *ahead* of Supabase's, the child's row lands with `started_at < sinceIso` and the
+`gte` filter matches nothing. The scoping requirement is still satisfied — this errs toward closing
+*fewer* rows, never a wrong one — but the fix can silently no-op in exactly the rare, weekly
+scenario it was written for, with no signal (`killClosedRunIds: []` reads the same as "nothing
+needed closing"). A small negative tolerance on `sinceIso`, bounded well below one tick, would make
+it robust without widening the scope meaningfully.
+
+### 🟡 NEW-5 (Minor, observation) — a non-SIGTERM hard crash still strands a `'running'` row
+
+`closeOrphanedRunningRows` runs only when `killedByScheduler` is true, which is gated to
+`ETIMEDOUT`/`ENOBUFS` (`:769, :782`). A child killed by anything else — OOM-killer, segfault, power
+loss mid-run — leaves the same stranded `'running'` row the round-2 fix exists to clean up. This is
+a deliberate, documented scope (`:701-716`) and the *due-ness* signal is unaffected (the row exists,
+so nothing starves); the residue is `public_freshness` honesty only. Noting for completeness, not
+as a defect in the fix.
+
+### Explicitly checked and clean
+
+- **C1 double-recording.** `newRowAppeared` (`:795`) compares `latestRun.started_at !== chosen.
+  lastStartedAtIso`. Both sides come from the same PostgREST client reading the same `timestamptz`
+  column, so the string forms are directly comparable. If the child opened its own row, the
+  timestamp differs and no attempt row is written; if `lastStartedAtIso` was `null` and a row
+  appeared, `latestRun !== null` also short-circuits correctly. The self-record fires only when
+  genuinely no new row exists. No double-recording path found.
+- **C1 honest due-ness advance.** The self-recorded row is `status='failed'`, and
+  `queryLatestStartedAt` intentionally has no status filter, so the next tick sees it and the
+  source backs off to its own `minIntervalMs`. A persistently failing us-congress now runs hourly
+  and never starves the others — verified by reading, and consistent with the live registry state.
+- **I4b right-row selection.** `queryLatestRun` (`:417-427`) filters by source, orders
+  `started_at` desc, `limit(1)` — after the child runs, that is the child's row, and the
+  single-instance lock prevents a concurrent writer for the same source.
+- **I4b correctness for the other four sources**, checked against live `ingestion_runs` detail
+  rather than the code comment: `mo-senate-web` has `detail.counts.votes` ✅;
+  `us-congress` `detail.counts.votes = 5` ✅; `us-senate` `detail.counts.votes = 210` ✅;
+  `mo-house-xml` **both** branches ✅ — the `bill-xml` branch via `counts.bills_detailed`, and all
+  11 real `rollcall-pdf` runs carry `detail.rollCallResult.castCount = 158` and evaluate `true`.
+- **us-senate inherits C1's protection.** `collectUsSenate` fetches the vote menu fatally
+  (`ingest.js:130`) before `openRun` (`:506`) — the same late-open shape as us-congress — and the
+  self-record path is source-agnostic, so it is covered.
+- **No new model reachability.** The import list gained only `node:crypto` and
+  `@supabase/supabase-js`; still no summarizer/verifier/Anthropic anywhere in the graph.
+- **MO ToU intervals** remain non-overridable constants; `process.env` is still read only inside
+  `envIntervalMs`, now for three floored non-ToU intervals.
+- **`dataset_hash`** still appears only in comments — the suspension-level gate is untouched.
+- **`mo-house-xml` cliArgs** is still the frozen literal `['--limit','1']`.
+
+## Verdicts
+
+| | Verdict |
+|---|---|
+| Original findings C1, C2, I1, I2, I3, I4, I5, M1, M2, M3, M4 | ✅ **all 11 addressed in code** (I4's mechanism is sound but incomplete — NEW-1) |
+| Round-2 mechanism (75-min lock vs +15-min tick, corrupt-field fallback, orphan-close scoping) | ✅ **internally sound**, verified at runtime |
+| New defects introduced | ❌ **1 Critical** (NEW-1), 3 Minor, 1 observation |
+| **Ship `41936f0..a6d94bc` as unattended-forever code** | ❌ **DO NOT SHIP** |
+
+**Blocking, and it is the only blocker: NEW-1.** Everything else in this stack is genuinely fixed,
+and the round-2 timeout/lock mechanism is the strongest part of the whole build — it is evidence-
+derived, runtime-verifiable, and fails safe in every malformed case I could construct. But
+registering the scheduler today means the single largest source of votes in this database
+(82.3% of the table) lands its weekly batch and never triggers the aggregate refresh, silently
+recreating the exact user-visible defect the brief cites as the reason for the standing practice.
+That is precisely the compounds-quietly-for-weeks failure class this review exists to catch, and it
+was introduced by the fix round rather than found in the original build.
+
+Not blocking, worth folding into the same pass because they are each a line or two: NEW-2 (clamp
+the declared lock duration), NEW-3 (act on `updateLockMaxDuration`'s `false`), NEW-4 (tolerance on
+the orphan-close `sinceIso`).
+
+**Task 1 (`41936f0` + M4's addition in `9a4eb66`) remains independently shippable and is
+unaffected by all of the above.**

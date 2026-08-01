@@ -10,13 +10,16 @@ import {
   parseArgs, isLockStale, acquireLock, releaseLock, updateLockMaxDuration,
   computeSourceDueness, pickMostOverdue,
   parseUsHouseRoll, parseUsSenateVote, computeRollWindow,
-  isExpectedTailProbeOutcome, countsShowRowsWritten,
+  isExpectedTailProbeOutcome,
+  moSenateWroteSomething, usCongressWroteSomething, usSenateWroteSomething, moHouseWroteSomething,
+  legiscanWroteSomething, defaultWroteSomething,
   parseChildOutput,
   queryLatestStartedAt, queryLatestRun,
   resolveLegiscanSessionId, resolveUsCongressRollWindow, resolveUsSenateVoteWindow, buildRegistry,
   runChildCli, recordSchedulerAttemptFailure, closeOrphanedRunningRows, runChosenSource,
   getSchedulerClient, envIntervalMs,
-  MAX_RUN_DURATION_MS, CHILD_TIMEOUT_MS, CHILD_MAX_BUFFER, LEGISCAN_CHILD_TIMEOUT_MS, LOCK_GRACE_MS,
+  MAX_RUN_DURATION_MS, MAX_LOCK_DURATION_MS, CHILD_TIMEOUT_MS, CHILD_MAX_BUFFER,
+  LEGISCAN_CHILD_TIMEOUT_MS, LOCK_GRACE_MS, ORPHAN_CLOSE_SKEW_GRACE_MS,
   US_CONGRESS_CONGRESS, US_CONGRESS_ROLL_WINDOW, US_SENATE_SESSION, US_SENATE_VOTE_WINDOW,
 } from '../scripts/scheduled-ingest.js';
 import { MO_SENATE_MIN_INTERVAL_MS } from '../src/adapters/mo-senate-web.js';
@@ -231,6 +234,34 @@ test('isLockStale directly: a valid maxDurationMs on the lock is honored over th
   assert.equal(isLockStale({ startedAt, maxDurationMs: 8 * 60 * 1000 }, now), true);
 });
 
+// ---- ROUND 3, NEW-2 RED-FIRST: a declared duration beyond MAX_LOCK_DURATION_MS is treated like
+// missing/corrupt — never honored as "never go stale" ----
+
+test('ROUND 3 RED-FIRST (NEW-2): an absurdly large declared maxDurationMs (e.g. hand-edited to ~31 years) is NOT honored — falls back to the default, so the lock CAN still go stale', () => {
+  const startedAt = '2026-07-31T12:00:00.000Z';
+  const wellPastDefault = Date.parse(startedAt) + MAX_RUN_DURATION_MS + 60 * 1000; // 1 min past the 10-min default
+
+  // Without the NEW-2 fix, 1e12 ms (~31 years) would be honored verbatim and this would read false.
+  assert.equal(isLockStale({ startedAt, maxDurationMs: 1e12 }, wellPastDefault), true);
+});
+
+test('ROUND 3 (NEW-2): a value right at MAX_LOCK_DURATION_MS is still honored; one msec beyond it falls back to the default', () => {
+  const startedAt = '2026-07-31T12:00:00.000Z';
+  const withinCeiling = Date.parse(startedAt) + MAX_LOCK_DURATION_MS - 1000; // 1s before the ceiling elapses
+  assert.equal(isLockStale({ startedAt, maxDurationMs: MAX_LOCK_DURATION_MS }, withinCeiling), false);
+
+  const beyondDefaultButNotCeiling = Date.parse(startedAt) + MAX_RUN_DURATION_MS + 1000; // past the 10-min default
+  assert.equal(
+    isLockStale({ startedAt, maxDurationMs: MAX_LOCK_DURATION_MS + 1 }, beyondDefaultButNotCeiling),
+    true,
+    'a duration one msec beyond the ceiling must fall back to the (much smaller) default, not be honored',
+  );
+});
+
+test('ROUND 3 (NEW-2): MAX_LOCK_DURATION_MS comfortably exceeds the largest real declared duration (legiscan + grace)', () => {
+  assert.ok(MAX_LOCK_DURATION_MS > LEGISCAN_CHILD_TIMEOUT_MS + LOCK_GRACE_MS);
+});
+
 test('acquireLock writes the initial maxDurationMs (MAX_RUN_DURATION_MS, the selection-phase default) into a fresh lock', () => {
   withTmpDir((dir) => {
     const lockPath = path.join(dir, 'scheduler.lock.json');
@@ -382,38 +413,209 @@ test('isExpectedTailProbeOutcome: false for a non-windowed source, or when there
   assert.equal(isExpectedTailProbeOutcome('us-congress', [{ step: 'roll 291' }], undefined), false);
 });
 
-// ---- I4b (fix round 1) red-first: countsShowRowsWritten replaces the old mode/status heuristic ----
+// ---- ROUND 3, NEW-1 RED-FIRST: per-source wroteSomething predicates, verified against REAL
+// ingestion_runs fixture rows (fetched read-only from the live DB during this fix round, trimmed
+// to the fields that matter) — not invented shapes. This is what caught the original bug:
+// fix-round-1's countsShowRowsWritten claimed "verified against each one's real closeRun() call
+// site" but legiscan's mapping was actually inferred by analogy, and measured 0/52 true against
+// real data. Every fixture below is a REAL observed shape. ----
 
-test('countsShowRowsWritten: mo-senate-web/us-congress/us-senate/legiscan all read detail.counts.votes', () => {
-  assert.equal(countsShowRowsWritten('us-congress', { counts: { votes: 3 } }), true);
-  assert.equal(countsShowRowsWritten('us-congress', { counts: { votes: 0 } }), false);
-  assert.equal(countsShowRowsWritten('mo-senate-web', { counts: { votes: 1 } }), true);
-  assert.equal(countsShowRowsWritten('us-senate', { counts: { votes: 2 } }), true);
-  assert.equal(countsShowRowsWritten('legiscan', { counts: { votes: 5 } }), true);
+// ---- mo-senate-web: real detail.counts.votes, both the "wrote something" and early-close
+// "wrote nothing" (roster/journal-index slot, votes always 0) shapes really occur ----
+
+const REAL_MO_SENATE_WROTE_VOTES = {
+  status: 'succeeded',
+  detail: {
+    counts: {
+      days: 1, casts: 231, gated: false, votes: 7, failures: 0, unresolved: 7,
+    },
+  },
+};
+const REAL_MO_SENATE_JOURNAL_INDEX_SLOT = {
+  status: 'succeeded',
+  detail: {
+    counts: {
+      days: 0, slot: 'journal-index', casts: 0, gated: false, votes: 0, failures: 0, unresolved: 0,
+    },
+  },
+};
+
+test('moSenateWroteSomething: real "wrote votes" row -> true; real journal-index early-close slot (votes always 0) -> false', () => {
+  assert.equal(moSenateWroteSomething(REAL_MO_SENATE_WROTE_VOTES.detail, REAL_MO_SENATE_WROTE_VOTES.status), true);
+  assert.equal(moSenateWroteSomething(REAL_MO_SENATE_JOURNAL_INDEX_SLOT.detail, REAL_MO_SENATE_JOURNAL_INDEX_SLOT.status), false);
 });
 
-test('countsShowRowsWritten: THE I4b REGRESSION CASE — a live/partial run whose probe window found nothing must read as "wrote nothing", not "wrote something"', () => {
-  // This is exactly the shape a us-congress tick has on a typical hour: mode 'live', status
-  // 'partial' (every probed roll 404d), counts.votes still 0. The OLD heuristic
-  // (mode==='live' && status in succeeded/partial) returned true here — this must return false.
-  assert.equal(countsShowRowsWritten('us-congress', { counts: { votes: 0, casts: 0, failures: 10 } }), false);
+test('moSenateWroteSomething: an unrecognized shape fails OPEN on a completed run, but never on a failed one', () => {
+  assert.equal(moSenateWroteSomething({ somethingElse: true }, 'succeeded'), true);
+  assert.equal(moSenateWroteSomething({ somethingElse: true }, 'partial'), true);
+  assert.equal(moSenateWroteSomething({ somethingElse: true }, 'failed'), false);
+  assert.equal(moSenateWroteSomething(null, 'succeeded'), true);
 });
 
-test('countsShowRowsWritten: mo-house-xml rollcall-pdf branch reads rollCallResult.castCount, a SIBLING of counts, not a field inside it', () => {
-  assert.equal(countsShowRowsWritten('mo-house-xml', { counts: { document_type: 'rollcall-pdf' }, rollCallResult: { castCount: 5 } }), true);
-  assert.equal(countsShowRowsWritten('mo-house-xml', { counts: { document_type: 'rollcall-pdf' }, rollCallResult: { castCount: 0 } }), false);
-  assert.equal(countsShowRowsWritten('mo-house-xml', { counts: { document_type: 'rollcall-pdf' } }), false, 'missing rollCallResult must not throw or default to true');
+// ---- us-congress / us-senate: real detail.counts.votes ----
+
+const REAL_US_CONGRESS_PARTIAL_WITH_FAILURES = {
+  status: 'partial',
+  detail: {
+    notes: [], counts: {
+      bills: 173, casts: 122129, votes: 283, failures: 2, legislators: 53,
+    }, failures: [{ step: 'roll 999', message: 'HTTP 404' }, { step: 'roll 1000', message: 'HTTP 404' }],
+  },
+};
+const REAL_US_CONGRESS_SUCCEEDED = {
+  status: 'succeeded',
+  detail: {
+    notes: [], counts: {
+      bills: 3, casts: 2165, votes: 5, failures: 0, legislators: 53,
+    }, failures: [],
+  },
+};
+
+test('usCongressWroteSomething: real succeeded row (votes:5) -> true; real partial-with-failures row (votes:283, the tail-probe shape) -> ALSO true, since votes really did land', () => {
+  assert.equal(usCongressWroteSomething(REAL_US_CONGRESS_SUCCEEDED.detail, REAL_US_CONGRESS_SUCCEEDED.status), true);
+  assert.equal(usCongressWroteSomething(REAL_US_CONGRESS_PARTIAL_WITH_FAILURES.detail, REAL_US_CONGRESS_PARTIAL_WITH_FAILURES.status), true);
 });
 
-test('countsShowRowsWritten: mo-house-xml bill-xml branch reads counts.bills_detailed', () => {
-  assert.equal(countsShowRowsWritten('mo-house-xml', { counts: { document_type: 'bill-xml', bills_detailed: 2 } }), true);
-  assert.equal(countsShowRowsWritten('mo-house-xml', { counts: { document_type: 'bill-xml', bills_detailed: 0 } }), false);
+test('usCongressWroteSomething: THE I4b REGRESSION CASE — a live/partial run whose probe window found nothing (votes:0) must read as "wrote nothing"', () => {
+  assert.equal(usCongressWroteSomething({ counts: { votes: 0, casts: 0, failures: 10 } }, 'partial'), false);
 });
 
-test('countsShowRowsWritten: a missing/empty detail never throws, reads as false', () => {
-  assert.equal(countsShowRowsWritten('us-congress', {}), false);
-  assert.equal(countsShowRowsWritten('us-congress', null), false);
-  assert.equal(countsShowRowsWritten('mo-house-xml', {}), false);
+test('usCongressWroteSomething: an unrecognized shape fails OPEN on a completed run, never on a failed one', () => {
+  assert.equal(usCongressWroteSomething({}, 'succeeded'), true);
+  assert.equal(usCongressWroteSomething({}, 'failed'), false);
+});
+
+const REAL_US_SENATE_WROTE_VOTES = {
+  status: 'succeeded',
+  detail: {
+    counts: {
+      bills: 44, casts: 20997, votes: 210, failures: 0, resolved: 20997, unresolved: 0, senate_members_ensured: 100, senate_members_filtered_historical: 2157,
+    },
+    failures: [],
+    unresolved: [],
+  },
+};
+
+test('usSenateWroteSomething: real succeeded row (votes:210) -> true; a zero-vote instance of the same real shape -> false', () => {
+  assert.equal(usSenateWroteSomething(REAL_US_SENATE_WROTE_VOTES.detail, REAL_US_SENATE_WROTE_VOTES.status), true);
+  const zeroVotes = { counts: { ...REAL_US_SENATE_WROTE_VOTES.detail.counts, votes: 0 } };
+  assert.equal(usSenateWroteSomething(zeroVotes, 'succeeded'), false);
+});
+
+test('usSenateWroteSomething: an unrecognized shape fails OPEN on a completed run, never on a failed one', () => {
+  assert.equal(usSenateWroteSomething({}, 'partial'), true);
+  assert.equal(usSenateWroteSomething({}, 'failed'), false);
+});
+
+// ---- mo-house-xml: real rollcall-pdf (rollCallResult.castCount) and bill-xml
+// (counts.bills_detailed) shapes, both branches ----
+
+const REAL_MO_HOUSE_ROLLCALL_PDF = {
+  status: 'succeeded',
+  detail: {
+    counts: {
+      failures: 0, document_type: 'rollcall-pdf', skipped_failed_pdfs: 0, skipped_failed_pdf_keys: [],
+    },
+    rollCallResult: {
+      mode: 'live', gated: false, resolved: 1, castCount: 158, persisted: true, unresolved: 157,
+    },
+  },
+};
+const REAL_MO_HOUSE_BILL_XML = {
+  status: 'succeeded',
+  detail: {
+    counts: {
+      roster: {}, failures: 0, bills_listed: 2099, document_type: 'bill-xml', bills_detailed: 1, list_fetch_mode: 'live', skipped_failed_pdfs: 0, skipped_failed_pdf_keys: [],
+    },
+    failures: [],
+    billResults: [{}],
+  },
+};
+
+test('moHouseWroteSomething: real rollcall-pdf row (castCount:158) -> true; a zero-cast instance of the same real shape -> false', () => {
+  assert.equal(moHouseWroteSomething(REAL_MO_HOUSE_ROLLCALL_PDF.detail, REAL_MO_HOUSE_ROLLCALL_PDF.status), true);
+  const zeroCast = { ...REAL_MO_HOUSE_ROLLCALL_PDF.detail, rollCallResult: { ...REAL_MO_HOUSE_ROLLCALL_PDF.detail.rollCallResult, castCount: 0 } };
+  assert.equal(moHouseWroteSomething(zeroCast, 'succeeded'), false);
+});
+
+test('moHouseWroteSomething: real bill-xml row (bills_detailed:1) -> true; a zero instance of the same real shape -> false', () => {
+  assert.equal(moHouseWroteSomething(REAL_MO_HOUSE_BILL_XML.detail, REAL_MO_HOUSE_BILL_XML.status), true);
+  const zeroBills = { ...REAL_MO_HOUSE_BILL_XML.detail, counts: { ...REAL_MO_HOUSE_BILL_XML.detail.counts, bills_detailed: 0 } };
+  assert.equal(moHouseWroteSomething(zeroBills, 'succeeded'), false);
+});
+
+test('moHouseWroteSomething: an unrecognized document_type fails OPEN on a completed run, never on a failed one', () => {
+  assert.equal(moHouseWroteSomething({ counts: { document_type: 'some-future-branch' } }, 'succeeded'), true);
+  assert.equal(moHouseWroteSomething({ counts: { document_type: 'some-future-branch' } }, 'failed'), false);
+  assert.equal(moHouseWroteSomething({}, 'partial'), true);
+});
+
+// ---- legiscan: THE ACTUAL NEW-1 FIX. Real ingest-legiscan.js shape has `votes` at the TOP
+// LEVEL of detail (never nested under .counts) — the old code's detail.counts.votes lookup could
+// never match it. ALSO real: ingest-legiscan-texts.js writes to the SAME source='legiscan' key
+// with a totally different, votes-free shape (nested under .counts this time) — and a real
+// failed-run shape with no votes field at all. ----
+
+const REAL_LEGISCAN_WROTE_VOTES = {
+  status: 'succeeded',
+  detail: {
+    bills: 3146,
+    casts: 70465,
+    votes: 604,
+    people: { gated: 0, created: 0, matched: 193, ambiguous: 0 },
+    session: { id: 'bf3c7f23-358d-4399-8279-3a8e60a96eda', gated: false, reason: 'exact_key', identifier: '261' },
+    sessions: 1,
+    datasetGate: { reason: 'hash_unchanged', shouldFetch: false },
+    queriesUsed: 1,
+    queries_used: 1,
+    votesByChamber: { house: 404, senate: 200 },
+    reconciliationFailures: 0,
+  },
+};
+// The ingest-legiscan-texts.js shape — real, but votes-unrelated (document/text-cache counters).
+const REAL_LEGISCAN_TEXTS_SHAPE = {
+  status: 'partial',
+  detail: {
+    counts: {
+      inserted: 3140, nonPdfMime: 0, statusError: 0, billsPlanned: 3152, cacheCorrupt: 0, datasetsRead: 31, decodeFailed: 0, docCacheHits: 0, extractEmpty: 1, queriesSpent: 3152, budgetRefused: 0, alreadyPresent: 0, datasetsMissing: 0, oversizeRefused: 11, identityMismatch: 0, missingSourceUrl: 0, alreadyHasVersion: 25,
+    },
+    failures: new Array(12).fill({ step: 'x' }),
+    attribution: { url: 'https://legiscan.com', holder: 'LegiScan', license: 'CC BY 4.0' },
+    queries_used: 3152,
+  },
+};
+const REAL_LEGISCAN_FAILED = {
+  status: 'failed',
+  detail: {
+    error: 'Error: insertIfAbsent(votes) failed: date/time field value out of range: "0000-00-00"',
+    queries_used: 1,
+  },
+};
+
+test('legiscanWroteSomething THE NEW-1 FIX: real ingest-legiscan.js row (top-level detail.votes:604) -> true — this is exactly the shape the old detail.counts.votes lookup measured 0/52 true against', () => {
+  assert.equal(legiscanWroteSomething(REAL_LEGISCAN_WROTE_VOTES.detail, REAL_LEGISCAN_WROTE_VOTES.status), true);
+});
+
+test('legiscanWroteSomething: a zero-vote instance of the real ingest-legiscan.js shape -> false', () => {
+  const zeroVotes = { ...REAL_LEGISCAN_WROTE_VOTES.detail, votes: 0 };
+  assert.equal(legiscanWroteSomething(zeroVotes, 'succeeded'), false);
+});
+
+test('legiscanWroteSomething: the real ingest-legiscan-texts.js shape (same source=\'legiscan\' key, no votes field anywhere) fails OPEN because the run genuinely completed', () => {
+  assert.equal(legiscanWroteSomething(REAL_LEGISCAN_TEXTS_SHAPE.detail, REAL_LEGISCAN_TEXTS_SHAPE.status), true);
+});
+
+test('legiscanWroteSomething: the real failed-run shape (no votes field, status failed) -> false, never fails open on a genuine failure', () => {
+  assert.equal(legiscanWroteSomething(REAL_LEGISCAN_FAILED.detail, REAL_LEGISCAN_FAILED.status), false);
+});
+
+// ---- defaultWroteSomething: the fallback for a registry entry with no predicate wired at all ----
+
+test('defaultWroteSomething fails open for any completed run, never for a failed one', () => {
+  assert.equal(defaultWroteSomething({ anything: true }, 'succeeded'), true);
+  assert.equal(defaultWroteSomething({ anything: true }, 'partial'), true);
+  assert.equal(defaultWroteSomething({ anything: true }, 'failed'), false);
+  assert.equal(defaultWroteSomething(null, null), false);
 });
 
 // ---- parseChildOutput ----
@@ -605,6 +807,25 @@ test('buildRegistry: all five sources, correct scripts + static args, legiscan r
   assert.equal(byKey.legiscan.scriptPath, 'src/cli/ingest-legiscan.js');
   assert.deepEqual(byKey.legiscan.cliArgs, ['--session', '2239']);
   assert.equal(byKey.legiscan.resolvable, true);
+});
+
+test('ROUND 3 (NEW-1): buildRegistry wires each entry to ITS OWN wroteSomething predicate — never a shared/generic one', async () => {
+  const client = fakeRegistryClient({ legiscanSessionId: 2239 });
+  const registry = await buildRegistry(client, { now: Date.now(), year: 2026 });
+  const byKey = Object.fromEntries(registry.map((e) => [e.key, e]));
+
+  assert.equal(byKey['mo-senate-web'].wroteSomething, moSenateWroteSomething);
+  assert.equal(byKey['mo-house-xml'].wroteSomething, moHouseWroteSomething);
+  assert.equal(byKey['us-congress'].wroteSomething, usCongressWroteSomething);
+  assert.equal(byKey['us-senate'].wroteSomething, usSenateWroteSomething);
+  assert.equal(byKey.legiscan.wroteSomething, legiscanWroteSomething);
+
+  // Each predicate must be independently callable and produce source-specific answers even
+  // against the SAME detail shape — proves they are genuinely distinct functions, not one
+  // dispatcher pretending to be five.
+  assert.equal(byKey.legiscan.wroteSomething({ votes: 3 }, 'succeeded'), true); // top-level votes
+  assert.equal(byKey['us-congress'].wroteSomething({ votes: 3 }, 'succeeded'), true); // fails open — no .counts.votes here, but a completed run
+  assert.equal(byKey['us-congress'].wroteSomething({ counts: { votes: 0 } }, 'succeeded'), false); // the real, precise signal
 });
 
 test('ROUND 2: buildRegistry gives every source EXCEPT legiscan the default CHILD_TIMEOUT_MS, and legiscan its own much larger LEGISCAN_CHILD_TIMEOUT_MS', async () => {
@@ -987,6 +1208,7 @@ test('ROUND 2 RED-FIRST (finding 3): a timeout-killed legiscan run (which had al
     scriptPath: 'src/cli/ingest-legiscan.js',
     cliArgs: ['--session', '2239'],
     timeoutMs: 75 * 60 * 1000,
+    wroteSomething: legiscanWroteSomething,
   };
   const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
   // Simulate: legiscan's own openRun already fired (a real row exists, 'running') before the
@@ -1019,6 +1241,73 @@ test('ROUND 2 RED-FIRST (finding 3): a timeout-killed legiscan run (which had al
   assert.equal(closedRow.detail.timeoutMs, 75 * 60 * 1000);
 });
 
+test('ROUND 3 RED-FIRST (NEW-4): a forward-skewed local clock (this tick\'s row lands slightly BEFORE the literal tickStartIso) is still found and closed, thanks to the skew-tolerance grace', async () => {
+  const tickStartIso = '2026-07-31T12:00:00.000Z';
+  const chosen = {
+    key: 'legiscan',
+    minIntervalMs: 24 * 60 * 60 * 1000,
+    lastStartedAtIso: '2026-07-30T07:00:00.000Z',
+    resolvable: true,
+    scriptPath: 'src/cli/ingest-legiscan.js',
+    cliArgs: ['--session', '2239'],
+    timeoutMs: 75 * 60 * 1000,
+    wroteSomething: legiscanWroteSomething,
+  };
+  const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
+  // The DB (server clock) timestamped this row 90 SECONDS BEFORE the local tickStartIso — a
+  // plausible forward local-clock skew. Without the grace, the plain `>= tickStartIso` filter
+  // would miss it entirely (killClosedRunIds: [], silently indistinguishable from "nothing
+  // needed closing"). It is well within ORPHAN_CLOSE_SKEW_GRACE_MS (5 min), so it must still be found.
+  const orphanId = client._seed({
+    source: 'legiscan', status: 'running', started_at: '2026-07-31T11:58:30.000Z', detail: null,
+  });
+
+  const spawnFn = () => ({
+    error: Object.assign(new Error('spawnSync ingest-legiscan.js ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+    status: null, stdout: '', stderr: '',
+  });
+  const result = await runChosenSource(client, chosen, {
+    runChildCliFn: (scriptPath, cliArgs, opts) => runChildCli(scriptPath, cliArgs, { ...opts, spawnFn }),
+    tickStartIso,
+  });
+
+  assert.deepEqual(result.killClosedRunIds, [orphanId], 'the skew-tolerant grace must still find a row timestamped slightly before tickStartIso');
+  assert.equal(client._get(orphanId).status, 'failed');
+});
+
+test('ROUND 3 (NEW-4): the skew grace is bounded — a row from BEFORE the grace window (genuinely older, pre-existing history) is still correctly excluded', async () => {
+  const tickStartIso = '2026-07-31T12:00:00.000Z';
+  const chosen = {
+    key: 'legiscan',
+    minIntervalMs: 24 * 60 * 60 * 1000,
+    lastStartedAtIso: '2026-07-30T07:00:00.000Z',
+    resolvable: true,
+    scriptPath: 'src/cli/ingest-legiscan.js',
+    cliArgs: ['--session', '2239'],
+    timeoutMs: 75 * 60 * 1000,
+    wroteSomething: legiscanWroteSomething,
+  };
+  const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
+  // 6 minutes before tick start — outside the 5-minute grace. Per the safety argument (every
+  // registry interval is >=30 min), this could not be a row THIS tick's invocation created, and
+  // must never be touched.
+  const staleId = client._seed({
+    source: 'legiscan', status: 'running', started_at: '2026-07-31T11:54:00.000Z', detail: null,
+  });
+
+  const spawnFn = () => ({
+    error: Object.assign(new Error('spawnSync ingest-legiscan.js ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+    status: null, stdout: '', stderr: '',
+  });
+  const result = await runChosenSource(client, chosen, {
+    runChildCliFn: (scriptPath, cliArgs, opts) => runChildCli(scriptPath, cliArgs, { ...opts, spawnFn }),
+    tickStartIso,
+  });
+
+  assert.deepEqual(result.killClosedRunIds, [], 'a row older than the grace window must never be touched');
+  assert.equal(client._get(staleId).status, 'running', 'genuinely pre-existing history is left completely alone');
+});
+
 test('ROUND 2: a timeout-killed us-congress run (which never reached its own openRun) still falls through to C1\'s self-record — closeOrphanedRunningRows correctly finds nothing to close', async () => {
   const tickStartIso = '2026-07-31T12:00:00.000Z';
   const chosen = {
@@ -1030,6 +1319,7 @@ test('ROUND 2: a timeout-killed us-congress run (which never reached its own ope
     cliArgs: ['--source', 'us-congress', '--rolls', '284-293'],
     timeoutMs: 8 * 60 * 1000,
     windowMaxKnown: 283,
+    wroteSomething: usCongressWroteSomething,
   };
   const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
   const spawnFn = () => ({
@@ -1059,6 +1349,7 @@ test('C1 RED-FIRST: when the child fails and writes NO new ingestion_runs row, r
     scriptPath: 'src/cli/ingest.js',
     cliArgs: ['--source', 'us-congress', '--year', '2026', '--rolls', '284-293'],
     windowMaxKnown: 283,
+    wroteSomething: usCongressWroteSomething,
   };
 
   // The fake starts already seeded with the OLD row (matching chosen.lastStartedAtIso) — the
@@ -1102,6 +1393,7 @@ test('runChosenSource: a NORMAL successful child (which writes its own row) is N
     resolvable: true,
     scriptPath: 'src/cli/ingest-mo-senate.js',
     cliArgs: ['--year', '2026', '--limit', '1'],
+    wroteSomething: moSenateWroteSomething,
   };
   const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
 
@@ -1130,6 +1422,7 @@ test('runChosenSource: a windowed source whose ONLY failures are expected tail 4
     scriptPath: 'src/cli/ingest.js',
     cliArgs: ['--source', 'us-congress', '--year', '2026', '--rolls', '284-293'],
     windowMaxKnown: 283,
+    wroteSomething: usCongressWroteSomething, // round 3: what buildRegistry actually attaches
   };
   const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
 

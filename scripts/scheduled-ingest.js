@@ -112,6 +112,21 @@ export const LEGISCAN_CHILD_TIMEOUT_MS = 75 * 60 * 1000; // 75 min — see deriv
 // kill and this process's cleanup finishing.
 export const LOCK_GRACE_MS = 60 * 1000; // 1 min
 
+// Round 3, NEW-2: an upper ceiling on a lock's declared maxDurationMs. Without this, isLockStale's
+// only validation was "finite and positive" — a lock somehow declaring an absurd value (hand-edited,
+// or a future bug) would be honored as-is and never go stale, permanently wedging every future tick
+// into "already-running" + exit 0, indistinguishable in Task Scheduler's history from a healthy
+// quiet period. 2 hours comfortably exceeds LEGISCAN_CHILD_TIMEOUT_MS + LOCK_GRACE_MS (the largest
+// legitimate declared duration today, 76 min) while still being a real, enforced ceiling — a
+// declared duration beyond this is treated exactly like a missing/corrupt one (isLockStale falls
+// back to fallbackMaxDurationMs).
+export const MAX_LOCK_DURATION_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// Round 3, NEW-4: tolerance subtracted from tickStartIso before scoping closeOrphanedRunningRows —
+// see runChosenSource's own comment at the call site for the full safety argument (every registry
+// interval is >=30 min, so this cannot capture pre-existing history).
+export const ORPHAN_CLOSE_SKEW_GRACE_MS = 5 * 60 * 1000; // 5 min
+
 // M2 (fix round 1): Node's spawnSync default maxBuffer (1 MB) is small enough that a chatty child
 // (the ingest CLIs have 2-11 console.error progress lines) could overflow it, which SILENTLY
 // kills the child and reports ENOBUFS as `result.error` — runChildCli used to fold that into the
@@ -199,14 +214,20 @@ export function parseArgs(argv) {
 // itself carries `maxDurationMs` (written by acquireLock, updated by updateLockMaxDuration once
 // the chosen source — and therefore its real timeout — is known), and staleness is judged against
 // THAT declared value. `fallbackMaxDurationMs` (still MAX_RUN_DURATION_MS by default) is used
-// only when the lock has no valid `maxDurationMs` of its own — an old-format or corrupt lock file
-// — which is the fail-safe direction: an unrecognized lock is judged by the conservative 10-minute
+// whenever the lock has no VALID `maxDurationMs` of its own — missing, corrupt, non-numeric,
+// non-positive, or (round 3, NEW-2) beyond MAX_LOCK_DURATION_MS — which is the fail-safe
+// direction: an unrecognized OR out-of-range lock is judged by the conservative 10-minute
 // default, never trusted to mean "wait indefinitely."
 export function isLockStale(lock, nowMs, fallbackMaxDurationMs = MAX_RUN_DURATION_MS) {
   const startedMs = Date.parse(lock.startedAt);
   if (!Number.isFinite(startedMs)) return true; // unparseable timestamp — never trusted, treated as stale
   const declared = Number(lock.maxDurationMs);
-  const maxDurationMs = Number.isFinite(declared) && declared > 0 ? declared : fallbackMaxDurationMs;
+  // Round 3, NEW-2: a declared duration beyond MAX_LOCK_DURATION_MS is treated exactly like a
+  // missing/corrupt one — an out-of-range value (hand-edited lock file, a future bug) must never
+  // be honored as "never go stale."
+  const maxDurationMs = Number.isFinite(declared) && declared > 0 && declared <= MAX_LOCK_DURATION_MS
+    ? declared
+    : fallbackMaxDurationMs;
   return nowMs - startedMs > maxDurationMs;
 }
 
@@ -375,25 +396,90 @@ export function isExpectedTailProbeOutcome(sourceKey, failures, windowMaxKnown) 
   });
 }
 
-// countsShowRowsWritten (I4b, fix round 1): reads the run's OWN detail — never inferred from
-// mode/status alone, which was the actual bug (a live/succeeded-or-partial run was treated as
-// "wrote something" even on a tick where every probed roll 404s and literally zero rows landed,
-// so refresh-aggregates.js fired every hour unconditionally). Source-specific because the CLIs'
-// count shapes are genuinely heterogeneous — verified against each one's real closeRun() call
-// site, not guessed:
-//   - mo-senate-web / us-congress / us-senate / legiscan: detail.counts.votes > 0
-//   - mo-house-xml: document_type-dependent — the rollcall-pdf branch writes CASTS
-//     (detail.rollCallResult.castCount, a sibling of counts, not inside it — see
-//     processRollCallPdf's return shape), the bill-xml branch writes BILL rows
-//     (detail.counts.bills_detailed)
-export function countsShowRowsWritten(sourceKey, detail) {
-  const counts = detail?.counts ?? {};
-  if (sourceKey === 'mo-house-xml') {
-    if (counts.document_type === 'rollcall-pdf') return (detail?.rollCallResult?.castCount ?? 0) > 0;
-    if (counts.document_type === 'bill-xml') return (counts.bills_detailed ?? 0) > 0;
-    return false;
+// wroteSomething predicates (round 3, NEW-1 fix): ONE PER REGISTRY SOURCE, each source declaring
+// how to read ITS OWN real close-detail shape — attached to its registry entry below (buildRegistry)
+// and invoked as `chosen.wroteSomething(detail, status)` from runChosenSource. This replaces
+// the single fix-round-1 `countsShowRowsWritten(sourceKey, detail)`, whose fallthrough
+// `detail.counts.votes` was WRONG for legiscan: measured against all 52 real legiscan
+// `ingestion_runs` rows, it evaluated true for ZERO of them, so refresh-aggregates.js never fired
+// after a legiscan run — a real regression (pre-fix-round-1, the refresh always fired) that
+// silently reintroduced the exact 2026-07-31 chart-drift defect for the single largest vote writer
+// in the database (legiscan is 82.3% of all `votes` rows). The fix-round-1 comment here claimed
+// "verified against each one's real closeRun() call site, not guessed" — true for four of five,
+// but legiscan's mapping was inferred by analogy with the other four, not actually measured, and
+// the inference was wrong. This round's version really was checked against real fixture rows
+// (tests/scheduled-ingest.test.js pulls them from live `ingestion_runs`) for all five.
+//
+// Every predicate below FAILS OPEN (returns true) for a succeeded/partial run whose detail
+// doesn't match its own expected shape — refreshing anyway is the accepted-safe direction (cheap,
+// idempotent SQL); silently never refreshing is the one this whole mechanism exists to prevent.
+// A 'failed' run never fails open (nothing to refresh after a genuine failure) — the accepted risk
+// is "occasionally refresh when nothing changed," not "refresh after every failure too."
+export function moSenateWroteSomething(detail, status) {
+  const votes = detail?.counts?.votes;
+  if (typeof votes === 'number') return votes > 0;
+  return status === 'succeeded' || status === 'partial';
+}
+
+export function usCongressWroteSomething(detail, status) {
+  const votes = detail?.counts?.votes;
+  if (typeof votes === 'number') return votes > 0;
+  return status === 'succeeded' || status === 'partial';
+}
+
+export function usSenateWroteSomething(detail, status) {
+  const votes = detail?.counts?.votes;
+  if (typeof votes === 'number') return votes > 0;
+  return status === 'succeeded' || status === 'partial';
+}
+
+// mo-house-xml: unchanged shape from round 1 (re-verified against real fixtures this round,
+// including all 5 real 'bill-xml' rows on file — every real 'rollcall-pdf' row on file already
+// checked by the reviewer's own re-review). document_type-dependent — the rollcall-pdf branch
+// writes CASTS (detail.rollCallResult.castCount, a SIBLING of counts, not inside it — see
+// processRollCallPdf's return shape), the bill-xml branch writes BILL rows
+// (detail.counts.bills_detailed). Falls open for a document_type this predicate doesn't
+// recognize (a future third branch) rather than assuming nothing was written.
+export function moHouseWroteSomething(detail, status) {
+  const documentType = detail?.counts?.document_type;
+  if (documentType === 'rollcall-pdf') {
+    const castCount = detail?.rollCallResult?.castCount;
+    if (typeof castCount === 'number') return castCount > 0;
+  } else if (documentType === 'bill-xml') {
+    const billsDetailed = detail?.counts?.bills_detailed;
+    if (typeof billsDetailed === 'number') return billsDetailed > 0;
   }
-  return (counts.votes ?? 0) > 0;
+  return status === 'succeeded' || status === 'partial';
+}
+
+// legiscan (the actual NEW-1 fix): `ingest-legiscan.js`'s own `buildSuccessCloseDetail` (that
+// file's own :961-963) is `return {...counts, attribution, queries_used: counts.queriesUsed}` —
+// it spreads `result.counts` at the TOP LEVEL of `detail`, never nested under a `.counts` key.
+// Verified against all 50 real `ingest-legiscan.js` rows on file: `detail.votes` (top-level) is a
+// genuine, reliable counter, observed 0-659 — this is the honest signal the old code's
+// `detail.counts.votes` lookup could never have matched (there is no `detail.counts` for this
+// CLI's own runs at all, which is the actual root cause of NEW-1's 0/52).
+//
+// `src/cli/ingest-legiscan-texts.js` ALSO writes to `source='legiscan'` — its own header comment
+// says so explicitly ("SAME source as ingest-legiscan.js") — with a COMPLETELY different,
+// votes-unrelated close-detail shape (billsPlanned/docCacheHits/alreadyHasVersion/... — text-cache
+// counters, nested under `detail.counts`, no votes field anywhere; 2 of the 52 real rows). This
+// scheduler's own registry only ever invokes ingest-legiscan.js, never ingest-legiscan-texts.js —
+// but queryLatestRun reads whatever the LATEST row for source='legiscan' happens to be, so if that
+// text CLI is ever run manually between scheduler ticks, this predicate would see ITS shape
+// instead. No honest votes signal exists there either, so it falls through to the same fail-open
+// default as every other unrecognized shape.
+export function legiscanWroteSomething(detail, status) {
+  const votes = detail?.votes;
+  if (typeof votes === 'number') return votes > 0;
+  return status === 'succeeded' || status === 'partial';
+}
+
+// defaultWroteSomething: fail-open fallback for a registry entry with no predicate wired at all
+// (should never happen with the five fixed entries below — defensive only, e.g. against a future
+// sixth source added without also wiring its own predicate).
+export function defaultWroteSomething(detail, status) {
+  return status === 'succeeded' || status === 'partial';
 }
 
 // ---- DB-facing helpers ----
@@ -550,6 +636,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       scriptPath: 'src/cli/ingest-mo-senate.js',
       cliArgs: ['--year', String(year), '--limit', '1'],
       timeoutMs: CHILD_TIMEOUT_MS,
+      wroteSomething: moSenateWroteSomething,
     },
     {
       key: 'mo-house-xml',
@@ -565,6 +652,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       // CLI fall through to its own DEFAULT_MO_HOUSE_SESSION, which is the current session.
       cliArgs: ['--limit', '1'],
       timeoutMs: CHILD_TIMEOUT_MS,
+      wroteSomething: moHouseWroteSomething,
     },
     {
       key: 'us-congress',
@@ -582,6 +670,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
         : [],
       timeoutMs: CHILD_TIMEOUT_MS,
       windowMaxKnown: rollWindow.value != null ? rollWindow.value.maxKnown : undefined,
+      wroteSomething: usCongressWroteSomething,
     },
     {
       key: 'us-senate',
@@ -595,6 +684,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
         : [],
       timeoutMs: CHILD_TIMEOUT_MS,
       windowMaxKnown: voteWindow.value != null ? voteWindow.value.maxKnown : undefined,
+      wroteSomething: usSenateWroteSomething,
     },
     {
       key: 'legiscan',
@@ -612,6 +702,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       // reimplemented.
       cliArgs: legiscanResolvedId != null ? ['--session', String(legiscanResolvedId)] : [],
       timeoutMs: LEGISCAN_CHILD_TIMEOUT_MS,
+      wroteSomething: legiscanWroteSomething,
     },
   ];
 }
@@ -746,9 +837,11 @@ export async function closeOrphanedRunningRows(client, source, { sinceIso, timeo
 //
 // I4: classifies the outcome from the run's OWN detail — never mode/status alone. `healthy` folds
 // in the tail-probe case (I4a): a windowed source (us-congress/us-senate) whose ONLY failures are
-// expected past-the-edge 404s reads as healthy, not alarming. `wroteRows` (I4b) is what gates the
-// aggregate refresh in main() — read from detail.counts, so a tick where every probe 404s and
-// zero rows landed correctly does NOT trigger a refresh, unlike the old mode/status heuristic.
+// expected past-the-edge 404s reads as healthy, not alarming. `wroteRows` (I4b, round 3 NEW-1 fix)
+// is what gates the aggregate refresh in main() — read via chosen.wroteSomething, THIS source's
+// own registry-declared predicate (see buildRegistry / the wroteSomething functions above), so a
+// tick where every probe 404s and zero rows landed correctly does NOT trigger a refresh, while a
+// shape a predicate doesn't recognize fails open (refreshes anyway) rather than silently never.
 // tickStartIso (round 2, finding 3): this TICK's own start time (main() captures `now` once,
 // before anything else runs, and passes its ISO form through) — the ONLY thing
 // closeOrphanedRunningRows below is allowed to treat as "this run's own row." Required whenever a
@@ -784,8 +877,23 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
     // this closes the row the kill stranded at 'running'. For us-congress/us-senate (which open
     // LATE, the actual C1 root cause), this correctly finds nothing and is a harmless no-op; the
     // existing self-record path below handles that case instead.
+    //
+    // Round 3, NEW-4: sinceIso is tickStartIso MINUS a skew-tolerance grace, not tickStartIso
+    // itself. tickStartIso comes from this process's LOCAL clock (Date.now() in main(), captured
+    // before anything else runs); started_at is DB-assigned (Postgres column default now(), the
+    // Supabase server's clock). If the local clock runs even slightly ahead of the server's, a row
+    // the CHOSEN source opens a second or two into this very tick could land with
+    // started_at < tickStartIso — the exact row this mechanism exists to find would then silently
+    // fail the >= filter, with killClosedRunIds:[] reading identically to "nothing needed closing".
+    // Safety argument for why 5 minutes of grace cannot capture stale, pre-existing history: every
+    // registry source's own minIntervalMs is >=30 minutes, so a 'running' row for THIS source
+    // dated within 5 minutes before tick start would mean that source was invoked well inside its
+    // own cooldown — impossible, since pickMostOverdue only ever selects a DUE source, and a
+    // source invoked <30min ago cannot be due under a >=30min interval. Any 'running' row this
+    // grace additionally captures must therefore be from the invocation THIS tick just made, never
+    // an older one.
     killClosedRunIds = await closeOrphanedRunningRows(client, chosen.key, {
-      sinceIso: tickStartIso,
+      sinceIso: new Date(Date.parse(tickStartIso) - ORPHAN_CLOSE_SKEW_GRACE_MS).toISOString(),
       timeoutMs: launchError.timeoutMs ?? chosen.timeoutMs,
       note: `${launchError.code}: ${launchError.message}`,
     });
@@ -804,7 +912,11 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
   const detail = selfRecordedFailure ? {} : (latestRun?.detail ?? {});
   const status = selfRecordedFailure ? 'failed' : (latestRun?.status ?? null);
   const failures = detail.failures ?? [];
-  const wroteRows = !selfRecordedFailure && countsShowRowsWritten(chosen.key, detail);
+  // Round 3, NEW-1 fix: chosen.wroteSomething is THIS source's own registry-declared predicate
+  // (buildRegistry) — never a generic key-dispatched function guessing at a shape it was never
+  // checked against. defaultWroteSomething is the fail-open fallback for the (should-never-happen)
+  // case where a registry entry has no predicate wired at all.
+  const wroteRows = !selfRecordedFailure && (chosen.wroteSomething ?? defaultWroteSomething)(detail, status);
   const tailProbeOnly = !selfRecordedFailure && status === 'partial'
     && isExpectedTailProbeOutcome(chosen.key, failures, chosen.windowMaxKnown);
   const healthy = !selfRecordedFailure && !killedByScheduler && (status === 'succeeded' || tailProbeOnly);
@@ -970,7 +1082,26 @@ async function main() {
     // the child starts, so a later tick's stale-reclaim check judges this run against its actual
     // bound (e.g. legiscan's 75 min) rather than the generic selection-phase placeholder
     // acquireLock wrote.
-    updateLockMaxDuration(LOCK_PATH, lockResult.nonce, chosen.timeoutMs + LOCK_GRACE_MS);
+    //
+    // Round 3, NEW-3: its return value MUST be acted on. Round 2 called this purely for effect —
+    // if it failed (lock missing/corrupt/no-longer-nonce-matched between acquire and here, an
+    // edge case but a real one), the child would still have been spawned under the stale
+    // selection-phase placeholder, reopening the exact mid-run-reclaim window round 2 exists to
+    // close. Fail-safe beats limping: if the lock can't record the run's real declared duration,
+    // do not spawn it at all — log honestly, release the lock (still via the outer finally), exit
+    // 0, and let the next tick retry (the source's own due-ness is untouched, since nothing ran).
+    const durationRecorded = updateLockMaxDuration(LOCK_PATH, lockResult.nonce, chosen.timeoutMs + LOCK_GRACE_MS);
+    if (!durationRecorded) {
+      writeLog({
+        timestamp: nowIso(),
+        mode: 'blocked',
+        chosen: chosen.key,
+        reason: `could not record ${chosen.key}'s declared run duration on the lock before spawning — refusing to start a run the stale-reclaim window would not correctly protect; next tick retries`,
+        sources: sourcesSummary,
+        lockReclaimed,
+      });
+      return;
+    }
 
     const run = await runChosenSource(client, chosen, { tickStartIso: nowIsoAtTickStart });
 
