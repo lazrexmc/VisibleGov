@@ -19,6 +19,10 @@ import {
   shouldRefetchBillList, readCachedBillList, writeCachedBillList, MO_BILL_LIST_MAX_AGE_MS,
   countPendingBills, runMoHouse, LiveRequestLimitError,
 } from '../src/cli/ingest-mo-house.js';
+// 2026-08-01 fast-follow (GAP 2): the scheduler's own predicate, pinned against the LITERAL new
+// run-detail shapes runMoHouse now emits — never a hand-approximated copy of the shape. Imported
+// straight from the scheduler script (already exported there; no changes to that file).
+import { moHouseWroteSomething } from '../scripts/scheduled-ingest.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
 const billListXml = readFileSync(`${FIXTURES}/bill-list-sample-truncated.xml`, 'utf8');
@@ -26,6 +30,12 @@ const memberListXml = readFileSync(`${FIXTURES}/member-list-sample-truncated.xml
 const representativeXml = readFileSync(`${FIXTURES}/representative-107.xml`, 'utf8');
 const hb1800Xml = readFileSync(`${FIXTURES}/HB1800-with-rollcall-tallies.xml`, 'utf8');
 const hb2Xml = readFileSync(`${FIXTURES}/HB2-bill-text-pdf-only.xml`, 'utf8');
+// Real captured 4-column roll-call PDF (ground truth, task-4b-brief.md, also used by
+// tests/mo-rollcall-pdf.test.js): 82 yes / 61 no / 2 present / 13 absent / 5 vacancies, MATTHIESEN
+// voted Y. Read as raw bytes (no encoding) — processRollCallPdf's live branch does
+// `Buffer.from(await fetchRollCallPdf(...))`, so the injected fake fetcher must return something
+// Buffer.from can consume, exactly like the real ArrayBuffer fetchMoRollCallPdf returns.
+const rollcallPdfBuffer = readFileSync(`${FIXTURES}/rollcall-034.008.pdf`);
 
 // ---- constants ----
 
@@ -935,22 +945,41 @@ const threeBillListXml = `<ROOT>
 // makeFakeMoSenateRunClient does.
 function makeMoHouseTable(store, idPrefix) {
   let counter = 0;
+  // builder is a genuine THENABLE (like the real Supabase/PostgREST query builder) rather than a
+  // set of pseudo-terminal async methods guessing which call ends a chain: `.eq()`/`.in()`
+  // COLLECT real filters and return `builder` for further chaining; `.like()`/`.not()`/`.order()`
+  // are accepted (this fake never needs to actually filter/sort on them — every row this file
+  // seeds already matches them by construction) but otherwise no-ops; `await builder` (at ANY
+  // point in the chain, e.g. after `.not()` for loadMoRoster's roster query, or after `.order()`
+  // for listPendingRollCallPdfs's pending-PDF query) resolves via `.then()` to the rows matching
+  // whatever `.eq()`/`.in()` filters were actually set. FOUND WHILE BUILDING THIS FAST-FOLLOW:
+  // an earlier draft made `.not()` a bare passthrough with NO `.then()` on the builder at all —
+  // `await builder` (non-thenable) resolved to the builder object ITSELF, so `{ data, error } =
+  // await ...` silently destructured to `{data: undefined, error: undefined}`, and
+  // `(data ?? []).map(...)` in loadMoRoster happened to produce the same `[]` an empty roster
+  // legitimately would — the PDF-priority test below would have passed for the WRONG reason and
+  // silently returned `[]` even for a non-empty legislators store on any future test.
   const builderFor = (rows) => {
     const filters = [];
+    const inFilters = [];
+    const matching = () => rows.filter((r) => filters.every(([c, v]) => r[c] === v)
+      && inFilters.every(([c, vals]) => vals.includes(r[c])));
     const builder = {
       eq(col, val) { filters.push([col, val]); return builder; },
+      in(col, vals) { inFilters.push([col, vals]); return builder; },
       like() { return builder; },
       not() { return builder; },
+      order() { return builder; },
       maybeSingle: async () => {
-        const found = rows.filter((r) => filters.every(([c, v]) => r[c] === v));
+        const found = matching();
         return { data: found[0] ?? null, error: null };
       },
       single: async () => {
-        const found = rows.filter((r) => filters.every(([c, v]) => r[c] === v));
+        const found = matching();
         if (found.length !== 1) return { data: null, error: { message: `expected 1 row for a fake table, got ${found.length}` } };
         return { data: found[0], error: null };
       },
-      order: async () => ({ data: rows.filter((r) => filters.every(([c, v]) => r[c] === v)), error: null }),
+      then(resolve) { resolve({ data: matching(), error: null }); },
     };
     return builder;
   };
@@ -993,7 +1022,7 @@ function makeMoHouseTable(store, idPrefix) {
 // update), same convention as ingest-mo-senate.js's makeFakeMoSenateRunClient.
 function makeFakeMoHouseRunClient() {
   const store = {
-    sessions: [], bills: [], bill_actions: [], votes: [], legislators: [],
+    sessions: [], bills: [], bill_actions: [], votes: [], legislators: [], vote_casts: [],
   };
   const closeCalls = [];
   let runCounter = 0;
@@ -1223,23 +1252,178 @@ test('runMoHouse: --bill-xml-file makes ZERO live requests regardless of a missi
 
 // ---- the one-live-request-per-run invariant, named explicitly ----
 
-test('runMoHouse: the one-live-request-per-run invariant — a multi-target scenario with a missing/stale list would have needed 2 live fetches under the old shape (list + bill); this run makes exactly 1', async () => {
+test('runMoHouse: the one-live-request-per-run invariant — a multi-target scenario with a missing/stale list would have needed 2 live fetches under the old shape (list + bill); this run makes exactly 1 across ALL THREE live fetchers (list, bill XML, roll-call PDF)', async () => {
   await withScratchArtifactDirAsync(async (base) => {
     const billsDir = join(base, 'bills');
     const billListDir = join(base, 'bill-list'); // no cache at all -> stale/missing
     const rollcallDir = join(base, 'rollcalls');
     const { client } = makeFakeMoHouseRunClient();
 
-    let liveFetchCount = 0; // combined counter across BOTH fetch types — the actual invariant
+    // Combined counter across ALL THREE live fetchers — the actual invariant under test. Routing
+    // fetchRollCallPdf through the SAME counter (even though this scenario's fake `votes` table
+    // has no pending PDF, so it never fires) makes the assertion airtight against a future
+    // regression where a run somehow tried the PDF slot AND the list/bill-detail slot together.
+    let liveFetchCount = 0;
     const fetchBillList = async () => { liveFetchCount += 1; return threeBillListXml; };
     const fetchBillXml = async () => { liveFetchCount += 1; return hb2Xml; };
+    const fetchRollCallPdf = async () => { liveFetchCount += 1; return rollcallPdfBuffer; };
 
     const args = parseMoHouseArgs(['--limit', '1']);
     const result = await runMoHouse(client, args, {
-      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml, fetchRollCallPdf,
     });
 
     assert.equal(liveFetchCount, 1, 'exactly one live house.mo.gov request this run, regardless of how many bills are pending or whether the list was also stale');
     assert.equal(result.status, 'succeeded');
+  });
+});
+
+// ---- GAP 1 fast-follow (2026-08-01 review): the PDF-priority slot had zero test coverage —
+// its one-request safety rested entirely on the reviewer's code-reading proof, not an executed
+// test. These pin it directly, using the same real PDF fixture mo-rollcall-pdf.test.js already
+// proves parses/reconciles cleanly, injected through the newly-added fetchRollCallPdf seam. ----
+
+test('runMoHouse: PDF-PRIORITY slot — a pending roll-call PDF takes the slot with exactly ONE live request; neither list-refresh nor bill-detail fires in the same invocation', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list'); // empty -> would normally force slot (a) if reached
+    const rollcallDir = join(base, 'rollcalls'); // scratch -> selectPendingPdf's existsSync/quarantine checks land here, not the real dir
+    const { client, closeCalls, store } = makeFakeMoHouseRunClient();
+    // A pending roll-call PDF: source_key matches the mo-house-xml-% prefix
+    // listPendingRollCallPdfs scopes to, source_url is non-null (the RollCallPDF link), and no
+    // vote_casts row exists yet for its vote_id — exactly what selectPendingPdf selects on.
+    store.votes.push({ id: 'vote-1', source_key: 'mo-house-xml-HB9-1', source_url: 'https://documents.house.mo.gov/billtracking/bills261/rollcalls/034.008.pdf' });
+
+    let listCalls = 0;
+    let xmlCalls = 0;
+    let pdfCalls = 0;
+    const fetchBillList = async () => { listCalls += 1; throw new Error('must not fetch the list live — the PDF slot takes priority and returns before the list is ever consulted'); };
+    const fetchBillXml = async () => { xmlCalls += 1; throw new Error('must not fetch a bill live — the PDF slot takes priority'); };
+    const fetchRollCallPdf = async (url) => {
+      pdfCalls += 1;
+      assert.equal(url, 'https://documents.house.mo.gov/billtracking/bills261/rollcalls/034.008.pdf');
+      return rollcallPdfBuffer;
+    };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml, fetchRollCallPdf,
+    });
+
+    // (a) exactly one live request — the roll-call PDF, nothing else.
+    assert.equal(pdfCalls, 1);
+    assert.equal(listCalls, 0);
+    assert.equal(xmlCalls, 0);
+    // (b) neither the list-refresh nor the bill-detail slot ran this invocation — proven both by
+    // the fetcher spies above (they'd have thrown) AND by the run's own detail shape, which stays
+    // the pre-existing rollcall-pdf shape (no `slot`/list_fetch_mode field ever gets added to it).
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.document_type, 'rollcall-pdf');
+    assert.equal(result.counts.slot, undefined);
+    assert.equal(result.counts.list_fetch_mode, undefined);
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].status, 'succeeded');
+    assert.equal(closeCalls[0].detail.counts.document_type, 'rollcall-pdf');
+    // The real fixture's known ground truth (task-4b-brief.md) — proves a REAL parse ran, not a
+    // stub: 82/61/2 tallies, and with an empty legislators roster (persistRoster never runs on
+    // this slot — see runMoHouse's own comment) every cast is honestly unresolved, never guessed.
+    const { rollCallResult } = closeCalls[0].detail;
+    assert.equal(rollCallResult.tallies.yes, 82);
+    assert.equal(rollCallResult.tallies.no, 61);
+    assert.equal(rollCallResult.castCount, 158);
+    assert.equal(rollCallResult.resolved, 0);
+    assert.equal(rollCallResult.unresolved, 158);
+    assert.equal(existsSync(billListDir), false, 'no bill-list cache directory was ever created — the list slot never ran this invocation');
+  });
+});
+
+// ---- GAP 2 fast-follow (2026-08-01 review): scripts/scheduled-ingest.js's moHouseWroteSomething
+// predicate (already exported there — no changes to that file) was never pinned against the NEW
+// run-detail shapes runMoHouse emits (list-refresh / bill-detail / honest-no-op) — exactly the
+// LegiScan NEW-1 regression class (an unpinned predicate silently reading the wrong shape). These
+// feed it the LITERAL detail runMoHouse just closed a real run with (closeCalls[0].detail — the
+// exact object shape written to ingestion_runs.detail), never a hand-typed approximation, so a
+// future field rename in either file breaks the test that actually connects them. ----
+
+test('moHouseWroteSomething: fed the LITERAL list-refresh slot detail runMoHouse just emitted -> false (stub rows only, no bill was actually detailed)', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list'); // empty -> forces slot (a)
+    const rollcallDir = join(base, 'rollcalls');
+    const { client, closeCalls } = makeFakeMoHouseRunClient();
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    await runMoHouse(client, args, {
+      billsDir,
+      billListDir,
+      rollcallDir,
+      fetchBillList: async () => threeBillListXml,
+      fetchBillXml: async () => { throw new Error('must not fetch a bill live — this is the list-refresh slot'); },
+    });
+
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].detail.counts.slot, 'list-refresh', 'sanity: this really is the new slot this gap is about');
+    assert.equal(
+      moHouseWroteSomething(closeCalls[0].detail, closeCalls[0].status),
+      false,
+      'a list-refresh run only persists bill STUBS (title/status/canonical_url all null) — bills_detailed stays 0, so wroteSomething must be false',
+    );
+  });
+});
+
+test('moHouseWroteSomething: fed the LITERAL bill-detail slot detail runMoHouse just emitted with a real write -> true', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list');
+    const rollcallDir = join(base, 'rollcalls');
+    writeCachedBillList('261', [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }], billListDir); // fresh -> forces slot (b)
+    const { client, closeCalls } = makeFakeMoHouseRunClient();
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    await runMoHouse(client, args, {
+      billsDir,
+      billListDir,
+      rollcallDir,
+      fetchBillList: async () => { throw new Error('must not fetch the list live — the cache is fresh'); },
+      fetchBillXml: async () => hb2Xml,
+    });
+
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].detail.counts.slot, 'bill-detail');
+    assert.equal(closeCalls[0].detail.counts.bills_detailed, 1, 'sanity: a real bill actually got detailed this run');
+    assert.equal(
+      moHouseWroteSomething(closeCalls[0].detail, closeCalls[0].status),
+      true,
+      'bills_detailed:1 is a real write (title/status/canonical_url/actions/votes for an actual bill) — wroteSomething must be true',
+    );
+  });
+});
+
+test('moHouseWroteSomething: fed the LITERAL honest-no-op detail runMoHouse just emitted (nothing pending) -> false', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list');
+    const rollcallDir = join(base, 'rollcalls');
+    writeCachedBillList('261', [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }], billListDir);
+    writeEnrichedMarker('HB 2', {}, billsDir); // already enriched -> nothing pending
+    const { client, closeCalls } = makeFakeMoHouseRunClient();
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    await runMoHouse(client, args, {
+      billsDir,
+      billListDir,
+      rollcallDir,
+      fetchBillList: async () => { throw new Error('must not fetch live'); },
+      fetchBillXml: async () => { throw new Error('must not fetch live'); },
+    });
+
+    assert.equal(closeCalls.length, 1);
+    assert.equal(closeCalls[0].detail.counts.slot, 'bill-detail');
+    assert.equal(closeCalls[0].detail.counts.bills_detailed, 0, 'sanity: this really is the honest no-op — zero live requests, zero bills detailed');
+    assert.equal(
+      moHouseWroteSomething(closeCalls[0].detail, closeCalls[0].status),
+      false,
+      'an honest no-op (nothing pending) wrote nothing at all — wroteSomething must be false, never fail open just because status is succeeded',
+    );
   });
 });

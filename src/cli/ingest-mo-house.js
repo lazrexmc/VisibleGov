@@ -461,8 +461,14 @@ export async function persistBillDetail(client, runId, sessionRow, parsed) {
 // invocation still processes exactly ONE document total (one PDF, OR — only once zero PDFs are
 // pending — the existing bill-list+selectTargets path), matching "each cooldown slot processes
 // ONE document" from the brief.
-function artifactPath(sourceKey) {
-  return `${ROLLCALL_ARTIFACT_DIR}/${sourceKey}.json`;
+// dir is injectable (defaults to the real ROLLCALL_ARTIFACT_DIR) — 2026-08-01 fast-follow: this
+// was the one function on the pending-roll-call-PDF read path that was NOT already dir-injectable
+// (readFailureArtifact/writeFailureArtifact/excludeQuarantinedPdfs/replayArtifacts all already
+// were), which left listPendingRollCallPdfs/selectPendingPdf below unable to be exercised in a
+// test without touching the real gitignored artifacts dir. Same convention as every other
+// dir param in this file; default is unchanged so production behavior is identical.
+function artifactPath(sourceKey, dir = ROLLCALL_ARTIFACT_DIR) {
+  return `${dir}/${sourceKey}.json`;
 }
 
 // ---- FINAL-REVIEW FIX: failing-PDF quarantine ----
@@ -547,7 +553,7 @@ export function excludeQuarantinedPdfs(candidates, dir = ROLLCALL_ARTIFACT_DIR) 
 // also carry a non-null source_url (an openstates.org bill-page link, never a PDF). Scoped instead
 // to source_key's own 'mo-house-xml-' prefix (mo.buildMoVoteRows's actual, intentional naming
 // convention) - the only reliable signal for "this row came from the mo-house-xml adapter."
-async function listPendingRollCallPdfs(client) {
+async function listPendingRollCallPdfs(client, dir = ROLLCALL_ARTIFACT_DIR) {
   const { data: candidates, error } = await client
     .from('votes')
     .select('id,source_key,source_url')
@@ -555,11 +561,11 @@ async function listPendingRollCallPdfs(client) {
     .not('source_url', 'is', null)
     .order('source_key', { ascending: true });
   if (error) throw new Error(`pending roll-call PDF lookup failed: ${error.message}`);
-  const undone = (candidates ?? []).filter((v) => !existsSync(artifactPath(v.source_key)));
+  const undone = (candidates ?? []).filter((v) => !existsSync(artifactPath(v.source_key, dir)));
   if (undone.length === 0) return { pending: [], skippedFailed: 0, skippedKeys: [] };
-  const { kept, skippedFailed, skippedKeys } = excludeQuarantinedPdfs(undone);
+  const { kept, skippedFailed, skippedKeys } = excludeQuarantinedPdfs(undone, dir);
   if (skippedFailed > 0) {
-    console.error(`[${new Date().toISOString()}] roll-call PDF queue: skipping ${skippedFailed} permanently-failing PDF(s): ${skippedKeys.join(', ')} (>= ${ROLLCALL_MAX_FAILED_ATTEMPTS} failed attempts — see *.failed.json in ${ROLLCALL_ARTIFACT_DIR})`);
+    console.error(`[${new Date().toISOString()}] roll-call PDF queue: skipping ${skippedFailed} permanently-failing PDF(s): ${skippedKeys.join(', ')} (>= ${ROLLCALL_MAX_FAILED_ATTEMPTS} failed attempts — see *.failed.json in ${dir})`);
   }
   if (kept.length === 0) return { pending: [], skippedFailed, skippedKeys };
   const { data: casted, error: castErr } = await client
@@ -573,10 +579,12 @@ async function listPendingRollCallPdfs(client) {
 
 // Returns { next, skippedFailed, skippedKeys }: next is the highest-priority still-eligible
 // pending PDF (or null if none), skippedFailed/skippedKeys describe what the quarantine above
-// excluded. Both are surfaced by main() into run detail even on an invocation that ends up
-// processing a different document entirely (see the FINDING 2 fix note in main()).
-export async function selectPendingPdf(client) {
-  const { pending, skippedFailed, skippedKeys } = await listPendingRollCallPdfs(client);
+// excluded. Both are surfaced by runMoHouse into run detail even on an invocation that ends up
+// processing a different document entirely (see the FINDING 2 fix note there). dir is injectable
+// (2026-08-01 fast-follow, see artifactPath's own comment) — runMoHouse passes its own rollcallDir
+// so this can be exercised in a test without touching the real gitignored artifacts dir.
+export async function selectPendingPdf(client, dir = ROLLCALL_ARTIFACT_DIR) {
+  const { pending, skippedFailed, skippedKeys } = await listPendingRollCallPdfs(client, dir);
   return { next: pending[0] ?? null, skippedFailed, skippedKeys };
 }
 
@@ -752,7 +760,13 @@ export async function replayArtifacts(client, runId, dir = ROLLCALL_ARTIFACT_DIR
 // request — Task 4b's live-verification budget is ZERO live PDF fetches, fixture-only) or a real
 // fetch through pdf.fetchMoRollCallPdf, which shares mo-house-xml.js's own moHouseLimiter instance
 // (same host, same durable ToU cooldown — see mo-rollcall-pdf.js's module comment).
-async function processRollCallPdf(client, runId, vote, args) {
+//
+// fetchRollCallPdf is injectable (2026-08-01 fast-follow — closes a test-coverage gap the
+// runMoHouse review found: the PDF-priority slot's one-request behavior had zero test coverage,
+// resting entirely on a code-reading proof) — same convention as runMoHouse's own
+// fetchBillList/fetchBillXml params; default is the real fetcher, so production behavior is
+// unchanged.
+async function processRollCallPdf(client, runId, vote, args, { fetchRollCallPdf = pdf.fetchMoRollCallPdf } = {}) {
   let pdfBuffer;
   let mode;
   try {
@@ -761,7 +775,7 @@ async function processRollCallPdf(client, runId, vote, args) {
       mode = 'fixture';
       console.error(`[${new Date().toISOString()}] read roll-call PDF for ${vote.source_key} from local fixture (not a live request): ${args.rollcallPdfFile}`);
     } else {
-      const arrayBuffer = await pdf.fetchMoRollCallPdf(vote.source_url);
+      const arrayBuffer = await fetchRollCallPdf(vote.source_url);
       pdfBuffer = Buffer.from(arrayBuffer);
       mode = 'live';
       console.error(`[${new Date().toISOString()}] fetched roll-call PDF for ${vote.source_key} (live)`);
@@ -963,6 +977,7 @@ export async function runMoHouse(client, args, {
   rollcallDir = ROLLCALL_ARTIFACT_DIR,
   fetchBillList = mo.fetchMoBillList,
   fetchBillXml = mo.fetchMoBillXml,
+  fetchRollCallPdf = pdf.fetchMoRollCallPdf,
 } = {}) {
   // --limit: with one live request per run, N>1 can no longer mean "N live fetches in one run" —
   // there is no other live-fetch-multiplying behavior left in this driver to reinterpret N against
@@ -1007,10 +1022,10 @@ export async function runMoHouse(client, args, {
     // rationale. This invocation processes exactly ONE document either way: one roll-call PDF, or
     // (only when zero are pending) the bill-list-or-bill-detail slot decision below.
     const wantsExplicitBill = Boolean(args.billIdentifier || args.billXmlFile);
-    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0, skippedKeys: [] } : await selectPendingPdf(client);
+    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0, skippedKeys: [] } : await selectPendingPdf(client, rollcallDir);
     const { next: pendingPdf, skippedFailed: skippedFailedPdfs, skippedKeys: skippedFailedPdfKeys } = pdfQueue;
     if (pendingPdf) {
-      const result = await processRollCallPdf(client, runId, pendingPdf, args);
+      const result = await processRollCallPdf(client, runId, pendingPdf, args, { fetchRollCallPdf });
       const failures = result.failure ? [result.failure] : [];
       const counts = {
         document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
