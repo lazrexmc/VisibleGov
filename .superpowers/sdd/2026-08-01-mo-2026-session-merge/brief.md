@@ -126,3 +126,89 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 Return: status, commit hash, fail-count line verbatim, the FULL `--dry-run` output against the
 real live DB, and concerns — especially anything that surprised you about the live data versus
 what this brief assumed (re-verify, don't trust the brief's specific numbers).
+
+---
+
+## Ledger — review round 1 (SHIP, with required fixes + operator decisions)
+
+Review verdict: MEETS SPEC / GOOD / SHIP. Fail-count verified independently (2131/0). Full
+mechanical re-verification of the deletion safety chain: redirect-before-delete strictly ordered,
+no CASCADE on any bills(id) FK (raced child rows raise 23503, caught not silently lost), session
+delete gated on a LIVE re-count not a cached one, per-bill failure isolation confirmed correct.
+Forbidden-function check independently re-verified (grep, comments only). Ambiguous-case refusal
+confirmed on the real SB 1233 pair. Dry-run re-verified zero writes on 10 tables before/after.
+
+**The 29-vote mystery is SOLVED, not open:** every one of the 29 hard mismatches is the same
+single cause — Sen. Travis Fitzwater's yea vote is present in LegiScan on all 29 roll calls and
+absent from every mo-senate-web cast (a known roster-gating undercount in that pipeline, not a
+new defect). Also surfaced, unprompted: the MO Senate roster is DUPLICATED in `legislators`
+(LegiScan row + mo-senate-web row per senator; one name-variant pair, Mary Coleman / Mary
+Elizabeth Coleman) — cancels out in tally comparisons but is a live identity defect. **New TODO
+item needed** (not scoped to this brief — controller to add after this correction ships).
+
+**Fixing now (fast-follow, same implementer):**
+- Important 2: writeReconciliationFlag throws uncaught mid-Phase-B-loop — one failure loses every
+  remaining flag with no re-run path. Fix: per-vote try/catch (Phase A's own isolation pattern)
+  + a standalone re-run mode for Phase B against already-merged bills.
+- Important 3: no test pins the delete-ordering safety chain directly (order-sensitive redirect-
+  before-delete, forceError on the redirect step specifically).
+- Latent (implementer's call, must be disclosed either way): isPrimaryCastDataComparable gate not
+  reproduced (harmless this batch, 0/29 affected); source_a_tallies from stored casts not printed
+  tallies (fidelity gap vs the live path, currently invisible).
+
+**NOT being fixed here — operator decisions, surfaced not resolved:**
+- Important 1: once bills merge, canonical bill pages will show BOTH votes (LegiScan's + the
+  Senate-journal's) for the same real action, and 29 of 31 pairs actively disagree — this reads
+  as a bug on the public site until Lance's queue clears those 29 flags. Not addressed by this
+  correction; his call whether that's acceptable in the interim.
+- Important 5: root cause unfixed. `ingest-mo-senate.js:472` will recreate the '2026' duplicate
+  session on its next scheduled run — this correction is a one-time fix, not a prevention. A
+  companion fix (resolve onto the canonical session the same way other MO sessions already do,
+  per the LegiScan-pivot Task 9 ruling) is a separate, connected task, not scoped here.
+
+## Ledger — fix round 2 (Important 2 + Important 3 closed, Important 4 folded in)
+
+Both mandatory findings closed, 13 new tests (55/55 in this file, 2144/2144 repo-wide, 0 fail).
+
+- **Important 2 closed two ways.** (a) `writeReconciliationFlag`'s real DB call is now wrapped in a
+  per-vote try/catch inside `reconcileOneVote` — an unexpected failure is recorded as
+  `{reason:'flag_write_failed'}` in `failures` and the loop continues, exactly mirroring Phase A's
+  own per-bill isolation. (b) new `runReconcileMo2026VotesStandalone` (CLI: `mo-2026-vote-reconcile`,
+  also excluded from `all`) re-discovers already-merged mo-senate-web-2026 votes directly by their
+  own `source_key` prefix (`mo-senate-web-2026-*`) rather than depending on Phase A's in-memory
+  merge result — so Phase B can be re-run any time after a live Phase A pass, including after a
+  partial-failure abort. Both share one extracted loop (`reconcileVoteBatch`), never two copies.
+  Re-run safety proven by test: a forced failure on vote 2 of 3 loses nothing for votes 1/3; a
+  clean re-run afterward completes vote 2's flag without duplicating the other two (dedupe via
+  `writeReconciliationFlag`'s own idempotency check, reused unmodified).
+- **Important 3 closed.** New tests prove the delete-ordering chain directly rather than reading
+  it: call-order assertion (redirect UPDATE -> live re-count -> bill DELETE, indices strictly
+  increasing); a simulated race that inserts a vote onto the duplicate bill between redirect and
+  delete is caught by the LIVE re-count, not the update's own stale count
+  (`vote_redirect_incomplete`, bill never deleted); `forceError` specifically on the redirect
+  UPDATE for one bill in a two-bill batch — that bill fails and is never deleted, its sibling
+  merges normally (per-bill isolation on the redirect step, not just the twin/table-check steps
+  already covered). Also closed the cheaper Q9 gaps found while there: `multiple_canonical_twins`,
+  `bill_delete_guard_mismatch` (a bill vanishing between re-count and delete), a failed session
+  bill-recount, a failed session DELETE, and an explicit pin that all four
+  `DUP_BILL_MUST_BE_EMPTY_TABLES` entries (including `bill_actions`) are enforced, not just three.
+- **Important 4 (latent, reviewer's discretion) — folded in, not deferred.** The live path's
+  `isPrimaryCastDataComparable` gate (never hard-flag a primary row whose casts haven't landed
+  yet) is reused here via two newly-exported `legiscan-votes.js` functions
+  (`parsePrimaryResultAggregate`, `isPrimaryCastDataComparable` — pure additive `export`, same
+  pattern as round 1). A gated vote now reports a `not_comparable` outcome, never written as a
+  flag. Live re-verification: `notComparableCount: 0` on the real 31-vote batch — matches the
+  reviewer's own finding, confirms the fold-in is safe and non-disruptive.
+- **Two smaller latent items left as documented residuals** (reviewer's own framing: "not
+  blocking, implementer's call"), explicitly, per that instruction: (1) `source_a_tallies` is
+  derived from LegiScan's stored `vote_casts` rather than the original dataset payload's printed
+  tallies — this backfill only has the DB to work from, not the original LegiScan dataset fetch;
+  re-deriving printed tallies would mean re-fetching LegiScan's archive, outside a DB-only
+  backfill's scope. (2) the discrepancy payload omits the live shape's `quarantine` key — Phase B
+  never quarantines anything (nothing to quarantine, both votes are already stored), so the field
+  would always read `false` and adds no information. Both documented in `correct-data.js`'s own
+  header comment, not silently dropped.
+- **Re-confirmed, explicitly, after this round's changes:** `crossCheckAgainstPrimarySource` and
+  `retractLegiscanVoteIfStored` are still neither imported nor called anywhere in
+  `correct-data.js` — every occurrence is inside a `//` comment. Verified by both a fresh `grep`
+  and the existing regression test (`tests/correct-data.test.js`), which still passes unmodified.

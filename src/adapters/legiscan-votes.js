@@ -410,7 +410,12 @@ export function summarizePrimaryCastPositions(castRows) {
 // to fall back on, so zero casts is the only mechanically-detectable "not landed yet" signal.
 const PRIMARY_RESULT_AGGREGATE_PATTERN = /^(\d+)-(\d+)$/;
 
-function parsePrimaryResultAggregate(result) {
+// EXPORTED (2026-08-01, task-review.md Important 4 / this file's own header comment above):
+// correct-data.js's mo-2026-session-merge reconciliation phase reuses these two directly so a
+// primary row whose casts haven't landed yet (routine two-phase-ingestion backlog state, not an
+// anomaly) is never mistaken for a real hard mismatch — pure additive change, zero behavior change
+// to any existing caller.
+export function parsePrimaryResultAggregate(result) {
   if (typeof result !== 'string') return null;
   const m = PRIMARY_RESULT_AGGREGATE_PATTERN.exec(result.trim());
   if (!m) return null;
@@ -421,7 +426,7 @@ function parsePrimaryResultAggregate(result) {
 // to its printed aggregate (mo-house shape — casts still short of aggregate.yea+aggregate.nay), or
 // whose aggregate is null (mo-senate shape) and casts are zero — the LITERAL two conditions the
 // controller amendment names.
-function isPrimaryCastDataComparable(aggregate, totalPrimaryCasts) {
+export function isPrimaryCastDataComparable(aggregate, totalPrimaryCasts) {
   if (aggregate) return totalPrimaryCasts >= (aggregate.yea + aggregate.nay);
   return totalPrimaryCasts > 0;
 }

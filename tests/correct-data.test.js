@@ -18,6 +18,7 @@ import {
   DUP_BILL_MUST_BE_EMPTY_TABLES,
   runMergeMo2026Session,
   runReconcileMo2026Votes,
+  runReconcileMo2026VotesStandalone,
   runCorrectMo2026SessionMerge,
 } from '../src/cli/correct-data.js';
 
@@ -95,7 +96,11 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
         table, mode, patch, filters: [...filters], select: selectCols, selectOpts, orderCol, limitVal, rangeVal,
       };
       calls.push(callInfo);
-      const injected = forceError && forceError(table, mode, filters);
+      // 4th arg (selectOpts) is new — lets a test distinguish two calls that share the same
+      // table/mode/filters shape but differ in intent (e.g. a plain multi-row select vs. a
+      // count-only `head:true` recount against the SAME table/filter). Every EXISTING forceError
+      // callback in this file only reads the first 3 params, so this is purely additive.
+      const injected = forceError && forceError(table, mode, filters, selectOpts);
       if (injected) return { data: null, error: injected, count: null };
 
       const rows = tables[table];
@@ -149,7 +154,11 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     return {
       select: () => ({
         single: async () => {
-          const injected = forceError && forceError(table, 'insert', []);
+          // 4th arg (the row being inserted) is new — lets a test selectively fail ONE insert (e.g.
+          // "the flag write for vote-2 only") without a bespoke mock, by inspecting `row` inside its
+          // own forceError callback. Every EXISTING forceError callback in this file only reads the
+          // first 3 params, so this is purely additive.
+          const injected = forceError && forceError(table, 'insert', [], row);
           if (injected) return { data: null, error: injected };
           insertCounter += 1;
           const inserted = {
@@ -1062,4 +1071,397 @@ test('runCorrectData: "mo-2026-session-merge" runs only when explicitly named �
   const all = await runCorrectData(makeFakeClient(seed), { which: 'all', dryRun: true });
   assert.equal(all.mo2026SessionMerge, undefined, '"all" must never run the session-merge correction implicitly');
   assert.equal(all.moStatus !== undefined && all.mo1969Dates !== undefined, true, 'the other two corrections are unaffected');
+});
+
+// ============================================================================================
+// Review fix round (task-review.md, 2026-08-01 — SHIP verdict, two Important findings closed
+// before the operator briefing): Important 2 (Phase B isolation + standalone re-run) and
+// Important 3 (the delete-ordering safety chain was previously untested). Important 4 (the
+// isPrimaryCastDataComparable gate) folded in too — see correct-data.js's own header comment for
+// the two smaller items left as documented residuals.
+// ============================================================================================
+
+// ---- Important 3: the delete-ordering chain, proven by test, not just read ----
+
+test('runMergeMo2026Session: the vote redirect UPDATE and its live re-count both complete BEFORE the bill DELETE fires — order-sensitive proof, not just an end-state assertion', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    votes: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-dup-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  });
+
+  await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  const votesUpdateIdx = client.calls.findIndex((c) => c.table === 'votes' && c.mode === 'update' && c.patch?.bill_id === 'bill-canon-1');
+  const votesRecountIdx = client.calls.findIndex((c, i) => (
+    i > votesUpdateIdx && c.table === 'votes' && c.mode === 'select' && c.selectOpts.head
+    && c.filters.some((f) => f.op === 'eq' && f.col === 'bill_id' && f.val === 'bill-dup-1')
+  ));
+  const billDeleteIdx = client.calls.findIndex((c) => c.table === 'bills' && c.mode === 'delete');
+
+  assert.notEqual(votesUpdateIdx, -1, 'the redirect update call happened');
+  assert.notEqual(votesRecountIdx, -1, 'a live re-count select happened after the update');
+  assert.notEqual(billDeleteIdx, -1, 'the bill delete happened');
+  assert.ok(votesUpdateIdx < votesRecountIdx, 'redirect fires before the re-count');
+  assert.ok(votesRecountIdx < billDeleteIdx, 're-count fires before the delete — the delete never races ahead of its own guard');
+});
+
+test('runMergeMo2026Session: a race that inserts a NEW vote onto the duplicate bill between the redirect and the delete is caught by the LIVE re-count (not trusted from the update\'s own result) — bill reported vote_redirect_incomplete, never deleted', async () => {
+  const client = makeFakeClient(
+    {
+      sessions: [CANON, DUP],
+      bills: [
+        moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+        moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+      ],
+      votes: [moVoteRow({
+        id: 'vote-dup-1', bill_id: 'bill-dup-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+      })],
+    },
+    {
+      afterExecute(callInfo, tables) {
+        // Right after the redirect UPDATE for bill-dup-1 executes (its own result already computed),
+        // a "concurrent writer" lands a brand-new vote row still pointing at the duplicate bill —
+        // the exact TOCTOU window task-review.md Q2(b) names. The re-count immediately after MUST
+        // see this, proving it is a fresh live query, not the update's own stale count.
+        if (callInfo.table === 'votes' && callInfo.mode === 'update' && callInfo.patch?.bill_id === 'bill-canon-1') {
+          tables.votes.push({
+            id: 'vote-raced-in', bill_id: 'bill-dup-1', chamber: 'senate', vote_date: '2026-02-24T00:00:00+00:00', jurisdiction_id: 'mo-legislature', source_key: 'mo-senate-web-2026-race-vote1', result: null,
+          });
+        }
+      },
+    },
+  );
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 0);
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].reason, 'vote_redirect_incomplete');
+  assert.equal(report.failures[0].remaining, 1);
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-1'), true, 'never deleted — the live re-count refused it');
+  assert.equal(client.calls.some((c) => c.table === 'bills' && c.mode === 'delete'), false, 'delete never even attempted');
+});
+
+test('runMergeMo2026Session: a forced failure on the vote redirect UPDATE for one bill reports that bill failed and NEVER deletes it, while a sibling bill in the same batch still merges cleanly (per-bill isolation on the redirect step specifically)', async () => {
+  const client = makeFakeClient(
+    {
+      sessions: [CANON, DUP],
+      bills: [
+        moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+        moBillRow('bill-canon-2', 'sess-261', 'SB 2'),
+        moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+        moBillRow('bill-dup-2', 'sess-2026', 'SB 2'),
+      ],
+      votes: [],
+    },
+    {
+      forceError: (table, mode, filters) => (
+        table === 'votes' && mode === 'update' && filters.some((f) => f.op === 'eq' && f.col === 'bill_id' && f.val === 'bill-dup-1')
+          ? { message: 'connection reset' }
+          : null
+      ),
+    },
+  );
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 1, 'bill-dup-2 still merges despite bill-dup-1\'s redirect failure');
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].billId, 'bill-dup-1');
+  assert.equal(report.failures[0].reason, 'vote_redirect_failed');
+  assert.match(report.failures[0].error, /connection reset/);
+
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-1'), true, 'never deleted — the redirect it depends on failed');
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-2'), false, 'the sibling bill was deleted normally — one bill\'s failure does not corrupt the batch');
+  assert.equal(report.sessionDeleted, false, 'session still owns bill-dup-1');
+});
+
+test('runMergeMo2026Session: a bill vanishing (raced away) between the live re-count and the delete itself is caught by the delete\'s own RETURNING-row guard, never silently treated as success', async () => {
+  const client = makeFakeClient(
+    {
+      sessions: [CANON, DUP],
+      bills: [
+        moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+        moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+      ],
+      votes: [],
+    },
+    {
+      afterExecute(callInfo, tables) {
+        // Simulates a concurrent process deleting bill-dup-1 itself in the window between the
+        // redirect re-count (which found 0 remaining votes, correctly) and this run's own delete.
+        if (callInfo.table === 'votes' && callInfo.mode === 'select' && callInfo.selectOpts.head
+          && callInfo.filters.some((f) => f.op === 'eq' && f.col === 'bill_id' && f.val === 'bill-dup-1')) {
+          tables.bills = tables.bills.filter((b) => b.id !== 'bill-dup-1');
+        }
+      },
+    },
+  );
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 0);
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].reason, 'bill_delete_guard_mismatch');
+  assert.equal(report.failures[0].got, 0);
+});
+
+test('runMergeMo2026Session: two canonical rows sharing one identifier (defensive — the DB\'s own unique constraint should prevent this in production) is reported multiple_canonical_twins, never guessed at', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1a', 'sess-261', 'SB 1'),
+      moBillRow('bill-canon-1b', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    votes: [],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.stopped.length, 1);
+  assert.equal(report.stopped[0].reason, 'multiple_canonical_twins');
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-1'), true, 'never deleted — ambiguous, never guessed');
+});
+
+test('runMergeMo2026Session: a failed live re-count of the duplicate session\'s remaining bills is an honest failure, never silently treated as "safe to delete"', async () => {
+  const client = makeFakeClient(
+    {
+      sessions: [CANON, DUP],
+      bills: [moBillRow('bill-canon-1', 'sess-261', 'SB 1'), moBillRow('bill-dup-1', 'sess-2026', 'SB 1')],
+      votes: [],
+    },
+    {
+      // head:true disambiguates the FINAL recount (a count-only select) from the initial selectAll
+      // load of duplicate bills earlier in the same run, which shares the same table/filter shape
+      // but is a plain multi-row select, not a head-count.
+      forceError: (table, mode, filters, selectOpts) => (
+        table === 'bills' && mode === 'select' && selectOpts?.head
+        && filters.some((f) => f.op === 'eq' && f.col === 'session_id' && f.val === 'sess-2026')
+          ? { message: 'timeout' }
+          : null
+      ),
+    },
+  );
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 1, 'the bill itself still merged');
+  assert.equal(report.sessionDeleted, false);
+  assert.ok(report.failures.some((f) => f.reason === 'session_bill_recount_failed'));
+  assert.equal(client.tables.sessions.some((s) => s.id === 'sess-2026'), true, 'never deleted on an unconfirmed recount');
+});
+
+test('runMergeMo2026Session: a failed session DELETE (after a genuinely zero recount) is an honest failure, session row untouched', async () => {
+  const client = makeFakeClient(
+    {
+      sessions: [CANON, DUP],
+      bills: [moBillRow('bill-canon-1', 'sess-261', 'SB 1'), moBillRow('bill-dup-1', 'sess-2026', 'SB 1')],
+      votes: [],
+    },
+    {
+      forceError: (table, mode) => (table === 'sessions' && mode === 'delete' ? { message: 'lock timeout' } : null),
+    },
+  );
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 1);
+  assert.equal(report.sessionDeleted, false);
+  assert.ok(report.failures.some((f) => f.reason === 'session_delete_failed'));
+  assert.equal(client.tables.sessions.some((s) => s.id === 'sess-2026'), true);
+});
+
+test('DUP_BILL_MUST_BE_EMPTY_TABLES: all four entries are actually enforced, including bill_actions (the one the brief\'s own prose does not name) — not just bill_texts/bill_sponsors/summaries', async () => {
+  assert.deepEqual(DUP_BILL_MUST_BE_EMPTY_TABLES, ['bill_texts', 'bill_sponsors', 'summaries', 'bill_actions']);
+
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    bill_actions: [{
+      id: 'ba-1', bill_id: 'bill-dup-1', action_date: '2026-01-01', description: 'x',
+    }],
+    votes: [],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.stopped.length, 1);
+  assert.equal(report.stopped[0].reason, 'non_zero_related_tables');
+  assert.deepEqual(report.stopped[0].nonZeroTables, [{ table: 'bill_actions', count: 1 }]);
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-1'), true, 'never deleted — bill_actions alone is enough to stop it');
+});
+
+// ---- Important 2: Phase B per-vote flag-write isolation + standalone re-run ----
+
+test('runReconcileMo2026Votes: an unexpected writeReconciliationFlag failure for ONE vote is isolated — recorded in failures, does not lose the remaining votes\' flags; a clean re-run afterward completes the missing flag WITHOUT duplicating the ones that already wrote', async () => {
+  let allowVote2Failure = true;
+  const client = makeFakeClient(
+    {
+      votes: [
+        moVoteRow({
+          id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+        }),
+        moVoteRow({
+          id: 'vote-ls-2', bill_id: 'bill-canon-2', vote_date: '2026-02-24T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641900',
+        }),
+        moVoteRow({
+          id: 'vote-ls-3', bill_id: 'bill-canon-3', vote_date: '2026-02-25T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1642000',
+        }),
+      ],
+      vote_casts: [
+        // each pair is a deliberate hard mismatch (legiscan has an extra yea caster) so every vote
+        // reaches the flag-write step.
+        castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+        castRow('c2', 'vote-ls-1', 'yea', 'L1'),
+        castRow('c3', 'vote-ls-1', 'yea', 'L2'),
+        castRow('c4', 'vote-dup-2', 'yea', 'L1'),
+        castRow('c5', 'vote-ls-2', 'yea', 'L1'),
+        castRow('c6', 'vote-ls-2', 'yea', 'L2'),
+        castRow('c7', 'vote-dup-3', 'yea', 'L1'),
+        castRow('c8', 'vote-ls-3', 'yea', 'L1'),
+        castRow('c9', 'vote-ls-3', 'yea', 'L2'),
+      ],
+    },
+    {
+      forceError: (table, mode, filters, row) => (
+        table === 'vote_reconciliation_flags' && mode === 'insert' && row?.vote_id === 'vote-dup-2' && allowVote2Failure
+          ? { message: 'connection reset mid-write' }
+          : null
+      ),
+    },
+  );
+  const mergedBills = [{
+    voteRows: [
+      moVoteRow({
+        id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+      }),
+      moVoteRow({
+        id: 'vote-dup-2', bill_id: 'bill-canon-2', vote_date: '2026-02-24T00:00:00+00:00', source_key: 'mo-senate-web-2026-y-vote1',
+      }),
+      moVoteRow({
+        id: 'vote-dup-3', bill_id: 'bill-canon-3', vote_date: '2026-02-25T00:00:00+00:00', source_key: 'mo-senate-web-2026-z-vote1',
+      }),
+    ],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.flaggedCount, 2, 'votes 1 and 3 still got their flags written despite vote 2 failing mid-batch');
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].voteId, 'vote-dup-2');
+  assert.equal(report.failures[0].reason, 'flag_write_failed');
+  assert.match(report.failures[0].error, /connection reset mid-write/);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 2, 'votes 1 and 3 wrote; vote 2 did not');
+  assert.equal(client.tables.vote_reconciliation_flags.some((f) => f.vote_id === 'vote-dup-1'), true);
+  assert.equal(client.tables.vote_reconciliation_flags.some((f) => f.vote_id === 'vote-dup-3'), true);
+
+  // A clean re-run (the transient error has cleared) must complete the missing flag for vote-dup-2
+  // WITHOUT duplicating the two that already wrote — writeReconciliationFlag's own idempotency
+  // dedupe (reused unmodified) must hold through this plumbing.
+  allowVote2Failure = false;
+  const rerun = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-2', mergedBills });
+  assert.equal(rerun.flaggedCount, 3, 'all three report flagged on re-run (2 deduped, 1 newly written)');
+  assert.equal(rerun.failures.length, 0);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 3, 'exactly 3 flag rows total — no duplicates for votes 1/3, the missing one for vote 2 now exists');
+});
+
+test('runReconcileMo2026VotesStandalone: re-runs the SAME reconciliation comparison directly against already-merged mo-senate-web-2026 votes, found by their own source_key — no Phase-A merge object needed (the concrete fix for "Phase B cannot be re-run once the duplicate session is gone")', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+      }),
+      // a DIFFERENT year's mo-senate-web vote — must NOT be swept in by the standalone query.
+      moVoteRow({
+        id: 'vote-other-year', bill_id: 'bill-canon-1', vote_date: '2018-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2018-x-vote1',
+      }),
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+      castRow('c2', 'vote-dup-1', 'nay', 'L2'),
+      castRow('c3', 'vote-ls-1', 'yea', 'L1'),
+      castRow('c4', 'vote-ls-1', 'nay', 'L2'),
+    ],
+  });
+
+  const report = await runReconcileMo2026VotesStandalone(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.votesChecked, 1, 'only the 2026 mo-senate-web vote is picked up — the 2018 one is a different year, never swept in');
+  assert.equal(report.cleanMatches, 1);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0);
+});
+
+test('runReconcileMo2026VotesStandalone: --dry-run performs zero writes; --limit caps how many votes are checked', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-a-vote1',
+      }),
+      moVoteRow({
+        id: 'vote-dup-2', bill_id: 'bill-canon-2', vote_date: '2026-02-24T00:00:00+00:00', source_key: 'mo-senate-web-2026-b-vote1',
+      }),
+    ],
+    vote_casts: [],
+  });
+
+  const limited = await runReconcileMo2026VotesStandalone(client, { dryRun: true, limit: 1 });
+  assert.equal(limited.votesChecked, 1);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0, 'dry-run never writes, even against a real DB query path');
+});
+
+test('runCorrectData: "mo-2026-vote-reconcile" is a distinct, explicit <which> value — also excluded from "all"', async () => {
+  const seed = {
+    votes: [
+      moVoteRow({
+        id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-a-vote1',
+      }),
+    ],
+    vote_casts: [],
+  };
+  const explicit = await runCorrectData(makeFakeClient(seed), { which: 'mo-2026-vote-reconcile', dryRun: true });
+  assert.ok(explicit.mo2026VoteReconcile);
+
+  const all = await runCorrectData(makeFakeClient(seed), { which: 'all', dryRun: true });
+  assert.equal(all.mo2026VoteReconcile, undefined);
+});
+
+// ---- Important 4 (folded in): the isPrimaryCastDataComparable gate ----
+
+test('reconcileOneVote (via runReconcileMo2026Votes): a primary (mo-senate-web) row whose casts have not landed yet is reported not_comparable, never mistaken for a real hard mismatch', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      // legiscan side fully cast; primary (mo-senate-web) side: ZERO casts landed yet.
+      castRow('c1', 'vote-ls-1', 'yea', 'L1'),
+      castRow('c2', 'vote-ls-1', 'nay', 'L2'),
+    ],
+  });
+  const mergedBills = [{
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1', result: null,
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.flaggedCount, 0, 'never hard-flags on incomplete primary cast data');
+  assert.equal(report.notComparableCount, 1);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0);
 });

@@ -10,6 +10,8 @@ import {
   compareTalliesForCrossCheck,
   writeReconciliationFlag,
   PRESENT_CATEGORY_CAVEAT,
+  parsePrimaryResultAggregate,
+  isPrimaryCastDataComparable,
 } from '../adapters/legiscan-votes.js';
 
 // correct-data — data-correction CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md,
@@ -38,12 +40,42 @@ import {
 //      explicitly "never a precedent for a delete anywhere else in this repo") — Phase B only ever
 //      reads votes/casts and additively writes vote_reconciliation_flags rows, never a delete.
 //
+//      REVIEW FIX ROUND (task-review.md, 2026-08-01, SHIP verdict with two Important findings
+//      closed before the operator briefing):
+//        - Important 2: `writeReconciliationFlag` (a real DB call) is now wrapped in a per-vote
+//          try/catch inside the Phase B loop — an unexpected failure on one vote's flag write is
+//          recorded in `failures` (matching Phase A's own per-bill isolation) and the loop
+//          continues, never losing the remaining votes' flags. Separately, Phase B previously could
+//          only ever see votes merged in the SAME invocation (`merge.merges[].voteRows`) — once the
+//          duplicate session is gone, nothing re-discovers them. `runReconcileMo2026VotesStandalone`
+//          (new `mo-2026-vote-reconcile` <which> value) re-runs the identical comparison directly
+//          against already-merged mo-senate-web votes, found by their own source_key
+//          (`mo-senate-web-2026-*` — no dependency on the duplicate session or Phase A's in-memory
+//          result). `writeReconciliationFlag`'s own idempotency dedupe (reused unmodified) makes
+//          re-running it safe: already-written flags are found and skipped, never duplicated.
+//        - Important 4 (folded in, not deferred): the live path's own `isPrimaryCastDataComparable`
+//          gate (never hard-flag on a primary row whose casts haven't landed yet) is now reused here
+//          too — a `not_comparable` outcome, reported honestly, never written as a flag.
+//      Two smaller latent divergences from the live comparison (task-review.md Q5, item 2, and the
+//      `quarantine` key) are left as DOCUMENTED RESIDUALS, not folded in: `source_a_tallies` here is
+//      derived from LegiScan's stored `vote_casts` rather than the original dataset payload's
+//      printed tallies (this backfill only has the DB to work from, not the original LegiScan
+//      dataset fetch — re-deriving printed tallies would mean re-fetching LegiScan's archive, well
+//      outside a DB-only backfill's scope) and the discrepancy payload omits the live shape's
+//      `quarantine` key (Phase B never quarantines anything — there is nothing to quarantine, both
+//      votes are already stored — so the field would always be `false` and adds no information).
+//      Both are non-triggering against the live 31-vote batch (task-review.md confirmed 0/29 flagged
+//      votes had zero primary casts even before this fix; the diagnostic in task-review.md found all
+//      29 hard mismatches share one real root cause — a systematically dropped legislator on the
+//      mo-senate-web side — unrelated to either residual).
+//
 // DRAFT-THEN-APPLY (Global Constraints / CLAUDE.md standing policy): this CLI is built READY, with
 // a real --dry-run, but Lance runs the live pass himself — nothing in this repo invokes it live.
 //
 // CLI: `node --env-file=.env src/cli/correct-data.js <which> [--dry-run] [--limit N]`
-// `<which>` is REQUIRED (mo-status | mo-1969-dates | mo-2026-session-merge | all) — no default, so
-// an operator can never accidentally run every correction at once by omitting an argument.
+// `<which>` is REQUIRED (mo-status | mo-1969-dates | mo-2026-session-merge | mo-2026-vote-reconcile
+// | all) — no default, so an operator can never accidentally run every correction at once by
+// omitting an argument.
 
 const SOURCE = 'correct-data';
 
@@ -63,13 +95,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | mo-2026-session-merge | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | mo-2026-session-merge | mo-2026-vote-reconcile | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'mo-2026-session-merge', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | mo-2026-session-merge | all`);
+  if (!['mo-status', 'mo-1969-dates', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | mo-2026-session-merge | mo-2026-vote-reconcile | all`);
   }
   out.which = which;
   return out;
@@ -495,6 +527,16 @@ export const DUP_BILL_MUST_BE_EMPTY_TABLES = ['bill_texts', 'bill_sponsors', 'su
 
 const MO_JURISDICTION_ID = 'mo-legislature';
 
+// MO_SENATE_2026_VOTE_SOURCE_KEY_PREFIX — ingest-mo-senate.js's own buildVoteSourceKey format
+// (`mo-senate-web-${year}-${pdfBasename}-vote${ordinal}`, per legiscan-votes.js's own
+// PRIMARY_SOURCE_KEY_PREFIXES comment) scoped to the 2026 year specifically. Used two ways: (1) as
+// the defensive filter on votes Phase A itself just redirected (narrower and more precise than a
+// bare 'mo-senate-web-' prefix), and (2) as the STANDALONE discovery key for
+// runReconcileMo2026VotesStandalone below — a source_key is a durable, source-derived fact that
+// survives the duplicate session's own deletion, unlike depending on Phase A's in-memory merge
+// result (task-review.md Important 2).
+const MO_SENATE_2026_VOTE_SOURCE_KEY_PREFIX = 'mo-senate-web-2026-';
+
 // parseLegiscanRollCallSourceKey — the exact inverse of legiscan-votes.js's own
 // buildLegiscanVoteSourceKey('legiscan-<sessionId>-rollcall-<rollCallId>'), so Phase B never
 // guesses a LegiScan roll_call_id: it parses it back out of the LegiScan vote's own stored
@@ -841,6 +883,25 @@ async function reconcileOneVote(client, dupVote, { dryRun, runId }) {
       detail: { voteId: dupVote.id, reason: 'primary_casts_lookup_failed', error: String(primaryCastErr.message ?? primaryCastErr) },
     };
   }
+
+  // task-review.md Important 4 (folded in): the SAME gate crossCheckAgainstPrimarySource's own
+  // single-candidate branch runs BEFORE any hard/soft comparison — a primary (mo-senate-web) row
+  // whose casts have not landed yet relative to its own printed result aggregate (mo-house shape)
+  // or whose aggregate is null and casts are zero (mo-senate-web shape, since it stores result:null
+  // unconditionally) is NOT COMPARABLE. Comparing against an undercounted castRows summary would
+  // manufacture a false hard mismatch out of the primary pipeline's own backlog, not a real
+  // divergence — checked here BEFORE fetching the LegiScan side at all (also saves that query).
+  const primaryAggregate = parsePrimaryResultAggregate(dupVote.result);
+  const totalPrimaryCasts = (primaryCastRows ?? []).length;
+  if (!isPrimaryCastDataComparable(primaryAggregate, totalPrimaryCasts)) {
+    return {
+      outcome: 'not_comparable',
+      detail: {
+        voteId: dupVote.id, legiscanVoteId: legiscanVote.id, billId: dupVote.bill_id, totalPrimaryCasts, result: dupVote.result ?? null,
+      },
+    };
+  }
+
   const { data: legiscanCastRows, error: legiscanCastErr } = await client
     .from('vote_casts').select('position').eq('vote_id', legiscanVote.id);
   if (legiscanCastErr) {
@@ -894,33 +955,49 @@ async function reconcileOneVote(client, dupVote, { dryRun, runId }) {
     };
   }
 
-  const flag = await writeReconciliationFlag(client, {
-    voteId: dupVote.id, sourceB: 'mo-senate-web', discrepancy, runId, rollCallId: parsedRollCall.rollCallId, reason,
-  });
-
-  return {
-    outcome: 'flagged',
-    detail: {
-      voteId: dupVote.id, legiscanVoteId: legiscanVote.id, billId: dupVote.bill_id, reason, flag,
-    },
-  };
+  // task-review.md Important 2: writeReconciliationFlag is a real DB call and THROWS on an
+  // unexpected error (legiscan-votes.js's own doc comment on it — a missing-relation is handled
+  // internally, but anything else propagates). Uncaught, that would abort this WHOLE loop mid-batch
+  // and silently lose every remaining vote's reconciliation with no re-run path (Phase B could only
+  // ever see votes merged in the SAME invocation before runReconcileMo2026VotesStandalone existed).
+  // Caught here and turned into a per-vote `failed` result — matching Phase A's own per-bill
+  // isolation pattern exactly — so ONE flag-write failure never loses the rest of the batch, and a
+  // later re-run (live, or via the standalone entry point) can pick up exactly the vote that failed
+  // without re-writing (writeReconciliationFlag's own idempotency dedupe, reused unmodified) the
+  // ones that already succeeded.
+  try {
+    const flag = await writeReconciliationFlag(client, {
+      voteId: dupVote.id, sourceB: 'mo-senate-web', discrepancy, runId, rollCallId: parsedRollCall.rollCallId, reason,
+    });
+    return {
+      outcome: 'flagged',
+      detail: {
+        voteId: dupVote.id, legiscanVoteId: legiscanVote.id, billId: dupVote.bill_id, reason, flag,
+      },
+    };
+  } catch (err) {
+    return {
+      outcome: 'failed',
+      detail: {
+        voteId: dupVote.id, legiscanVoteId: legiscanVote.id, billId: dupVote.bill_id, reason: 'flag_write_failed', error: String(err.message ?? err),
+      },
+    };
+  }
 }
 
-// runReconcileMo2026Votes — Phase B driver. Only ever looks at mo-senate-web-prefixed votes among
-// `mergedBills[].voteRows` (defensive: the brief's live verification found all 31 redirected votes
-// were mo-senate-web, but this never assumes that holds forever) — never touches a vote this run
-// didn't itself just merge.
-export async function runReconcileMo2026Votes(client, {
-  dryRun = false, runId = null, mergedBills = [],
-} = {}) {
-  const votesToCheck = mergedBills.flatMap((m) => (m.voteRows ?? [])
-    .filter((v) => String(v.source_key ?? '').startsWith('mo-senate-web-')));
-
+// reconcileVoteBatch — the shared Phase B loop, extracted (task-review.md Important 2) so BOTH the
+// same-run path (runReconcileMo2026Votes, fed by Phase A's own merge output) and the standalone
+// re-run path (runReconcileMo2026VotesStandalone, fed by an independent DB query) drive the exact
+// SAME per-vote logic — never two copies that could drift. `not_comparable` (Important 4) is its
+// own honest bucket, distinct from both `clean` (verified matching) and `flagged` (a real
+// discrepancy) — never written to the DB, never counted as either.
+async function reconcileVoteBatch(client, votesToCheck, { dryRun, runId }) {
   const cleanMatchDetails = [];
   const flagged = [];
   const noMatch = [];
   const ambiguous = [];
   const unparseable = [];
+  const notComparable = [];
   const failures = [];
 
   for (const dupVote of votesToCheck) {
@@ -932,6 +1009,7 @@ export async function runReconcileMo2026Votes(client, {
     else if (result.outcome === 'no_match') noMatch.push(result.detail);
     else if (result.outcome === 'ambiguous') ambiguous.push(result.detail);
     else if (result.outcome === 'unparseable') unparseable.push(result.detail);
+    else if (result.outcome === 'not_comparable') notComparable.push(result.detail);
     else failures.push(result.detail);
   }
 
@@ -942,16 +1020,53 @@ export async function runReconcileMo2026Votes(client, {
     noMatchCount: noMatch.length,
     ambiguousCount: ambiguous.length,
     unparseableCount: unparseable.length,
+    notComparableCount: notComparable.length,
     cleanMatchDetails,
     flagged,
     noMatch,
     ambiguous,
     unparseable,
+    notComparable,
     failures,
   };
 }
 
-// runCorrectMo2026SessionMerge — Phase A then Phase B, combined report + combined failures.
+// runReconcileMo2026Votes — Phase B, same-run path. Only ever looks at 2026 mo-senate-web votes
+// among `mergedBills[].voteRows` (defensive: the brief's live verification found all 31 redirected
+// votes were mo-senate-web, but this never assumes that holds forever) — never touches a vote this
+// run didn't itself just merge.
+export async function runReconcileMo2026Votes(client, {
+  dryRun = false, runId = null, mergedBills = [],
+} = {}) {
+  const votesToCheck = mergedBills.flatMap((m) => (m.voteRows ?? [])
+    .filter((v) => String(v.source_key ?? '').startsWith(MO_SENATE_2026_VOTE_SOURCE_KEY_PREFIX)));
+  return reconcileVoteBatch(client, votesToCheck, { dryRun, runId });
+}
+
+// runReconcileMo2026VotesStandalone — Phase B, STANDALONE re-run path (task-review.md Important 2:
+// "Phase B is one-shot and cannot be re-run after Phase A succeeds"). Once the duplicate session and
+// its bill rows are gone, `mergedBills[].voteRows` no longer exists for a later invocation to read —
+// so this discovers the SAME votes independently, straight from the DB, by their own durable
+// source_key (`mo-senate-web-2026-*`, ingest-mo-senate.js's own buildVoteSourceKey format) rather
+// than depending on Phase A's in-memory result. Runs the IDENTICAL reconcileOneVote/reconcileVoteBatch
+// logic (never a second copy) — safe to re-run even against votes already reconciled once, because
+// writeReconciliationFlag's own idempotency dedupe (reused unmodified, keyed on vote_id/source_a/
+// source_b/roll_call_id/reason) finds and returns the existing flag rather than duplicating it; a
+// prior partial failure (Important 2's flag_write_failed) simply completes on THIS pass instead.
+export async function runReconcileMo2026VotesStandalone(client, {
+  dryRun = false, limit = null, runId = null,
+} = {}) {
+  const { data: rows, error } = await selectAll(client, 'votes', 'id,bill_id,chamber,vote_date,source_key,result', {
+    filter: (q) => q.eq('jurisdiction_id', MO_JURISDICTION_ID).like('source_key', `${MO_SENATE_2026_VOTE_SOURCE_KEY_PREFIX}%`),
+  });
+  if (error) throw new Error(`mo-2026-vote-reconcile: standalone vote lookup failed: ${error.message}`);
+  const sorted = [...(rows ?? [])].sort((a, b) => (a.id > b.id ? 1 : -1));
+  const scoped = limit != null ? sorted.slice(0, limit) : sorted;
+  return reconcileVoteBatch(client, scoped, { dryRun, runId });
+}
+
+// runCorrectMo2026SessionMerge — Phase A then Phase B (same-run path), combined report + combined
+// failures.
 export async function runCorrectMo2026SessionMerge(client, {
   dryRun = false, limit = null, runId = null,
 } = {}) {
@@ -986,6 +1101,14 @@ export async function runCorrectData(client, {
   if (which === 'mo-2026-session-merge') {
     out.mo2026SessionMerge = await runCorrectMo2026SessionMerge(client, { dryRun, limit, runId });
     failures.push(...out.mo2026SessionMerge.failures);
+  }
+  // mo-2026-vote-reconcile — the standalone Phase B re-run (task-review.md Important 2), for after
+  // the duplicate session is already gone (a live mo-2026-session-merge pass either succeeded fully,
+  // or aborted partway through Phase B and left some reconciliations undone). Also excluded from
+  // `all`: it only makes sense to run once the merge has already happened.
+  if (which === 'mo-2026-vote-reconcile') {
+    out.mo2026VoteReconcile = await runReconcileMo2026VotesStandalone(client, { dryRun, limit, runId });
+    failures.push(...out.mo2026VoteReconcile.failures);
   }
 
   out.failures = failures;
