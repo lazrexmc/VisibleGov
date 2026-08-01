@@ -144,17 +144,21 @@ Run every 15 minutes — deliberately shorter than every source's own interval a
 never more than ~15 minutes late; the per-source cooldowns above do the real gating, not this
 number.
 
-**Command line** (adjust the `node.exe` path if `where node` gives something different; using
-absolute paths throughout means Task Scheduler's working directory doesn't matter):
+**Command line — use Command Prompt, NOT PowerShell.** (Start menu → type `cmd` → "Command
+Prompt". Windows 11's default terminal is PowerShell, where this command's quoting breaks
+silently — an earlier multi-line version of this doc failed exactly that way.) One single line,
+paste it whole, press Enter. No administrator elevation needed. Adjust the `node.exe` path only
+if `where node` prints something different; absolute paths throughout mean Task Scheduler's
+working directory doesn't matter. Omitting `/ru` registers it for the current user, running only
+while logged on (a locked screen still counts as logged on) — after a reboot it resumes at first
+login, and missed ticks are harmless because due-ness is durable in the database:
 
 ```
-schtasks /create /tn "VisibleGov Scheduled Ingestion" ^
-  /tr "\"C:\Program Files\nodejs\node.exe\" --env-file=F:\VisibleGov\.env F:\VisibleGov\scripts\scheduled-ingest.js" ^
-  /sc minute /mo 15 ^
-  /st 00:00 ^
-  /ru "%USERNAME%" ^
-  /f
+schtasks /create /tn "VisibleGov Scheduled Ingestion" /tr "\"C:\Program Files\nodejs\node.exe\" --env-file=F:\VisibleGov\.env F:\VisibleGov\scripts\scheduled-ingest.js" /sc minute /mo 15 /st 00:00 /f
 ```
+
+Expected output: `SUCCESS: The scheduled task "VisibleGov Scheduled Ingestion" has successfully
+been created.`
 
 - `/sc minute /mo 15` — repeats every 15 minutes, indefinitely (no end date unless you add `/ed`).
 - `/ru "%USERNAME%"` runs it as your own account, only while you're logged on (no password
