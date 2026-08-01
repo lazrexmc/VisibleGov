@@ -1094,7 +1094,9 @@ async function main() {
     if (!durationRecorded) {
       writeLog({
         timestamp: nowIso(),
-        mode: 'blocked',
+        // Distinct from the exit-1 'blocked' branch above: this one is transient and exits 0
+        // (next tick retries), so the log must not read like the fatal case (review R3-1).
+        mode: 'lock-record-failed',
         chosen: chosen.key,
         reason: `could not record ${chosen.key}'s declared run duration on the lock before spawning — refusing to start a run the stale-reclaim window would not correctly protect; next tick retries`,
         sources: sourcesSummary,

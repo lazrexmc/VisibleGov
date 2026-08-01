@@ -209,7 +209,8 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    log looks healthy but freshness doesn't move, something downstream (not the scheduler) is
    wrong.
 3. Windows Task Scheduler's own History tab for "VisibleGov Scheduled Ingestion" shows exit codes
-   over time — 0 is normal (success, nothing due, or already-running); non-zero is a real error
+   over time — 0 is normal (success, nothing due, already-running, or the rare transient
+   `lock-record-failed`, which self-heals on the next tick); non-zero is a real error
    (e.g. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` missing) and is the one case worth investigating.
 
 Manual checks any time, safe to run for real (read-only, zero writes, zero external fetches):

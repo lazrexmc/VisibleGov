@@ -154,7 +154,18 @@
     (c) "(e.g. X)" mid-sentence over-splits into an extra verifier fragment (accepted
     residual — noisy-but-honest beats silent merge; prompt discourages dotted abbreviations).
 
-13. **Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion** - daily delta runs (new House rolls via ceiling probe, new Senate votes via menu diff, MO XML on its half-hour ToU), plus a summary-candidate report Lance approves as batches. Design after Plan 3a lands.
+13. ~~**Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion**~~
+    **BUILT 2026-07-31, awaiting Lance's registration** (commits 3e12a1e→6cf47cf; survived a
+    3-round adversarial review, final verdict SHIP). `scripts/scheduled-ingest.js` /
+    `npm run schedule:ingest`: five sources (mo-senate-web, mo-house-xml, us-congress, us-senate,
+    legiscan), self-computed due-ness off the durable `ingestion_runs` signal, single-instance
+    lock with declared-duration staleness, per-source timeouts (legiscan 75 min, evidence-derived),
+    honest failure self-recording, refresh-aggregates gated on real per-source write counters
+    (fail-open), dated logs, incapable of calling a model. **Registration = Lance runs the
+    `schtasks` command in `docs/SCHEDULED_INGESTION.md`** (draft-then-apply; it runs forever on
+    his machine). On registration the session-bound manual loops retire. Note: mo-senate-web
+    continues feeding the TODO-25 duplicate session at today's rate until that merge lands —
+    registering before or after the TODO-25 fix is Lance's call, both are safe.
 
 12. [x] ~~US Senate roll-call adapter~~ **DONE 2026-07-28** — senate.gov LIS XML adapter live:
     869 Senate votes, every senator's cast, 0 unresolved (Hawley/Schmitt 869/869; historical
@@ -225,7 +236,11 @@
 
 ### Live landmines recovered from the ledgers 2026-07-31 — these had fallen OUT of TODO entirely
 
-30. **⚠️ `npm run summarize` and `npm run verify` SPEND MONEY WITH NO GATE.** `gloss.js`,
+30. ~~**⚠️ `npm run summarize` and `npm run verify` SPEND MONEY WITH NO GATE.**~~ **DONE
+    2026-07-31** (commit 41936f0 + M4 cost-estimate lines in 6cf47cf): both now carry the same
+    mechanical gate as gloss.js — `SUMMARIZE_RUN_APPROVED=yes` / `VERIFY_RUN_APPROVED=yes` —
+    firing before any client construction; `--dry-run` stays freely runnable. Passed adversarial
+    review. Original finding, for the record: `gloss.js`,
     `extract-terms.js` and `golden.js` all carry mechanical env gates
     (`GLOSS_RUN_APPROVED` / `GOLDEN_CHECK_APPROVED`), but `src/cli/summarize.js` and
     `src/cli/verify.js` have none and both default `dryRun: false` — they call
@@ -250,6 +265,17 @@
     arbitrary truncated subset. Wave 1 was safe only because it used `summary-queue.js` instead.
     Fix before anyone reaches for `summarize.js` again. (TODO 18 tracks this as "hygiene" — the
     ledger's own word was URGENT.)
+
+33. **Two CLIs share `source='legiscan'` in `ingestion_runs` with different detail shapes**
+    (surfaced by the 2026-07-31 scheduler review, reviewer-confirmed out-of-scope-but-ledger).
+    `ingest-legiscan.js` (votes/bills) and `ingest-legiscan-texts.js` (doc blobs,
+    `ingest-legiscan-texts.js:781`, deliberate per its own comment) both write the same source
+    key, so any latest-row read — scheduler due-ness, `public_freshness` — sees whichever ran
+    last. Every current consequence is fail-safe (a manual texts run can only *delay* the next
+    scheduled legiscan tick, never advance it; the scheduler's refresh gate fails open on the
+    texts shape). Real fix = split the source key (schema + CLI + historical-row migration
+    touching `public_freshness`) — **draft-then-apply, Lance runs it**. Not urgent; recorded so
+    the shared key stops being a surprise.
 
 ---
 

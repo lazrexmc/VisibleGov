@@ -696,3 +696,300 @@ the orphan-close `sinceIso`).
 
 **Task 1 (`41936f0` + M4's addition in `9a4eb66`) remains independently shippable and is
 unaffected by all of the above.**
+
+
+---
+
+# Re-review (round 3)
+
+Scope: commit `6cf47cf` (on `a6d94bc`) — NEW-1 through NEW-4. Full stack under final verdict:
+`41936f0..6cf47cf` (5 commits). Reviewer: session 8ecd5d8c. Date 2026-07-31.
+
+## Mechanical re-verification
+
+**Test suite** — bare `node --test` from `F:\VisibleGov`, re-run by the reviewer:
+
+```
+ℹ tests 2089
+ℹ suites 0
+ℹ pass 2089
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22288.4128
+```
+
+Extracted fail-count line: **`ℹ fail 0`**. Corroborated by `grep -c "^not ok"` = **0**. 2089 tests
+(2073 + 16), matching the claim.
+
+**Dry run** — exit code **0**, zero stderr, lock released at rest, count-header on six tables
+byte-identical bracketing the invocation:
+
+```
+BEFORE {"ingestion_runs":404,"votes":9988,"vote_casts":1465564,"bills":38273,"sessions":33,"legislators":1607}
+AFTER  {"ingestion_runs":404,"votes":9988,"vote_casts":1465564,"bills":38273,"sessions":33,"legislators":1607}
+```
+
+**Stack invariants re-checked after a 185-line change to the scheduler** — import graph still 10
+files with zero model-adjacent modules and zero Anthropic imports; `dataset_hash` still appears
+only in comments; `mo-house-xml` cliArgs still the frozen literal `['--limit','1']`;
+`process.env` read only in `envIntervalMs` and `getSchedulerClient` (never for a MO cadence).
+`countsShowRowsWritten` is fully removed from live code (surviving mentions are comments only).
+Round 3 touched only `scripts/scheduled-ingest.js`, `tests/scheduled-ingest.test.js`, and ledger files.
+
+## (a) Per-finding verification
+
+### NEW-1 ✅ FIXED — and the implementer's deeper root cause is confirmed
+
+The single key-dispatched `countsShowRowsWritten` is replaced by five per-registry-entry
+predicates (`:414-484`), attached in `buildRegistry` and invoked as
+`(chosen.wroteSomething ?? defaultWroteSomething)(detail, status)` at `:919`.
+
+I ran the **real exported predicates against every real `ingestion_runs` row** (339 rows across
+five sources), not against fixtures:
+
+| Source | Real rows | Predicate tally | Shapes actually seen |
+|---|---|---|---|
+| `mo-senate-web` | 153 | 30 true / 123 false | 153/153 carry a numeric `counts.votes` |
+| `mo-house-xml` | 127 | **127 true** / 0 false | 113 `bill-xml`, 11 `rollcall-pdf`, 3 with no `document_type` |
+| `us-congress` | 3 | 3 true | 3/3 numeric `counts.votes` |
+| `us-senate` | 4 | 4 true | 4/4 numeric `counts.votes` |
+| `legiscan` | 52 | **37 true** / 15 false | 37 top-level `votes` (0–1359), 3 failure-shape, **2 texts-CLI shape** |
+
+**The legiscan predicate returns true against the real top-level-votes shape.** ✅ Confirmed:
+`detail.votes` is a genuine top-level counter present on 37 of the 52 rows, observed 0 through
+1359. Round-2 state was **0 of 52** true; it is now **37 of 52**. The regression is closed.
+
+**The texts-CLI shape fails open rather than false.** ✅ Confirmed empirically. The 2 rows written
+by `ingest-legiscan-texts.js` (nested `detail.counts` with text-cache counters, no votes field
+anywhere) resolve **true**, not false — they land in the succeeded/partial fail-open branch. The
+15 false results decompose exactly as: 12 rows with a genuine top-level `votes: 0`, and 3
+failure-shape rows (`keys: error|queries_used`, status `failed`). No false is a shape-miss.
+
+**The implementer's root-cause claim is verified independently.**
+`src/cli/ingest-legiscan-texts.js:781` really is `openRun(client, SOURCE)` carrying its own
+comment *"SAME source as ingest-legiscan.js — see file header"*. Three distinct real shapes exist
+under `source='legiscan'`, and all three are now handled.
+
+**The four other predicates still read their real shapes correctly after the refactor.** ✅
+Re-verified live (this was the coordinator's specific ask): `mo-senate-web` reads a real numeric
+`counts.votes` on all 153 rows — its 123 false results are genuine `votes: 0` roster/journal-index
+slots, which is the honest signal, not a shape-miss. `mo-house-xml` evaluates true on all 127 rows
+across all three real shapes, including all 11 `rollcall-pdf` runs via
+`detail.rollCallResult.castCount` (the shape I verified live in round 2) and the 3 rows with an
+absent `document_type`, which correctly fail open. `us-congress` and `us-senate` are unchanged and
+correct.
+
+**Sibling-counter blind-spot audit** — I checked for the exact class of error that produced NEW-1
+in the first place (the chosen counter reading 0 while a sibling counter shows rows really landed):
+
+```
+mo-senate-web: 153 rows; votes==0 but casts/bills>0 -> 0
+us-congress:     3 rows; votes==0 but casts/bills>0 -> 0
+us-senate:       4 rows; votes==0 but casts/bills>0 -> 0
+legiscan:            votes==0 but casts/bills>0 -> 12
+```
+
+The 12 legiscan rows are **not** a defect. Each has `casts: 0` alongside `votes: 0` (e.g.
+`{"bills":1746,"casts":0,"votes":0,…}`) — they ingested bills only. `scripts/refresh-aggregates.js`
+refreshes **three vote-aggregate materialized views** (`public_position_totals`,
+`public_party_alignment`, `public_party_position_totals`, per its own header), all vote-derived, so
+a bills-only run genuinely cannot move them and skipping the refresh is correct. A legiscan run
+that does write votes moves both counters together (sample: `{"bills":43,"casts":514,"votes":8,…}`),
+so `detail.votes` is a faithful proxy for the thing being refreshed. **The counter choice is right,
+not lucky.**
+
+**Test provenance** is honest: the round-3 fixtures are documented as real observed shapes fetched
+read-only from the live DB during the fix round, and include the regression case explicitly
+(`usCongressWroteSomething: THE I4b REGRESSION CASE — … (votes:0) must read as "wrote nothing"`).
+
+### NEW-2 ✅ FIXED — ceiling enforced, round-2 guarantee intact
+
+`MAX_LOCK_DURATION_MS = 2h` (`:123`), applied at `:228` as
+`Number.isFinite(declared) && declared > 0 && declared <= MAX_LOCK_DURATION_MS`. Runtime-verified
+against the real export:
+
+```
+  legiscan 76min (legit)   stale@+9m=false @+11m=false @+77m=true  @+121m=true
+  default 9min (legit)     stale@+9m=false @+11m=true  @+77m=true  @+121m=true
+  exactly 2h ceiling       stale@+9m=false @+11m=false @+77m=false @+121m=true
+  2h + 1ms (over)          stale@+9m=false @+11m=true  @+77m=true  @+121m=true
+  1e12 (absurd)            stale@+9m=false @+11m=true  @+77m=true  @+121m=true
+  Number.MAX_VALUE         stale@+9m=false @+11m=true  @+77m=true  @+121m=true
+```
+
+Absurd values now fall back to the conservative 10-minute default, exactly like a missing/corrupt
+field. And the round-2 guarantee is untouched — the legiscan lock still survives a +15-minute tick:
+
+```
+   +15m:live  +30m:live  +60m:live  +75m:live  +76m:live  +77m:STALE
+```
+
+### NEW-3 ✅ FIXED — failure now aborts before spawn
+
+`:1093-1105`: the return value is captured and, when false, the tick logs and returns **without
+spawning**. Runtime-verified the underlying contract against the real export in all five cases:
+
+```
+  update with CORRECT nonce  -> true    (lock file really rewritten: maxDurationMs 4560000)
+  update with WRONG   nonce  -> false
+  update with NULL    nonce  -> false
+  update on CORRUPT lock     -> false
+  update on MISSING lock     -> false
+```
+
+The abort path is inside the `try`, so the outer `finally` still runs `releaseLock` — and that
+release is itself nonce-checked, so if the lock update failed *because* the nonce no longer
+matches, the release correctly declines to delete someone else's lock. Fail-safe end to end.
+
+### NEW-4 ✅ FIXED — and the safety argument holds under audit
+
+`ORPHAN_CLOSE_SKEW_GRACE_MS = 5 min` (`:128`), applied at `:896` as
+`tickStartIso - ORPHAN_CLOSE_SKEW_GRACE_MS`. I audited the stated argument rather than accepting it:
+
+- Every registry interval is ≥30 min: MO Senate/House are hardcoded 30-min ToU constants;
+  `us-congress`/`us-senate` are floored at 1h; `legiscan` at 24h. Minimum is 30 min — a **6×
+  margin** over the 5-minute grace.
+- For a source to be chosen it must be *due*, and `queryLatestStartedAt` has **no status filter**
+  (by design), so even a stranded `'running'` row from a prior tick counts against due-ness. A
+  source with any row inside the last 5 minutes is therefore not due and cannot be selected.
+- Hence any `'running'` row the grace additionally captures must be from the invocation this tick
+  just made. The scoping guarantee from round 2 (never touches pre-existing history) survives.
+
+The one residual — a *manual* concurrent run of the same CLI could place a row in the window — is
+pre-existing (it was equally reachable with the un-graced `tickStartIso` bound) and outside the
+single-instance lock's reach by construction. Not introduced here.
+
+### NEW-5 — accepted scope, untouched. Agreed; my round-2 framing already treated it as an
+observation rather than a defect, and nothing in this round changes that.
+
+## (b) Fail-open cannot resolve to silent-never for any completed run
+
+Enumerated by executing every predicate against seven unrecognized shapes
+(`{}`, `{counts:{}}`, `{counts:{votes:null}}`, `{votes:'x'}`, `{weird:1}`, `null`, `undefined`)
+across every status:
+
+```
+  mo-senate-web  succeeded:ALL-TRUE  partial:ALL-TRUE  failed:ALL-FALSE  running:ALL-FALSE  null:ALL-FALSE
+  mo-house-xml   succeeded:ALL-TRUE  partial:ALL-TRUE  failed:ALL-FALSE  running:ALL-FALSE  null:ALL-FALSE
+  us-congress    succeeded:ALL-TRUE  partial:ALL-TRUE  failed:ALL-FALSE  running:ALL-FALSE  null:ALL-FALSE
+  us-senate      succeeded:ALL-TRUE  partial:ALL-TRUE  failed:ALL-FALSE  running:ALL-FALSE  null:ALL-FALSE
+  legiscan       succeeded:ALL-TRUE  partial:ALL-TRUE  failed:ALL-FALSE  running:ALL-FALSE  null:ALL-FALSE
+  default        succeeded:ALL-TRUE  partial:ALL-TRUE  failed:ALL-FALSE  running:ALL-FALSE  null:ALL-FALSE
+```
+
+Every path to `wroteRows === false`, exhaustively:
+
+| # | Path | Resolves false because | Completed run? | Correct? |
+|---|---|---|---|---|
+| 1 | `selfRecordedFailure === true` | short-circuited by the `!selfRecordedFailure &&` guard at `:919` | No — the child never wrote a row | ✅ nothing to refresh |
+| 2 | status `succeeded`/`partial`, **recognized** shape, counter `=== 0` | a real numeric counter was read and it was zero | Yes | ✅ the honest signal — this is the I4b fix working |
+| 3 | status `failed` | deliberate: a genuine failure has nothing to refresh | Yes (completed-as-failed) | ✅ documented, intended |
+| 4 | status `running` | not a completed run — child opened a row and never closed it | No | ✅ only reachable via a non-SIGTERM hard crash (NEW-5's accepted scope) |
+| 5 | status `null` | unreachable in practice: `!selfRecordedFailure` implies `latestRun !== null`, so path 1 already applies | n/a | ✅ |
+
+**There is no path where a completed (`succeeded`/`partial`) run with an unrecognized detail shape
+resolves false.** Confirmed twice over: synthetically (table above) and empirically — across all
+339 real historical rows, the count of *completed runs resolving false without having read a real
+numeric counter* is **0 for every one of the five sources**. Silent-never is unreachable.
+
+## (c) New defects in this diff
+
+### 🟡 R3-1 (Minor) — `mode: "blocked"` now spans two different exit codes, and the doc's exit-code guide wasn't updated
+
+`scripts/scheduled-ingest.js:1094-1104` logs `mode: 'blocked'` and returns **exit 0**. The
+pre-existing blocked branch (missing `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, `:1022-1031`) logs
+the same `mode: 'blocked'` but sets `process.exitCode = 1`. Meanwhile
+`docs/SCHEDULED_INGESTION.md:211-212` still enumerates exit-0 outcomes as *"success, nothing due,
+or already-running"* — the new abort isn't listed, and round 3 didn't touch the doc.
+
+Consequence is cosmetic but lands squarely on the "one file Lance reads to know it's alive": a
+reader grepping `"mode": "blocked"` cannot tell a benign self-healing abort from a real
+configuration failure without also reading `reason`. A distinct mode string (e.g.
+`lock-update-failed`) plus one line in the doc's exit-code list would close it. Not ship-blocking:
+the `reason` field is explicit and honest, and the behavior itself is correct.
+
+No other new defects found. Specifically checked and clean: the predicate functions attached to
+registry entries survive the `{...entry}` spread in `computeSourceDueness`; no function value ever
+reaches `JSON.stringify` (every `writeLog` payload uses `chosen.key` and scalar-only
+`sourcesSummary`); `defaultWroteSomething` is correctly wired via `??` for a future unwired source;
+and the fail-open direction cannot produce a refresh storm (at most one refresh per tick, i.e. per
+15 min, of idempotent SQL).
+
+## (e) Ruling — NEW-3 verified by reading, not a dedicated unit test: **ACCEPTABLE, not a gap that blocks ship**
+
+The disclosure is accurate and the reasoning is sound:
+
+- **The decision function is tested, and I re-verified it at runtime.**
+  `updateLockMaxDuration`'s false-return contract has round-2 coverage and I independently
+  exercised all five branches (correct nonce, wrong nonce, null nonce, corrupt file, missing file)
+  against the real export this round. The part carrying actual logic is covered.
+- **The untested part has no logic.** It is a three-statement guard: call, `if (!x) { writeLog(…);
+  return; }`. There is no branch, no arithmetic, no state. `return` inside `try` still runs the
+  `finally` (language-guaranteed), which I confirmed by reading and which the dry-run exercises for
+  the sibling early-return paths.
+- **The repo convention is real, not an excuse.** No CLI in this repo exports its `main()` — the
+  scheduler's own comment at `:625-631` records that this was checked. Testing this branch would
+  mean either breaking that convention repo-wide or spawning a real subprocess against a doctored
+  lock file, both disproportionate to a guard clause.
+- **The failure direction is safe.** If the guard were wrong, the worst case is refusing to spawn a
+  run that could have proceeded — the next tick retries and no source's due-ness moved.
+
+I would rule differently if the branch made a *positive* decision (spawning, writing, closing a
+row) on untested logic. It does the opposite: it declines to act. Accept as a documented residual.
+
+## (f) Ruling — shared `source='legiscan'` key: **AGREE, out-of-scope-but-ledger, not a blocker**
+
+Verified independently (`ingest-legiscan-texts.js:781`, plus 2 of 52 real rows carrying that CLI's
+shape). Every consequence for *this* scheduler is either fail-safe-conservative or
+fail-open-harmless:
+
+1. **Due-ness** — `queryLatestStartedAt('legiscan')` could read a texts-CLI row and conclude the
+   dataset CLI ran when it didn't. Effect: the legiscan tick is *delayed* by up to 24h. Strictly
+   more conservative; it cannot cause an extra call, a ToU issue, or a LegiScan budget event.
+2. **Refresh gate** — the texts shape now fails open to true (measured), so the cost is one extra
+   idempotent refresh, never a missed one.
+3. **Orphan-close** — could in principle touch a texts-CLI `'running'` row, but only given a
+   concurrent manual texts run inside the same tick window; that is the same pre-existing
+   manual-overlap class the single-instance lock never covered.
+4. **The scheduler never invokes the texts CLI** — the registry's legiscan `scriptPath` is
+   `src/cli/ingest-legiscan.js`, verified.
+
+The honest fix (distinct source keys, or a discriminator column) is a schema + CLI + historical-row
+migration that would also move `public_freshness` — clearly outside this brief, and exactly the
+kind of thing that should be Lance's draft-then-apply call rather than a scope creep inside a
+scheduler build. **Recommend a TODO.md entry** so it is not rediscovered the hard way during future
+freshness work; it does not gate registration.
+
+## Verdicts
+
+| | Verdict |
+|---|---|
+| NEW-1 (legiscan refresh-gate regression) | ✅ **FIXED** — verified against all 339 real rows; 0/52 → 37/52; texts shape fails open |
+| NEW-2 (unclamped lock duration) | ✅ **FIXED** — 2h ceiling, runtime-verified, round-2 guarantee intact |
+| NEW-3 (ignored update failure) | ✅ **FIXED** — aborts before spawn; contract runtime-verified in 5 branches |
+| NEW-4 (orphan-close clock skew) | ✅ **FIXED** — 5-min grace; ≥30-min-interval argument audited and holds (6× margin) |
+| NEW-5 | Accepted scope, agreed |
+| Other four predicates after refactor | ✅ **still correct** — re-verified live |
+| Fail-open → silent-never for a completed run | ✅ **unreachable** (synthetic + 339-row empirical) |
+| New defects this round | 🟡 **1 Minor** (R3-1: overloaded `mode:"blocked"` + stale doc exit-code list) |
+| (e) NEW-3 test coverage | **Acceptable** — not a ship blocker |
+| (f) shared `source='legiscan'` | **Agree** — out-of-scope-but-ledger |
+| **Ship `41936f0..6cf47cf` as unattended-forever code** | ✅ **SHIP** |
+
+Every Critical and Important finding raised across three rounds — C1, C2, I1–I5, NEW-1 through
+NEW-4 — is now verified fixed against live data or runtime execution rather than against the
+implementer's report. The one open item is a Minor log-string/doc nit that cannot cause a wrong
+write, a missed refresh, a ToU violation, or a silent stall.
+
+**Follow-ups (none blocking):**
+1. R3-1 — give the lock-update abort its own mode string and add it to
+   `docs/SCHEDULED_INGESTION.md`'s exit-code list.
+2. TODO.md entry for the shared `source='legiscan'` key between `ingest-legiscan.js` and
+   `ingest-legiscan-texts.js`.
+
+**Standing operational caveat, unchanged and now honestly documented:** registering this scheduler
+means `mo-senate-web` keeps feeding the TODO-25 session duplicate on a forever cadence.
+`docs/SCHEDULED_INGESTION.md:247-268` says so plainly, which was the requirement — the decision to
+register before or after TODO 25's merge is Lance's, made with accurate information.

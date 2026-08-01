@@ -107,3 +107,31 @@ keys and verified vs the 52 live rows, fixture tests from real detail rows for a
 fix the :378-388 comment. NEW-2 = 2h ceiling → default beyond. NEW-3 = can't-record → don't
 spawn (log, release, exit 0). NEW-4 = 5-min skew grace + written safety argument (≥30-min
 intervals make pre-tick capture impossible) or DB-derived now(). Next: scoped re-review round 3.
+
+## Fix round 3 — complete (commit 6cf47cf, ℹ fail 0, 2089 tests = 2073 + 16)
+NEW-1 root cause deeper than reviewed: ingest-legiscan-texts.js ALSO writes source='legiscan'
+rows with a third detail shape. Fix = five per-entry wroteSomething(detail,status) predicates,
+fail-open on unrecognized completed-run shapes, fixture-tested from real live ingestion_runs rows
+for all shapes. NEW-2 = 2h clamp. NEW-3 = can't-record → no spawn (implementer disclosure: branch
+verified by reading, lives in main(), repo convention doesn't unit-test CLI main()s — reviewer to
+adjudicate). NEW-4 = 5-min skew grace + safety comment. Implementer also surfaced (out of scope,
+ON RECORD): shared source='legiscan' key means due-ness reads see whichever CLI (votes or texts)
+ran latest — 2/52 historically; same architectural fact NEW-1 exposed. Round-3 scoped re-review
+dispatched (resumed reviewer): verify NEW-1..4, fail-open path enumeration, adjudicate the NEW-3
+testing judgment call + the shared-key disclosure, final SHIP/DO-NOT-SHIP on 41936f0..6cf47cf.
+
+## Round-3 re-review — ✅ SHIP 41936f0..6cf47cf
+NEW-1..4 all verified (predicates run against ALL 339 real ingestion_runs rows: legiscan 0/52 →
+37/52 true with the 15 falses decomposing exactly as 12 genuine votes:0 + 3 failure shapes;
+texts-CLI shape fails open; other four sources re-verified live post-refactor; sibling-counter
+audit clean — the votes/casts counter choice is right, not lucky). Silent-never proven
+unreachable synthetically (7 shapes × statuses × 6 predicates) and empirically (0/339). NEW-3
+testing judgment ACCEPTED (decline-to-act branch, contract tested, repo convention real). Shared
+legiscan-key disclosure adjudicated out-of-scope-but-ledger → TODO 33. Sole open item R3-1
+(Minor, log mode string + doc line) — controller fixed directly post-verdict (distinct
+'lock-record-failed' mode + doc exit-0 list), no logic touched.
+
+## CLOSEOUT
+Task 1 + Task 2 complete: 41936f0, 3e12a1e, 9a4eb66, a6d94bc, 6cf47cf + controller R3-1 commit.
+TODO 13 marked BUILT-awaiting-registration; TODO 30 marked DONE; TODO 33 added. Registration is
+Lance's step (docs/SCHEDULED_INGESTION.md). Manual loops retire on registration.

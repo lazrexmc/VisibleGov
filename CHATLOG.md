@@ -923,3 +923,50 @@ casts fall out of party comparisons; 152 roll calls render a result with no name
 strong and internally consistent; the plain-language layer covers a few dozen bills from 2 of 33
 sessions; and the docs' numbers were stale because a cron writes every 30 minutes while docs sit
 still.
+
+## 2026-07-31 (night) — spend gates + the scheduler: three review rounds to unattended-safe
+
+Lance: *"add the spend gate / build the schedule ingestion"* — the two quick approvals from the
+operator-queue rundown. The first is 20 minutes of protection; the second is the difference
+between "fresh while a chat session happens to be running" and actually fresh.
+
+**Spend gates (commit 41936f0):** `npm run summarize` and `npm run verify` could bill the
+Anthropic account with nothing in the way — the unfinished half of CLAUDE.md's own "extend that
+pattern" policy. Both now carry the same mechanical gate as gloss.js
+(`SUMMARIZE_RUN_APPROVED=yes` / `VERIFY_RUN_APPROVED=yes`), firing before any client is
+constructed, with `--dry-run` untouched and a cost estimate printed at the gate. Passed review
+round 1 untouched.
+
+**The scheduler (3e12a1e + three fix rounds → 6cf47cf):** `scripts/scheduled-ingest.js`, the
+first code in this repo built to run forever unattended. Five sources with self-computed
+due-ness off the durable ingestion_runs signal. It took the full adversarial loop to make it
+actually safe, and the loop earned its cost each round:
+
+- **Round 1 (9a4eb66)** fixed the reviewer's two Criticals: a starvation spiral (a persistently
+  unreachable congress.gov writes no run row → us-congress stays "most overdue" → picked every
+  tick forever, starving MO and hammering congress.gov — live on day one, since federal was the
+  most-overdue source at review time; fixed by honest self-recorded failure rows) and a doc that
+  denied the scheduler feeds the TODO-25 session split (it does — mo-senate-web is the feeder
+  and is in the registry; now stated plainly). Plus lock-ownership, timeout, lookup-isolation,
+  tail-404-classification, and missing-us-senate findings.
+- **Round 2 (a6d94bc)** came from the implementer's own empirical check: real legiscan runs took
+  449-476s against a 480s kill budget (outlier: 53 min). Fixed with evidence-derived per-source
+  timeouts (legiscan 75 min) and a lock that declares its run's allowed duration so the
+  stale-reclaim can't fire mid-run.
+- **Round 3 (6cf47cf)** fixed the regression MY round-1 ruling introduced: the refresh gate read
+  a counts field legiscan's run records don't have — measured 0 of 52 real runs would trigger,
+  on the source that writes 82% of the vote corpus. The weekly dataset would have landed with no
+  aggregate refresh, silently recreating this morning's chart-drift defect every week. Fix:
+  per-source predicates fixture-tested from real rows, failing OPEN. The dig also surfaced that
+  two CLIs deliberately share source='legiscan' with different record shapes → TODO 33.
+
+**Final re-review verdict: SHIP** — every finding verified against live data or runtime
+execution (the reviewer ran the predicates against all 339 real ingestion_runs rows and walked
+the lock staleness function through every boundary), not against the implementer's report.
+
+**What this hands Lance:** the one-line `schtasks` registration in `docs/SCHEDULED_INGESTION.md`
+(draft-then-apply — it runs forever on his machine, so he runs the command). On registration:
+freshness stops depending on a chat session, the ~42-day senate journal backlog drains on its
+own, federal votes get scheduled ingestion for the first time, and the manual loops retire.
+Honest caveat, stated in the doc: mo-senate-web keeps feeding the TODO-25 duplicate session at
+today's rate until that merge fix lands — registering before or after is his call, both safe.
