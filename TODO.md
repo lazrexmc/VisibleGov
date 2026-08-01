@@ -302,6 +302,16 @@
     scheduler's frozen `--limit 1` is unaffected. 9 new tests
     (`tests/mo-house-xml.test.js`), 2101/2101 green.
 
+35. **MO Senate roster is duplicated in `legislators`** (found 2026-08-01, investigating TODO 25's
+    vote-reconciliation flags). Every current senator has TWO rows — one LegiScan-sourced (party
+    set), one mo-senate-web-sourced (party NULL) — plus at least one name-variant pair not
+    unified (Mary Coleman / Mary Elizabeth Coleman). Currently harmless for tally comparisons (the
+    duplication cancels out), but it's a live identity defect: casts and sponsorships could split
+    across the two rows for the same real person, undercounting either row's activity on their
+    profile page. Fix = identity merge pass scoped to the MO Senate roster (same exact-match
+    machinery as the existing person-identity merger, not new logic) — not urgent, not blocking,
+    but real and worth a dedicated pass.
+
 ---
 
 ### Defects found by the 2026-07-31 data audit (docs vs live DB) — none were previously recorded
