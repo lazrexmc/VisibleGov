@@ -294,3 +294,26 @@ yea/nay **tally**, which a review proved could delete a genuinely different roll
 to share a tally. The fix used exact set-equality on the *legislator IDs* who voted each way —
 strictly stronger, and still exact rather than fuzzy. **When a heuristic decides whether to delete,
 the bar is identity, not resemblance.**
+
+## Lesson 18 — Never hand-transcribe machine-readable lists into agent dispatches (2026-08-01)
+
+Wave 2's batch-1 args listed 20 bill directories; the controller typed the second ten from
+memory and got ALL TEN wrong (confabulated plausible tags like `b17-SB_190` for slots actually
+holding different bills). Cost: 10 wasted opus author dispatches. Two layers saved it: the
+subagents each REFUSED to substitute the bill they could actually find ("no bill text means
+every point would be fabricated" — the refuse-don't-improvise instinct the prompts demand), and
+the manifest on disk stayed authoritative. Rule: any list that exists in a file is passed by
+GENERATING the dispatch from the file (a script bakes the literals in), never by retyping.
+A preview that prints sizes but not names is not verification of names.
+
+## Lesson 19 — Government sources say "not found" with HTTP 200 + a human-readable page (2026-08-01)
+
+senate.gov LIS returns **200** with a fixed HTML page ("Roll Call Vote Unavailable") for a
+not-yet-cast vote number — never a 404 — so an `!res.ok` guard passes it straight to the XML
+parser, which produced a rootless tree WITHOUT throwing (fast-xml-parser parses HTML happily),
+and the first field access crashed with a bare TypeError. Meanwhile clerk.house.gov cleanly
+404s for the same situation. Rule: for every source, capture what "doesn't exist yet" ACTUALLY
+returns (fixture it — ours proved byte-identical across vote numbers, so exact-match detection
+is safe) and classify it as a typed expected-miss; any OTHER structure-missing payload must
+stay a loud failure so real outages can't hide inside the expected-miss class. Related: §7
+lesson 3 (government HTML inside expected-XML channels).
