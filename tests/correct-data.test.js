@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   parseArgs,
   MO_STATUS_WORD_MAP,
@@ -12,6 +13,12 @@ import {
   runCorrectMoStatus,
   runCorrectMo1969Dates,
   runCorrectData,
+  CANONICAL_MO_2026_SESSION_IDENTIFIER,
+  DUPLICATE_MO_2026_SESSION_IDENTIFIER,
+  DUP_BILL_MUST_BE_EMPTY_TABLES,
+  runMergeMo2026Session,
+  runReconcileMo2026Votes,
+  runCorrectMo2026SessionMerge,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -26,15 +33,33 @@ import {
 // update+select(count:exact), delete+select) against three small tables (bills, votes,
 // vote_casts) — mirrors real supabase-js closely enough (fluent + thenable) to exercise this
 // module's actual query construction, not just its counting arithmetic.
+function likeToRegExp(pattern) {
+  const escaped = String(pattern).split('%').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`^${escaped.join('.*')}$`);
+}
+
 function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = {}) {
-  const tables = { bills: [], votes: [], vote_casts: [], ...seed };
+  const tables = {
+    bills: [],
+    votes: [],
+    vote_casts: [],
+    sessions: [],
+    bill_texts: [],
+    bill_sponsors: [],
+    summaries: [],
+    bill_actions: [],
+    vote_reconciliation_flags: [],
+    ...seed,
+  };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
   const calls = [];
+  let insertCounter = 0;
 
   function matchesFilters(row, filters) {
     return filters.every((f) => {
       if (f.op === 'eq') return row[f.col] === f.val;
       if (f.op === 'in') return f.vals.includes(row[f.col]);
+      if (f.op === 'like') return likeToRegExp(f.val).test(String(row[f.col] ?? ''));
       return true;
     });
   }
@@ -44,14 +69,17 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     let orderCol = null;
     let orderAsc = true;
     let limitVal = null;
+    let rangeVal = null;
     let selectCols = null;
     let selectOpts = {};
 
     const builder = {
       eq(col, val) { filters.push({ op: 'eq', col, val }); return builder; },
       in(col, vals) { filters.push({ op: 'in', col, vals }); return builder; },
+      like(col, val) { filters.push({ op: 'like', col, val }); return builder; },
       order(col, { ascending = true } = {}) { orderCol = col; orderAsc = ascending; return builder; },
       limit(n) { limitVal = n; return builder; },
+      range(from, to) { rangeVal = [from, to]; return builder; },
       select(cols, opts = {}) { selectCols = cols; selectOpts = opts; return builder; },
       then(resolve, reject) {
         try {
@@ -64,7 +92,7 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
 
     function execute() {
       const callInfo = {
-        table, mode, patch, filters: [...filters], select: selectCols, selectOpts, orderCol, limitVal,
+        table, mode, patch, filters: [...filters], select: selectCols, selectOpts, orderCol, limitVal, rangeVal,
       };
       calls.push(callInfo);
       const injected = forceError && forceError(table, mode, filters);
@@ -79,7 +107,8 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
           matched = [...matched].sort((a, b) => (a[orderCol] > b[orderCol] ? 1 : -1) * (orderAsc ? 1 : -1));
         }
         let out = matched;
-        if (limitVal != null) out = out.slice(0, limitVal);
+        if (rangeVal) out = out.slice(rangeVal[0], rangeVal[1] + 1);
+        else if (limitVal != null) out = out.slice(0, limitVal);
         if (selectOpts.head) result = { data: null, error: null, count: matched.length };
         else if (selectOpts.count === 'exact') result = { data: out.map((r) => ({ ...r })), error: null, count: matched.length };
         else result = { data: out.map((r) => ({ ...r })), error: null };
@@ -111,6 +140,31 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     return builder;
   }
 
+  // makeInsertBuilder — only vote_reconciliation_flags (via legiscan-votes.js's own
+  // writeReconciliationFlag, reused unmodified by the mo-2026-session-merge reconciliation phase)
+  // ever inserts through this fake client. Mirrors tests/legiscan-votes.test.js's own
+  // makeFakeVotesDb insert shape (`.insert(row).select().single()`) closely enough to drive that
+  // real function's actual call chain, not a bespoke re-derivation of it.
+  function makeInsertBuilder(table, row) {
+    return {
+      select: () => ({
+        single: async () => {
+          const injected = forceError && forceError(table, 'insert', []);
+          if (injected) return { data: null, error: injected };
+          insertCounter += 1;
+          const inserted = {
+            id: `${table}-${insertCounter}`, resolved: false, created_at: 'test-time', ...row,
+          };
+          tables[table].push(inserted);
+          calls.push({
+            table, mode: 'insert', patch: row, filters: [], select: null, selectOpts: {}, orderCol: null, limitVal: null, rangeVal: null,
+          });
+          return { data: { ...inserted }, error: null };
+        },
+      }),
+    };
+  }
+
   return {
     tables,
     calls,
@@ -119,6 +173,7 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
         select: (cols, opts) => makeBuilder(table, 'select', null).select(cols, opts),
         update: (patch) => makeBuilder(table, 'update', patch),
         delete: () => makeBuilder(table, 'delete', null),
+        insert: (row) => makeInsertBuilder(table, row),
       };
     },
   };
@@ -586,4 +641,425 @@ test('runCorrectData: "mo-status" runs only the status correction; "mo-1969-date
   assert.ok(both.mo1969Dates);
   assert.equal(both.failures.length, 0);
   assert.equal(both.mode, 'dry-run');
+});
+
+// ============================================================================================
+// mo-2026-session-merge (TODO 25 / .superpowers/sdd/2026-08-01-mo-2026-session-merge/brief.md) —
+// Phase A (bill/session merge) + Phase B (vote reconciliation, additive-only, NO deletes).
+// ============================================================================================
+
+test('parseArgs: accepts mo-2026-session-merge as a fourth <which> value', () => {
+  assert.equal(parseArgs(['mo-2026-session-merge']).which, 'mo-2026-session-merge');
+  assert.equal(parseArgs(['mo-2026-session-merge', '--dry-run']).dryRun, true);
+});
+
+test('CANONICAL_MO_2026_SESSION_IDENTIFIER / DUPLICATE_MO_2026_SESSION_IDENTIFIER / DUP_BILL_MUST_BE_EMPTY_TABLES: pinned to the brief\'s verified values', () => {
+  assert.equal(CANONICAL_MO_2026_SESSION_IDENTIFIER, '261');
+  assert.equal(DUPLICATE_MO_2026_SESSION_IDENTIFIER, '2026');
+  assert.ok(DUP_BILL_MUST_BE_EMPTY_TABLES.includes('bill_texts'));
+  assert.ok(DUP_BILL_MUST_BE_EMPTY_TABLES.includes('bill_sponsors'));
+  assert.ok(DUP_BILL_MUST_BE_EMPTY_TABLES.includes('summaries'));
+});
+
+test('correct-data.js source: never IMPORTS or CALLS crossCheckAgainstPrimarySource or retractLegiscanVoteIfStored — the two sanctioned-elsewhere functions the brief forbids this file from invoking (a bare mention in an explanatory comment, documenting WHY they are never called, is fine)', () => {
+  const src = readFileSync(new URL('../src/cli/correct-data.js', import.meta.url), 'utf8');
+  assert.equal(/\bcrossCheckAgainstPrimarySource\(/.test(src), false, 'must never CALL the live pre-store gate against already-published data');
+  assert.equal(/import\s*\{[^}]*\bcrossCheckAgainstPrimarySource\b/.test(src), false, 'must never IMPORT it either');
+  assert.equal(/\bretractLegiscanVoteIfStored\(/.test(src), false, 'must never CALL this repo\'s one sanctioned delete — Phase B never deletes anything');
+  assert.equal(/import\s*\{[^}]*\bretractLegiscanVoteIfStored\b/.test(src), false, 'must never IMPORT it either');
+});
+
+function sessionRow(id, identifier, legiscanSessionId = null) {
+  return {
+    id, jurisdiction_id: 'mo-legislature', identifier, legiscan_session_id: legiscanSessionId,
+  };
+}
+function moBillRow(id, sessionId, identifier) {
+  return { id, session_id: sessionId, identifier };
+}
+function moVoteRow(overrides) {
+  return {
+    jurisdiction_id: 'mo-legislature', chamber: 'senate', result: null, ...overrides,
+  };
+}
+function castRow(id, voteId, position, legislatorId) {
+  return {
+    id, vote_id: voteId, position, legislator_id: legislatorId,
+  };
+}
+
+const CANON = sessionRow('sess-261', '261', 2239);
+const DUP = sessionRow('sess-2026', '2026', null);
+
+// ---- runMergeMo2026Session (Phase A) ----
+
+test('runMergeMo2026Session: happy path — exact-identifier twin found, zero related tables, votes redirected, duplicate bill deleted, session deleted once empty', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    votes: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-dup-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+    vote_casts: [],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.canonicalSessionFound, true);
+  assert.equal(report.dupSessionFound, true);
+  assert.equal(report.dupBillsTotal, 1);
+  assert.equal(report.dupBillsSeen, 1);
+  assert.equal(report.billsMerged, 1);
+  assert.equal(report.votesRedirected, 1);
+  assert.equal(report.stopped.length, 0);
+  assert.equal(report.failures.length, 0);
+  assert.equal(report.sessionDeletionEligible, true);
+  assert.equal(report.sessionDeleted, true);
+
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-1'), false, 'duplicate bill deleted');
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-canon-1'), true, 'canonical bill untouched');
+  assert.equal(client.tables.sessions.some((s) => s.id === 'sess-2026'), false, 'duplicate session deleted');
+  assert.equal(client.tables.votes.find((v) => v.id === 'vote-dup-1').bill_id, 'bill-canon-1', 'vote redirected to the canonical bill');
+
+  assert.equal(report.merges.length, 1);
+  assert.equal(report.merges[0].canonicalBillId, 'bill-canon-1');
+  assert.equal(report.merges[0].billDeleted, true);
+});
+
+test('runMergeMo2026Session: no canonical twin for a duplicate identifier — STOPS and reports, never invents a merge target, bill/session untouched', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-orphan', 'sess-2026', 'SB 99'), // no SB 99 under the canonical session
+    ],
+    votes: [],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 0);
+  assert.equal(report.stopped.length, 1);
+  assert.equal(report.stopped[0].reason, 'no_canonical_twin');
+  assert.equal(report.stopped[0].billId, 'bill-dup-orphan');
+  assert.equal(report.sessionDeletionEligible, false, 'a stopped bill blocks session-delete eligibility');
+  assert.equal(report.sessionDeleted, false);
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-orphan'), true, 'never deleted — no twin to redirect its votes to');
+  assert.equal(client.tables.sessions.some((s) => s.id === 'sess-2026'), true, 'session not deleted — still owns a bill');
+});
+
+test('runMergeMo2026Session: a duplicate bill with a non-zero related table (bill_texts here) STOPS and reports, never silently redirects', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    bill_texts: [{
+      id: 'bt-1', bill_id: 'bill-dup-1', version: 'introduced',
+    }],
+    votes: [],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.billsMerged, 0);
+  assert.equal(report.stopped.length, 1);
+  assert.equal(report.stopped[0].reason, 'non_zero_related_tables');
+  assert.deepEqual(report.stopped[0].nonZeroTables, [{ table: 'bill_texts', count: 1 }]);
+  assert.equal(client.tables.bills.some((b) => b.id === 'bill-dup-1'), true, 'never deleted — a table this brief didn\'t anticipate redirecting is non-zero');
+});
+
+test('runMergeMo2026Session: --dry-run performs ZERO writes but reports the same honest counts a live run would produce', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    votes: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-dup-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  });
+  const before = JSON.stringify([client.tables.bills, client.tables.votes, client.tables.sessions]);
+
+  const report = await runMergeMo2026Session(client, { dryRun: true });
+
+  assert.equal(report.billsMerged, 1);
+  assert.equal(report.votesRedirected, 1);
+  assert.equal(report.sessionDeletionEligible, true);
+  assert.equal(report.sessionDeleted, false, 'dry-run never actually deletes the session, even when eligible');
+  assert.equal(JSON.stringify([client.tables.bills, client.tables.votes, client.tables.sessions]), before, 'zero writes — every table byte-for-byte unchanged');
+  assert.equal(client.calls.some((c) => c.mode === 'update' || c.mode === 'delete'), false);
+});
+
+test('runMergeMo2026Session: --limit caps how many duplicate bills are processed; a partial pass never deletes the still-non-empty session', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-canon-2', 'sess-261', 'SB 2'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+      moBillRow('bill-dup-2', 'sess-2026', 'SB 2'),
+    ],
+    votes: [],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, limit: 1, runId: 'run-1' });
+
+  assert.equal(report.dupBillsTotal, 2);
+  assert.equal(report.dupBillsSeen, 1);
+  assert.equal(report.billsMerged, 1);
+  assert.equal(report.sessionDeletionEligible, false, 'the limit left a bill unprocessed');
+  assert.equal(report.sessionDeleted, false);
+  assert.equal(client.tables.sessions.some((s) => s.id === 'sess-2026'), true, 'session still owns bill-dup-2 — the guard refuses');
+});
+
+test('runMergeMo2026Session: no duplicate session present -> nothing to do, clean empty report, never an error', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON],
+    bills: [moBillRow('bill-canon-1', 'sess-261', 'SB 1')],
+  });
+
+  const report = await runMergeMo2026Session(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.dupSessionFound, false);
+  assert.equal(report.billsMerged, 0);
+  assert.equal(report.sessionDeleted, false);
+  assert.deepEqual(report.failures, []);
+});
+
+// ---- runReconcileMo2026Votes (Phase B) ----
+
+test('runReconcileMo2026Votes: exactly one same-day LegiScan candidate with matching tallies -> clean match, writes NOTHING', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+      castRow('c2', 'vote-dup-1', 'yea', 'L2'),
+      castRow('c3', 'vote-dup-1', 'nay', 'L3'),
+      castRow('c4', 'vote-ls-1', 'yea', 'L1'),
+      castRow('c5', 'vote-ls-1', 'yea', 'L2'),
+      castRow('c6', 'vote-ls-1', 'nay', 'L3'),
+    ],
+  });
+  const mergedBills = [{
+    billId: 'bill-dup-1',
+    canonicalBillId: 'bill-canon-1',
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.votesChecked, 1);
+  assert.equal(report.cleanMatches, 1);
+  assert.equal(report.flaggedCount, 0);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0, 'a clean match writes nothing to the DB');
+});
+
+test('runReconcileMo2026Votes: a HARD (yea/nay) mismatch writes a vote_reconciliation_flags row keyed on the mo-senate-web vote\'s own id, reason hard_mismatch', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+      castRow('c2', 'vote-dup-1', 'yea', 'L2'),
+      castRow('c3', 'vote-dup-1', 'nay', 'L3'),
+      // legiscan side: all three yea — a real hard yea/nay divergence
+      castRow('c4', 'vote-ls-1', 'yea', 'L1'),
+      castRow('c5', 'vote-ls-1', 'yea', 'L2'),
+      castRow('c6', 'vote-ls-1', 'yea', 'L3'),
+    ],
+  });
+  const mergedBills = [{
+    billId: 'bill-dup-1',
+    canonicalBillId: 'bill-canon-1',
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.cleanMatches, 0);
+  assert.equal(report.flaggedCount, 1);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 1);
+  const flag = client.tables.vote_reconciliation_flags[0];
+  assert.equal(flag.vote_id, 'vote-dup-1', 'vote_id points at the PRIMARY-source (mo-senate-web) row, matching the live system\'s own convention');
+  assert.equal(flag.source_a, 'legiscan');
+  assert.equal(flag.source_b, 'mo-senate-web');
+  assert.equal(flag.discrepancy.reason, 'hard_mismatch');
+  assert.ok(flag.discrepancy.hard_mismatches.length > 0);
+  assert.deepEqual(flag.discrepancy.source_b_tallies.yea !== undefined, true);
+  assert.equal(flag.discrepancy.source_b_vote_id, 'vote-dup-1');
+  assert.equal(flag.discrepancy.source_b_source_key, 'mo-senate-web-2026-x-vote1');
+});
+
+test('runReconcileMo2026Votes: a SOFT-only mismatch (yea/nay agree, non-yea/non-nay bucket differs) writes reason soft_mismatch with the PRESENT_CATEGORY_CAVEAT attached', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+      castRow('c2', 'vote-dup-1', 'yea', 'L2'),
+      castRow('c3', 'vote-dup-1', 'nay', 'L3'),
+      castRow('c4', 'vote-dup-1', 'present', 'L4'), // primary-only category, no LegiScan analog
+      castRow('c5', 'vote-ls-1', 'yea', 'L1'),
+      castRow('c6', 'vote-ls-1', 'yea', 'L2'),
+      castRow('c7', 'vote-ls-1', 'nay', 'L3'),
+    ],
+  });
+  const mergedBills = [{
+    billId: 'bill-dup-1',
+    canonicalBillId: 'bill-canon-1',
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.flaggedCount, 1);
+  const flag = client.tables.vote_reconciliation_flags[0];
+  assert.equal(flag.discrepancy.reason, 'soft_mismatch');
+  assert.equal(flag.discrepancy.hard_mismatches.length, 0);
+  assert.ok(flag.discrepancy.soft_mismatches.length > 0);
+  assert.ok(flag.discrepancy.caveat, 'the Present-category caveat is attached whenever a soft mismatch is present');
+});
+
+test('runReconcileMo2026Votes: zero LegiScan candidates -> honest no-match report, no flag written', async () => {
+  const client = makeFakeClient({ votes: [], vote_casts: [] });
+  const mergedBills = [{
+    billId: 'bill-dup-1',
+    canonicalBillId: 'bill-canon-1',
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.noMatchCount, 1);
+  assert.equal(report.flaggedCount, 0);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0);
+});
+
+test('runReconcileMo2026Votes: more than one same-day LegiScan candidate -> reported ambiguous, never guessed, no flag written', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+      moVoteRow({
+        id: 'vote-ls-2', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641860',
+      }),
+    ],
+    vote_casts: [],
+  });
+  const mergedBills = [{
+    billId: 'bill-dup-1',
+    canonicalBillId: 'bill-canon-1',
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: false, runId: 'run-1', mergedBills });
+
+  assert.equal(report.ambiguousCount, 1);
+  assert.equal(report.flaggedCount, 0);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0);
+});
+
+test('runReconcileMo2026Votes: --dry-run performs ZERO writes even on a mismatch, reports wouldWrite honestly', async () => {
+  const client = makeFakeClient({
+    votes: [
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+      castRow('c4', 'vote-ls-1', 'yea', 'L1'),
+      castRow('c5', 'vote-ls-1', 'nay', 'L2'), // hard mismatch: primary has no nay caster at all
+    ],
+  });
+  const mergedBills = [{
+    billId: 'bill-dup-1',
+    canonicalBillId: 'bill-canon-1',
+    voteRows: [moVoteRow({
+      id: 'vote-dup-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+    })],
+  }];
+
+  const report = await runReconcileMo2026Votes(client, { dryRun: true, mergedBills });
+
+  assert.equal(report.flaggedCount, 1);
+  assert.equal(report.flagged[0].wouldWrite, true);
+  assert.equal(client.tables.vote_reconciliation_flags.length, 0, 'dry-run never writes a flag row');
+});
+
+// ---- runCorrectMo2026SessionMerge (combined) + runCorrectData dispatcher wiring ----
+
+test('runCorrectMo2026SessionMerge: runs Phase A then Phase B against the bills Phase A actually merged, combining failures', async () => {
+  const client = makeFakeClient({
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    votes: [
+      moVoteRow({
+        id: 'vote-dup-1', bill_id: 'bill-dup-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'mo-senate-web-2026-x-vote1',
+      }),
+      moVoteRow({
+        id: 'vote-ls-1', bill_id: 'bill-canon-1', vote_date: '2026-02-23T00:00:00+00:00', source_key: 'legiscan-2239-rollcall-1641859',
+      }),
+    ],
+    vote_casts: [
+      castRow('c1', 'vote-dup-1', 'yea', 'L1'),
+      castRow('c2', 'vote-ls-1', 'yea', 'L1'),
+    ],
+  });
+
+  const report = await runCorrectMo2026SessionMerge(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.merge.billsMerged, 1);
+  assert.equal(report.merge.sessionDeleted, true);
+  assert.equal(report.reconciliation.votesChecked, 1);
+  assert.equal(report.reconciliation.cleanMatches, 1);
+  assert.deepEqual(report.failures, []);
+});
+
+test('runCorrectData: "mo-2026-session-merge" runs only when explicitly named — "all" never sweeps it in, given its higher stakes (deletes + FK redirects)', async () => {
+  const seed = {
+    sessions: [CANON, DUP],
+    bills: [
+      moBillRow('bill-canon-1', 'sess-261', 'SB 1'),
+      moBillRow('bill-dup-1', 'sess-2026', 'SB 1'),
+    ],
+    votes: [],
+  };
+
+  const explicit = await runCorrectData(makeFakeClient(seed), { which: 'mo-2026-session-merge', dryRun: true });
+  assert.ok(explicit.mo2026SessionMerge);
+
+  const all = await runCorrectData(makeFakeClient(seed), { which: 'all', dryRun: true });
+  assert.equal(all.mo2026SessionMerge, undefined, '"all" must never run the session-merge correction implicitly');
+  assert.equal(all.moStatus !== undefined && all.mo1969Dates !== undefined, true, 'the other two corrections are unaffected');
 });

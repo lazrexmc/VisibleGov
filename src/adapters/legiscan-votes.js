@@ -359,7 +359,12 @@ export const PRESENT_CATEGORY_CAVEAT = 'LegiScan\'s ls_vote schema has no distin
   + 'the two apart. The raw tallies recorded in this flag are the evidence — check for Present casts '
   + 'on the primary-source side, but do not assume that alone explains it.';
 
-function sameCalendarDate(a, b) {
+// EXPORTED (2026-08-01, .superpowers/sdd/2026-08-01-mo-2026-session-merge/brief.md): this and
+// summarizePrimaryCastPositions/compareTalliesForCrossCheck/writeReconciliationFlag below are the
+// pure-comparison/write helpers correct-data.js's mo-2026-session-merge reconciliation phase
+// reuses directly, rather than re-implementing the same tally/date comparison a second time. Pure
+// additive change — just the `export` keyword, zero behavior change to any existing caller.
+export function sameCalendarDate(a, b) {
   if (a == null || b == null) return false;
   return String(a).slice(0, 10) === String(b).slice(0, 10);
 }
@@ -375,7 +380,7 @@ function primarySourceLabel(sourceKey) {
   return matchedPrefix ? matchedPrefix.replace(/-$/, '') : 'unknown-primary-source';
 }
 
-function summarizePrimaryCastPositions(castRows) {
+export function summarizePrimaryCastPositions(castRows) {
   const counts = {
     yea: 0, nay: 0, present: 0, absent: 0, not_voting: 0, other: 0,
   };
@@ -432,7 +437,7 @@ function isPrimaryCastDataComparable(aggregate, totalPrimaryCasts) {
 //     present/absent/not_voting 1:1 would manufacture false mismatches out of a real
 //     category-vocabulary difference between the two sources, not an actual data disagreement) — an
 //     accounting difference, not a contradiction (see PRESENT_CATEGORY_CAVEAT above).
-function compareTalliesForCrossCheck(legiscanTallies, primaryCounts) {
+export function compareTalliesForCrossCheck(legiscanTallies, primaryCounts) {
   const hardMismatches = [];
   if (legiscanTallies.tallies.yea !== primaryCounts.yea) {
     hardMismatches.push(`yea: legiscan ${legiscanTallies.tallies.yea} vs primary ${primaryCounts.yea}`);
@@ -501,7 +506,7 @@ async function findExistingReconciliationFlag(client, {
 // `reason` (both now REQUIRED, every call site below supplies them explicitly) are the idempotency
 // key described above — stamped onto the stored `discrepancy` itself (`roll_call_id`/`reason`
 // fields) so the key is self-describing to a human reviewer too, not just an internal lookup detail.
-async function writeReconciliationFlag(client, {
+export async function writeReconciliationFlag(client, {
   voteId, sourceB, discrepancy, runId, rollCallId, reason,
 }) {
   const keyedDiscrepancy = { ...discrepancy, roll_call_id: rollCallId, reason };
