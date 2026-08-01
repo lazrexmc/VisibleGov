@@ -17,6 +17,7 @@ import {
   replayArtifacts,
   persistBillDetail, hasEnrichedMarker, writeEnrichedMarker, backfillEnrichedMarkers,
   shouldRefetchBillList, readCachedBillList, writeCachedBillList, MO_BILL_LIST_MAX_AGE_MS,
+  countPendingBills, runMoHouse, LiveRequestLimitError,
 } from '../src/cli/ingest-mo-house.js';
 
 const FIXTURES = 'tests/fixtures/research/mo-house-xml';
@@ -892,6 +893,353 @@ test('writeCachedBillList then readCachedBillList: round-trips session, entries,
   });
 });
 
-test('MO_BILL_LIST_MAX_AGE_MS is 60 minutes', () => {
-  assert.equal(MO_BILL_LIST_MAX_AGE_MS, 60 * 60 * 1000);
+test('MO_BILL_LIST_MAX_AGE_MS is 24 hours (2026-08-01 one-request-per-run fix — raised from 60 minutes; see the constant\'s own comment in src/cli/ingest-mo-house.js for why)', () => {
+  assert.equal(MO_BILL_LIST_MAX_AGE_MS, 24 * 60 * 60 * 1000);
+});
+
+// ---- countPendingBills ----
+
+test('countPendingBills: counts entries without an enriched marker, excludes those with one', () => {
+  withScratchArtifactDir((dir) => {
+    const entries = [{ identifier: 'HB 2' }, { identifier: 'HB 3' }, { identifier: 'HB 4' }];
+    writeEnrichedMarker('HB 3', {}, dir);
+    assert.equal(countPendingBills(entries, dir), 2);
+  });
+});
+
+// ---- runMoHouse (2026-08-01 one-request-per-run rebuild) ----
+//
+// THE DIAGNOSED DEFECT: a single invocation could need TWO live requests (a stale BillList.XML
+// refresh, then a per-bill XML fetch) — both routed through the SAME shared moHouseLimiter, so the
+// second request slept out ~30 minutes and the scheduler killed the process before it could ever
+// finish (3-for-3 ETIMEDOUT). These tests pin the fix: runMoHouse makes at most one live request
+// per invocation, chosen by a stale-list-vs-fresh-list slot decision, and never both in one run —
+// using injected fetchBillList/fetchBillXml spies (never the real network) plus a minimal
+// generic in-memory fake DB client (same style as ingest-mo-senate.js's runMoSenate test suite).
+
+const threeBillListXml = `<ROOT>
+<BillXML><BillType>HB</BillType><BillNumber>2</BillNumber><BillXMLLink>https://x/HB2.xml</BillXMLLink></BillXML>
+<BillXML><BillType>HB</BillType><BillNumber>3</BillNumber><BillXMLLink>https://x/HB3.xml</BillXMLLink></BillXML>
+<BillXML><BillType>HB</BillType><BillNumber>4</BillNumber><BillXMLLink>https://x/HB4.xml</BillXMLLink></BillXML>
+</ROOT>`;
+
+// Generic upsert/select/insert/update table — same shape/rationale as ingest-mo-senate.js's own
+// makeGenericTable (generalized across table name so one fake client can cover
+// sessions/bills/bill_actions/votes/legislators without five near-identical copies), extended with
+// maybeSingle/update/insert().select().single()/like()/not() since persistBillDetail and the
+// pending-roll-call-PDF query (listPendingRollCallPdfs) need those shapes too. `.order()` is a
+// TERMINAL call here (resolves directly) — the only table this generic builder serves where
+// `.order()` is used at all is `votes`' pending-PDF query, where it genuinely IS the last call in
+// the chain; ingestion_runs (whose OWN `.order()` is followed by `.limit().maybeSingle()`) gets its
+// own dedicated stub below instead, exactly like ingest-mo-senate.js's
+// makeFakeMoSenateRunClient does.
+function makeMoHouseTable(store, idPrefix) {
+  let counter = 0;
+  const builderFor = (rows) => {
+    const filters = [];
+    const builder = {
+      eq(col, val) { filters.push([col, val]); return builder; },
+      like() { return builder; },
+      not() { return builder; },
+      maybeSingle: async () => {
+        const found = rows.filter((r) => filters.every(([c, v]) => r[c] === v));
+        return { data: found[0] ?? null, error: null };
+      },
+      single: async () => {
+        const found = rows.filter((r) => filters.every(([c, v]) => r[c] === v));
+        if (found.length !== 1) return { data: null, error: { message: `expected 1 row for a fake table, got ${found.length}` } };
+        return { data: found[0], error: null };
+      },
+      order: async () => ({ data: rows.filter((r) => filters.every(([c, v]) => r[c] === v)), error: null }),
+    };
+    return builder;
+  };
+  return {
+    upsert: async (rows, opts) => {
+      const conflictCols = (opts?.onConflict || '').split(',').filter(Boolean);
+      for (const row of rows) {
+        const exists = conflictCols.length > 0
+          && store.some((r) => conflictCols.every((c) => r[c] === row[c]));
+        if (!exists) { counter += 1; store.push({ id: `${idPrefix}-${counter}`, ...row }); }
+      }
+      return { error: null };
+    },
+    insert: (row) => ({
+      select: () => ({
+        single: async () => {
+          counter += 1;
+          const inserted = { id: `${idPrefix}-${counter}`, ...row };
+          store.push(inserted);
+          return { data: inserted, error: null };
+        },
+      }),
+    }),
+    update: (patch) => ({
+      eq: async (col, val) => {
+        const row = store.find((r) => r[col] === val);
+        if (row) Object.assign(row, patch);
+        return { error: null };
+      },
+    }),
+    select: () => builderFor(store),
+  };
+}
+
+// Covers exactly the tables runMoHouse's own steps touch: sessions (ensureSessionRow), bills
+// (persistBillStubs/persistBillDetail), bill_actions (persistBillDetail), votes (persistBillDetail
+// + selectPendingPdf's pending-roll-call-PDF query — always empty in these tests, so the PDF-queue
+// branch never short-circuits a scenario meant to exercise the list/bill-detail slot decision),
+// legislators (persistRoster). ingestion_runs gets its own dedicated stub (insert/select-cooldown/
+// update), same convention as ingest-mo-senate.js's makeFakeMoSenateRunClient.
+function makeFakeMoHouseRunClient() {
+  const store = {
+    sessions: [], bills: [], bill_actions: [], votes: [], legislators: [],
+  };
+  const closeCalls = [];
+  let runCounter = 0;
+  return {
+    store,
+    closeCalls,
+    client: {
+      from(table) {
+        if (table === 'ingestion_runs') {
+          return {
+            insert: () => ({
+              select: () => ({
+                single: async () => {
+                  runCounter += 1;
+                  return { data: { id: `run-${runCounter}` }, error: null };
+                },
+              }),
+            }),
+            select: () => {
+              const builder = {
+                eq: () => builder,
+                order: () => builder,
+                limit: () => builder,
+                maybeSingle: async () => ({ data: null, error: null }), // no prior run -> zero cooldown wait
+              };
+              return builder;
+            },
+            update: (detail) => ({
+              eq: async (col, val) => {
+                closeCalls.push({ id: val, ...detail });
+                return { error: null };
+              },
+            }),
+          };
+        }
+        if (table in store) return makeMoHouseTable(store[table], table);
+        throw new Error(`fake mo-house run client: unexpected table ${table}`);
+      },
+    },
+  };
+}
+
+// ---- --limit semantics ----
+
+test('runMoHouse: --limit > 1 throws a typed LiveRequestLimitError before touching the DB at all', async () => {
+  const client = { from: () => { throw new Error('must not touch the DB when --limit > 1'); } };
+  const args = parseMoHouseArgs(['--limit', '2']);
+  await assert.rejects(
+    () => runMoHouse(client, args),
+    (err) => {
+      assert.ok(err instanceof LiveRequestLimitError);
+      assert.equal(err.limit, 2);
+      assert.match(err.message, /ONE live house\.mo\.gov/);
+      return true;
+    },
+  );
+});
+
+test('runMoHouse: --limit 1 (the scheduler\'s own frozen invocation) is unaffected', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const { client } = makeFakeMoHouseRunClient();
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir: join(base, 'bills'),
+      billListDir: join(base, 'bill-list'),
+      rollcallDir: join(base, 'rollcalls'),
+      fetchBillList: async () => threeBillListXml,
+      fetchBillXml: async () => hb2Xml,
+    });
+    assert.equal(result.status, 'succeeded');
+  });
+});
+
+// ---- slot decision: stale/missing list -> list slot ----
+
+test('runMoHouse: SLOT (a) — a missing bill-list cache spends this run\'s one request on fetchMoBillList and STOPS (never reaches fetchMoBillXml)', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list'); // empty -> no cache at all
+    const rollcallDir = join(base, 'rollcalls');
+    const { client } = makeFakeMoHouseRunClient();
+
+    let listCalls = 0;
+    let xmlCalls = 0;
+    const fetchBillList = async (session) => { listCalls += 1; assert.equal(session, '261'); return threeBillListXml; };
+    const fetchBillXml = async () => { xmlCalls += 1; return hb2Xml; };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(listCalls, 1);
+    assert.equal(xmlCalls, 0, 'slot (a) must never also fetch a bill this same run — the exact defect this fix closes');
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.slot, 'list-refresh');
+    assert.equal(result.counts.list_fetch_mode, 'live');
+    assert.equal(result.counts.bills_detailed, 0);
+    assert.equal(result.counts.bills_listed, 3);
+    assert.equal(result.counts.total_pending_bills, 3);
+    assert.ok(existsSync(join(billListDir, '261.json')), 'the freshly-fetched list must be cached for the NEXT invocation to read');
+  });
+});
+
+test('runMoHouse: SLOT (a) — a bill-list cache older than MO_BILL_LIST_MAX_AGE_MS is treated the same as missing', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list');
+    const rollcallDir = join(base, 'rollcalls');
+    writeCachedBillList('261', [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }], billListDir);
+    // Back-date the cache file's fetched_at past the 24h threshold directly (writeCachedBillList
+    // always stamps "now").
+    const cachePath = join(billListDir, '261.json');
+    const stale = JSON.parse(readFileSync(cachePath, 'utf8'));
+    stale.fetched_at = new Date(Date.now() - (MO_BILL_LIST_MAX_AGE_MS + 60000)).toISOString();
+    writeFileSync(cachePath, JSON.stringify(stale, null, 2));
+
+    const { client } = makeFakeMoHouseRunClient();
+    let listCalls = 0;
+    const fetchBillList = async () => { listCalls += 1; return threeBillListXml; };
+    const fetchBillXml = async () => { throw new Error('must not fetch a bill this run'); };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(listCalls, 1);
+    assert.equal(result.counts.slot, 'list-refresh');
+  });
+});
+
+// ---- slot decision: fresh list -> bill slot ----
+
+test('runMoHouse: SLOT (b) — a fresh cached list reads it (zero live list fetches) and spends this run\'s one request on exactly ONE pending bill, not all pending bills', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list');
+    const rollcallDir = join(base, 'rollcalls');
+    const entries = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' },
+      { identifier: 'HB 4', bill_xml_url: 'https://x/HB4.xml' },
+    ];
+    writeCachedBillList('261', entries, billListDir); // fresh -> shouldRefetchBillList is false
+    const { client } = makeFakeMoHouseRunClient();
+
+    let listCalls = 0;
+    let xmlCalls = 0;
+    const fetchBillList = async () => { listCalls += 1; throw new Error('must not fetch the list live — the cache is fresh'); };
+    const fetchBillXml = async () => { xmlCalls += 1; return hb2Xml; };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(listCalls, 0);
+    assert.equal(xmlCalls, 1, 'exactly one bill fetched, not 3 — the one-live-request-per-run invariant');
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.slot, 'bill-detail');
+    assert.equal(result.counts.list_fetch_mode, 'cached');
+    assert.equal(result.counts.bills_detailed, 1);
+    assert.equal(result.counts.total_pending_bills, 3, 'reports the backlog size BEFORE this run\'s own selection, mirroring ingest-mo-senate.js\'s total_pending_days');
+  });
+});
+
+// ---- slot decision: nothing pending -> honest no-op ----
+
+test('runMoHouse: SLOT (b) — nothing pending (every entry already enriched) is an honest no-op: zero live requests at all, status succeeded, bills_detailed 0', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list');
+    const rollcallDir = join(base, 'rollcalls');
+    const entries = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }];
+    writeCachedBillList('261', entries, billListDir);
+    writeEnrichedMarker('HB 2', {}, billsDir);
+    const { client } = makeFakeMoHouseRunClient();
+
+    let listCalls = 0;
+    let xmlCalls = 0;
+    const fetchBillList = async () => { listCalls += 1; throw new Error('must not fetch live'); };
+    const fetchBillXml = async () => { xmlCalls += 1; throw new Error('must not fetch live'); };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(listCalls, 0);
+    assert.equal(xmlCalls, 0);
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.slot, 'bill-detail');
+    assert.equal(result.counts.bills_detailed, 0);
+    assert.equal(result.counts.total_pending_bills, 0);
+  });
+});
+
+// ---- explicit-file modes stay unaffected (point 6 of the fix) ----
+
+test('runMoHouse: --bill-xml-file makes ZERO live requests regardless of a missing bill-list cache — unaffected by the slot decision', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list'); // empty -> would normally force slot (a)
+    const rollcallDir = join(base, 'rollcalls');
+    const { client } = makeFakeMoHouseRunClient();
+
+    let listCalls = 0;
+    let xmlCalls = 0;
+    const fetchBillList = async () => { listCalls += 1; throw new Error('must not fetch the list live — --bill-xml-file needs no list at all'); };
+    const fetchBillXml = async () => { xmlCalls += 1; throw new Error('must not fetch live — --bill-xml-file is a local fixture read'); };
+
+    const args = parseMoHouseArgs(['--bill', 'HB 2', '--bill-xml-file', `${FIXTURES}/HB2-bill-text-pdf-only.xml`]);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(listCalls, 0);
+    assert.equal(xmlCalls, 0);
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.counts.bills_detailed, 1);
+    assert.equal(result.counts.list_fetch_mode, 'fixture');
+    assert.equal(result.counts.bills_listed, null);
+    assert.equal(result.counts.total_pending_bills, null);
+  });
+});
+
+// ---- the one-live-request-per-run invariant, named explicitly ----
+
+test('runMoHouse: the one-live-request-per-run invariant — a multi-target scenario with a missing/stale list would have needed 2 live fetches under the old shape (list + bill); this run makes exactly 1', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list'); // no cache at all -> stale/missing
+    const rollcallDir = join(base, 'rollcalls');
+    const { client } = makeFakeMoHouseRunClient();
+
+    let liveFetchCount = 0; // combined counter across BOTH fetch types — the actual invariant
+    const fetchBillList = async () => { liveFetchCount += 1; return threeBillListXml; };
+    const fetchBillXml = async () => { liveFetchCount += 1; return hb2Xml; };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(liveFetchCount, 1, 'exactly one live house.mo.gov request this run, regardless of how many bills are pending or whether the list was also stale');
+    assert.equal(result.status, 'succeeded');
+  });
 });

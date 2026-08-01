@@ -8,6 +8,20 @@ export const SOURCE = 'mo-house-xml';
 // xml-bill-list-instructions-doc.html, quoted verbatim): "Do not automate scripts to pull down
 // information more often than once every half hour." Mechanically enforced, not just
 // documented — every fetch* function below defaults to this shared limiter.
+//
+// TRIPWIRE ROLE (2026-08-01 fix — see src/cli/ingest-mo-house.js's runMoHouse module comment for
+// the full defect this closes): ingest-mo-house.js now makes AT MOST ONE live request through this
+// limiter per process invocation (a stale-list refresh OR one bill/roll-call detail fetch, never
+// both in the same run) — so under that architecture this limiter should never actually have to
+// wait out its own interval; `.take()` returns immediately every time. It stays at the full
+// 30-minute interval anyway, ON PURPOSE, as a mechanical tripwire: if a code path is ever added
+// (or a bug reintroduces one) that makes a SECOND live request within the same run, that second
+// `.take()` call sleeps out the remaining ~30 minutes — which the scheduler's per-source
+// child-process timeout (8 min, scripts/scheduled-ingest.js's CHILD_TIMEOUT_MS) then kills LOUDLY
+// (a visible ETIMEDOUT/killed run, alerting) long before the sleep could ever complete. A silent
+// ToU violation is structurally impossible this way — the failure mode is a loud, logged timeout,
+// never a quiet double-fetch. This is exactly how the original defect was diagnosed: real scheduler
+// runs killed at their timeout, root-caused to this limiter blocking on a second in-run fetch.
 export const MO_HOUSE_MIN_INTERVAL_MS = 30 * 60 * 1000;
 export const moHouseLimiter = createLimiter({ minIntervalMs: MO_HOUSE_MIN_INTERVAL_MS });
 

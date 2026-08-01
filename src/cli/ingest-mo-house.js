@@ -4,7 +4,7 @@ import {
 import {
   getClient, openRun, closeRun, insertIfAbsent, additivePatch, isMissingColumnError, isMissingRelationError,
 } from '../lib/db.js';
-import { SourceFetchError } from '../lib/errors.js';
+import { SourceFetchError, parsePositiveIntegerFlag } from '../lib/errors.js';
 import * as mo from '../adapters/mo-house-xml.js';
 import * as pdf from '../adapters/mo-rollcall-pdf.js';
 
@@ -63,7 +63,13 @@ export function parseMoHouseArgs(argv) {
     if (key === '--dry-run') { out.dryRun = true; i += 1; continue; }
     const val = argv[i + 1];
     if (key === '--session') out.session = val;
-    else if (key === '--limit') out.limit = Number(val);
+    // Typed validation (project law) — matches enrich-federal-bills.js/backfill-mo-bill-texts.js's
+    // own --limit handling. This only validates SHAPE (a positive integer). The separate
+    // ARCHITECTURAL constraint — --limit may not exceed 1, since runMoHouse makes at most one live
+    // request per invocation — is enforced in runMoHouse itself, not here, so a --dry-run
+    // invocation (which never calls runMoHouse and never even looks at args.limit) is never
+    // affected by a --limit value it doesn't use. See runMoHouse's own module comment.
+    else if (key === '--limit') out.limit = parsePositiveIntegerFlag(val, '--limit');
     // Normalized (case/space-insensitive) so '--bill hb1800', '--bill HB1800', and
     // '--bill "HB 1800"' all resolve identically — matches entries[].identifier, which is
     // always produced via the same normalizeMoBillIdentifier call (parseMoBillList).
@@ -185,6 +191,14 @@ export function selectTargets(entries, args, dir = MO_BILLS_ARTIFACT_DIR) {
   return pending.slice(0, args.limit).map((e) => ({ identifier: e.identifier, bill_xml_url: e.bill_xml_url }));
 }
 
+// Mirrors selectTargets's own "not yet enriched" filter exactly (same signal, same dir
+// convention) — pulled out separately so runMoHouse can report total_pending_bills (mirrors
+// ingest-mo-senate.js's selectJournalDayWorklist -> worklist.totalPending) without changing
+// selectTargets's own return shape, which many existing tests already pin as a bare array.
+export function countPendingBills(entries, dir = MO_BILLS_ARTIFACT_DIR) {
+  return entries.filter((e) => !hasEnrichedMarker(e.identifier, dir)).length;
+}
+
 // ---- durable, cross-process ToU cooldown ----
 //
 // moHouseLimiter (src/adapters/mo-house-xml.js) is an IN-MEMORY limiter: it only sequences
@@ -289,26 +303,41 @@ export async function enforceDurableCooldown(
   );
 }
 
-// ---- Task fix-mo-enrichment: bill-list refetch cadence ----
+// ---- bill-list refetch cadence + slot priority (task fix-mo-enrichment, then the 2026-08-01
+// one-request-per-run rebuild — see runMoHouse's own module comment, near main(), for the full
+// current architecture) ----
 //
-// BUG FOUND LIVE: main() used to unconditionally re-fetch the entire BillList.XML on every
-// invocation before ever reaching the per-bill fetch. Both fetches share the SAME in-process
-// moHouseLimiter instance (house.mo.gov's <=1 req/30min ToU, mechanically enforced) — so the
-// second (per-bill) fetch of every single invocation had to wait out a FULL second 30-minute
-// interval after the first (list) fetch completed. Live proof (ingestion_runs, this source): every
-// started_at/finished_at pair is exactly 30 minutes apart (e.g. 10:24:22 -> 10:54:22) — each
-// invocation spent its ENTIRE cooldown slot on this one redundant list re-fetch, roughly HALVING
-// how many bills this driver can process per hour. The list only regenerates upstream on its own
-// schedule (LastTimeRun timestamps in the research fixture cluster around :01 and :30 past the
-// hour) — re-fetching it every 30 minutes was never buying freshness, only burning budget.
+// BUG FOUND LIVE (fix-mo-enrichment, 2026-07-29): main() used to unconditionally re-fetch the
+// entire BillList.XML on every invocation before ever reaching the per-bill fetch. Both fetches
+// share the SAME in-process moHouseLimiter instance (house.mo.gov's <=1 req/30min ToU,
+// mechanically enforced) — so the second (per-bill) fetch of every single invocation had to wait
+// out a FULL second 30-minute interval after the first (list) fetch completed. Live proof
+// (ingestion_runs, this source): every started_at/finished_at pair was exactly 30 minutes apart
+// (e.g. 10:24:22 -> 10:54:22) — each invocation spent its ENTIRE cooldown slot sleeping inside
+// that second fetch, roughly HALVING how many bills this driver could process per hour.
 //
-// FIX: cache the parsed list to a local artifact with a fetch timestamp; only re-fetch live once
-// that cache is >= MO_BILL_LIST_MAX_AGE_MS old (60 min — comfortably covers the upstream refresh
-// cadence with margin, without needing to introspect house.mo.gov's own regeneration schedule
-// precisely). A stale-by-up-to-an-hour list is harmless here: persistBillStubs's writes are
-// purely additive (insertIfAbsent), and any bill genuinely new since the last live fetch is picked
-// up on the next refresh, at most an hour later.
-export const MO_BILL_LIST_MAX_AGE_MS = 60 * 60 * 1000;
+// THAT FIX WAS INCOMPLETE (root-caused 2026-08-01, controller-verified live on pid-level evidence
+// — the round-2 reviewer's "every run took an exact multiple of 1800s" observation was THIS
+// defect, misattributed at the time to MO-side slowness): caching the list at a 60-minute max-age
+// reduced how OFTEN both fetches happened in the same run, but did not stop it — any invocation
+// that happened to land after the cache aged past 60 minutes still made BOTH a live list fetch AND
+// a live per-bill fetch in that same process, hitting the exact same limiter collision above. Under
+// the scheduler's 480s per-source child timeout (scripts/scheduled-ingest.js's CHILD_TIMEOUT_MS),
+// every such run was killed long before the ~30-minute in-process sleep could ever complete —
+// mo-house-xml was 3-for-3 ETIMEDOUT, effectively down.
+//
+// THE ACTUAL FIX (2026-08-01): runMoHouse now makes AT MOST ONE live house.mo.gov request per
+// invocation, full stop (see its own module comment for the slot-priority architecture). This
+// constant's role changes accordingly: it no longer exists to avoid burning a cooldown slot on a
+// redundant SECOND fetch (that combination is now structurally impossible — a list-refresh run
+// never reaches the per-bill code in the same invocation); it now purely controls how often a
+// WHOLE run gets spent refreshing the list instead of detailing a bill. Raised from 60 minutes to
+// 24 hours: out of session the list changes rarely (no new bills filed), so checking hourly bought
+// nothing but spent whole runs on housekeeping; in session, a once-a-day refresh is still frequent
+// enough to keep stub discovery current (a bill filed this morning is picked up by tonight's
+// refresh at the latest) while leaving nearly every 30-minute cooldown slot free for actual
+// bill-detail progress instead.
+export const MO_BILL_LIST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function billListCachePath(session, dir) {
   return `${dir}/${session}.json`;
@@ -886,6 +915,235 @@ export async function dryRunReport(client, session) {
   };
 }
 
+// ---- runMoHouse (main orchestration) ----
+//
+// ARCHITECTURE (2026-08-01 fix — the diagnosed defect this closes): house.mo.gov's ToU allows at
+// most one request per 30 minutes (moHouseLimiter, mo-house-xml.js), the scheduler invokes this
+// CLI on that same ~30-minute durable cooldown (enforceDurableCooldown below), and each invocation
+// is a fresh child process killed if it runs past CHILD_TIMEOUT_MS (8 min,
+// scripts/scheduled-ingest.js). Before this fix, a single invocation could need TWO live requests —
+// a stale BillList.XML refresh, THEN a per-bill XML fetch, in the SAME run — both routed through
+// the one shared in-process moHouseLimiter, so the second request simply slept out the ~30-minute
+// interval the first request had just started. The scheduler killed the process long before that
+// sleep could ever finish: mo-house-xml was 3-for-3 ETIMEDOUT, effectively down (see
+// MO_BILL_LIST_MAX_AGE_MS's own comment for the full history, including the incomplete first fix).
+//
+// THE FIX: runMoHouse makes AT MOST ONE live house.mo.gov request per invocation, chosen by
+// priority — the same shape as ingest-mo-senate.js's runMoSenate (roster/index/day slots), applied
+// to this driver's own document types (roll-call PDF / bill list / bill detail):
+//   1. A pending roll-call PDF (selectPendingPdf) — UNCHANGED by this fix; this branch already
+//      made exactly one live request (the PDF) and returned immediately below, never falling
+//      through to the bill-list code — preserved as the highest-priority slot.
+//   2. An explicit --bill-xml-file — ZERO live requests (a local fixture read); bypasses the slot
+//      decision entirely rather than being subject to slot 3/4's staleness check, since
+//      selectTargets's billXmlFile branch never needs the bill list to find a bill_xml_url.
+//   3. SLOT (a), list-refresh — the cached BillList for this session is missing or older than
+//      MO_BILL_LIST_MAX_AGE_MS: spend this run's one request on fetchMoBillList, persist stubs,
+//      and STOP. This run never also fetches a bill's detail XML — that combination is the exact
+//      defect above.
+//   4. SLOT (b), bill-detail — the cache is fresh: read it (no network), select the single next
+//      target exactly as selectTargets already did (an explicit --bill still goes through this
+//      same slot, honored by selectTargets's own explicit-identifier branch — if the list happens
+//      to be stale, slot (a) fires instead and the explicit bill is deferred to the next
+//      invocation, never a second live request in this one), and spend this run's one request on
+//      that target's bill XML.
+export class LiveRequestLimitError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'LiveRequestLimitError';
+    Object.assign(this, meta);
+  }
+}
+
+// deps default to the real artifact directories / live fetchers (unchanged runtime behavior);
+// overridable purely for testability, same convention as ingest-mo-senate.js's runMoSenate.
+export async function runMoHouse(client, args, {
+  billsDir = MO_BILLS_ARTIFACT_DIR,
+  billListDir = MO_BILL_LIST_ARTIFACT_DIR,
+  rollcallDir = ROLLCALL_ARTIFACT_DIR,
+  fetchBillList = mo.fetchMoBillList,
+  fetchBillXml = mo.fetchMoBillXml,
+} = {}) {
+  // --limit: with one live request per run, N>1 can no longer mean "N live fetches in one run" —
+  // there is no other live-fetch-multiplying behavior left in this driver to reinterpret N against
+  // (unlike, say, a batch of independently cache-only work), so this rejects rather than silently
+  // reinterpreting or capping. Checked FIRST, before any DB/network activity at all (fail fast, zero
+  // side effects) — a --dry-run invocation never reaches runMoHouse at all (see main() below) and
+  // never even looks at args.limit, so it is entirely unaffected by this restriction. The
+  // scheduler's own frozen invocation (scripts/scheduled-ingest.js, cliArgs: ['--limit', '1']) is
+  // exactly the boundary case this allows through unchanged.
+  if (args.limit > 1) {
+    throw new LiveRequestLimitError(
+      `--limit ${args.limit} is not supported: this run makes at most ONE live house.mo.gov `
+        + 'request per invocation (see this file\'s own module comment above runMoHouse, and the '
+        + 'tripwire comment on MO_HOUSE_MIN_INTERVAL_MS in src/adapters/mo-house-xml.js) — pass '
+        + '--limit 1 (the default) or omit the flag, and invoke the CLI again for each additional '
+        + 'target; the scheduler\'s 30-minute durable cooldown (enforceDurableCooldown) is the '
+        + 'intended pacing mechanism for processing more than one target over time.',
+      { limit: args.limit },
+    );
+  }
+
+  // Cross-process durable cooldown check happens BEFORE we even open our own run row — see
+  // enforceDurableCooldown's own comment block for why (an in-flight row must be visible).
+  await enforceDurableCooldown(client);
+
+  // openRun is called BEFORE any live fetch. Its started_at (schema default now() at INSERT time)
+  // is therefore a close proxy for "when this process's live house.mo.gov request happened" —
+  // durable and cross-process-visible, unlike moHouseLimiter's in-memory state. With this fix, a
+  // process makes AT MOST ONE live fetch, so the "which fetch does started_at reflect" ambiguity
+  // the old code's KNOWN RESIDUAL GAP note described no longer applies — there is only ever one.
+  const runId = await openRun(client, 'mo-house-xml');
+  try {
+    // Pure DB + filesystem — no house.mo.gov request — safe to attempt every invocation
+    // regardless of which slot below actually runs (see replayArtifacts's own comment for why
+    // this is what makes "apply 0005, next run just works" literally true).
+    const artifactReplay = await replayArtifacts(client, runId, rollcallDir);
+
+    // Task 4b queue priority: an explicit --bill/--bill-xml-file targets a specific bill directly
+    // (bypasses the PDF queue — the operator asked for that bill, honor it). Otherwise, a pending
+    // roll-call PDF (a votes row with a pdf_url and no casts yet) takes priority over fetching a
+    // NEW bill this slot — see listPendingRollCallPdfs's own comment for the FIFO/priority
+    // rationale. This invocation processes exactly ONE document either way: one roll-call PDF, or
+    // (only when zero are pending) the bill-list-or-bill-detail slot decision below.
+    const wantsExplicitBill = Boolean(args.billIdentifier || args.billXmlFile);
+    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0, skippedKeys: [] } : await selectPendingPdf(client);
+    const { next: pendingPdf, skippedFailed: skippedFailedPdfs, skippedKeys: skippedFailedPdfKeys } = pdfQueue;
+    if (pendingPdf) {
+      const result = await processRollCallPdf(client, runId, pendingPdf, args);
+      const failures = result.failure ? [result.failure] : [];
+      const counts = {
+        document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
+      };
+      const status = failures.length === 0 ? 'succeeded' : 'partial';
+      await closeRun(client, runId, status, { counts, rollCallResult: result, failures });
+      console.log(JSON.stringify({
+        mode: 'live', run_id: runId, status, counts, rollCallResult: result, failures,
+      }, null, 2));
+      if (failures.length > 0) process.exitCode = 2;
+      return {
+        runId, status, counts,
+      };
+    }
+
+    let entries = null;
+    let listFetchMode = null;
+    let sessionRow;
+    let roster;
+
+    if (args.billXmlFile) {
+      // Point 6 of the fix: zero live requests, unaffected by the slot decision below —
+      // selectTargets's billXmlFile branch never reads `entries` at all, so there is nothing to
+      // fetch or cache here.
+      sessionRow = await ensureSessionRow(client, runId, args.session);
+      roster = await persistRoster(client, runId);
+    } else {
+      // ---- slot decision: at most ONE live house.mo.gov request from here on ----
+      const cachedList = readCachedBillList(args.session, billListDir);
+      if (shouldRefetchBillList(cachedList?.fetched_at ?? null)) {
+        // SLOT (a) — list-refresh. Spend this run's one request here and STOP: this run never
+        // also attempts a bill-detail fetch (that combination is the defect this fix closes).
+        const listXml = await fetchBillList(args.session);
+        console.error(`[${new Date().toISOString()}] fetched bill-list XML (live, session ${args.session})`);
+        entries = mo.parseMoBillList(listXml);
+        writeCachedBillList(args.session, entries, billListDir);
+        sessionRow = await ensureSessionRow(client, runId, args.session);
+        await persistBillStubs(client, runId, sessionRow, entries);
+        roster = await persistRoster(client, runId);
+        const counts = {
+          document_type: 'bill-xml',
+          slot: 'list-refresh',
+          bills_listed: entries.length,
+          bills_detailed: 0,
+          list_fetch_mode: 'live',
+          total_pending_bills: countPendingBills(entries, billsDir),
+          failures: 0,
+          roster,
+          artifact_replay: artifactReplay,
+          skipped_failed_pdfs: skippedFailedPdfs,
+          skipped_failed_pdf_keys: skippedFailedPdfKeys,
+        };
+        await closeRun(client, runId, 'succeeded', { counts, roster });
+        console.log(JSON.stringify({
+          mode: 'live', run_id: runId, status: 'succeeded', counts,
+        }, null, 2));
+        return { runId, status: 'succeeded', counts };
+      }
+      // SLOT (b) — bill-detail. The cache is fresh: read it (no network) — the only branch that
+      // reuses a prior fetch instead of spending this run's request on a refresh.
+      entries = cachedList.entries;
+      listFetchMode = 'cached';
+      console.error(`[${new Date().toISOString()}] reusing cached bill-list XML from ${cachedList.fetched_at} (< ${MO_BILL_LIST_MAX_AGE_MS / (60 * 60 * 1000)}h old; skipping live list fetch this slot)`);
+      sessionRow = await ensureSessionRow(client, runId, args.session);
+      await persistBillStubs(client, runId, sessionRow, entries);
+      roster = await persistRoster(client, runId);
+    }
+
+    // selectTargets's own --limit slicing is effectively moot now (args.limit is <= 1 by
+    // construction — checked above) but is left unchanged rather than special-cased to "just take
+    // index 0": it remains the single source of truth for SELECTION PRIORITY (an explicit --bill/
+    // --bill-xml-file bypasses the enriched-marker filter; the automatic path excludes
+    // already-enriched bills) — only the COUNT it ever gets sliced to has changed.
+    const targets = selectTargets(entries ?? [], args, billsDir);
+    // Captured BEFORE the fetch loop below (which, on success, immediately marks its one target
+    // enriched) so this reports the backlog size THIS RUN STARTED WITH, mirroring
+    // ingest-mo-senate.js's worklist.totalPending/total_pending_days semantics exactly.
+    const totalPendingBills = entries ? countPendingBills(entries, billsDir) : null;
+
+    const billResults = [];
+    const failures = [];
+    for (const target of targets) {
+      let xmlText;
+      let mode;
+      try {
+        if (target.localFile) {
+          xmlText = readFileSync(target.localFile, 'utf8');
+          mode = 'fixture';
+          console.error(`[${new Date().toISOString()}] read bill XML ${target.identifier} from local fixture (not a live request): ${target.localFile}`);
+        } else {
+          xmlText = await fetchBillXml(target.bill_xml_url);
+          mode = 'live';
+          console.error(`[${new Date().toISOString()}] fetched bill XML ${target.identifier} (live)`);
+        }
+      } catch (err) {
+        if (!(err instanceof SourceFetchError)) throw err;
+        failures.push({ step: `bill xml ${target.identifier}`, message: err.message });
+        continue;
+      }
+      const parsed = mo.parseMoBillXml(xmlText);
+      const result = await persistBillDetail(client, runId, sessionRow, parsed);
+      billResults.push({ identifier: target.identifier, mode, ...result });
+      // Task fix-mo-enrichment: the bill LEAVES the needs-enrichment set here, unconditionally,
+      // now that its fetch+parse+persist cycle has completed — see selectTargets/
+      // hasEnrichedMarker's own comment for why this is file-presence-driven rather than derived
+      // from any DB column.
+      writeEnrichedMarker(target.identifier, { run_id: runId, bill_id: result.bill_id }, billsDir);
+    }
+
+    const counts = {
+      document_type: 'bill-xml',
+      slot: 'bill-detail',
+      bills_listed: entries ? entries.length : null,
+      bills_detailed: billResults.length,
+      list_fetch_mode: listFetchMode ?? 'fixture',
+      total_pending_bills: totalPendingBills,
+      failures: failures.length,
+      roster,
+      artifact_replay: artifactReplay,
+      skipped_failed_pdfs: skippedFailedPdfs,
+      skipped_failed_pdf_keys: skippedFailedPdfKeys,
+    };
+    const status = failures.length === 0 ? 'succeeded' : 'partial';
+    await closeRun(client, runId, status, { counts, billResults, failures, roster });
+    console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts, billResults, failures }, null, 2));
+    if (failures.length > 0) process.exitCode = 2;
+    return { runId, status, counts };
+  } catch (err) {
+    await closeRun(client, runId, 'failed', { error: String(err) });
+    throw err;
+  }
+}
+
 // ---- main ----
 
 async function main() {
@@ -914,130 +1172,7 @@ async function main() {
     return;
   }
 
-  // Cross-process durable cooldown check happens BEFORE we even open our own run row — see
-  // enforceDurableCooldown's own comment block for why (an in-flight row must be visible).
-  await enforceDurableCooldown(client);
-
-  // openRun is now called BEFORE the bill-list fetch (previously it was called AFTER — the bug
-  // the review caught: a run row that only appears once a fetch already happened is invisible
-  // to another process's cooldown check for as long as the fetch takes). Its started_at
-  // (schema default now() at INSERT time) is therefore a close proxy for "when this process's
-  // first house.mo.gov request happened" — safe because: (1) it's durable and
-  // cross-process-visible, unlike moHouseLimiter's in-memory state; (2) if anything fails between
-  // this insert and the actual fetch, the cooldown still counts it — conservative, better to
-  // over-wait than risk violating the ToU; (3) it reflects FETCH time, not run-CLOSE time —
-  // using finished_at instead would be wrong, since a run that loops over several per-bill
-  // fetches can stay open far longer than any single fetch, which would make a next run's
-  // cooldown check under-wait if it referenced finished_at.
-  //
-  // KNOWN RESIDUAL GAP: within a single process making MULTIPLE live fetches (--limit > 1, no
-  // --bill-xml-file), only the FIRST fetch's timing is captured by started_at — a third process
-  // starting mid-loop would see a stale started_at and could under-wait relative to that
-  // process's most recent (not first) fetch. In practice this driver has so far only ever made
-  // one live document fetch per invocation (see task-4-report.md); running it as short-lived,
-  // --limit 1 invocations spaced externally (e.g. a scheduler re-launching the process every
-  // ~30 min) sidesteps the gap entirely and is the recommended operational pattern.
-  const runId = await openRun(client, 'mo-house-xml');
-  try {
-    // Pure DB + filesystem — no house.mo.gov request — safe to attempt every invocation
-    // regardless of which branch below actually runs this slot (see replayArtifacts's own
-    // comment for why this is what makes "apply 0005, next run just works" literally true).
-    const artifactReplay = await replayArtifacts(client, runId);
-
-    // Task 4b queue priority: an explicit --bill/--bill-xml-file targets a specific bill directly
-    // (bypasses the PDF queue — the operator asked for that bill, honor it). Otherwise, a pending
-    // roll-call PDF (a votes row with a pdf_url and no casts yet) takes priority over fetching a
-    // NEW bill this slot — see listPendingRollCallPdfs's own comment for the FIFO/priority
-    // rationale. This invocation processes exactly ONE document either way: one roll-call PDF, or
-    // (only when zero are pending) the existing bill-list + selectTargets bill-XML path below.
-    const wantsExplicitBill = Boolean(args.billIdentifier || args.billXmlFile);
-    // FINDING 2 fix: the pending-PDF queue check (and its skippedFailed/quarantine count+keys)
-    // runs whenever no explicit --bill/--bill-xml-file was given, regardless of whether this slot
-    // ends up processing a PDF or falls through to the bill-xml path below — surfaced into run
-    // detail either way (both counts objects below).
-    const pdfQueue = wantsExplicitBill ? { next: null, skippedFailed: 0, skippedKeys: [] } : await selectPendingPdf(client);
-    const { next: pendingPdf, skippedFailed: skippedFailedPdfs, skippedKeys: skippedFailedPdfKeys } = pdfQueue;
-    if (pendingPdf) {
-      const result = await processRollCallPdf(client, runId, pendingPdf, args);
-      const failures = result.failure ? [result.failure] : [];
-      const counts = {
-        document_type: 'rollcall-pdf', artifact_replay: artifactReplay, failures: failures.length, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
-      };
-      const status = failures.length === 0 ? 'succeeded' : 'partial';
-      await closeRun(client, runId, status, { counts, rollCallResult: result, failures });
-      console.log(JSON.stringify({
-        mode: 'live', run_id: runId, status, counts, rollCallResult: result, failures,
-      }, null, 2));
-      if (failures.length > 0) process.exitCode = 2;
-      return;
-    }
-
-    // Task fix-mo-enrichment: only re-fetch BillList.XML live when the cache is stale (or absent)
-    // — see shouldRefetchBillList's own comment for the live-verified bug this closes (every
-    // invocation used to spend its entire cooldown slot on a redundant list re-fetch).
-    const cachedList = readCachedBillList(args.session);
-    let entries;
-    let listFetchMode;
-    if (shouldRefetchBillList(cachedList?.fetched_at ?? null)) {
-      const listXml = await mo.fetchMoBillList(args.session);
-      console.error(`[${new Date().toISOString()}] fetched bill-list XML (live, session ${args.session})`);
-      entries = mo.parseMoBillList(listXml);
-      writeCachedBillList(args.session, entries);
-      listFetchMode = 'live';
-    } else {
-      entries = cachedList.entries;
-      listFetchMode = 'cached';
-      console.error(`[${new Date().toISOString()}] reusing cached bill-list XML from ${cachedList.fetched_at} (< ${MO_BILL_LIST_MAX_AGE_MS / 60000}min old; skipping live list fetch this slot)`);
-    }
-    const targets = selectTargets(entries, args);
-
-    const sessionRow = await ensureSessionRow(client, runId, args.session);
-    await persistBillStubs(client, runId, sessionRow, entries);
-    const roster = await persistRoster(client, runId);
-
-    const billResults = [];
-    const failures = [];
-    for (const target of targets) {
-      let xmlText;
-      let mode;
-      try {
-        if (target.localFile) {
-          xmlText = readFileSync(target.localFile, 'utf8');
-          mode = 'fixture';
-          console.error(`[${new Date().toISOString()}] read bill XML ${target.identifier} from local fixture (not a live request): ${target.localFile}`);
-        } else {
-          xmlText = await mo.fetchMoBillXml(target.bill_xml_url);
-          mode = 'live';
-          console.error(`[${new Date().toISOString()}] fetched bill XML ${target.identifier} (live)`);
-        }
-      } catch (err) {
-        if (!(err instanceof SourceFetchError)) throw err;
-        failures.push({ step: `bill xml ${target.identifier}`, message: err.message });
-        continue;
-      }
-      const parsed = mo.parseMoBillXml(xmlText);
-      const result = await persistBillDetail(client, runId, sessionRow, parsed);
-      billResults.push({ identifier: target.identifier, mode, ...result });
-      // Task fix-mo-enrichment: the bill LEAVES the needs-enrichment set here, unconditionally,
-      // now that its fetch+parse+persist cycle has completed — see selectTargets/
-      // hasEnrichedMarker's own comment for why this is file-presence-driven rather than derived
-      // from any DB column.
-      writeEnrichedMarker(target.identifier, { run_id: runId, bill_id: result.bill_id });
-    }
-
-    const counts = {
-      document_type: 'bill-xml', bills_listed: entries.length, bills_detailed: billResults.length,
-      list_fetch_mode: listFetchMode,
-      failures: failures.length, roster, artifact_replay: artifactReplay, skipped_failed_pdfs: skippedFailedPdfs, skipped_failed_pdf_keys: skippedFailedPdfKeys,
-    };
-    const status = failures.length === 0 ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, { counts, billResults, failures, roster });
-    console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts, billResults, failures }, null, 2));
-    if (failures.length > 0) process.exitCode = 2;
-  } catch (err) {
-    await closeRun(client, runId, 'failed', { error: String(err) });
-    throw err;
-  }
+  await runMoHouse(client, args);
 }
 
 const invokedDirectly = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());

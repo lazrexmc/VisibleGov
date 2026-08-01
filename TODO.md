@@ -277,6 +277,31 @@
     touching `public_freshness`) — **draft-then-apply, Lance runs it**. Not urgent; recorded so
     the shared key stops being a surprise.
 
+34. [x] ~~MO House driver silently slept ~30 minutes mid-run, wedged behind its own rate
+    limiter — every scheduled run ETIMEDOUT.~~ **FIXED 2026-08-01.** `mo-house-xml.js:12`'s
+    `moHouseLimiter` (30 min/request, per house.mo.gov's own ToU) is correctly *strict*, but
+    `ingest-mo-house.js`'s old shape could need TWO live requests in one invocation — a stale
+    `BillList.XML` refresh, then a per-bill XML fetch — both through that SAME shared limiter, so
+    the second request just slept out the first request's ~30-minute interval in-process (zero
+    connections, zero CPU, zero log output — invisible unless you caught the process alive).
+    Under the scheduler's 480s child timeout every such run was killed first: mo-house-xml was
+    3-for-3 ETIMEDOUT, effectively down. **The round-2 reviewer's "every historical run took an
+    exact multiple of 1800 seconds" observation was THIS defect — misattributed at the time to
+    MO-side slowness rather than an in-process double-fetch.** An earlier partial fix (caching the
+    list at a 60-minute max-age) only reduced how *often* both fetches landed in one run; it
+    didn't stop the combination once the cache aged out. Real fix: `runMoHouse`
+    (`src/cli/ingest-mo-house.js`) now makes **at most one live house.mo.gov request per
+    invocation**, mirroring `ingest-mo-senate.js`'s `runMoSenate` slot-priority shape — pending
+    roll-call PDF, then a stale-list-refresh slot (spends the request, persists stubs, stops), then
+    a fresh-list bill-detail slot (reads cache, no network, spends the request on one bill). The
+    limiter itself is untouched (still 30 min, per ToU) and now doubles as a tripwire: a future bug
+    making a second live request in one run would sleep and get killed LOUDLY by the scheduler
+    instead of silently violating the ToU. `MO_BILL_LIST_MAX_AGE_MS` raised 60min → 24h (fewer
+    whole runs spent on list housekeeping under the new one-slot-per-run shape). `--limit` > 1 is
+    now a typed `LiveRequestLimitError` (there is only ever one live fetch to give a limit to); the
+    scheduler's frozen `--limit 1` is unaffected. 9 new tests
+    (`tests/mo-house-xml.test.js`), 2101/2101 green.
+
 ---
 
 ### Defects found by the 2026-07-31 data audit (docs vs live DB) — none were previously recorded
