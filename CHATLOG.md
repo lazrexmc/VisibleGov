@@ -985,3 +985,32 @@ hasn't voted since (August recess) — classified it HEALTHY rather than failure
 correctly skipped the aggregate refresh on zero writes. Freshness no longer depends on a chat
 session being open. The manual senate-journal loop drains its backlog until it exhausts, then the
 scheduler owns all five sources.
+
+## 2026-08-01 (early) — wave 2: 60 bills through the two-axis chain; published 39 → 70
+
+Lance: *"summary wave 2, go."* Ran 60 bills (the plan queue's top 60, all passage-priority) through
+the full trust chain on the $0 subagent path: opus authors from official text; sonnet adversarially
+refutes each bullet; a second sonnet lists key provisions WITHOUT seeing the summary; a third
+checks coverage; `summary-queue.js record` re-validates everything mechanically and decides
+publish/flag itself.
+
+**Result: 31 auto-published (both axes clean), 29 flagged into Lance's review queue, 0 rejects in
+the final state, 0 bills lost.** Published total: 39 → 70. Every flagged item carries its specific
+gaps (e.g. "3 covered / 4 uncovered" on HB 744), so review is a targeted read, not an audit.
+
+Two defect classes surfaced and were fixed mid-wave, both caught by designed layers:
+- **Controller hand-transcription:** I typed 10 directory names from memory into the batch-1 args
+  and got all 10 wrong. The author agents each REFUSED to substitute a different bill and wrote
+  nothing — "no bill text means every point would be fabricated." Fix: bill lists are now
+  generated from the manifest by code, never typed. (Lesson candidate for PLAYBOOK_DELTA.)
+- **Checker citation invention:** 6 completeness checkers synthesized dotted statute ranges
+  ("233.295.2-3") that don't appear verbatim in the text. The grounding gate rejected all six
+  whole — "the checker invented a section it never read" — before any DB write. Fix: the
+  verbatim-substring rule is now stated mechanically in every stage prompt; batches 2-3 ran with
+  it from the start and produced ZERO grounding rejects.
+
+The model-label dry-run reject (envelope wants bare ids; record applies the 'subagent:' prefix
+itself) was the third catch — that's what `--dry-run` is for.
+
+Batch shape: 3 × 20 bills, ~210 subagents total, all four stages green on every completed bill.
+Batch flag rates: 9/20, 11/20, 9/20 — the completeness axis is doing real work.
