@@ -10,11 +10,13 @@ eye on it afterward.
 Each invocation:
 
 1. Takes a single-instance, ownership-checked lock
-   (`.superpowers/artifacts/scheduler.lock.json`, pid + a random nonce). If another invocation is
-   already holding it, this one logs `already-running` and exits 0 — that is a **normal**,
-   expected outcome (see cadence below), never a failure. A lock older than 10 minutes is
-   reclaimed as stale; releasing the lock always re-checks the nonce first, so a run that hung
-   long enough to be reclaimed can never delete a *newer* tick's lock out from under it.
+   (`.superpowers/artifacts/scheduler.lock.json`, pid + a random nonce + a declared max duration).
+   If another invocation is already holding it, this one logs `already-running` and exits 0 —
+   that is a **normal**, expected outcome (see cadence below), never a failure. A lock older than
+   its OWN declared max duration is reclaimed as stale (10 minutes by default; a source's real
+   per-source timeout once one has been chosen — see *Per-source timeouts* below for why one
+   fixed number doesn't work here); releasing the lock always re-checks the nonce first, so a run
+   that hung long enough to be reclaimed can never delete a *newer* tick's lock out from under it.
 2. Checks all five ingestion sources' real due-ness by querying `ingestion_runs` for each one's
    last `started_at` and comparing against its own minimum interval — the *same* durable,
    cross-process signal the ingest CLIs' own cooldown check (`enforceDurableCooldown`) already
@@ -24,10 +26,19 @@ Each invocation:
 3. Picks the single **most overdue** due source (the one that has gone longest since it last ran)
    and runs it as a short, timeout-bounded child process: `node --env-file=.env <cli> --limit 1`
    (or the equivalent for that source — see the registry table below). At most one source per
-   tick. If the child fails in a way that leaves no new `ingestion_runs` row for it (a hard crash,
-   a timeout, an upstream outage before the CLI's own bookkeeping starts), the scheduler writes
-   its own honest failed attempt record — never a fake success — so that source's due-ness clock
-   still advances and a persistently-failing source cannot monopolize every future tick.
+   tick. Two distinct honest-recovery paths, depending on how the CLI failed:
+   - If it fails in a way that leaves **no new** `ingestion_runs` row at all (a hard crash, a
+     timeout, an upstream outage before the CLI's own bookkeeping starts — this is `us-congress`/
+     `us-senate`'s own shape, since `ingest.js` does its network work before it ever records
+     anything), the scheduler writes its own honest **failed attempt** record — never a fake
+     success — so that source's due-ness clock still advances and a persistently-failing source
+     cannot monopolize every future tick.
+   - If the timeout (or a buffer overflow) forcefully kills a CLI that HAD already opened its own
+     run row (`mo-senate-web`/`mo-house-xml`/`legiscan` all open their row before their long
+     work), that row would otherwise be stranded at `status='running'` forever — lying about state
+     to anyone reading it (`public_freshness` included) while still silently advancing due-ness.
+     The scheduler closes it honestly instead: `status='failed'`, `detail.scheduler_kill: true`,
+     scoped so it can only ever touch a row this exact tick could plausibly have created.
 4. If that run's own recorded counts show it actually wrote rows, refreshes the vote aggregates
    (`scripts/refresh-aggregates.js`) — the same standing practice every ingest batch has always
    followed, so the profile charts never silently drift behind the vote lists. A tick whose only
@@ -54,10 +65,13 @@ Each invocation:
   31). The registry entry for `mo-house-xml` passes `--limit 1` only, nothing else, permanently.
 - **Never stacks overlapping processes.** The single-instance lock (step 1 above) and the
   due-ness check (step 2) both have to agree before anything runs. The lock's own release is
-  ownership-checked (nonce-based), and every child process runs under an explicit timeout
-  (8 minutes — comfortably less than both the lock's 10-minute stale-reclaim window and the
-  15-minute recommended tick), so a single hung child cannot hold the lock indefinitely or be
-  mistaken for a still-legitimate run by a later tick.
+  ownership-checked (nonce-based), and every child process runs under an explicit, per-source
+  timeout (see *Per-source timeouts* below) — the lock's own declared stale-reclaim window is
+  updated to match that exact timeout right before the child is spawned, so a later tick's
+  staleness check is always judging the run against its real bound, never a generic number that
+  could be shorter than a legitimately still-running child. A single hung child can therefore
+  never hold the lock indefinitely, and can never be mistaken for stale by a later tick while it
+  is still legitimately within its own budget.
 - **Never lets one failing source starve the others.** `ingest.js` (the `us-congress`/`us-senate`
   CLI) does its network work before it records anything — a persistent upstream failure there used
   to leave no durable trace at all, which would have let that one source win the "most overdue"
@@ -93,6 +107,37 @@ had scheduled ingestion, so new federal roll calls simply never arrived.
 raised via `.env` if Lance ever wants these to run less often; any value below the defaults above
 is silently floored back up to them.
 
+## Per-source timeouts — why legiscan is different
+
+Every child process runs under a hard timeout (`spawnSync`'s own `timeout` option): if a CLI
+hasn't finished by then, the scheduler kills it rather than risk hanging forever. Four of the five
+sources share one **8-minute default** (`CHILD_TIMEOUT_MS`). `legiscan` gets its own, much larger
+**75-minute** budget (`LEGISCAN_CHILD_TIMEOUT_MS`).
+
+This isn't a guess — it came from reading `legiscan`'s own history in `ingestion_runs`. Real runs
+against the scheduler's actual target session (`'261'`, `legiscan_session_id 2239`) took **449.3s
+and 475.7s** — within, but uncomfortably close to, the old single 480s (8-minute) budget every
+source originally shared. A separate historical run (a genuine dataset-hash-changed
+reprocessing — the case `ingest-legiscan.js`'s own `dataset_hash` gate exists for, not a cheap
+hash-match skip) took **3168.5s (~52.8 minutes)**. 75 minutes is that observed maximum plus ~40%
+headroom, rounded up.
+
+**Why the other four sources don't need this:** `mo-senate-web`'s real historical runs never
+exceeded 9.6 seconds; `us-congress`/`us-senate`'s small sample never came close to 8 minutes
+either. `mo-house-xml` LOOKS like an exception in raw `ingestion_runs` history (some runs show
+~30-minute durations) — investigated and ruled out: those are exact 1800.0-second multiples,
+which is `enforceDurableCooldown` *sleeping out* the old manual bash-loop's premature
+invocations, not real work. This scheduler's own due-ness gate never invokes a CLI before its
+cooldown has elapsed, so that scenario cannot recur under it.
+
+**Why this matters beyond just "don't kill a slow run": the lock itself has to know about it
+too.** A fixed 10-minute stale-reclaim window and a legitimately 75-minute `legiscan` run cannot
+coexist — a second tick 15 minutes in would see the lock as stale, reclaim it, and start a
+*second* concurrent `legiscan` process, exactly the overlapping-process problem the lock exists to
+prevent. So the lock's own declared stale-reclaim duration is updated to match the CHOSEN
+source's real timeout right before that source is spawned (see "What it does," step 1) — a
+`legiscan` tick's lock is only ever considered stale after ~76 minutes, not 10.
+
 ## Registering it (Lance's step — never run `schtasks` from an agent)
 
 Run every 15 minutes — deliberately shorter than every source's own interval above, so a tick is
@@ -124,6 +169,27 @@ schtasks /create /tn "VisibleGov Scheduled Ingestion" ^
 Actions → New → Program: `C:\Program Files\nodejs\node.exe`, Arguments:
 `--env-file=F:\VisibleGov\.env F:\VisibleGov\scripts\scheduled-ingest.js`, Start in:
 `F:\VisibleGov` (redundant with the absolute `--env-file` path, but harmless to set).
+
+### ⚠️ Check the task's own "Stop the task if it runs longer than" setting — it must EXCEED 75 minutes
+
+This is a **separate setting from everything above** — it's Windows' own execution-time limit on
+the *whole scheduled task*, not anything this script controls. The `schtasks /create` command
+above does not set it explicitly, so **check it via the GUI after creating the task**: Task
+Scheduler → find "VisibleGov Scheduled Ingestion" → Properties → **Settings tab** → "Stop the task
+if it runs longer than."
+
+If that value is *shorter* than `legiscan`'s own 75-minute timeout, Windows will kill the entire
+scheduler process itself partway through a legitimate `legiscan` run — and because that's a forced
+process termination from OUTSIDE this script (not `spawnSync`'s own timeout), **none of this
+script's own honest-recovery logic gets a chance to run**: the lock is never released by its own
+`finally` block (it self-heals eventually via the next tick's stale-reclaim, which is fine), but
+any `ingestion_runs` row `legiscan` had already opened would be stranded at `status='running'`
+with nothing to close it — exactly the lying-about-state problem this build went out of its way to
+prevent, reintroduced from a layer above it.
+
+**Recommendation: uncheck "Stop the task if it runs longer than" entirely, or set it to at least 2
+hours.** This script's own per-source timeouts (8 minutes default, 75 minutes for `legiscan`) are
+the real enforcement — Windows' own limit only needs to be generous enough to never fire first.
 
 ## How to verify it is alive
 
@@ -161,10 +227,12 @@ schtasks /change /tn "VisibleGov Scheduled Ingestion" /enable    # resume
 schtasks /delete /tn "VisibleGov Scheduled Ingestion" /f         # remove entirely
 ```
 
-If the machine ever loses power mid-run, the lock file self-heals: a lock older than 10 minutes
-(`MAX_RUN_DURATION_MS`) is automatically reclaimed on the next tick, with a warning logged. You can
-also delete `.superpowers/artifacts/scheduler.lock.json` by hand at any time if you want a clean
-next tick immediately rather than waiting out the 10 minutes.
+If the machine ever loses power mid-run, the lock file self-heals: a lock older than its own
+declared max duration (10 minutes by default, `MAX_RUN_DURATION_MS`; up to ~76 minutes if a
+`legiscan` run was in progress — see *Per-source timeouts* above) is automatically reclaimed on
+the next tick, with a warning logged. You can also delete
+`.superpowers/artifacts/scheduler.lock.json` by hand at any time if you want a clean next tick
+immediately rather than waiting out whichever window applies.
 
 ## Known gap: `legiscan` may report `resolvable: false`
 

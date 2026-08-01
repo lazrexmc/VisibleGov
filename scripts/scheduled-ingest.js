@@ -20,10 +20,17 @@
 //     (.superpowers/artifacts/scheduler.lock.json) is required before anything else happens; a
 //     live lock means "already running," logged and exited 0 — an overlapping tick is expected
 //     (Task Scheduler is recommended at a 15-min cadence, shorter than every source's own
-//     interval, see docs/SCHEDULED_INGESTION.md) and must never read as a scheduler failure. A
-//     child process (and the scheduler's own DB fetches) can never hang past a bounded timeout,
-//     which is what makes the lock's own ownership check (nonce-based, fix round 1 — see
-//     acquireLock/releaseLock) actually sufficient rather than theoretical.
+//     interval, see docs/SCHEDULED_INGESTION.md) and must never read as a scheduler failure. Every
+//     child process runs under a PER-SOURCE bounded timeout (fix round 2 — see CHILD_TIMEOUT_MS/
+//     LEGISCAN_CHILD_TIMEOUT_MS; legiscan alone can legitimately run up to 75 minutes on a real
+//     dataset-hash change, evidenced from real ingestion_runs history), and the lock itself
+//     carries THAT source's own declared max duration (updateLockMaxDuration, written after
+//     selection, before spawn) — so the stale-reclaim window judges each run against its own real
+//     bound rather than one fixed number, which is what makes the lock's ownership check
+//     (nonce-based, fix round 1 — see acquireLock/releaseLock) actually sufficient rather than
+//     theoretical. A forceful kill (timeout or buffer overflow) that strands a source's own
+//     ingestion_runs row at status='running' is closed honestly afterward, scoped to only the
+//     rows this exact tick could have created (fix round 2 — see closeOrphanedRunningRows).
 //   - INCAPABLE OF LETTING ONE FAILING SOURCE STARVE THE OTHERS. The ingest CLIs do not exit when
 //     their ToU cooldown hasn't elapsed — they SLEEP until it has (enforceDurableCooldown,
 //     ingest-mo-senate.js:446; same pattern in ingest-mo-house.js) — so this script decides
@@ -80,11 +87,30 @@ export const MAX_RUN_DURATION_MS = 10 * 60 * 1000;
 
 // I2 (fix round 1): explicit timeout so a stalled child cannot hang the scheduler — and therefore
 // hold the lock — indefinitely, which was precisely the precondition I1's ownership-blind
-// releaseLock() turned into unbounded process stacking. Strictly less than BOTH the 15-minute
-// recommended tick AND MAX_RUN_DURATION_MS's own 10-minute stale-reclaim window: a child this
-// script gives up on is always already dead well before any other tick would consider the lock
-// stale, so there is never a race between "still legitimately running" and "reclaimable."
-export const CHILD_TIMEOUT_MS = 8 * 60 * 1000; // 8 min < 10 min stale-reclaim < 15 min tick
+// releaseLock() turned into unbounded process stacking. This is the DEFAULT, used by the four
+// sources whose real observed durations never came close to it (mo-senate-web max 9.6s observed
+// across 151 historical runs; us-congress/us-senate max well under a minute across their small
+// sample; mo-house-xml's apparent ~30-min outliers turned out to be enforceDurableCooldown
+// SLEEPING out the old manual-loop's premature invocations — exact 1800.0s multiples in
+// ingestion_runs, not real work, and structurally impossible under this scheduler's own due-ness
+// gate, which never invokes a CLI before its cooldown has elapsed).
+export const CHILD_TIMEOUT_MS = 8 * 60 * 1000; // 8 min
+
+// Round 2 fix: legiscan needed its own, much larger timeout. Real ingestion_runs history showed
+// its runs against the scheduler's actual target session ('261', legiscan_session_id 2239) took
+// 449.3s and 475.7s — uncomfortably close to the old single 480s (8 min) budget — and a separate
+// historical run (a real dataset-hash-changed reprocessing, not a cheap hash-match skip) took
+// 3168.5s (~52.8 min). 75 minutes (4500s) is that observed max plus ~40% headroom
+// (3168.5 * 1.4 ≈ 4436s), rounded up. A per-source timeoutMs field (see buildRegistry) is what
+// makes this safe to raise for just this one source without loosening the default for the rest.
+export const LEGISCAN_CHILD_TIMEOUT_MS = 75 * 60 * 1000; // 75 min — see derivation above
+
+// Round 2 fix: the lock's own declared max duration (see acquireLock/updateLockMaxDuration) is
+// the chosen source's timeoutMs PLUS this grace — cleanup after a timeout-kill (closing an
+// orphaned 'running' row, writing the log) takes at most a few seconds, but a small buffer keeps
+// the stale-reclaim window from being able to fire in the split second between spawnSync's own
+// kill and this process's cleanup finishing.
+export const LOCK_GRACE_MS = 60 * 1000; // 1 min
 
 // M2 (fix round 1): Node's spawnSync default maxBuffer (1 MB) is small enough that a chatty child
 // (the ingest CLIs have 2-11 console.error progress lines) could overflow it, which SILENTLY
@@ -164,12 +190,24 @@ export function parseArgs(argv) {
   return out;
 }
 
-// ---- pure: single-instance lock (I1, fix round 1: ownership-checked via nonce) ----
+// ---- pure: single-instance lock (I1 fix round 1: ownership-checked via nonce; round 2: the
+// stale-reclaim window is the LOCK'S OWN declared duration, not one fixed constant) ----
 
-export function isLockStale(lock, nowMs, maxRunDurationMs = MAX_RUN_DURATION_MS) {
+// isLockStale (round 2): a fixed 10-minute stale-reclaim window and a legiscan run that can
+// legitimately need 75 minutes cannot coexist — a tick at +15 min would reclaim a still-live
+// legiscan lock, starting a SECOND concurrent child, exactly the stacking I1 closed. So the lock
+// itself carries `maxDurationMs` (written by acquireLock, updated by updateLockMaxDuration once
+// the chosen source — and therefore its real timeout — is known), and staleness is judged against
+// THAT declared value. `fallbackMaxDurationMs` (still MAX_RUN_DURATION_MS by default) is used
+// only when the lock has no valid `maxDurationMs` of its own — an old-format or corrupt lock file
+// — which is the fail-safe direction: an unrecognized lock is judged by the conservative 10-minute
+// default, never trusted to mean "wait indefinitely."
+export function isLockStale(lock, nowMs, fallbackMaxDurationMs = MAX_RUN_DURATION_MS) {
   const startedMs = Date.parse(lock.startedAt);
   if (!Number.isFinite(startedMs)) return true; // unparseable timestamp — never trusted, treated as stale
-  return nowMs - startedMs > maxRunDurationMs;
+  const declared = Number(lock.maxDurationMs);
+  const maxDurationMs = Number.isFinite(declared) && declared > 0 ? declared : fallbackMaxDurationMs;
+  return nowMs - startedMs > maxDurationMs;
 }
 
 // acquireLock: an atomic create ('wx' — fails with EEXIST if the file already exists) is tried
@@ -181,10 +219,20 @@ export function isLockStale(lock, nowMs, maxRunDurationMs = MAX_RUN_DURATION_MS)
 // tick. Every lock this process writes carries a fresh random `nonce` (crypto.randomUUID) — the
 // caller MUST thread the returned nonce through to releaseLock, which is the other half of I1's
 // fix (see that function).
+//
+// Round 2: the lock also carries `maxDurationMs`, initialized here to `maxRunDurationMs`
+// (MAX_RUN_DURATION_MS by default) — at acquire time the chosen source (and therefore its real
+// per-source timeout) isn't known yet, so this initial value only has to cover the SELECTION
+// phase (a handful of bounded DB lookups, realistically seconds) and every non-live tick shape
+// (nothing-due/already-running/dry-run/blocked, none of which spawn a child at all). The caller
+// MUST call updateLockMaxDuration once a source is chosen and BEFORE spawning it, so the
+// stale-reclaim window covers that child's REAL declared timeout, not this placeholder.
 export function acquireLock(lockPath = LOCK_PATH, { now = Date.now(), maxRunDurationMs = MAX_RUN_DURATION_MS } = {}) {
   mkdirSync(path.dirname(lockPath), { recursive: true });
   const nonce = randomUUID();
-  const payload = JSON.stringify({ pid: process.pid, startedAt: new Date(now).toISOString(), nonce }, null, 2);
+  const payload = JSON.stringify({
+    pid: process.pid, startedAt: new Date(now).toISOString(), nonce, maxDurationMs: maxRunDurationMs,
+  }, null, 2);
 
   try {
     writeFileSync(lockPath, payload, { flag: 'wx' });
@@ -233,6 +281,28 @@ export function releaseLock(lockPath = LOCK_PATH, nonce = null) {
   }
   if (!nonce || existing.nonce !== nonce) return; // not (verifiably) ours — leave it alone
   unlinkSync(lockPath);
+}
+
+// updateLockMaxDuration (round 2): rewrites the lock's declared `maxDurationMs` once the chosen
+// source — and therefore its real per-source timeout — is known, so the stale-reclaim window
+// (isLockStale) judges THIS run against its own real bound rather than the generic
+// selection-phase placeholder acquireLock wrote. Must be called AFTER source selection and
+// BEFORE the child is spawned. Ownership-checked the same way releaseLock is (nonce match) —
+// never overwrites a lock this process cannot prove it still owns; a missing/corrupt/
+// non-matching lock is a safe no-op (returns false) rather than a throw, since a scheduler that
+// somehow lost its own lock between acquiring it and choosing a source has a bigger problem than
+// this write failing.
+export function updateLockMaxDuration(lockPath = LOCK_PATH, nonce = null, maxDurationMs) {
+  if (!existsSync(lockPath)) return false;
+  let existing;
+  try {
+    existing = JSON.parse(readFileSync(lockPath, 'utf8'));
+  } catch {
+    return false;
+  }
+  if (!nonce || existing.nonce !== nonce) return false;
+  writeFileSync(lockPath, JSON.stringify({ ...existing, maxDurationMs }, null, 2));
+  return true;
 }
 
 // ---- pure: due-ness + selection ----
@@ -444,10 +514,12 @@ function skipReason(result) {
 // ---- registry ----
 //
 // Each entry: { key, minIntervalMs, lastStartedAtIso, resolvable, unresolvedReason, scriptPath,
-// cliArgs, windowMaxKnown? }. scriptPath is repo-root-relative, matching every
+// cliArgs, timeoutMs, windowMaxKnown? }. scriptPath is repo-root-relative, matching every
 // "node --env-file=.env <path>" npm script already in package.json. `only` (M3, fix round 1)
 // skips every lookup not needed for the requested source, rather than running all eight and
-// discarding six of them every tick.
+// discarding six of them every tick. `timeoutMs` (round 2) is CHILD_TIMEOUT_MS for every source
+// except legiscan, which gets LEGISCAN_CHILD_TIMEOUT_MS — see that constant's own comment for the
+// real-duration evidence behind the 75-minute figure.
 export async function buildRegistry(client, { now = Date.now(), year = new Date(now).getFullYear(), only = null } = {}) {
   const need = (key) => !only || only === key;
 
@@ -477,6 +549,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       unresolvedReason: skipReason(moSenateLast),
       scriptPath: 'src/cli/ingest-mo-senate.js',
       cliArgs: ['--year', String(year), '--limit', '1'],
+      timeoutMs: CHILD_TIMEOUT_MS,
     },
     {
       key: 'mo-house-xml',
@@ -491,6 +564,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       // predecessor. NEVER add --session (or any year/era flag) here — --limit 1 alone lets the
       // CLI fall through to its own DEFAULT_MO_HOUSE_SESSION, which is the current session.
       cliArgs: ['--limit', '1'],
+      timeoutMs: CHILD_TIMEOUT_MS,
     },
     {
       key: 'us-congress',
@@ -506,6 +580,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       cliArgs: rollWindow.value != null
         ? ['--source', 'us-congress', '--year', String(year), '--rolls', `${rollWindow.value.lo}-${rollWindow.value.hi}`]
         : [],
+      timeoutMs: CHILD_TIMEOUT_MS,
       windowMaxKnown: rollWindow.value != null ? rollWindow.value.maxKnown : undefined,
     },
     {
@@ -518,6 +593,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       cliArgs: voteWindow.value != null
         ? ['--source', 'us-senate', '--session', String(US_SENATE_SESSION), '--votes', `${voteWindow.value.lo}-${voteWindow.value.hi}`]
         : [],
+      timeoutMs: CHILD_TIMEOUT_MS,
       windowMaxKnown: voteWindow.value != null ? voteWindow.value.maxKnown : undefined,
     },
     {
@@ -535,6 +611,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
       // suspension-level gate itself is entirely the CLI's own responsibility, invoked, not
       // reimplemented.
       cliArgs: legiscanResolvedId != null ? ['--session', String(legiscanResolvedId)] : [],
+      timeoutMs: LEGISCAN_CHILD_TIMEOUT_MS,
     },
   ];
 }
@@ -542,9 +619,7 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
 // ---- process orchestration ----
 
 function defaultSpawn(command, args, options) {
-  return spawnSync(command, args, {
-    encoding: 'utf8', timeout: CHILD_TIMEOUT_MS, maxBuffer: CHILD_MAX_BUFFER, ...options,
-  });
+  return spawnSync(command, args, { encoding: 'utf8', ...options });
 }
 
 // runChildCli: every ingestion CLI in this repo (and refresh-aggregates.js) speaks the same "API"
@@ -554,18 +629,36 @@ function defaultSpawn(command, args, options) {
 // import — is the only way to invoke one. spawnFn is injectable so tests never launch a real
 // subprocess against real network/DB state; the real default really does spawn `node
 // --env-file=.env <scriptPath> ...cliArgs`, matching every "node --env-file=.env ..." npm script.
-export function runChildCli(scriptPath, cliArgs, { cwd = REPO_ROOT, spawnFn = defaultSpawn } = {}) {
-  const result = spawnFn(process.execPath, ['--env-file=.env', scriptPath, ...cliArgs], { cwd });
+//
+// timeoutMs (round 2): per-call, defaulting to CHILD_TIMEOUT_MS — the caller (runChosenSource)
+// passes the CHOSEN SOURCE's own registry.timeoutMs, so legiscan's 75-minute budget is honored
+// without loosening the 8-minute default every other source uses.
+export function runChildCli(scriptPath, cliArgs, {
+  cwd = REPO_ROOT, spawnFn = defaultSpawn, timeoutMs = CHILD_TIMEOUT_MS,
+} = {}) {
+  const result = spawnFn(process.execPath, ['--env-file=.env', scriptPath, ...cliArgs], {
+    cwd, timeout: timeoutMs, maxBuffer: CHILD_MAX_BUFFER,
+  });
   if (result.error) {
     // I2: a timeout throws here too now (result.error.code === 'ETIMEDOUT', result.killed true) —
     // this IS a real scheduler-level condition, distinctly reported so it is never confused with
     // a bad path. M2: a maxBuffer overflow (ENOBUFS) also lands here and gets its own message
-    // instead of the misleading "could not launch".
+    // instead of the misleading "could not launch". Both are tagged with `.code` and (for
+    // ETIMEDOUT) `.timeoutMs` on the thrown Error — round 2, finding 3: runChosenSource uses this
+    // to know a forceful kill happened and that source's own ingestion_runs row may need to be
+    // closed (a graceful crash inside the CLI's own try/catch already self-closes; only a
+    // SIGTERM/SIGKILL from spawnSync bypasses that).
     if (result.error.code === 'ETIMEDOUT') {
-      throw new Error(`${scriptPath} exceeded its ${CHILD_TIMEOUT_MS}ms timeout and was killed (ETIMEDOUT)`);
+      const err = new Error(`${scriptPath} exceeded its ${timeoutMs}ms timeout and was killed (ETIMEDOUT)`);
+      err.code = 'ETIMEDOUT';
+      err.timeoutMs = timeoutMs;
+      throw err;
     }
     if (result.error.code === 'ENOBUFS') {
-      throw new Error(`${scriptPath} exceeded the ${CHILD_MAX_BUFFER}-byte output buffer and was killed mid-run (ENOBUFS) — raise maxBuffer or investigate excessive stdout/stderr output`);
+      const err = new Error(`${scriptPath} exceeded the ${CHILD_MAX_BUFFER}-byte output buffer and was killed mid-run (ENOBUFS) — raise maxBuffer or investigate excessive stdout/stderr output`);
+      err.code = 'ENOBUFS';
+      err.timeoutMs = timeoutMs;
+      throw err;
     }
     throw new Error(`could not launch ${scriptPath}: ${result.error.message}`);
   }
@@ -605,6 +698,39 @@ export async function recordSchedulerAttemptFailure(client, source, childResult,
   return runId;
 }
 
+// closeOrphanedRunningRows (round 2, finding 3): three of the five CLIs (mo-senate-web,
+// mo-house-xml, legiscan) call openRun BEFORE their long work, unlike ingest.js — so a forceful
+// kill (I2's ETIMEDOUT, M2's ENOBUFS: both SIGTERM the child before it ever reaches its own
+// try/catch's closeRun) leaves that row stranded at status='running' forever. Left alone, this
+// lies twice over: public_freshness would show the source as permanently "running", and the
+// row's own started_at silently keeps advancing the durable due-ness signal (queryLatestStartedAt
+// has no status filter, by design — see its own comment) even though nothing is actually
+// happening. Closed here as status='failed' with real diagnostic detail — never left open, never
+// silently deleted.
+//
+// Scoped to `sinceIso` (the TICK's own start time, captured once in main() before anything else
+// runs) — `started_at >= sinceIso` — so this can only ever touch a row THIS tick's own child could
+// plausibly have created. A 'running' row from any earlier tick is a different, unrelated
+// question this function must never touch (if a previous tick's kill-cleanup already ran, that
+// row is 'failed' already, not 'running'; if this is somehow the first time it's being noticed,
+// that is its own separate investigation, not something to paper over here).
+//
+// Routed through selectAll (project law: no bare multi-row .select()) even though the realistic
+// result size is 0 or 1 — the whole point of that law is not re-deriving "is this one small
+// enough to skip it" per call site.
+export async function closeOrphanedRunningRows(client, source, { sinceIso, timeoutMs, note }) {
+  const { data, error } = await selectAll(client, 'ingestion_runs', 'id', {
+    filter: (q) => q.eq('source', source).eq('status', 'running').gte('started_at', sinceIso),
+  });
+  if (error) throw new Error(`orphaned-run lookup failed for source=${source}: ${error.message}`);
+  const closedIds = [];
+  for (const row of data ?? []) {
+    await closeRun(client, row.id, 'failed', { scheduler_kill: true, timeoutMs, note });
+    closedIds.push(row.id);
+  }
+  return closedIds;
+}
+
 // runChosenSource: invokes the chosen source's CLI, then reconciles the durable signal against
 // what actually landed in ingestion_runs. This is where C1 and I4 both live, since both need to
 // read the SAME post-run row (the "honest counts channel," per the review's own framing).
@@ -623,13 +749,24 @@ export async function recordSchedulerAttemptFailure(client, source, childResult,
 // expected past-the-edge 404s reads as healthy, not alarming. `wroteRows` (I4b) is what gates the
 // aggregate refresh in main() — read from detail.counts, so a tick where every probe 404s and
 // zero rows landed correctly does NOT trigger a refresh, unlike the old mode/status heuristic.
-export async function runChosenSource(client, chosen, { runChildCliFn = runChildCli } = {}) {
+// tickStartIso (round 2, finding 3): this TICK's own start time (main() captures `now` once,
+// before anything else runs, and passes its ISO form through) — the ONLY thing
+// closeOrphanedRunningRows below is allowed to treat as "this run's own row." Required whenever a
+// forceful kill is possible; the existing round-1 tests never reach that branch, so they are
+// unaffected by its absence.
+export async function runChosenSource(client, chosen, { runChildCliFn = runChildCli, tickStartIso } = {}) {
   let childResult;
   let launchError = null;
+  let killedByScheduler = false;
   try {
-    childResult = runChildCliFn(chosen.scriptPath, chosen.cliArgs);
+    childResult = runChildCliFn(chosen.scriptPath, chosen.cliArgs, { timeoutMs: chosen.timeoutMs });
   } catch (err) {
     launchError = err;
+    // Round 2, finding 3: ETIMEDOUT (I2) and ENOBUFS (M2) both SIGTERM the child — it never
+    // reaches its own try/catch's closeRun, unlike a graceful in-process crash (which every CLI
+    // already self-closes as 'failed'). Only these two forceful-kill codes can strand a
+    // pre-opened run row at status='running'.
+    killedByScheduler = err.code === 'ETIMEDOUT' || err.code === 'ENOBUFS';
     childResult = {
       scriptPath: chosen.scriptPath,
       cliArgs: chosen.cliArgs,
@@ -639,6 +776,19 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
       parsed: null,
       parseError: err.message,
     };
+  }
+
+  let killClosedRunIds = [];
+  if (killedByScheduler) {
+    // mo-senate-web/mo-house-xml/legiscan all call openRun BEFORE their long work — for those,
+    // this closes the row the kill stranded at 'running'. For us-congress/us-senate (which open
+    // LATE, the actual C1 root cause), this correctly finds nothing and is a harmless no-op; the
+    // existing self-record path below handles that case instead.
+    killClosedRunIds = await closeOrphanedRunningRows(client, chosen.key, {
+      sinceIso: tickStartIso,
+      timeoutMs: launchError.timeoutMs ?? chosen.timeoutMs,
+      note: `${launchError.code}: ${launchError.message}`,
+    });
   }
 
   const latestRun = await queryLatestRun(client, chosen.key);
@@ -657,22 +807,26 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
   const wroteRows = !selfRecordedFailure && countsShowRowsWritten(chosen.key, detail);
   const tailProbeOnly = !selfRecordedFailure && status === 'partial'
     && isExpectedTailProbeOutcome(chosen.key, failures, chosen.windowMaxKnown);
-  const healthy = !selfRecordedFailure && (status === 'succeeded' || tailProbeOnly);
+  const healthy = !selfRecordedFailure && !killedByScheduler && (status === 'succeeded' || tailProbeOnly);
+
+  let note = null;
+  if (killedByScheduler) {
+    note = `scheduler killed this run (${launchError.code}) after its ${formatCooldownWait(launchError.timeoutMs ?? chosen.timeoutMs)} timeout — `
+      + `${killClosedRunIds.length} orphaned 'running' row(s) closed honestly`;
+  } else if (tailProbeOnly) {
+    note = `${failures.length} tail 404(s) past ${chosen.key === 'us-congress' ? 'roll' : 'vote'} ${chosen.windowMaxKnown} — expected from the probe window, not a failure`;
+  }
 
   return {
     childResult,
     latestRun,
     selfRecordedFailure,
     selfRecordedRunId,
+    killedByScheduler,
+    killClosedRunIds,
     launchError: launchError ? launchError.message : null,
     outcome: {
-      status,
-      healthy,
-      wroteRows,
-      tailProbeOnly,
-      note: tailProbeOnly
-        ? `${failures.length} tail 404(s) past ${chosen.key === 'us-congress' ? 'roll' : 'vote'} ${chosen.windowMaxKnown} — expected from the probe window, not a failure`
-        : null,
+      status, healthy, wroteRows, tailProbeOnly, note,
     },
   };
 }
@@ -728,6 +882,10 @@ export function getSchedulerClient() {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const now = Date.now();
+  // Captured once, before anything else runs — the ONLY timestamp closeOrphanedRunningRows
+  // (round 2, finding 3) is allowed to treat as "this tick's own" when scoping which orphaned
+  // 'running' rows it may close.
+  const nowIsoAtTickStart = new Date(now).toISOString();
 
   const lockResult = acquireLock(LOCK_PATH, { now });
   if (!lockResult.acquired) {
@@ -807,7 +965,14 @@ async function main() {
       return;
     }
 
-    const run = await runChosenSource(client, chosen);
+    // Round 2, finding 2: the lock's declared duration must cover THIS source's real timeout
+    // before we spawn it — written after selection (now that we know chosen.timeoutMs), before
+    // the child starts, so a later tick's stale-reclaim check judges this run against its actual
+    // bound (e.g. legiscan's 75 min) rather than the generic selection-phase placeholder
+    // acquireLock wrote.
+    updateLockMaxDuration(LOCK_PATH, lockResult.nonce, chosen.timeoutMs + LOCK_GRACE_MS);
+
+    const run = await runChosenSource(client, chosen, { tickStartIso: nowIsoAtTickStart });
 
     // I4b: refresh-aggregates fires ONLY when the run's own detail.counts show rows actually
     // written (run.outcome.wroteRows) — never the old "mode==='live' && succeeded/partial"
@@ -827,6 +992,8 @@ async function main() {
       chosen: chosen.key,
       reason,
       selfRecordedFailure: run.selfRecordedFailure,
+      killedByScheduler: run.killedByScheduler,
+      killClosedRunIds: run.killClosedRunIds,
       result: {
         exitStatus: run.childResult.exitStatus,
         mode: run.childResult.parsed?.mode ?? null,

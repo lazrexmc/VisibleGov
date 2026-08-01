@@ -52,3 +52,21 @@ AbortSignal.timeout, http.js untouched; I3 = allSettled + skip-with-reason; I4 =
 row → tail-404 partial logged healthy + refresh only on >0 written; I5 = add us-senate mirroring
 its 4 prior runs. Red-first tests required for C1/I1/I3/I4-gate. M4 is the only permitted Task-1
 touch.
+
+## Fix round 1 — complete (commit 9a4eb66, ℹ fail 0, 2057 tests = 2025 + 32)
+All C1/C2/I1-I5/M1-M4 landed per rulings. Implementer's empirical self-check surfaced a real
+follow-on: legiscan runs vs the target session took 449.3s/475.7s against the I2-ruled 480s
+budget (1-7% margin), outlier 3168.5s; a timeout-kill strands the CLI's pre-opened 'running' row
+AND repeats daily (24h interval) — weekly dataset could never land. mo-house 1800.0s-multiple
+"outliers" adjudicated false alarm (enforceDurableCooldown sleeping out the old manual loop's
+premature invocations; structurally prevented by the scheduler's due-ness gate).
+
+## Fix round 2 — dispatched (same implementer; controller CONFIRMED the concern as a defect)
+Rulings: per-source timeoutMs (legiscan 75 min = observed max +40%, default stays 480s); lock
+carries maxDurationMs of the in-flight run and stale-reclaim reads IT (fixed 10-min fallback for
+missing/corrupt field) — this is what keeps a 75-min child and the I1 single-instance guarantee
+compatible; timeout-kill closes the child's orphaned 'running' rows honestly (scheduler_kill
+detail, only rows started within the tick); doc gains per-source values + derivation + Windows
+"stop task if longer than" must EXCEED 75 min (recommend do-not-stop; our timeouts are the real
+enforcement). Red-first: 75-min lock not reclaimed at 15 min / 480s lock still is / corrupt lock
+still is; orphan-closing. One scoped re-review will cover rounds 1+2 together.
