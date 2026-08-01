@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   planWork, wrapTextFormatError, persistReferencedTermsGracefully, createDraftSummary,
-  checkSummarizeApproval,
+  checkSummarizeApproval, SUMMARIZE_COST_PER_BILL_USD,
 } from '../src/cli/summarize.js';
 import { SourceFetchError, RunNotApprovedError } from '../src/lib/errors.js';
 
@@ -322,6 +322,12 @@ test('checkSummarizeApproval blocks unless SUMMARIZE_RUN_APPROVED is exactly "ye
   assert.throws(() => checkSummarizeApproval(undefined), RunNotApprovedError);
   assert.throws(() => checkSummarizeApproval('true'), RunNotApprovedError);
   assert.doesNotThrow(() => checkSummarizeApproval('yes'));
+});
+
+// M4 (task review fix round 1): summarize.js now prints a cost estimate before the gate, the
+// gloss.js voice — matches golden.js's own $0.11/bill estimate for the SAME summarizeBill call.
+test('SUMMARIZE_COST_PER_BILL_USD matches golden.js\'s own estimate for the same summarizeBill call', () => {
+  assert.equal(SUMMARIZE_COST_PER_BILL_USD, 0.11);
 });
 
 test('checkSummarizeApproval\'s message names SUMMARIZE_RUN_APPROVED specifically, never another CLI\'s var', () => {

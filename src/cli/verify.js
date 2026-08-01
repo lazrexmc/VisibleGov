@@ -12,6 +12,11 @@ import { parseBullets } from '../../site/js/summary-parse.js';
 
 export { parseBullets };
 
+// M4 (task review fix round 1): verifyBill is a comparably-sized bill-level call to the
+// summarizeBill golden.js/summarize.js already estimate at $0.11 — same order of magnitude, no
+// independently-metered figure exists for verification alone, so the same estimate is reused
+// rather than invented from nothing.
+export const VERIFY_COST_PER_SUMMARY_USD = 0.11;
 const FAILURE_TYPES = [OversizeTextError, SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError];
 // Same target set as summarize.js's staleness handling: a draft is the normal unreviewed state,
 // stale means the text moved out from under an existing draft — both need a fresh verification.
@@ -164,6 +169,11 @@ async function main() {
     console.log(JSON.stringify(out, null, 2));
     return;
   }
+
+  // M4 (task review fix round 1): cost estimate printed before the gate, gloss.js's own voice —
+  // both files already know their candidate count at this point (unverified.length).
+  const estimate = (unverified.length * VERIFY_COST_PER_SUMMARY_USD).toFixed(2);
+  console.log(`Cost estimate: ${unverified.length} summary(ies) x ~$${VERIFY_COST_PER_SUMMARY_USD.toFixed(2)} = ~$${estimate} in live model calls (adversarial summary verification).`);
 
   // Mechanical per-run approval gate (task 1) — same standing policy as GLOSS_RUN_APPROVED in
   // gloss.js/extract-terms.js and GOLDEN_CHECK_APPROVED in golden.js: no live, billed Anthropic

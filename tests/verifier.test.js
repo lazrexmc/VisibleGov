@@ -6,7 +6,9 @@ import {
   buildVerifyMessage, verifyBill, assessVerdicts, VerificationIncompleteError,
 } from '../src/lib/verifier.js';
 import { MODEL, MAX_TEXT_CHARS, OversizeTextError, renderMarkdown } from '../src/lib/summarizer.js';
-import { parseArgs, parseBullets, checkBulletCoverage, checkVerifyApproval } from '../src/cli/verify.js';
+import {
+  parseArgs, parseBullets, checkBulletCoverage, checkVerifyApproval, VERIFY_COST_PER_SUMMARY_USD,
+} from '../src/cli/verify.js';
 import { RunNotApprovedError } from '../src/lib/errors.js';
 
 // ---- constants (controller ruling #4: sonnet stays sonnet, deliberately not opus) ----
@@ -256,6 +258,12 @@ test('checkVerifyApproval blocks unless VERIFY_RUN_APPROVED is exactly "yes"', (
   assert.throws(() => checkVerifyApproval(undefined), RunNotApprovedError);
   assert.throws(() => checkVerifyApproval('true'), RunNotApprovedError);
   assert.doesNotThrow(() => checkVerifyApproval('yes'));
+});
+
+// M4 (task review fix round 1): verify.js now prints a cost estimate before the gate, the
+// gloss.js voice.
+test('VERIFY_COST_PER_SUMMARY_USD is a stated estimate, same order of magnitude as the other bill-level calls', () => {
+  assert.equal(VERIFY_COST_PER_SUMMARY_USD, 0.11);
 });
 
 test('checkVerifyApproval\'s message names VERIFY_RUN_APPROVED specifically, never another CLI\'s var', () => {

@@ -11,6 +11,10 @@ import {
 } from '../lib/glossary-terms.js';
 
 const JURISDICTION = 'us-congress';
+// M4 (task review fix round 1): golden.js's runCheck re-runs this EXACT summarizeBill call
+// (same model, same shape of input/output) and estimates it at $0.11/bill — reused here rather
+// than a second, independently-guessed number for the identical underlying call.
+export const SUMMARIZE_COST_PER_BILL_USD = 0.11;
 const FAILURE_TYPES = [SourceFetchError, OversizeTextError, SummaryRefusedError, SummaryTruncatedError];
 // A summary in any of these statuses, at the current text hash, is "already summarized" — skip
 // it. 'approved' means an editor signed off but hasn't published yet; it must not be
@@ -290,6 +294,13 @@ async function main() {
     }, null, 2));
     return;
   }
+
+  // M4 (task review fix round 1): candidateCount is needText + needSummary — EVERY bill in
+  // needText also gets summarized right after its text is fetched (see the loop below), so
+  // needSummary alone would understate the true number of billed calls this run is about to make.
+  const candidateCount = plan.needText.length + plan.needSummary.length;
+  const estimate = (candidateCount * SUMMARIZE_COST_PER_BILL_USD).toFixed(2);
+  console.log(`Cost estimate: ${candidateCount} bill(s) x ~$${SUMMARIZE_COST_PER_BILL_USD.toFixed(2)} = ~$${estimate} in live model calls (bill summary authoring).`);
 
   // Mechanical per-run approval gate (task 1) — same standing policy as GLOSS_RUN_APPROVED in
   // gloss.js/extract-terms.js and GOLDEN_CHECK_APPROVED in golden.js: no live, billed Anthropic
