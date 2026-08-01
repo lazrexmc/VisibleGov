@@ -1025,3 +1025,18 @@ write-detection then fired refresh-aggregates automatically (15s), so senators' 
 new casts. Every layer the three review rounds built — honest failure records, healthy-partial
 classification, per-source refresh gating — plus the overnight hotfix, all working together
 unattended. First scheduler-driven federal Senate ingestion in the project's history.
+
+## 2026-08-01 (afternoon) — MO House un-wedged: the 30-minute sleep was ours, not theirs
+
+The scheduler's honest failure records showed mo-house-xml ETIMEDOUT 3-for-3. Live diagnosis
+(connection table + CPU + a caught-in-the-act process) found the truth: house.mo.gov answers in
+0.23s — but any run needing TWO requests slept ~30 minutes between them behind our own
+per-request ToU limiter, silently. The round-2 reviewer's "historical runs took exact 1800-second
+multiples" observation was this same defect, misattributed then. Fix (f692b34 + test fast-follow
+84f180e, task review: SHIP): the Senate model — at most ONE live request per invocation
+(pending-PDF slot → stale-list-refresh slot → single-bill slot → honest no-op), runs finish in
+seconds, the durable 30-min run cooldown does all pacing. Missouri sees an identical-or-slower
+request rate; the limiter stays as a tripwire that makes any future double-fetch bug fail LOUD.
+Reviewer structurally proved the invariant (all three live fetchers in mutually-exclusive
+early-return branches) and byte-verified the ToU machinery unchanged; the fast-follow pinned the
+scheduler's write-detection predicate against the literal new run shapes. TODO 34 closed.
