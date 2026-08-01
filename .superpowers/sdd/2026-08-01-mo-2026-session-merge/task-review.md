@@ -352,3 +352,199 @@ excluded from `all`; nothing in the repo runs it live.
    re-running the command (Important 2).
 4. The duplicate `'2026'` session will be re-created by the next `ingest-mo-senate` run — this
    cleans up, it does not fix (Important 5).
+
+---
+
+# Re-review (fix round 1) â€” ed866f6
+
+Scope: `da69a44..ed866f6`, code only (`src/adapters/legiscan-votes.js`, `src/cli/correct-data.js`,
+`tests/correct-data.test.js`). Verdict below covers the full stack `5ecd938..ed866f6`.
+
+## Test suite (run by this reviewer, bare `node --test`)
+
+```
+â„¹ tests 2144
+â„¹ suites 0
+â„¹ pass 2144
+â„¹ fail 0
+â„¹ cancelled 0
+â„¹ skipped 0
+â„¹ todo 0
+â„¹ duration_ms 39660.5192
+```
+
+Matches the claim (2144 = 2131 + 13 new).
+
+## (a) Important 2, part 1 â€” per-vote try/catch isolation âœ…
+
+`correct-data.js:958-983` wraps **only** the `writeReconciliationFlag` call â€” the one real DB call
+that throws â€” and returns `{outcome:'failed', reason:'flag_write_failed'}`, mirroring Phase A's
+per-bill pattern. Nothing else was swallowed into the catch.
+
+The test (`tests/correct-data.test.js`, "an unexpected writeReconciliationFlag failure for ONE vote
+is isolatedâ€¦") **genuinely proves it**, not just plausibly:
+
+- Injects `forceError` on the `vote_reconciliation_flags` **insert** for `vote-dup-2` only, in a
+  3-vote batch where all three are constructed to reach the flag-write step.
+- Asserts `flaggedCount === 2`, `failures[0].voteId === 'vote-dup-2'`,
+  `reason === 'flag_write_failed'`, the error text matches, **and** the fake table holds exactly 2
+  rows for votes 1 and 3 by id. The failure demonstrably fired (the assertions on its message would
+  fail otherwise), so the test is not vacuous.
+- If the try/catch were removed the throw would propagate and the test would error out, not pass.
+
+## (b) Important 2, part 2 â€” standalone re-run soundness âœ…
+
+`runReconcileMo2026VotesStandalone` (`:1049-1062`) discovers votes via `selectAll(votes)` filtered
+on `jurisdiction_id='mo-legislature'` + `source_key LIKE 'mo-senate-web-2026-%'`, with no dependence
+on Phase A's in-memory result. Sound:
+
+**False-positive rediscovery â€” analysed, then measured live.** Three ways a non-correction vote
+could match, all benign:
+
+1. *A vote whose bill was never merged* (e.g. after `ingest-mo-senate` recreates the duplicate
+   session per Important 5). Its `bill_id` still points at a duplicate bill, so the LegiScan
+   candidate lookup (`.eq('bill_id', â€¦)`) finds nothing â†’ `no_match`, **never a wrong flag**.
+2. *A `bill_id IS NULL` procedural vote.* `.eq('bill_id', null)` matches nothing â†’ `no_match`.
+3. *A different year.* The prefix pins the year segment of ingest-mo-senate's own
+   `mo-senate-web-${year}-${basename}-vote${n}` format; `2026-` cannot prefix another year. Pinned
+   by the standalone test's negative case (a `mo-senate-web-2018-` row that must not be swept in).
+
+Measured against the live DB: the discovery key matches **exactly 31 votes, on 29 distinct bills,
+100% of them in session `'2026'`, zero null `bill_id`** â€” precisely the correction's own set, zero
+false positives. And running the standalone mode *right now* (pre-merge) returns **31 `no_match`,
+0 flagged, 0 failures** â€” empirical confirmation that a mis-timed run degrades to silence rather
+than to a wrong flag.
+
+**Idempotency after partial failure â€” sufficient. âœ…** The dedupe key (`vote_id`,
+`source_a='legiscan'`, `source_b`, `roll_call_id`, `reason`) is `writeReconciliationFlag`'s own,
+reused unmodified. The isolation test proves the round trip end-to-end: after the forced failure,
+flipping the error off and re-running yields `flaggedCount 3`, `failures 0`, and **exactly 3 flag
+rows total** â€” no duplicate for votes 1/3, the missing one for vote 2 now present. No missed flags,
+no double flags.
+
+*Residual (Minor, inherited from the live system, not new):* if a re-run classifies a vote
+differently (`hard_mismatch` â†’ `soft_mismatch`, or a different matched roll call), the key differs
+and a **second** flag row is written for the same vote rather than superseding the first. That is
+exactly `crossCheckAgainstPrimarySource`'s own behavior, so it is consistent, not a regression.
+
+*Minor:* a deduped re-run still counts toward `flaggedCount`, so the report reads "29 flagged" even
+when it wrote zero rows. The `deduped: true` marker is present in each detail, so it is
+discoverable, but the headline count overstates writes.
+
+## (c) Important 3 â€” does the ordering test pin order, or just outcome? âœ… Genuinely order-sensitive
+
+Three tests, and the load-bearing assertions are not tautological:
+
+1. **Call-order assertion.** Indexes into the fake's recorded `client.calls` and asserts
+   `votesUpdateIdx < votesRecountIdx < billDeleteIdx`. The first comparison *is* tautological
+   (`votesRecountIdx` is searched with `i > votesUpdateIdx`), but the second is not â€”
+   `billDeleteIdx` is a plain `findIndex` over all calls, so **reordering delete before the
+   re-count makes `billDeleteIdx < votesRecountIdx` and the assertion fails**. Deleting the
+   re-count entirely trips the `notEqual(votesRecountIdx, -1)` guard.
+2. **Simulated race (the stronger one).** `afterExecute` inserts a new vote onto the duplicate bill
+   *immediately after* the redirect UPDATE returns. Asserts `vote_redirect_incomplete`, the bill
+   still present, and `delete never even attempted`. This can only pass if the re-count is a fresh
+   live query issued before the delete â€” it fails on any reorder *and* on any substitution of the
+   update's own stale count. This is the test I asked for in round 1.
+3. **`forceError` on the redirect specifically**, for one bill in a two-bill batch: that bill
+   reports `vote_redirect_failed` and is never deleted; the sibling merges and is deleted normally.
+
+Also closed while there: `multiple_canonical_twins`, `bill_delete_guard_mismatch`,
+`session_bill_recount_failed`, `session_delete_failed`, and an explicit pin that all four
+`DUP_BILL_MUST_BE_EMPTY_TABLES` entries â€” `bill_actions` included â€” are enforced. Every Q9 gap I
+raised in round 1 is now covered.
+
+## (d) Important 4 fold-in âœ… correct, no live-path-only logic introduced
+
+`legiscan-votes.js:413,429` add `export` to `parsePrimaryResultAggregate` /
+`isPrimaryCastDataComparable` â€” keyword only, and both are **pure functions with no client argument
+and no DB access**. `correct-data.js:887-902` applies the gate at the same point the live path does:
+after the single candidate is identified and the primary casts are fetched, **before** any
+hard/soft comparison (and before fetching the LegiScan casts, which is a strict improvement â€” one
+fewer query). Since mo-senate-web stores `result: null` unconditionally, the gate correctly reduces
+to "zero primary casts â‡’ not comparable". Pinned by the new test (primary with zero casts â†’
+`notComparableCount 1`, `flaggedCount 0`, zero flag rows).
+
+No new import of, or call to, `crossCheckAgainstPrimarySource`; no quarantine logic, no
+`retractLegiscanVoteIfStored`, no store/no-store decision â€” none of the live-path-only behavior
+came along with the two helpers.
+
+*Minor divergence (deliberate, documented):* the live path *writes* a
+`primary_cast_data_not_comparable` flag for a gated row; this path writes nothing and reports the
+outcome only. Conservative and additive-only, but a gated vote leaves no durable record â€” only the
+run report. `notComparableCount: 0` live, so non-triggering today.
+
+*Was folding it in the right call?* Yes. It was verifiably a no-op on this batch (0 either way), so
+it carried no risk to this run, and it removes a latent trap for the standalone mode, which is
+explicitly designed to be re-run later â€” when the mo-senate cast backlog state may well differ.
+
+## (e) Forbidden functions still unreachable âœ… (re-verified independently)
+
+Fresh `grep -rn` over `src/cli/correct-data.js` after this round: `crossCheckAgainstPrimarySource`
+at lines 34, 37, 367, 387, 829, 887; `retractLegiscanVoteIfStored` at line 39. **Every one is inside
+a `//` comment** â€” I filtered non-comment occurrences separately and the result set is empty. No
+import, no call, no indirection. The round-1 regression test survives unmodified and still passes.
+
+## (f)+(g) Live `--dry-run` re-verification â€” zero writes, unchanged numbers âœ…
+
+Ran **both** modes against the real DB with a full before/after snapshot on all ten affected tables.
+`diffs: []` â€” every count identical (sessions 33, bills 38288, votes 10006, vote_casts 1466496,
+vote_reconciliation_flags 17, ingestion_runs 465, bill_texts 3630, bill_sponsors 46268,
+summaries 213, bill_actions 831). No `ingestion_runs` row either, since `main()` still skips
+`openRun` on dry-run.
+
+`mo-2026-session-merge --dry-run`:
+
+```
+billsMerged 34 / dupBillsTotal 34 | votesRedirected 31
+sessionDeletionEligible true | sessionDeleted false | stopped 0 | failures []
+reconciliation: votesChecked 31 | clean 0 | flagged 29 (hard 29, soft 0)
+                no_match 0 | ambiguous 2 | unparseable 0 | not_comparable 0 | failures []
+```
+
+Exactly the claimed figures, and notably **unchanged from round 1** â€” confirming the narrowing of
+the Phase B filter from `mo-senate-web-` to `mo-senate-web-2026-` (`:1042`) silently dropped nothing
+(still 31/31).
+
+`mo-2026-vote-reconcile --dry-run` (standalone, run against the *pre-merge* state):
+`votesChecked 31 | clean 0 | flagged 0 | no_match 31 | ambiguous 0 | not_comparable 0 | failures []`
+â€” correct and safe: pre-merge the votes still sit on duplicate bills, so no LegiScan counterpart is
+findable and nothing is flagged.
+
+## Per-finding status
+
+| Round-1 finding | Status |
+|---|---|
+| Important 1 â€” merge publishes contradictory roll calls on one bill page | OPEN by design (operator decision, correctly surfaced not silently resolved) |
+| Important 2 â€” Phase B loses flags on throw, un-rerunnable | âœ… **closed**, both halves, test-proven |
+| Important 3 â€” delete-ordering untested | âœ… **closed**, order-sensitive + race + forceError |
+| Important 4 â€” comparability gate not reproduced | âœ… **closed** (folded in, verified no-op on this batch) |
+| Important 5 â€” root cause unfixed, dup session regrows | OPEN by design (separate task) |
+| Minor 6 (`redirectedCount` from `.length`) | unchanged, reporting only |
+| Minor 7 (`run_id` overwrite) | unchanged |
+| Minor 8 (no try/catch around `processDuplicateBill`) | unchanged, state stays safe |
+| Minor 9 (`quarantine` key absent) | documented residual, rationale sound (always `false` here) |
+| Q5 item 2 (`source_a_tallies` from casts) | documented residual, rationale sound (DB-only backfill has no dataset payload) |
+
+## New findings this round
+
+**None at Critical or Important.** Three Minors, all in context above: (1) deduped re-runs still
+count toward `flaggedCount`; (2) a reclassified vote produces a second flag row rather than
+superseding the first (matches live-system behavior); (3) a `not_comparable` vote leaves no durable
+record, unlike the live path's flag.
+
+One operator note, not a defect: running `mo-2026-vote-reconcile` **before** the merge returns 31
+`no_match` and looks like a clean no-op. The two commands are ordered â€” merge first, standalone
+re-run only if needed.
+
+## Final verdict â€” `5ecd938..ed866f6`
+
+**SHIP.** Both mandatory findings are genuinely closed, not papered over: the isolation and re-run
+tests would fail if the fix were reverted, and the delete-ordering tests are order-sensitive rather
+than end-state-only. The optional fold-in was correct and verifiably risk-free on this batch. The
+forbidden-function boundary holds. `--dry-run` remains a genuine zero-write read against the live
+DB, and its numbers are unchanged from the reviewed baseline.
+
+The two open Importants (1 and 5) remain **operator decisions, not code defects** â€” the round-1
+operator briefing stands unchanged and must still be delivered before the live command is run.
+

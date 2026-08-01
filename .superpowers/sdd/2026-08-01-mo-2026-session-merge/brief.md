@@ -212,3 +212,46 @@ Both mandatory findings closed, 13 new tests (55/55 in this file, 2144/2144 repo
   `retractLegiscanVoteIfStored` are still neither imported nor called anywhere in
   `correct-data.js` — every occurrence is inside a `//` comment. Verified by both a fresh `grep`
   and the existing regression test (`tests/correct-data.test.js`), which still passes unmodified.
+
+## Ledger — re-review (fix round 1) — SHIP, 5ecd938..ed866f6
+
+Both Important findings verified closed via RUNTIME EXECUTION, not reading: Important 2's
+try/catch proven non-vacuous (forced a mid-loop failure, confirmed votes 1/3 still wrote, vote 2
+completed cleanly on standalone re-run with zero duplicates — dedupe held). Important 3's
+order-sensitivity proven via simulated race (a vote inserted onto the dup bill between redirect
+and delete correctly blocks the delete from ever being attempted) plus forceError isolation on
+the redirect step specifically. Important 4's fold-in confirmed correct (pure helpers, no new
+DB/live-path calls, empirically a no-op on this batch: notComparableCount 0 both before/after).
+Rediscovery safety measured empirically: mo-senate-web-2026-% matches exactly the 31 real votes,
+zero false positives; standalone mode against pre-merge state correctly produces 31/31 no_match
+(never a wrong flag). Forbidden functions re-confirmed unreachable (fresh grep, comments only).
+Dry-run re-verified twice, zero writes both times, numbers unchanged and the mo-senate-web- to
+mo-senate-web-2026- filter narrowing confirmed to drop nothing.
+
+3 Minors (non-blocking, informational): flaggedCount includes deduped re-run flags (detail carries
+deduped:true, headline doesn't subtract them); a reclassified vote adds a second flag rather than
+superseding (inherited from the live system's own behavior, not a regression); not_comparable
+leaves no durable record (unlike the live path). Command ordering note: running the standalone
+reconcile BEFORE the merge silently returns 31 no_match and looks like a clean no-op — commands
+must run in order (merge, then reconcile if not already run as part of the merge).
+
+VERDICT: SHIP for handoff to Lance. Both operator decisions (bill-page display collision during
+the interim; root-cause-not-fixed) remain his to make, unchanged by this round — surfaced, not
+resolved, per the brief's own scope.
+
+## LIVE RUN — 2026-08-01, run_id 3e188139-659e-474f-8e5f-f7f0cb031663 (Lance: "Run it for me")
+
+status: succeeded. billsMerged:34, votesRedirected:31, sessionDeleted:true, 0 stopped, 0 failures.
+reconciliation: votesChecked:31, flaggedCount:29, ambiguousCount:2, cleanMatches:0, 0 failures.
+Matched the final pre-run dry-run exactly (no drift).
+
+Independent post-run verification (controller, separate from the CLI's own report): duplicate
+session '2026' confirmed deleted; all 34 duplicate bill rows confirmed deleted (0/34 still exist);
+all 34 canonical bills confirmed intact and unmodified; 0 orphaned votes on any deleted bill_id;
+31/31 mo-senate-web-2026 votes confirmed correctly attached to their canonical bills; 29
+reconciliation flags confirmed created; vote_casts total unchanged (1,466,496 — this correction
+never touches a cast). TODO 25 CLOSED.
+
+Still open (unchanged, operator's call, not resolved by this run): interim display of 29
+disagreeing vote pairs on merged bill pages until Lance's review queue clears them; root cause
+(ingest-mo-senate.js:472) unfixed, will recreate the '2026' session on its next run.

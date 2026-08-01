@@ -1040,3 +1040,25 @@ request rate; the limiter stays as a tripwire that makes any future double-fetch
 Reviewer structurally proved the invariant (all three live fetchers in mutually-exclusive
 early-return branches) and byte-verified the ToU machinery unchanged; the fast-follow pinned the
 scheduler's write-detection predicate against the literal new run shapes. TODO 34 closed.
+
+## 2026-08-01 (mid-afternoon) — TODO-25 closed: the actively-growing session split, fixed and verified
+
+Lance: *"make the corrections"* → deep investigation found the fix split into two real questions
+(a mechanical bill merge, and a genuine cross-source vote discrepancy this codebase already had
+tested machinery to detect) → *"Run it for me."*
+
+Two review rounds (SHIP both times — the second one forced a mid-loop failure and measured the
+recovery rather than trusting the fix) preceded the live run. Result: **34 duplicate bills merged
+into their canonical twins, 31 votes redirected, the duplicate session deleted, 29 real
+cross-source discrepancies flagged for review, 0 failures.** Independently re-verified against
+the live database after the run (not just the CLI's own report): 0 duplicate bills remain, 0
+orphaned votes, 31/31 redirected votes land correctly, casts total unchanged.
+
+The 29 flags trace to one root cause, found and confirmed during review: Sen. Travis Fitzwater's
+yea vote is present in every LegiScan roll call and absent from every Senate-journal-sourced one —
+a known undercount in that pipeline, not a new mystery. A second, unrelated identity defect
+surfaced along the way (the MO Senate roster duplicated in `legislators`) and is now TODO 35.
+
+Two things intentionally left open, surfaced not resolved: 29 bill pages will show disagreeing
+vote pairs until the flag queue clears; and the code that created the duplicate session is
+unchanged, so this is a cleanup, not yet a prevention.
