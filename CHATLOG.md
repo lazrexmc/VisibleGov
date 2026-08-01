@@ -970,3 +970,18 @@ freshness stops depending on a chat session, the ~42-day senate journal backlog 
 own, federal votes get scheduled ingestion for the first time, and the manual loops retire.
 Honest caveat, stated in the doc: mo-senate-web keeps feeding the TODO-25 duplicate session at
 today's rate until that merge fix lands — registering before or after is his call, both safe.
+
+## 2026-07-31 (late night) — registered: VisibleGov now keeps itself fresh
+
+Lance registered the scheduler (his step, per draft-then-apply): `schtasks` one-liner (the doc's
+original multi-line form broke silently in PowerShell — Windows 11's default terminal; doc fixed
+to a single cmd-safe line), then switched the task to S4U logon ("run whether logged on or not,
+no stored password") so it runs invisibly and survives reboots without login.
+
+First live tick (22:00 local) demonstrated the whole review-hardened build at once: reclaimed the
+stale lock left by a killed test run (logged pid+nonce), picked us-congress as most overdue
+(unchecked for 3.5 days), probed rolls 284-293, got clean tail 404s past roll 283 — the House
+hasn't voted since (August recess) — classified it HEALTHY rather than failure noise, and
+correctly skipped the aggregate refresh on zero writes. Freshness no longer depends on a chat
+session being open. The manual senate-journal loop drains its backlog until it exhausts, then the
+scheduler owns all five sources.
