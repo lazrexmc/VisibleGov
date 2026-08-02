@@ -281,7 +281,12 @@
     `legiscan-source-split` correction (`runCorrectLegiscanSourceSplit`) is the historical-row
     fix, **built ready, `--dry-run` verified against the real live DB (54 rows: 2 relabel to
     `legiscan-texts`, 52 stay `legiscan`, 0 unclassified) — Lance runs the live pass himself**,
-    same draft-then-apply convention as every other correction in that file.
+    same draft-then-apply convention as every other correction in that file. **Independent
+    adversarial review: SHIP.** The reviewer hand-traced the actual production budget-check call
+    sites (not just the pure helpers) and hand-computed both refusal directions with real numbers,
+    and independently re-derived the 54-row classification from a from-scratch script against the
+    live DB — exact match, same 2 row ids. Live command whenever Lance wants it:
+    `node --env-file=.env src/cli/correct-data.js legiscan-source-split`.
 
 34. [x] ~~MO House driver silently slept ~30 minutes mid-run, wedged behind its own rate
     limiter — every scheduled run ETIMEDOUT.~~ **FIXED 2026-08-01.** `mo-house-xml.js:12`'s

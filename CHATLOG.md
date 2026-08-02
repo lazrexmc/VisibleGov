@@ -1225,3 +1225,27 @@ change, confirmed by reading the view definition directly: a plain `distinct on 
 hardcoded source enumeration.
 
 2170 → 2192 tests (22 new, all TDD red-first), 0 fail. Full suite green before committing.
+
+## 2026-08-02 (continued) — TODO-33 closed: the one where getting it wrong would have mattered
+
+Lance: *"feel free to spend real Fable5 usage on this one to ensure accuracy."* Worth it — the
+investigation found the TODO's own proposed fix was itself dangerous. "Split the shared source key"
+sounds like a harmless naming cleanup, but that shared key exists specifically because two CLIs
+spend queries against ONE real LegiScan account with a 30,000/month cap, and the budget check sums
+usage per source. Splitting the label without also fixing the summing logic would have let each
+CLI's own pre-flight check see only half the real spend — a real path to exceeding a suspension-
+level term without either side noticing.
+
+Built with that fully understood: the split happens for freshness/scheduling accuracy, the budget
+check now sums across both labels, proven in both refusal directions with an explicit adversarial
+test. A 54-row historical backfill (built ready, not run live) correctly classifies every single
+row — including four ambiguous failures resolved by reading their actual error text for markers
+only one of the two CLIs' code paths could ever produce.
+
+Independent review didn't take any of that on faith: hand-traced the real production call sites,
+hand-computed both budget scenarios with real numbers, and independently re-derived the historical
+classification from a script written from scratch against the live database — exact match. SHIP.
+
+**The day's full tally: TODO-25, 26, 27, 28, 29, 33, 35 all closed or corrected, two unlisted
+production issues found and fixed, zero data ever at risk.** The backlog from yesterday's audit is
+clear.
