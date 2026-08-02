@@ -368,3 +368,29 @@ at least as type-tolerant as the guarantee it mirrors.** A Postgres unique index
 `===` check over the same logical field does not, unless written to. Never assume two writers of
 the same JSON key agree on JS type — coerce explicitly at the comparison, and coerce at the write
 site too (fixing only one is a patch; fixing both closes it for both directions).
+
+## Lesson 22 — A status flag is not the invariant, if more than one writer can set it (2026-08-02)
+
+Designed a public DB view to expose a new field only for `summaries.status = 'published'`, reasoning
+that publish requires an adversarial verifier to have re-derived `overall='clean'` first — true for
+the code's own auto-publish path (`classifyRecordItem` → `autoPublishSummary`), which does enforce
+it. Missed, until an adversarial design review (deliberately run before any code was written) caught
+it: a SECOND path sets the same status column — the staff review server's manual approve/publish
+button — and it never looks at verification data at all. Nothing in the schema ties the two
+together; the safety property held only because, by coincidence of what had happened to be published
+so far, every live row satisfied it. The moment a human uses the second path on an item that doesn't
+satisfy it (here: manually publishing one of the ~100 items sitting in the flagged review queue,
+which is the queue's own designed exit), the exposed data would silently start lying — presenting a
+verifier's REFUTING quote as if it were supporting evidence, because the fields that would reveal the
+refutation (`supported`, `reason`) were deliberately the ones being stripped for public display.
+
+**Rule: when gating what a view/API exposes, gate on the actual invariant your safety argument
+depends on (here: `overall = 'clean'`, computed straight from the verification row), never on a
+status flag that's merely correlated with it today.** A status column is safe to gate on ONLY if
+every writer that can set it enforces the same invariant — audit every write site (`grep` for the
+column being set), not just the one you built. A status flag review-checked once eventually gets a
+second writer nobody re-checks against the first writer's promises; a live re-derivation can't drift
+that way because there's nothing to drift out of sync with. This is the same "never trust a
+self-report, always re-derive mechanically" discipline this project already applies to verifier
+output (`assessVerdicts`/`assessCompleteness`) — the same discipline applies to status flags with
+more than one writer, not just to model output.

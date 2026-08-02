@@ -82,7 +82,17 @@
     specific missing-provision reason. Full trail: CHATLOG 2026-08-02 "the review queue backfill".
     All 98 remaining need Lance's read or a re-author — a severity-sorted review view (single-issue
     flags first) was offered but not yet built; Lance's call whether to build it.
-  - **9 open vote-reconciliation flags** — source discrepancies held out of the clean record.
+  - **49 open vote-reconciliation flags (2026-08-02, up from 9)** — grew during the TODO-25
+    session-merge live run, which surfaced 29 real cross-source discrepancies (Sen. Fitzwater's
+    yea vote present in every LegiScan roll call, absent from every Senate-journal-sourced one — one
+    root cause, not 29 separate mysteries) rather than hiding them. Source discrepancies held out of
+    the clean record by design; not a backlog to auto-clear.
+  - **Bullet-citation exposure — spec written and adversarially reviewed (Fable 5), not yet
+    implemented.** Exposes `verifier.js`'s existing `evidence_quote` per `what_it_does` bullet on
+    the public bill page (click-to-expand, mirrors the glossary quote pattern) so `trust.html`'s
+    existing receipt claim becomes true for bill summaries too. Spec:
+    `docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md`. Migration is
+    draft-then-apply, per standing convention — Lance applies when ready.
   - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
     (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:
@@ -158,17 +168,37 @@
     residual — noisy-but-honest beats silent merge; prompt discourages dotted abbreviations).
 
 13. ~~**Freshness machinery (Lance priority, 2026-07-28): scheduled incremental ingestion**~~
-    **BUILT 2026-07-31, awaiting Lance's registration** (commits 3e12a1e→6cf47cf; survived a
-    3-round adversarial review, final verdict SHIP). `scripts/scheduled-ingest.js` /
+    **BUILT 2026-07-31, REGISTERED AND RUNNING** (commits 3e12a1e→6cf47cf; survived a 3-round
+    adversarial review, final verdict SHIP). Lance ran the `schtasks` registration 2026-07-31 late
+    night (S4U logon); confirmed live via scheduler logs and `ingestion_runs` tick spacing —
+    ~15-minute cadence, still ticking as of 2026-08-02. `scripts/scheduled-ingest.js` /
     `npm run schedule:ingest`: five sources (mo-senate-web, mo-house-xml, us-congress, us-senate,
     legiscan), self-computed due-ness off the durable `ingestion_runs` signal, single-instance
     lock with declared-duration staleness, per-source timeouts (legiscan 75 min, evidence-derived),
     honest failure self-recording, refresh-aggregates gated on real per-source write counters
-    (fail-open), dated logs, incapable of calling a model. **Registration = Lance runs the
-    `schtasks` command in `docs/SCHEDULED_INGESTION.md`** (draft-then-apply; it runs forever on
-    his machine). On registration the session-bound manual loops retire. Note: mo-senate-web
-    continues feeding the TODO-25 duplicate session at today's rate until that merge lands —
-    registering before or after the TODO-25 fix is Lance's call, both are safe.
+    (fail-open), dated logs, incapable of calling a model. The session-bound manual ingestion loops
+    have retired. **Open concern (2026-08-02): `legiscan` source shows `status: failed`, last
+    finished 2026-08-02T07:34:46 — the root cause (roll_call_id type mismatch) was fixed in code
+    the same day, but the source hasn't ticked again since to confirm the fix took. legiscan's
+    due-ness interval is long (query-budget-conserving), so this may simply not be due yet — worth
+    checking `npm run status`'s INGESTION FRESHNESS section, or running `node --env-file=.env
+    src/cli/ingest-legiscan.js` manually, next session.**
+
+31. **MO House cross-era misattribution trap — verified still open 2026-08-02.**
+    `0005_mo_house_id.sql:11`'s `mo_house_id` unique column was never dropped (0009 dropped only
+    the Senate equivalent, after this exact bug reproduced as CRITICAL there); `ingest-mo-house.js`
+    still calls `insertIfAbsent(..., 'mo_house_id')` against a current-only roster with no
+    unique-violation handling (the Senate driver has `isMoSenateIdUniqueViolation`; the House
+    driver has no equivalent). Dormant only because House ingestion has been single-session so far
+    — **fires silently the first time anyone backfills a prior MO General Assembly.** Put on the
+    record here specifically so a future multi-era House backfill doesn't rediscover it live.
+32. **`summarize.js`'s candidate-picker `.select()` calls are still uncapped — verified still open
+    2026-08-02.** `src/cli/summarize.js`'s `loadFederalBills` reads `sessions`/`bills`/`votes` via
+    bare `.select()` (no `selectAll`, no `.range()`/`.limit()`) against 38k+ bills and 10k+ votes,
+    both past Supabase's 1,000-row default cap — returns success with a silently wrong candidate
+    list. Both summary waves since this was first flagged (2026-08-01 wave 2, 2026-08-02 review-
+    queue backfill) routed around this CLI via `summary-queue.js`/dedicated scripts, so it hasn't
+    fired again — but it's still armed for the next person who calls `summarize.js` directly.
 
 12. [x] ~~US Senate roll-call adapter~~ **DONE 2026-07-28** — senate.gov LIS XML adapter live:
     869 Senate votes, every senator's cast, 0 unresolved (Hawley/Schmitt 869/869; historical

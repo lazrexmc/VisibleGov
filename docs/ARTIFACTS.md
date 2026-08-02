@@ -21,8 +21,9 @@ just expensive or rule-bound to re-fetch.
 
 ## ⚠️ `legiscan-texts/` — 3,177 cached `getBillText` responses (859 MB)
 
-**The extracted text is already safe** — it lives in the `bill_texts` table in Supabase (3,630
-rows). Losing this cache does **not** lose any bill text the site serves.
+**The extracted text is already safe** — it lives in the `bill_texts` table in Supabase already.
+Losing this cache does **not** lose any bill text the site serves. (Run `npm run status` for the
+current row count — do not hand-type it here; see the note at the bottom of this file for why.)
 
 What the cache protects is **LegiScan's Rule 7**: *"Document blobs (getBillText etc.) are downloaded
 at most once per doc_id."* The cache is the mechanism that enforces it —
@@ -82,10 +83,15 @@ trust page shows would restart from zero until those days fail again.
 
 ## What is NOT on disk anywhere but Supabase
 
-The live database is the system of record for all ingested data — roughly 1.47M vote casts, 38k
-bills, 3.6k bill texts, 46k sponsorships and 1,607 legislator rows, plus the whole plain-language
-layer. For exact current numbers run `npm run status`; do not trust counts written here, since an
-ingestion cron writes every 30 minutes.
+The live database is the system of record for all ingested data — vote casts, bills, bill texts,
+sponsorships, legislator rows, and the whole plain-language layer.
+
+> **Live numbers: run `npm run status`.** No count is hand-typed into this file — a prior version
+> of this doc (and of `README.md`) carried "1,465,102 vote casts," which turned out to be the sum
+> of a stale materialized view (`public_position_totals`), not the live `vote_casts` table; the gap
+> grew with every cron tick and nobody could trace where the number came from. `docs/DATA_INVENTORY.md`
+> is the source of truth for what each number *means* and how the tables relate; `scripts/data-status.js`
+> (via `npm run status`) is the only source of truth for what they currently *are*.
 
 **The repo can rebuild the pipelines; it cannot rebuild the database.** Supabase's own backups are
 the safety net — worth confirming they're enabled and retained.

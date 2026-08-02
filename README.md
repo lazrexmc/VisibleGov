@@ -5,7 +5,7 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-07-31): back end live and accurate; public site built and merged, deploy deliberately
+**Status (2026-08-02): back end live and accurate; public site built and merged, deploy deliberately
 deferred until the backend is locked in.**
 > **Live numbers: run `npm run status`.** An ingestion cron writes every 30 minutes, so any count
 > typed into a document is stale within the hour — that staleness is exactly what made the project's
@@ -26,9 +26,11 @@ deferred until the backend is locked in.**
   (*nothing false*); a second checker independently lists the bill's key provisions **before seeing
   the summary** and verifies coverage (*nothing important missing*). Both axes must pass
   mechanically for auto-publish; anything short of that goes to the owner. Runs on the flat-rate
-  subagent path — $0 in API spend. **This layer is the project's thinnest part**: a few dozen bills
-  published out of ~3,300 eligible, drawn from 2 of 33 sessions. The votes are the strong part; the
-  plain-language layer is early.
+  subagent path — $0 in API spend. **115 summaries published, 98 held in the review queue by the
+  mechanical trust gate** out of ~3,300 eligible bills — each held-back item failed a specific,
+  named check (a missing citation, an omitted provision), not a backlog nobody looked at. The votes
+  are still the strong part; the plain-language layer is still early relative to the ~3,300
+  eligible, but no longer thin in absolute terms.
 - **The public site is built and merged** (`site/`): directory with address lookup, legislator
   profiles with vote records and mechanical vote-aggregate charts, bill pages, and a trust page
   whose prose was fact-checked against the code. Not deployed yet — by the owner's call, deploying

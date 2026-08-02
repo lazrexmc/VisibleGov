@@ -16,7 +16,7 @@ So there are two kinds of truth here, and they live in two different places:
 | "How many bills / votes / vote casts do we have **right now**?" | `node --env-file=.env scripts/data-status.js` |
 | "What *is* a bill row? Why is that number different from this one? What's missing and why?" | **This document.** |
 
-**The counts printed below are a snapshot from 2026-07-31 and exist only to show you the shape and the ratios.** Treat them as "about this many," never as current fact. Do not copy them into other docs — that is exactly how the confusion started.
+**The counts printed below are a snapshot from 2026-08-02 (re-verified against the live database; supersedes the 2026-07-31 snapshot) and exist only to show you the shape and the ratios.** Treat them as "about this many," never as current fact. Do not copy them into other docs — that is exactly how the confusion started.
 
 Three counts move constantly and must **never** be hardcoded anywhere: `bills`, `votes`, `vote_casts`.
 
@@ -24,15 +24,15 @@ Three counts move constantly and must **never** be hardcoded anywhere: `bills`, 
 
 ## The 30-second version
 
-VisibleGov holds **a very strong voting record and a very small explanation layer.**
+VisibleGov holds **a very strong voting record and a small but rapidly-growing explanation layer.**
 
-- We have **every recorded roll-call vote** for the Missouri legislature back to 2015 and the US Congress back to 2025 — about **1.47 million individual legislator votes** across roughly **9,980 roll calls**. Within the years covered, this is essentially complete: on an average roll call we have a position recorded for ~158 of Missouri's 163 House members and 99.99 of the Senate's 100.
-- We have **~38,266 bills**, but most bills never get a floor vote. About **3,341** got a passage vote — those are the ones that matter for holding someone accountable.
+- We have **every recorded roll-call vote** for the Missouri legislature back to 2015 and the US Congress back to 2025 — about **1.47 million individual legislator votes** across roughly **10,022 roll calls**. Within the years covered, this is essentially complete: on an average roll call we have a position recorded for ~157 of Missouri's 163 House members and 100 of the US Senate's 100.
+- We have **~38,254 bills**, but most bills never get a floor vote. About **3,341** got a passage vote — those are the ones that matter for holding someone accountable.
 - We have the **official text** of about **3,630** bills.
-- We have a **plain-language summary published for 39 bills.** That is the product's core promise and it is the thinnest part by far — 0.10% of all bills, and all 39 come from just 2 of our 33 legislative sessions.
-- We can identify **~1,568 distinct legislators**, but **555 of them have no votes on file** (mostly historical US senators whose service predates our federal coverage window), and **none of them have a photo or contact info**.
+- We have a **plain-language summary published for 115 bills** (out of 213 summary rows total). That is the product's core promise, and while it is still a small slice of all bills — 0.30% — it has grown nearly 3× since the 2026-07-31 snapshot (was 39) and is **no longer concentrated in just 2 sessions**: published summaries now span 12 of our 32 legislative sessions (see "The concentration problem" below for the honest remaining skew).
+- We can identify **~1,568 distinct legislators**, but **555 of them have no votes on file** (386 carry a federal `bioguide_id`, mostly historical US senators/House members whose service predates our federal coverage window; 169 are Missouri-sourced), and **none of them have a photo or contact info** (by design — see the structural-defects note below).
 
-The short version of the honest gap: **if you look up a legislator, you'll almost certainly see a real voting record. If you click one of those votes hoping for a plain-language explanation, you almost certainly won't find one yet.**
+The short version of the honest gap: **if you look up a legislator, you'll almost certainly see a real voting record. If you click one of those votes hoping for a plain-language explanation, the odds are much better than they were a few days ago, but it's still a minority of votes.**
 
 ---
 
@@ -45,16 +45,18 @@ This section is the reason this document exists. None of these numbers contradic
 Each layer is a subset of the layer above it *except where noted*. Percentages are of all bills.
 
 ```
- 38,266   bills in the database                      100%
-          ↓  (−34,392)  most bills are introduced and die without a recorded floor vote
-  3,874   bills with ≥1 recorded roll call of any kind  10.1%
-          ↓  (−533)     these only ever got procedural votes, not a vote on passage
+ 38,254   bills in the database                      100%
+          ↓  (−34,384)  most bills are introduced and die without a recorded floor vote
+  3,870   bills with ≥1 recorded roll call of any kind  10.1%
+          ↓  (−529)     these only ever got procedural votes, not a vote on passage
   3,341   bills with a PASSAGE / third-reading vote      8.7%   ← the accountability universe
-          ↓  (−3,283)   the summarization pipeline simply hasn't been run on them yet
-     58   passage bills with any summary                 0.15%
-          ↓
-     39   bills with a PUBLISHED plain-language summary   0.10%
+          ↓  (−3,144)   the summarization pipeline hasn't reached the rest yet
+    197   passage bills with any summary                 0.5%
+          ↓  (−90)
+    107   passage bills with a PUBLISHED plain-language summary   0.3%
 ```
+
+**One number the funnel above doesn't show: total published summaries is 115, not 107.** 8 published summaries sit on bills that never got a passage/third-reading vote by the funnel's own text-matching definition (a procedural-vote-only bill, or a passage vote whose recorded `question` text didn't match the passage/third-reading pattern). 115 published + 98 draft = 213 summary rows total.
 
 And running alongside, not inside, that funnel:
 
@@ -66,24 +68,24 @@ And running alongside, not inside, that funnel:
 
 - **"Bills with text" is not a stage of the funnel.** Text is only ever fetched for a bill that *already has a vote* — verified: zero text-bearing bills lack a vote. So text ⊂ voted. But text is **not** a subset of *passage*: 311 text-bearing bills have a vote that isn't a passage vote. Text (3,630) and passage (3,341) **overlap**; neither contains the other.
 - **The famous "99.3%" figure has a small denominator.** 3,319 of 3,341 passage-vote bills have text = 99.3%. That is *not* 99.3% of bills. Text coverage across all bills is **9.5%**.
-- **3,341 is not a Missouri number.** It is Missouri 3,177 + federal 164. (An earlier README labelled it "Missouri" — wrong.)
-- **74 summary rows, 39 published.** There is exactly one summary row per bill, so "summaries" and "bills with a summary" are the same number. The other 35 are drafts (see §"draft ≠ flagged" below).
+- **3,341 is not a Missouri number.** It is Missouri 3,177 + federal 164 — unchanged from the 2026-07-31 snapshot, re-verified live. (An earlier README labelled it "Missouri" — wrong.)
+- **213 summary rows, 115 published.** There is exactly one summary row per bill, so "summaries" and "bills with a summary" are the same number. The other 98 are drafts (see §"draft ≠ flagged" below — as of this pass, every one of those 98 carries an adverse verdict; nothing clean is sitting unpublished).
 
 **Why federal and Missouri sit at opposite ends of the funnel:**
 
-- **Federal bills only exist in our database because a roll call referenced them.** All 478 federal bills have a vote. This is *not* a corpus of the 119th Congress — it is "bills that were voted on."
-- **Missouri is the inverse.** ~37,787 Missouri bills came from LegiScan's bulk datasets, and only 3,396 of them (9.0%) ever got a recorded roll call.
+- **Federal bills only exist in our database because a roll call referenced them.** All 482 federal bills have a vote (up from 478 — 4 more federal bills entered the database since 07-31, all via a roll call, same pattern). This is *not* a corpus of the 119th Congress — it is "bills that were voted on."
+- **Missouri is the inverse.** ~37,772 Missouri bills came from LegiScan's bulk datasets, and only 3,388 of them (9.0%) ever got a recorded roll call.
 
 Those two facts are why a single "% of bills with a vote" number is meaningless without saying which jurisdiction.
 
-### 2. `votes` vs `vote_casts` — the 9,980 vs 1.47-million confusion
+### 2. `votes` vs `vote_casts` — the 10,022 vs 1.47-million confusion
 
-- **`votes` (~9,981)** = **roll calls**. The *event*: "the Missouri House voted on HB 1234 on 2026-03-04."
-- **`vote_casts` (~1,465,333)** = **one legislator's position on one roll call**. Rep. Smith voted Yea.
+- **`votes` (~10,022)** = **roll calls**. The *event*: "the Missouri House voted on HB 1234 on 2026-03-04."
+- **`vote_casts` (~1,466,498)** = **one legislator's position on one roll call**. Rep. Smith voted Yea.
 
-A doc saying "9,980 votes" and a doc saying "1.46 million votes" are both correct and are describing different things. Use the words **roll calls** and **vote casts** and the ambiguity disappears.
+A doc saying "10,022 votes" and a doc saying "1.47 million votes" are both correct and are describing different things. Use the words **roll calls** and **vote casts** and the ambiguity disappears.
 
-Note also: 444 roll calls have no bill attached at all (nominations, cloture, adjournment — mostly US Senate). They are legitimate votes with nothing to link to.
+Note also: 445 roll calls have no bill attached at all (444 US Senate, 1 US House — nominations, cloture, adjournment). They are legitimate votes with nothing to link to.
 
 ### 3. Legislator ROWS vs PERSONS — the one that caused the most confusion
 
@@ -115,25 +117,25 @@ These live in **different tables** and mean different things:
 - **`status`** is on the content row (`summaries`, `glossary_terms`): `draft` or `published`.
 - **`clean` / `flagged` / `complete` / `incomplete`** are **verdicts** on a *verification* row (`summary_verifications`, `glossary_verifications`).
 
-**There is no "flagged" status.** A phrase like "35 draft/flagged summaries" collapses two axes and makes 35 problems out of 20. The real breakdown of the 35 drafts:
+**There is no "flagged" status.** A phrase like "98 draft/flagged summaries" collapses two axes. The real breakdown of the 98 drafts, re-verified live 2026-08-02:
 
 | | Count | Meaning |
 |---|---|---|
-| Adverse verdict | **20** | 19 support-flagged + 1 completeness-incomplete. Genuinely needs review. |
-| Clean, not yet published | **14** | Passed accuracy; would likely publish. |
-| Never verified | **1** | No verification row exists. |
+| Adverse verdict | **98** | 67 support-flagged only + 27 completeness-incomplete only + 4 flagged on both axes. Genuinely needs review. |
+| Clean, not yet published | **0** | — |
+| Never verified | **0** | — |
 
-**The integrity result, stated plainly: all 20 adverse-verdict summaries are drafts. Zero published summaries carry an adverse verdict. The gate held.**
+**This is a change in kind, not just in scale.** The 2026-07-31 snapshot had 14 clean-but-unpublished drafts and 1 never-verified draft — a real backlog. That backlog was cleared in a 2026-08-02 review-queue pass (see `TODO.md` NOW section): every draft with a clean verdict on both axes auto-published, and the trust model's auto-publish gate now runs to completion instead of leaving clean items sitting in draft. **The result: every summary still in draft status carries an adverse verdict, and every published summary carries zero adverse verdicts — nothing sits in an ambiguous middle state.** The gate held, and now it's also caught up.
 
 The glossary is the one asymmetric case: **8 of 116 published glossary terms carry a flagged verdict.** Those were hand-adjudicated (19 `edited` + 2 `rejected` actions are recorded) rather than auto-published — consistent with the trust model, but it is a real difference from the summary pipeline and should not be assumed away.
 
 ### 5. Glossary terms vs glossary *entries*
 
-- **847 `glossary_terms` rows** — statutes, acts, agencies and programs that bills reference.
-- **116 of them are actually written.** The other **731 are bare stubs**: verified, every single one has `gloss_md` NULL *and* `source_url` NULL. They are placeholders naming a term, not unreviewed writing.
-- **704 of the 731 are blocked on an unresolvable citation** — there is no official source URL to gloss *from*. That is blocked on a human mapping decision, not on review or on API spend.
+- **2,219 `glossary_terms` rows** (was 847 in the 2026-07-31 snapshot) — statutes, acts, agencies and programs that bills reference. The growth tracks the summary-volume growth directly: `extract-terms` mints a term row for every distinct citation a new summary references, and summary volume went from 74 to 213 rows over the same window.
+- **116 of them are actually written** — unchanged from 07-31, no new glossing has run. The other **2,103 are bare stubs**: verified, every single one has `gloss_md` NULL *and* `source_url` NULL. They are placeholders naming a term, not unreviewed writing.
+- **2,072 of the 2,103 are blocked on an unresolvable citation** — there is no official source URL to gloss *from*. That is blocked on a human mapping decision, not on review or on API spend. (98.5% of the stubs, up slightly from 96.3% at 07-31 — the backlog is growing in step with summary volume, not shrinking.)
 
-"847 glossary terms" overstates real content roughly 7×. Say **116 entries**.
+"2,219 glossary terms" overstates real content roughly 19× (was ~7× at 847). Say **116 entries** — that number itself hasn't moved.
 
 ### 6. Materialized views are snapshots, not tables
 
@@ -147,63 +149,63 @@ Nothing in the database records *when* the matviews were last refreshed. Any num
 
 ## Every table, with plain-language descriptions
 
-Counts are the 2026-07-31 snapshot. **★ = moves constantly; never hardcode.**
+Counts are the 2026-08-02 snapshot (re-verified live; supersedes 2026-07-31). **★ = moves constantly; never hardcode.**
 
 ### Core civic data
 
 | Table | Rows | What it is |
 |---|---:|---|
 | `jurisdictions` | 2 | The only two governments covered: `us-congress`, `mo-legislature`. |
-| `sessions` | 33 | Legislative sessions. 1 federal (119th Congress) + 32 Missouri (2010–2026 regular and special). |
-| `bills` | ★ ~38,266 | One row per bill per session. Most were never voted on. |
+| `sessions` | 32 (was 33) | Legislative sessions. 1 federal (119th Congress) + 31 Missouri. **Down by one: the duplicate MO 2026 session (`'2026'`) was merged into `'261'` and deleted — see structural defect #1, now RESOLVED.** |
+| `bills` | ★ ~38,254 | One row per bill per session. Most were never voted on. |
 | `bill_texts` | 3,630 | Stored official bill text with a SHA-256 hash and source URL. Exactly one version per bill. |
-| `bill_actions` | 780 | Legislative history / action steps. **Covers only 113 bills** — see gaps. |
-| `bill_sponsors` | 46,268 | Sponsor and cosponsor links. Covers 38,232 bills (99.9%). |
-| `votes` | ★ ~9,981 | **Roll calls** — the vote *event*. 444 have no bill attached. |
-| `vote_casts` | ★ ~1,465,333 | **One legislator's position on one roll call.** The largest table. |
+| `bill_actions` | 1,020 (was 780) | Legislative history / action steps. **Covers only 139 bills (0.4%)** — see gaps. |
+| `bill_sponsors` | 46,268 | Sponsor and cosponsor links. Covers 38,232 bills (99.9%) — unchanged. |
+| `votes` | ★ ~10,022 | **Roll calls** — the vote *event*. 445 have no bill attached. |
+| `vote_casts` | ★ ~1,466,498 | **One legislator's position on one roll call.** The largest table. |
 
 ### People
 
 | Table | Rows | What it is |
 |---|---:|---|
-| `legislators` | 1,607 | One row **per source system** per legislator. Every row is identified. |
-| `terms` | 1,087 | Service records: chamber, district, party, state, dates. One per legislator row that has one. |
-| `persons` | 37 | **Merge records only** — created when ≥2 legislator rows are the same human. Not a roster. |
-| `person_links` | 76 | The edges: legislator row → person. 1,531 rows correctly have none. |
-| `identity_flags` | 16 | Same-surname clusters the auto-merger refused to decide. **4 open**, 12 resolved. |
-| `districts` | **0** | **Empty. Never populated.** Address lookup runs off `terms.state` / `terms.district` instead. |
+| `legislators` | 1,607 | One row **per source system** per legislator. Every row is identified. Unchanged from 07-31. |
+| `terms` | 1,087 | Service records: chamber, district, party, dates. One per legislator row that has one. Unchanged from 07-31. |
+| `persons` | 37 | **Merge records only** — created when ≥2 legislator rows are the same human. Not a roster. Unchanged from 07-31. |
+| `person_links` | 76 | The edges: legislator row → person. 1,531 rows correctly have none. Unchanged from 07-31. |
+| `identity_flags` | 16 | Same-surname clusters the auto-merger refused to decide. **4 open**, 12 resolved — unchanged from 07-31, re-verified live. |
+| `districts` | **0** | **Empty. Never populated, by design** — re-confirmed 2026-08-02, the site never reads it. Address lookup runs off `terms.district` instead. |
 
 ### Plain-language layer
 
 | Table | Rows | What it is |
 |---|---:|---|
-| `summaries` | 74 | Plain-language bill summaries. One per bill. **39 published, 35 draft.** |
-| `summary_verifications` | 113 | Adversarial verification results on two axes: accuracy (support) and coverage (completeness). |
-| `summary_notes` | 78 | Adjudication trail: 39 `approved` + 39 `published`. |
-| `summary_terms` | 974 | Summary → glossary-term links, across 72 of the 74 summaries. |
-| `glossary_terms` | 847 | Statutes/acts/agencies bills reference. **116 written, 731 bare stubs.** |
-| `glossary_verifications` | 116 | One per published term: 108 clean, 8 flagged. |
-| `glossary_notes` | 266 | Adjudication trail: 123 approved, 122 published, 19 edited, 2 rejected. |
+| `summaries` | 213 (was 74) | Plain-language bill summaries. One per bill. **115 published, 98 draft.** |
+| `summary_verifications` | 378 (was 113) | Adversarial verification results on two axes: accuracy (support) and coverage (completeness). |
+| `summary_notes` | 230 (was 78) | Adjudication trail: 115 `approved` + 115 `published`. |
+| `summary_terms` | 3,228 (was 974) | Summary → glossary-term links, across 211 of the 213 summaries. |
+| `glossary_terms` | 2,219 (was 847) | Statutes/acts/agencies bills reference. **116 written, 2,103 bare stubs.** |
+| `glossary_verifications` | 116 | One per published term: 108 clean, 8 flagged. Unchanged from 07-31. |
+| `glossary_notes` | 266 | Adjudication trail: 123 approved, 122 published, 19 edited, 2 rejected. Unchanged from 07-31 — no new hand-adjudication has run. |
 
 ### Operations and provenance
 
 | Table | Rows | What it is |
 |---|---:|---|
-| `ingestion_runs` | 397 | Every pipeline run, with status and JSON detail, across 20 sources. |
-| `legiscan_datasets` | 31 | LegiScan bulk-dataset cache ledger — one per Missouri session. |
-| `vote_reconciliation_flags` | 9 | Cross-source vote-tally discrepancies. **All 9 open**, 0 resolved, covering 7 distinct roll calls. |
+| `ingestion_runs` | 563 (was 397) | Every pipeline run, with status and JSON detail, across 21 sources (was 20 — see freshness table). |
+| `legiscan_datasets` | 31 | LegiScan bulk-dataset cache ledger — one per Missouri session. Same count as 07-31, but now genuinely one-per-session (the 2026 duplicate that shared this count is gone; see structural defect #1). |
+| `vote_reconciliation_flags` | 49 (was 9) | Cross-source vote-tally discrepancies. **All 49 open**, 0 resolved, covering 45 distinct roll calls (was 7) — 16 LegiScan-vs-MO-House-XML, 33 LegiScan-vs-MO-Senate-web. A real, material jump — see structural defect #2. |
 
 ### Views and materialized views
 
 | Object | Rows | What it is |
 |---|---:|---|
 | `public_vote_feed` | ★ = `vote_casts` | Plain view joining casts → roll calls → bills. Row count always equals `vote_casts`. |
-| `public_position_totals` | 11,444 | **MATVIEW** — casts per legislator / chamber / year / position. Stale until refreshed. |
-| `public_party_alignment` | 3,042 | **MATVIEW** — how often a legislator votes with their party's majority. |
-| `public_party_position_totals` | 198 | **MATVIEW** — casts per party / chamber / year / position. |
-| `public_freshness` | 20 | Latest run status per ingestion source. |
-| `public_verification_notes` | 68 | Verification metadata, scoped to published summaries only. |
-| `public_reconciliation_flags` | 9 | Reconciliation flags exposed publicly. |
+| `public_position_totals` | 11,463 (was 11,444) | **MATVIEW** — casts per legislator / chamber / year / position. Stale until refreshed. |
+| `public_party_alignment` | 3,042 | **MATVIEW** — how often a legislator votes with their party's majority. Unchanged from 07-31. |
+| `public_party_position_totals` | 198 | **MATVIEW** — casts per party / chamber / year / position. Unchanged from 07-31. |
+| `public_freshness` | 21 (was 20) | Latest run status per ingestion source — one new source joined the freshness ledger (correction/backfill CLIs that didn't exist at 07-31). |
+| `public_verification_notes` | 220 (was 68) | Verification metadata, scoped to published summaries only. |
+| `public_reconciliation_flags` | 49 (was 9) | Reconciliation flags exposed publicly — tracks `vote_reconciliation_flags` above exactly. |
 
 > **Gone:** migration 0003's `ingestion_freshness` view no longer exists — 0016 dropped it and replaced it with `public_freshness`. Don't go looking for it.
 
@@ -219,10 +221,12 @@ Counts are the 2026-07-31 snapshot. **★ = moves constantly; never hardcode.**
 
 | Chamber | First roll call | Last roll call | Roll calls | Casts | Avg members per roll call |
 |---|---|---|---:|---:|---|
-| Missouri House | 2015-01-15 | 2026-05-15 | 6,590 | 1,038,737 | 157.6 of 163 |
-| Missouri Senate | 2016-01-07 | 2026-05-15 | 1,876 | ~60,833 | 32.3 of 34 |
+| Missouri House | 2015-01-15 | 2026-05-15 | 6,610 | 1,038,740 | 157.1 of 163 |
+| Missouri Senate | 2016-01-07 | 2026-05-15 | 1,891 | 61,328 | 32.4 of 34 |
 | US House | 2025-01-03 | 2026-07-23 | 645 | 278,842 | 432.3 of 435 |
-| US Senate | 2025-01-09 | 2026-07-27 | 869 | 86,888 | 99.99 of 100 |
+| US Senate | 2025-01-09 | 2026-07-30 | 876 | 87,588 | 100.0 of 100 |
+
+(All four rows re-verified live 2026-08-02. US House is byte-for-byte unchanged from the 07-31 snapshot — that ingestion source has been quiet — while US Senate's window extended 3 days and its per-roll-call average rounded up to a clean 100.0.)
 
 Every roll call carries a real date — zero NULLs, and the old `1969-12-31` sentinel dates are fully cleared.
 
@@ -230,11 +234,11 @@ Every roll call carries a real date — zero NULLs, and the old `1969-12-31` sen
 
 ### The year gaps
 
-**GAP 1 — Missouri House 2024 is entirely absent.** LegiScan's 2024 session held 351 roll calls. We stored 76 (all Senate). The other **275 (all House) were refused** because LegiScan prints their date as `0000-00-00`. The decision was to refuse rather than invent dates. Result: Missouri 2024 shows ~2,500 casts against ~100,000 in neighbouring years. It is *absent*, not thin.
+**GAP 1 — Missouri House 2024 is entirely absent.** LegiScan's 2024 session held 351 roll calls. We stored 76 (all Senate) — re-verified live 2026-08-02, still exactly 0 House / 76 Senate roll calls for 2024. The other **275 (all House) were refused** because LegiScan prints their date as `0000-00-00`; the decision was to refuse rather than invent dates. **The "275" figure itself is unverified this pass** — refused rows are never written to the database (that's the whole point of "refused"), so there is no live table to re-query for a refusal count; it comes from the original 2026-07-31 ingest-run audit and was accurate then. Result: Missouri 2024 shows ~2,500 casts against ~100,000 in neighbouring years, confirmed still true. It is *absent*, not thin.
 
-**GAP 2 — Missouri 2010–2014 has bills but zero votes.** ~8,985 bills exist across the 2010–2014 regular sessions (and ~9,079 including six special sessions) with **no roll calls at all**. This is a **source** gap, not an ingestion miss: all 31 LegiScan datasets were fetched, and every one of those sessions' ingest runs reports `rollCallsPlanned = 0`. Nothing to recover without a different source. **The Missouri bill record starts in 2010; the Missouri vote record starts in 2015.**
+**GAP 2 — Missouri 2010–2014 has bills but zero votes.** ~8,985 bills exist across the 2010–2014 regular sessions — re-verified live, exact match. **Correction to the 07-31 snapshot: including special sessions the total is 9,021, not "~9,079 including six special sessions."** Live query finds only **three** MO special sessions fall in the 2010–2014 window (`2010-special-497`, `2011-special-498`, `2013-special-1094`), not six, and 8,985 + 3 specials' bills = 9,021. All 9,021 of these bills — regular and special alike — still have **zero recorded votes**, confirmed live. This is a **source** gap, not an ingestion miss: all 31 LegiScan datasets were fetched, and every one of those sessions' ingest runs reports `rollCallsPlanned = 0`. Nothing to recover without a different source. **The Missouri bill record starts in 2010; the Missouri vote record starts in 2015.**
 
-**GAP 3 — federal history does not exist.** All 365,730 federal casts are 119th Congress (2025→). A senator's pre-2025 record simply is not here. Widening it means more Congress.gov / senate.gov ingestion — free, polite, slow.
+**GAP 3 — federal history does not exist.** All 366,430 federal casts (was 365,730) are 119th Congress (2025→) — re-verified: the per-year breakdown shows exactly zero federal casts in every year before 2025. A senator's pre-2025 record simply is not here. Widening it means more Congress.gov / senate.gov ingestion — free, polite, slow.
 
 **GAP 4 — Missouri Senate has no 2015.** The journals-first pipeline starts in 2016.
 
@@ -242,51 +246,51 @@ Every roll call carries a real date — zero NULLs, and the old `1969-12-31` sen
 
 | Stage | Count | Why we lose the ones we lose |
 |---|---:|---|
-| Bills in the database | ~38,266 | — |
-| ↓ have any recorded roll call | 3,874 | **−34,392.** Introduced and died without a floor vote. This bucket also swallows all of Missouri 2010–2014, where no source has roll calls. |
-| ↓ have a passage / third-reading vote | 3,341 | **−533.** Only ever got procedural votes, so they are not accountability-relevant under the pool definition. |
+| Bills in the database | ~38,254 | — |
+| ↓ have any recorded roll call | 3,870 | **−34,384.** Introduced and died without a floor vote. This bucket also swallows all of Missouri 2010–2014, where no source has roll calls. |
+| ↓ have a passage / third-reading vote | 3,341 | **−529.** Only ever got procedural votes, so they are not accountability-relevant under the pool definition. |
 | ↓ have official text on hand | 3,319 | **−22.** 21 refused by the 400,000-character oversize gate + 1 image-only PDF that extracted zero characters. Nothing was ever silently truncated. |
-| ↓ have any summary row | 58 | **−3,283.** Pure volume — the pipeline just hasn't been run. 3,261 of these already have text and are ready to go. |
-| ↓ **published** | **39** | **−19.** 35 rows sit in draft awaiting review (20 with an adverse verdict, 14 clean, 1 unverified). |
+| ↓ have any summary row | 197 | **−3,144.** Pure volume — the pipeline hasn't reached the rest yet. 3,122 passage-vote bills already have text and are ready to go. |
+| ↓ **published** (within the passage-vote pool) | **107** | **−90.** 98 rows sit in draft awaiting review, and every one of them carries an adverse verdict (see "draft ≠ flagged" above) — none are clean-and-waiting. (Total published across the whole database is 115 — 8 more sit on bills outside the passage-vote pool by this funnel's own text-matching definition.) |
 
-**The concentration problem is worse than the count suggests.** All 39 published summaries come from **2 of 33 sessions**: 28 from Missouri's 2026 session and 11 from the 119th Congress. **Every other session — all of Missouri 2010 through 2025, roughly 1,090,000 vote casts — has zero published summaries.** Someone reading a Missouri legislator's 2019 record sees real votes on bills with no explanation whatsoever. That is the single largest gap between the product promise and what exists.
+**The concentration problem has substantially improved, but is not solved.** At 07-31, all 39 published summaries came from 2 of 33 sessions. Re-verified live 2026-08-02: **115 published summaries now span 12 of 32 sessions** — the 119th Congress plus 11 Missouri sessions (2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2025, and 261/2026). Per-session counts: 261 (2026) 38, 2023 15, 119th Congress 19, 2018 11, 2019 6, 2016 6, 2015 5, 2022 5, 2017 4, 2021 2, 2025 3, 2020 1. **It is still lopsided** — MO 2026 alone accounts for a third of all published summaries — but a legislator's 2016–2023 record is no longer guaranteed to be explanation-free the way it was at 07-31. The sessions still at zero are structurally expected to be: all of Missouri 2010–2014 (zero votes exist there at all — GAP 2), every MO special session in the window, and 2024 (GAP 1, the refused-House-dates year).
 
-Also: **3 of the 39 published-summary bills have a NULL title**, so the page renders a summary under a bare bill number.
+Also: **0 of the 115 published-summary bills have a NULL title** (was 3 of 39) — **RESOLVED**. The 2026-08-02 title backfill (`backfill-bill-titles.js`, 1,972 of 1,975 NULL titles filled from cached LegiScan data) closed this gap as a side effect.
 
 ### Quarantined, refused and flagged items
 
 | Item | Count | Status |
 |---|---:|---|
-| Missouri House 2024 roll calls refused | **275** | Refused on `0000-00-00` source dates. Deliberate. |
-| MO Senate journal days quarantined | **11** | Failed to parse 3+ times; held out of the published record by design. |
-| Passage bills with no text | **22** | 21 oversize refusals + 1 image-only PDF. |
-| Vote-reconciliation flags | **9 open / 0 resolved** | Cross-source tally discrepancies over 7 roll calls (LegiScan vs MO House XML ×5, vs MO Senate web ×4). |
-| Identity flags | **4 open / 12 resolved** | Clusters: Brown (3 rows), Moore (2), Johnson (2), Menendez (2 — an informational keep-separate ruling). |
-| Roll calls with zero individual casts | **152** | 95 OpenStates 2022 events (source has no per-voter data) + 57 MO House XML 2026 where only the aggregate tally was captured. A user opening these sees a result with no names. |
+| Missouri House 2024 roll calls refused | **275** (unverified this pass — refused rows are never stored, so there is no live table to re-count; was accurate as of 2026-07-31, and the resulting gap — 0 MO House roll calls in 2024 — is independently re-confirmed live) | Refused on `0000-00-00` source dates. Deliberate. |
+| MO Senate journal days quarantined | **12** (was 11) | Failed to parse 3+ times; held out of the published record by design. |
+| Passage bills with no text | **22** | 21 oversize refusals + 1 image-only PDF. Unchanged from 07-31. |
+| Vote-reconciliation flags | **49 open / 0 resolved** (was 9 open / 0 resolved) | Cross-source tally discrepancies over **45** distinct roll calls (was 7): 16 LegiScan-vs-MO-House-XML, 33 LegiScan-vs-MO-Senate-web. A real, material jump — see structural defect #2. |
+| Identity flags | **4 open / 12 resolved** | Clusters: Brown (3 rows), Moore (2), Johnson (2), Menendez (2 — an informational keep-separate ruling). Unchanged from 07-31, re-verified live. |
+| Roll calls with zero individual casts | **169** (was 152) | 95 OpenStates events (source has no per-voter data) + 74 MO House XML rows where only the aggregate tally was captured. Growth is ongoing ingestion, not drift. **A 2026-08-02 display fix (`site/js/bill-page.js`, TODO 28) now hides the OpenStates rows on a bill page whenever real cast-bearing data exists elsewhere on that same bill** — so a visitor sees fewer misleading zero-cast rows than this raw count implies; the MO House XML rows are never hidden (they carry a real, specific tally already, with individual casts arriving later on the same row). No underlying data was touched — this is display-only. |
 
 ### Structural defects worth knowing about
 
 These are real problems, not design choices:
 
-1. **The Missouri 2026 session is split across two session rows, and the split is growing.** Session `'261'` (LegiScan) and session `'2026'` (MO Senate journals) both cover 2026. `'2026'` is the **only** Missouri session with no `legiscan_session_id` — that is the tell. It duplicates 16 bills, 17 roll calls and ~561 casts already present under `'261'`, and the cron is actively feeding it. (Missouri 2018 had the same adapter collision and *was* merged correctly, which is the model for the fix.)
-2. **Cross-source roll-call duplication beyond that split.** 106 `(bill, date, chamber)` groups span multiple adapters and carry **166 extra roll-call rows**, 33 of them passage votes. `vote_reconciliation_flags` exists to catch exactly this class and has flagged only 9 — roughly 4% of the overlap. Not a claim that all 166 are wrong (some may be genuinely distinct motions), but "every row traceable to an official source" does not currently guarantee "exactly one row per real roll call."
-3. **2,005 bills have both a NULL title and a NULL canonical URL** — 1,986 of them in Missouri session `'261'`, which is **62.8% of the current 2026 session**. 209 are already reachable from a roll call, 190 have stored text, and 3 already carry a published summary. They render as a bare bill number with no "read the official bill" link.
-4. **`bill_actions` is effectively empty** — 780 rows over 113 of ~38,266 bills (0.3%), all Missouri, all 2025–2026. There is no "what happened to this bill" timeline for 99.7% of bills.
-5. **Legislator profiles have no photos and no contact info** — `image_url` and `contact` are NULL on all 1,607 rows. `districts` is empty. One row still displays a raw bioguide code (`G000578`) as its name.
-6. **555 of 1,607 legislator rows have zero votes** (1,015 of 1,568 lookup-able people have a record; 553 render empty). **352 of those are historical US senators** — the senate.gov adapter created rows for members named in historical rosters, but we only ingested 119th-Congress roll calls. Exactly one *currently serving* legislator has an empty shell, and it is a duplicate row already merged into a person with 1,850 casts.
-7. **318 legislator rows have votes but no term row** — their profile shows a voting record with no office, chamber or district attached. 482 of 1,568 entries have no term at all.
-8. **Party vocabulary is unnormalized** — `R` (391) and `Republican` (469) and `D` (209) and `Democratic` (463) coexist, plus 65 NULLs, one `Independent Democrat` and one empty string. The party aggregates map R→Republican and D→Democratic but **41,514 casts fall out of every party total silently.**
-9. **Current-seat coverage is nearly complete but not perfectly.** US Senate 100/100. US House 437, of which 5 non-voting delegates have null state *and* district, so address lookup cannot match them. Missouri House 159 of 163 seats (districts 95, 110, 114, 160 have no current-term row). Missouri Senate covers all 34 districts but has 35 rows — district 2 carries two overlapping current terms. And 194 terms have no start date, 731 no end date, so "current" is partly inferred rather than proven.
-10. **`legiscan_datasets` is publicly readable including its `local_cache_path` column** — a filesystem path on the operator's own machine, exposed on the public API. Not civic-data leakage, but it should not be there.
+1. ~~**The Missouri 2026 session is split across two session rows.**~~ **RESOLVED 2026-08-02.** Session `'261'` (LegiScan) and session `'2026'` (MO Senate journals) used to both cover 2026, with `'2026'` carrying no `legiscan_session_id`. Live-verified: `sessions` now holds exactly **one** MO-2026 row (`'261'`) — the duplicate was merged and deleted (34 duplicate bills merged into their canonical twins, 31 votes redirected, 0 orphaned votes independently re-verified) — see `CHATLOG.md` 2026-08-02. The fix landed twice: the first pass closed the existing duplicate, then a still-buggy `ensureSessionRow` re-minted a fresh *empty* `'2026'` row before the root cause was patched; that empty row was confirmed empty and deleted, and the underlying resolver was rewritten to reuse the same year+name logic already proven correct for LegiScan sessions. 12 real scheduler ticks since have created zero duplicates.
+2. **Cross-source roll-call duplication beyond that split — still open, and larger.** Re-run live with the same cross-adapter methodology: **139** `(bill, date, chamber)` groups now span multiple adapters (was 106) and carry **202 extra roll-call rows** (was 166), 36 of them passage votes (was 33). `vote_reconciliation_flags` now catches 45 of the distinct roll calls involved — roughly **32%** of the overlap, a real improvement from 07-31's ~8% (9 of 106), but the defect itself is not closed. Not a claim that all 202 are wrong (some may be genuinely distinct motions), but "every row traceable to an official source" still does not guarantee "exactly one row per real roll call."
+3. ~~**2,005 bills have both a NULL title and a NULL canonical URL.**~~ **RESOLVED 2026-08-02.** `backfill-bill-titles.js` filled 1,972 of 1,975 NULL-title bills from cached LegiScan datasets (0 failures; the 3 left untitled are `SRM` remonstrance resolutions LegiScan's own cache has no title for either — correctly left untouched, never guessed). Live-verified: bills with **both** a NULL title and a NULL `canonical_url` are now down to **3** database-wide (1 of them in session `'261'`), from 2,005. This was the single largest count-based improvement found this pass.
+4. **`bill_actions` is effectively empty** — grew but the coverage ratio barely moved: 1,020 rows (was 780) over 139 of 38,254 bills (0.4%, was 113/38,266 = 0.3%), all Missouri. There is still no "what happened to this bill" timeline for 99.6% of bills.
+5. **Legislator profiles have no photos and no contact info** — re-confirmed live 2026-08-02: `image_url` and `contact` are NULL on all 1,607 rows, by design (`TODO.md` item 29 — photos derive from bioguide at render time, not stored). `districts` is still empty. One row still displays a raw bioguide code (`G000578`) as its name — unchanged, still open.
+6. **555 of 1,607 legislator rows have zero votes** — unchanged in total (exact match to 07-31). Breakdown re-verified live: 386 carry a federal `bioguide_id` (mostly historical members whose service predates our federal coverage window), 169 are Missouri-sourced. (The 07-31 snapshot's finer claim, "352 of those are historical US senators" specifically — a chamber-level sub-cut of the federal group — is **unverified this pass**; it needs a join against each row's own term chamber that wasn't run this time, was accurate as of 2026-07-31.) At the distinct-person level: 1,015 of 1,568 lookup-able people show a voting record, 553 render empty (555 no-vote rows minus 2 that are merged into a person whose *other* linked row does have votes — unchanged from 07-31). **The "exactly one currently-serving empty-shell row" claim needs updating: it's now two.** Bob Onder's known duplicate persists (person total 1,850 casts, unchanged). A second has appeared: a Jason Smith row now merges into a person carrying 645 casts across 2 rows.
+7. **318 legislator rows have votes but no term row** — unchanged, exact match to 07-31. Live-verified: **520 of 1,607 legislator rows** have no term row at all (the 07-31 snapshot phrased this as "482 of 1,568 entries," using the person-deduplicated denominator rather than the raw row count this figure is actually computed against — the row-level number itself moved 482→520).
+8. ~~**Party vocabulary is unnormalized.**~~ **LARGELY RESOLVED 2026-08-02 — on the column the public aggregates actually read.** `correct-data.js party-normalize` ran live: `legislators.party` (the column `public_position_totals`/`public_party_alignment`/`public_party_position_totals` all join against) is now fully normalized — **Republican 860, Democratic 672, Independent 8, Independent Democrat 1, NULL 66** — zero bare `R`/`D` codes remain, confirmed live. The fix also closed the insertion point (`legiscan-identity.js` now writes full words directly), so a freshly-ingested LegiScan legislator can't re-dirty the column. **Casts falling out of every party total** (NULL or `Independent Democrat` party) is now **42,207** (was 41,514) across 67 legislators — the leak persists by the same deliberate design (no unrecognized party is ever guessed), it just grew with vote volume. **Found live, not in the 07-31 snapshot: a *second*, still-unnormalized party column.** `terms.party` — a separate column, not read by any of the three party matviews — still carries bare `R` (131) and `D` (62) codes alongside `Republican` (450), `Democratic` (435), `Independent` (8) and `Independent Democrat` (1). Because nothing public reads `terms.party` for the party rollups, this doesn't currently distort a public number, but it is the same defect class sitting one table over, untouched by the fix.
+9. **Current-seat coverage is nearly complete but not perfectly — re-verified live, essentially unchanged.** US Senate 100/100 (unchanged). US House 437 current-term rows, of which **6** (was 5) have a null district, so address lookup cannot match them. Missouri House 159 of 163 seats — districts 95, 110, 114, 160 still have no current-term row, exact match to 07-31. Missouri Senate covers all 34 districts but has 35 rows — district 2 still carries two overlapping current terms. 194 terms have no start date, 731 no end date — both exact matches to 07-31 — so "current" is still partly inferred rather than proven.
+10. **`legiscan_datasets` is still publicly readable including its `local_cache_path` column** — re-confirmed live against the migration: `create policy anon_read on legiscan_datasets for select using (true)` (migration 0010) is unchanged, and the `local_cache_path` column still exists on the table. Not civic-data leakage, but it should not be there. Still open.
 
 ### What the public can actually see
 
-Measured with the anonymous key, not assumed:
+Measured with the anonymous key posture unchanged since 07-31 — **checked**: no migration after `0020_completeness_checks.sql` has landed, so the RLS/grant surface itself has not moved; only the row counts below have.
 
 - **Fully public:** bills, sponsors, actions, roll calls, vote casts, the vote feed, legislators, terms, persons, sessions, jurisdictions, summary→term links, and all three aggregate matviews.
 - **Gated to zero rows:** `bill_texts`, `ingestion_runs`, all notes and verifications, `identity_flags`, `person_links`, `vote_reconciliation_flags`.
-- **Filtered:** `summaries` shows 39 of 74 (published only); `glossary_terms` shows 116 of 847 (published only).
-- **Two deliberate view bypasses:** `public_freshness` (20 rows) and `public_reconciliation_flags` (9 rows) expose data whose *base tables* are anon-gated. Documented design choices, but the two places where "the base table is private" does not mean the data is private.
+- **Filtered:** `summaries` shows 115 of 213 (published only) — was 39 of 74; `glossary_terms` shows 116 of 2,219 (published only) — was 116 of 847.
+- **Two deliberate view bypasses:** `public_freshness` (21 rows, was 20) and `public_reconciliation_flags` (49 rows, was 9) expose data whose *base tables* are anon-gated. Documented design choices, but the two places where "the base table is private" does not mean the data is private.
 
 ---
 
@@ -294,23 +298,23 @@ Measured with the anonymous key, not assumed:
 
 Several counts in the ledgers read like data loss and are not. Checking these once, here, should stop the recurring panic.
 
-**"275 Missouri House 2024 roll calls refused."** LegiScan prints those roll calls with the date `0000-00-00`. There is no honest way to derive a real date. Storing them with a fabricated or sentinel date would put wrong dates on the public record. **Refusing is the correct behavior.** The gap is real and is documented above; the refusal is not a bug.
+**"275 Missouri House 2024 roll calls refused"** (unverified this pass, was accurate as of 2026-07-31 — refused rows are never stored, so there is no live table to re-derive the count from; the resulting gap it describes — 0 MO House roll calls stored for 2024 — is independently re-confirmed live). LegiScan prints those roll calls with the date `0000-00-00`. There is no honest way to derive a real date. Storing them with a fabricated or sentinel date would put wrong dates on the public record. **Refusing is the correct behavior.** The gap is real and is documented above; the refusal is not a bug.
 
 **"21 bills refused for oversize text."** A 400,000-character ceiling on stored text. Missouri's SRB 975 is 751,225 characters; the federal S 1071 is 3,492,102. The alternative to refusing is silently truncating, which would mean summarizing half a bill and calling it the bill. **Nothing was ever truncated.** Correct by design.
 
-**"11 MO Senate journal days quarantined."** Days whose journal PDF failed to parse cleanly three or more times, deliberately held out rather than published as a partial or garbled vote record. Correct by design, and each quarantined day is named in the run record.
+**"12 MO Senate journal days quarantined"** (was 11 at 07-31, re-verified live via `public_freshness.quarantined_days`). Days whose journal PDF failed to parse cleanly three or more times, deliberately held out rather than published as a partial or garbled vote record. Correct by design, and each quarantined day is named in the run record.
 
 **"1,813 LegiScan roll calls refused over an unknown `NV` vote code."** This was a first-contact fail-loud on an unrecognized vote value — the pipeline stopped rather than guessing what `NV` meant. **It was fixed and every affected session re-ingested to `succeeded` with zero reconciliation failures.** Not missing today.
 
-**"3,474 unresolved US Senate cast entries."** Resolved. The final us-senate run reports 20,997 resolved / **0 unresolved**, and the live average of 99.99 senators per roll call confirms it.
+**"3,474 unresolved US Senate cast entries."** Resolved. The final us-senate run reports 20,997 resolved / **0 unresolved**, and the live average is now a clean 100.0 of 100 senators per roll call (up from 99.99), which confirms it.
 
 **"17,585 unresolved casts in mo-house-xml."** An artifact of re-counting. This is a **single stuck artifact** (~158 surname-only casts with null districts, source key `mo-house-xml-HB1800-4`) being retried on every run, and the 17,585 figure is that same ~158 counted across 122 runs. Roughly 158 casts are genuinely not stored — not 17,585.
 
 **"1969-12-31 dates" and "numeric bill status codes."** Both cleaned up. Zero sentinel dates and zero NULL vote dates remain. 37,662 bills had numeric LegiScan status codes converted to words; **36 bills still show status `0` deliberately**, because LegiScan's codebook has no word for code 0 and inventing one would be editorializing. 18 have a NULL status.
 
-**"`enrich-federal-bills` status: partial"** and **"`gloss` has never succeeded."** These pipelines record per-item failures and continue by design, so `partial` is their normal healthy outcome, not a failure. 476 of 478 federal bills have a status; the 2 without are the fake `QUORUM` / `ADJOURN` pseudo-bills that Congress.gov returns 404 for.
+**"`enrich-federal-bills` status: partial"** and **"`gloss` has never succeeded."** These pipelines record per-item failures and continue by design, so `partial` is their normal healthy outcome, not a failure. 480 of 482 federal bills have a status (was 476 of 478 — the federal bill count grew by 4, and the same 2 exceptions remain uncovered); the 2 without are the fake `QUORUM` / `ADJOURN` pseudo-bills that Congress.gov returns 404 for.
 
-**"444 roll calls have no bill."** Nominations, cloture motions, adjournment — 443 US Senate and 1 US House. Real votes that genuinely have no bill to attach to.
+**"445 roll calls have no bill"** (was 444). Nominations, cloture motions, adjournment — 444 US Senate and 1 US House (was 443/1). Real votes that genuinely have no bill to attach to.
 
 **"Only 8 of 116 published glossary terms are flagged, but zero published summaries are."** Not an inconsistency. Glossary terms were hand-adjudicated (19 edited, 2 rejected on the way through) under the review model; summaries auto-publish only on a clean verdict. Different pipelines, both intentional — but state it rather than assume it.
 

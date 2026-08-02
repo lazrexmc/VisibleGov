@@ -11,10 +11,11 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
-**Status (2026-07-31): backend live and accurate; public site built + merged, deploy deferred.**
+**Status (2026-08-02): backend live and accurate; public site built + merged, deploy deferred.**
 See `TODO.md` NOW for the current state and the only open operator decisions. The repo holds the
 ingestion CLIs and adapters (`src/`), the public site (`site/`), schema migrations
-(`supabase/migrations/`, 0001-0020 all applied), and fixture-backed tests (`tests/`, ~1,975 green).
+(`supabase/migrations/`, 0001-0020 all applied), and fixture-backed tests (`tests/`, ~2,192 green).
+**Live numbers: run `npm run status`** — any count typed into a doc goes stale within the hour.
 
 **If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
 17 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open),
@@ -61,10 +62,12 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   count + dollar estimate stated up front. Mechanical enforcement exists where possible (e.g.
   the golden-check `GOLDEN_CHECK_APPROVED` gate) - extend that pattern to new model-calling
   tools.
-- **Trust model v3 (adopted 2026-07-28 for glossary; summaries at their next batch; spec:
-  docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from official
-  text only → sonnet-5 adversarially verifies (mechanically completeness-gated - never trust
-  the verifier's self-report) → verified-CLEAN items auto-approve and auto-publish with
+- **Trust model v3 (adopted 2026-07-28 for glossary, 2026-07-31 for summaries — fully live, not
+  pending; spec: docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from
+  official text only → sonnet-5 adversarially verifies (mechanically completeness-gated - never
+  trust the verifier's self-report) → verified-CLEAN items auto-approve and auto-publish with
   per-item audit logging; Lance reviews FLAGGED items only (process auditor, not truth
-  certifier). Public rendering must carry receipts (source link + supporting quote). Facts-only
-  rule per the spec; nothing editorial, ever.
+  certifier). Public rendering must carry receipts (source link + supporting quote) — currently
+  true for glossary terms; bill-summary bullets have the quote data but don't render it yet
+  (spec: docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md, awaiting
+  implementation). Facts-only rule per the spec; nothing editorial, ever.

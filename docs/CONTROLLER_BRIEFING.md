@@ -1,6 +1,14 @@
 # VisibleGov — Controller Catch-Up Briefing
 *Compiled 2026-07-31 from 105 SDD ledgers, 5 specs, 9 plans, 4 research docs, 21 migrations, the 925-line CHATLOG, PLAYBOOK_DELTA (17 lessons), TODO.md, DATA_INVENTORY.md, and live code verification.*
 
+*Refresh pass 2026-08-02: sections 3 and 5 rewritten below to reflect what actually happened to*
+*TODO 25-29 (and 33, 35) since compile — all closed or corrected, verified against CHATLOG.md's*
+*2026-08-01/02 entries and TODO.md's own struck-through items, not assumed. Live-reverified counts*
+*this pass: test suite 2,192/2,192 green (`node --test` from repo root); migrations still 21 files*
+*(0001-0020 + 0018a, unchanged); PLAYBOOK_DELTA now has 22 lessons (`grep '^## Lesson'`), up from*
+*17 at compile — lessons 18-22 landed 2026-08-01/02; CHATLOG.md is now 1,293 lines (was 925).*
+*Sections 2 and 4 below are an unaltered historical record and were NOT touched by this pass.*
+
 ---
 
 ## 1. Standing rules I must not violate
@@ -12,7 +20,7 @@
 > "no more spending credits. Figure out how to do it otherwise for a bit or just hold the items that need spending approval back for a bit." (memory/no-api-spend-hold.md, 2026-07-28)
 
 All volume work runs the $0 subagent path (`summary-queue.js record`). ~$6 credits are earmarked for exactly two named cases: the parked golden drift check (~$0.35, pre-approved) and the 11 over-400k bills.
-**TRAP:** `npm run summarize`, `npm run verify`, `npm run gloss`, `npm run extract-terms`, `npm run golden` all still exist in package.json. `gloss.js`/`extract-terms.js`/`golden.js` carry mechanical env gates (`GLOSS_RUN_APPROVED`, `GOLDEN_CHECK_APPROVED`). **`src/cli/summarize.js` and `src/cli/verify.js` have NO gate and default `dryRun:false`** — typing `npm run verify` spends money with nothing in the way. That is the unfinished half of CLAUDE.md's own policy.
+**RESOLVED 2026-07-31** (commit 41936f0): `npm run summarize`, `npm run verify`, `npm run gloss`, `npm run extract-terms`, `npm run golden` all still exist in package.json, but every one now carries a mechanical env gate (`SUMMARIZE_RUN_APPROVED`, `VERIFY_RUN_APPROVED`, `GLOSS_RUN_APPROVED`, `GOLDEN_CHECK_APPROVED`) firing before any Anthropic client is constructed; `--dry-run` stays freely runnable on all of them. This section originally flagged `summarize.js`/`verify.js` as the two ungated holdouts — that gap is closed; leaving this paragraph in place (rather than deleting it) so the historical trap is still legible to a reader who encounters the old framing elsewhere.
 
 **Cloudflare deploy is a MILESTONE, not a task.**
 > "I'm only interested in starting the cloudflare portion once the entire backend is locked in and accurate, otherwise I'm troubleshooting two systems back and forth and each change takes 3 steps instead of 1." (CHATLOG.md:794)
@@ -108,26 +116,134 @@ Worst shape: concurrent-submit rendering the WRONG address's representatives (KS
 
 ### Genuinely blocking (accuracy defects on the public record)
 
-1. **MO 2026 session is split across two rows and the split is ACTIVELY GROWING.** Session `'2026'` carries `legiscan_session_id = NULL` (only MO session missing one) and duplicates session `'261'` — 16 bills, 17 roll calls, ~561 casts, and it grew 15→16 *during the audit* because the 30-min cron is feeding it. (TODO 25) **Verify whether the cron is still running; if so this worsens on a timer.**
-2. **2,005 bills have NULL title AND NULL canonical_url** (~63% of the current MO session) — 3 already carry a PUBLISHED summary rendering under a blank title. (TODO 26)
-3. **`legislators.party` is unnormalized** — "Democratic" (456) vs "Democrat" (0) vs variants; **41,514 casts fall out of every party comparison silently.** (TODO 27)
-4. **152 stub roll calls render a result with no member positions**, across 52 bills. (TODO 28)
-5. **Display-time dedup was RULED BINDING and never implemented.** Ruling: "the primary-source (journal/PDF) row wins for display whenever both exist for the same (chamber, date, bill, tallies)." No dedup logic exists anywhere in `site/js/`. DATA_INVENTORY confirms **106 groups span multiple adapters carrying 166 extra roll-call rows, 33 of them passage votes** — the same double-counting the combined-vehicle ruling forbade, arriving by a different route. Inflates every share/percentage in the 0018 matviews.
+**Status as of 2026-08-02: items 1-4 below are all CLOSED.** Verified against CHATLOG.md's
+2026-08-01/02 entries and TODO.md's own items 25-28 (all struck through as done). Item 5 has no
+TODO number and is the one genuinely still-open item in this list — verified open by grep, not
+assumed closed just because 1-4 were.
 
-Items 1-4 are all draft-then-apply corrections governed by PLAYBOOK lesson 17 (extract the mapping from the source, put the `.eq()` guard on the UPDATE not in a JS pre-filter, establish reversibility before approval). Items 1 and 4 are dedup-shaped and will *tempt a resemblance heuristic* — see §1 zero-fuzzy-matching. All are visible on the site, so all sit inside Lance's "locked in **and accurate**" gate.
+1. ~~MO 2026 session split across two rows, actively growing~~ **CLOSED.** The 2026-08-01 live run
+   merged 34 duplicate bills into their canonical twins, redirected 31 votes, and deleted the
+   duplicate session — independently re-verified against the live DB afterward: 0 duplicate bills,
+   0 orphaned votes, 31/31 redirected votes correct, casts total unchanged. The ROOT CAUSE (not
+   just the cleanup) closed 2026-08-02: `ensureSessionRow` (mo-senate-web) now uses the same
+   year+name session resolution `ensureLegiscanSessionRow` already proved correct, so a fresh
+   `'2026'` duplicate can no longer be minted — including a same-day self-correction after review
+   caught that the first cut would have manufactured a false ambiguity the moment MO calls a
+   special session. 29 real cross-source vote discrepancies surfaced during the merge (all trace to
+   one root cause: Sen. Fitzwater's yea vote present in every LegiScan roll call, absent from every
+   Senate-journal-sourced one — a known pipeline undercount, not a new mystery) and were flagged for
+   review rather than hidden; they now sit in the reconciliation-flag queue (49 open, up from 9 —
+   see "Accepted residuals" below), not on this accuracy-defect list. (TODO 25)
+2. ~~2,005 bills with NULL title AND NULL canonical_url~~ **CLOSED 2026-08-02.**
+   `backfill-bill-titles.js` ran live: 1,972 of 1,975 NULL-title bills backfilled from cached
+   LegiScan datasets, 0 failures. 3 remain — LegiScan's own cache has no title for them either (all
+   `SRM` remonstrance resolutions), correctly left untouched rather than guessed. Independently
+   verified against the live DB post-run. `canonical_url` NULLs were not separately re-counted this
+   pass. (TODO 26)
+3. ~~`legislators.party` unnormalized~~ **CLOSED 2026-08-02.** `correct-data.js party-normalize` ran
+   live: 391 `R`→Republican, 209 `D`→Democratic, 1 blank→NULL; independently verified against the
+   live DB (860 Republican, 672 Democratic, 66 NULL — exact expected deltas). `Independent` and
+   Lieberman's real `Independent Democrat` deliberately left untouched. Fixed AT THE INSERTION
+   POINT too (`legiscan-identity.js`), after a same-day follow-up check found LegiScan's own dataset
+   prints bare `R`/`D` codes — a future LegiScan-sourced legislator can no longer re-dirty the
+   column. (TODO 27)
+4. ~~152 stub roll calls with no member positions~~ **CLOSED 2026-08-02.** Live investigation found
+   the original framing conflated two structurally different causes (167 rows/60 bills by the time
+   this ran — ongoing ingestion, not drift, not decay): OpenStates rows are permanent zero-cast
+   bill-action-log stubs (hidden at display time ONLY when the same bill has real cast-bearing data
+   elsewhere — never a row-to-row pairing the data doesn't support); MO House rows already carry
+   real specific tallies with casts landing later from a separately-polled PDF that updates the SAME
+   `vote_id` in place (never touched, never a duplicate, gets honest wording instead of a bare
+   all-zero line). Display-only fix in `site/js/bill-page.js` — no data was touched. Verified live
+   via dev server + Playwright. (TODO 28)
+5. **Display-time dedup was RULED BINDING and is still NOT implemented — genuinely still open.**
+   Re-verified 2026-08-02: no dedup logic exists anywhere in `site/js/` (the only "dedup" hit in
+   `profile-model.js` is an unrelated affiliation-list dedup; grep confirmed). This is a DIFFERENT
+   defect than items 1 and 4 above — cross-adapter duplication of the same real vote (LegiScan vs.
+   mo-senate/mo-house rows), not a session split or a display-only stub-suppression problem — and
+   none of today's fix passes touched it. Ruling: "the primary-source (journal/PDF) row wins for
+   display whenever both exist for the same (chamber, date, bill, tallies)." Inflates every
+   share/percentage in the 0018 matviews. (No TODO number — surfaced by the original audit, never
+   filed as its own item.)
+
+**TODO 29 (hygiene) was also re-verified 2026-08-02, no action needed** — empty `districts` table
+and zero `image_url`/`contact` rows are both confirmed by design, not decay.
+
+Items 1-4 above were all draft-then-apply corrections governed by PLAYBOOK lesson 17 (extract the
+mapping from the source, put the `.eq()` guard on the UPDATE not in a JS pre-filter, establish
+reversibility before approval) — all four ran live and were independently re-verified against the
+database, not just the CLI's own report. Item 5 is still visible on the site and still sits inside
+Lance's "locked in **and accurate**" gate.
 
 ### Live landmines not tracked in TODO.md at all
 
-6. **MO House cross-era misattribution trap.** `0005_mo_house_id.sql:11` still reads `alter table legislators add column mo_house_id text unique;` — never dropped (0009 dropped only the *Senate* equivalent, after reproducing the bug as CRITICAL). `src/cli/ingest-mo-house.js:794` still does `insertIfAbsent(..., 'mo_house_id')` against a current-only roster, with **no 23505 handling** (the Senate driver has `isMoSenateIdUniqueViolation`; the House driver has no equivalent). Dormant only because House ingestion has been single-session. **Fires silently the first time anyone backfills a prior MO General Assembly** — an obvious next data-breadth task. The mo-senate ledger wrote "must not be forgotten → TODO" and it never made it.
-7. **`summarize.js` candidate picker is silently truncating today.** `src/cli/summarize.js:89` (bills), `:96` (`from('votes').select('bill_id')`), `:117` (summaries) are all bare `.select()` — no `selectAll`, no `.range()`, no `.limit()` — against ~38,266 bills and ~9,981 votes with Supabase's 1,000-row default cap. Every other bulk reader in `src/` was migrated to `selectAll` (`src/lib/db.js:85`); this one was missed. Ledgered severity: **URGENT-WHEN-SUMMARIES-RESUME.** Summaries resumed 2026-07-31 (wave 1 = 40 bills) but dodged it via `summary-queue.js`. Returns success with a wrong list.
-8. **No `*_APPROVED` gate on `summarize.js` / `verify.js`** (see §1).
-9. **Two adjudicated fast-follows never built:** (a) transaction/RPC hardening of the non-transactional link sequence — the TOCTOU guard only shrinks the window; (b) **a proper unlink route.** Verified absent; `person-identity.js:220` says so in-code. The Bayh mis-link was corrected by controller-executed raw SQL against production because there is no in-app undo. With 4 open flags awaiting Lance, another wrong link is one click away.
-10. **Nothing calls `refresh_vote_aggregates()` from any CLI.** 0018's comment claims the batch loops do; `scripts/refresh-aggregates.js` says it was left as "a documented follow-up, not silently wired into every CLI." The charts are a stale snapshot while the vote list beside them is a live query — a live drift of 231 casts already made 33 MO senators' charts contradict their own vote lists. Until wired: run `npm run refresh:aggregates` at every batch end (this is the standing loop rule).
+**Re-verified individually 2026-08-02 against current code and CHATLOG — not assumed closed or
+open from this list's own age.** Result: 6, 7, 9, 11, 12 are STILL OPEN and unchanged; 8 is now
+CLOSED; 10 is substantially mitigated by the scheduler's registration (see below).
+
+6. **MO House cross-era misattribution trap — STILL OPEN, unchanged.** `0005_mo_house_id.sql:11`
+   still reads `alter table legislators add column mo_house_id text unique;` (verified by direct
+   read 2026-08-02 — never dropped). `src/cli/ingest-mo-house.js` still does
+   `insertIfAbsent(client, 'legislators', rows, 'mo_house_id')` against a current-only roster with
+   **no unique-violation handling** (grep confirms no `isMoHouseIdUniqueViolation`-equivalent
+   anywhere in the file). Now explicitly on the record as TODO 31 (was "never made it" at compile
+   time — it has since; still unchecked/open there). The now-registered scheduler's own registry
+   entry for `mo-house-xml` hardcodes `--limit 1` with an explicit in-code comment never to add
+   `--session`/a year flag, which prevents the SCHEDULER itself from tripping this — but a manual
+   historical/multi-era backfill still would.
+7. **`summarize.js` candidate picker is still silently truncating — STILL OPEN, unchanged.**
+   Verified by direct read 2026-08-02: the `sessions`/`bills`/`votes` lookups inside
+   `src/cli/summarize.js`'s `loadFederalBills` are all still bare `.select()` — no `selectAll`, no
+   `.range()`, no `.limit()` — against 38,254 bills and roughly 10,000+ votes, both well past
+   Supabase's 1,000-row default cap. Now on the record as TODO 32 (unchecked, still open). Both
+   summary waves that ran
+   since compile (wave 2: 60 bills, 2026-08-01; the review-queue backfill: 15 bills, 2026-08-02)
+   continued to route around this CLI entirely (`summary-queue.js` / a small dedicated adapter
+   script), so it has not actually fired again — but it is still armed for the next person who
+   reaches for `summarize.js` directly.
+8. ~~No `*_APPROVED` gate on `summarize.js` / `verify.js`~~ **CLOSED 2026-07-31** (commit 41936f0,
+   TODO 30). Both now carry the same mechanical gate as `gloss.js`
+   (`SUMMARIZE_RUN_APPROVED=yes` / `VERIFY_RUN_APPROVED=yes`), firing before any Anthropic client is
+   constructed; `--dry-run` stays freely runnable. Passed adversarial review. (Note: §1 above still
+   describes this as an open TRAP — that line is part of the untouched historical record and was
+   not in scope for this refresh pass; flagging the inconsistency here rather than silently leaving
+   it unexplained.)
+9. **Two adjudicated fast-follows still never built — STILL OPEN, unchanged.** (a) transaction/RPC
+   hardening of the non-transactional link sequence — the TOCTOU guard only shrinks the window; (b)
+   **a proper unlink route.** Verified absent by direct read 2026-08-02; `person-identity.js:220`
+   still says so explicitly in-code ("a scheduled fast-follow, not yet built"). The Bayh mis-link
+   was corrected by controller-executed raw SQL against production because there is no in-app undo.
+   With 4 open flags awaiting Lance, another wrong link is one click away.
+10. **`refresh_vote_aggregates()` is still never called from any `src/` CLI — but the operational
+    risk is now substantially mitigated.** Still literally true (grep confirms no `src/` file calls
+    it). BUT: the scheduler (`scripts/scheduled-ingest.js`) is now **registered and running** — Lance
+    ran the `schtasks` registration 2026-07-31 late night (switched to S4U logon, "run whether
+    logged on or not"), confirmed live by its first tick at 22:00 local that night, and every
+    ~15-minute tick since (`.superpowers/artifacts/scheduler-logs/`, most recently
+    2026-08-02T21:45Z at the time of this pass). It calls `scripts/refresh-aggregates.js`
+    automatically after every tick whose chosen source's own recorded counts show it actually wrote
+    rows (fail-open on an unrecognized shape). As long as this keeps running, the "charts silently
+    drift behind the vote list" failure mode this item describes should no longer recur — the
+    underlying design gap (no CLI calls it directly) is unchanged, but the live exposure it created
+    is closed. See `docs/SCHEDULED_INGESTION.md` (refreshed this same pass) for the full mechanism.
 
 ### Public-surface leaks (small, real, one-line fixes)
 
-11. **`legiscan_datasets` is anon-readable including `local_cache_path`** — a filesystem path on Lance's machine, on the public API. The 0010 comment justified two columns ("hash + timestamp"); the policy exposed four. The rationale it mirrored (`ingestion_runs` is anon-readable) was itself later revoked by 0016.
-12. **`public_reconciliation_flags` publishes the whole free-form `discrepancy` jsonb.** 0010 says the table is "deliberately NOT anon-readable"; 0016 built an owner-bypass view over it. The column list is supposed to be the wall, but one exposed column is an unstructured bag — any future writer adding a diagnostic field publishes it with no code change and no review signal.
+**Both re-verified 2026-08-02 by direct read of the current migrations — STILL OPEN, unchanged.**
+
+11. **`legiscan_datasets` is anon-readable including `local_cache_path`** — a filesystem path on
+    Lance's machine, on the public API. `0010_legiscan_identity_and_ledger.sql:63`'s `anon_read`
+    policy is unchanged. The 0010 comment justified two columns ("hash + timestamp"); the policy
+    exposes four. The rationale it mirrored (`ingestion_runs` is anon-readable) was itself later
+    revoked by 0016.
+12. **`public_reconciliation_flags` publishes the whole free-form `discrepancy` jsonb.**
+    `0016_public_read_surface.sql:60-63` is unchanged: `select vote_id, source_a, source_b,
+    discrepancy, resolved, created_at ... grant select on public_reconciliation_flags to anon,
+    authenticated`. The column list is supposed to be the wall, but one exposed column is an
+    unstructured bag — any future writer adding a diagnostic field publishes it with no code change
+    and no review signal. Now covers more ground than at compile time: open reconciliation flags
+    grew from 9 to 49 during TODO-25's fix (see "Accepted residuals" below) — more real rows now
+    flow through this same unreviewed public column.
 
 ### Accepted residuals — do NOT "fix" or re-litigate these
 
@@ -135,7 +251,7 @@ Items 1-4 are all draft-then-apply corrections governed by PLAYBOOK lesson 17 (e
 - **`identity_flags.cluster_key` drift:** membership change mints a new key; the old flag row sits orphaned/unresolved forever. Mitigation was display-side only. Relevant when reporting "the queue is down to N."
 - **275 MO House 2024 roll calls refused** (`0000-00-00`) — they arrive later via house.mo.gov with real dates. **36 MO bills deliberately show status `0`** — LegiScan's codebook has no word for it. **21 bills refused by the 400k gate + 1 image-only PDF** — "nothing was ever truncated." **11 MO Senate journal days quarantined.** **444 roll calls have no bill** (nominations, cloture). **MO 2010-2014 has bills, zero votes** — a source gap (`rollCallsPlanned = 0`). **Federal history is 119th-Congress-only.** **OpenStates MO events carry no per-voter casts** (upstream).
 - **Trust-layer residuals deferred to prompt v3:** `evidence_quote` content is unconstrained — a fabricated quote is storable as a public receipt; the sonnet verifier is the declared trust boundary. That acceptance must be restated if the verification model ever changes.
-- **`quarantine:true` in the legiscan reconciler is unreachable from real evidence** — correspondence proof requires tally agreement, hard contradiction requires disagreement; they can't coexist. Cross-source disagreements are **permanently human-review flags by design.** The 9 open vote-reconciliation flags will not self-clear; that's not a backlog to automate.
+- **`quarantine:true` in the legiscan reconciler is unreachable from real evidence** — correspondence proof requires tally agreement, hard contradiction requires disagreement; they can't coexist. Cross-source disagreements are **permanently human-review flags by design.** The open vote-reconciliation flag count grew from 9 (compile time) to **49** (live-verified via `node --env-file=.env scripts/data-status.js`, 2026-08-02) — 29 of the increase is the Fitzwater undercount class TODO-25's session-merge fix surfaced (see §3 item 1), not new decay. They will not self-clear; that's not a backlog to automate.
 - **Retraction is this codebase's ONE sanctioned delete** (FK order, `legiscan-` prefix-guarded). Any other row-deleting code is a violation.
 - **Glossary: 731 of 847 terms are bare stubs**, 704 blocked on an unresolvable citation — a human mapping decision, not review backlog and not API spend. Real content ≈ 116 entries.
 
@@ -175,15 +291,44 @@ DATA_INVENTORY has a section literally titled *"Numbers that look alarming but a
 
 ## 5. The 60-second orientation
 
-**Where it stands.** Backend is live and broadly trustworthy; the site is built and merged but **not deployed by design**. Suite: 1,975/1,975 green, tree clean, migrations 0001-0020 applied. Summary waves resumed 2026-07-31 on the $0 subagent path — wave 1 shipped 40 bills (26 published / 12 flagged / 2 shape failures, both recovered). Identity merge sits at 37 clusters, 4 open flags awaiting Lance. Glossary has 116 real entries and a never-run billed E2E.
+*Rewritten 2026-08-02 — the original version of this section was built entirely around the TODO*
+*25-29 framing, which is now stale (see §3): those five items, plus 33 and 35, are all closed or*
+*corrected. This section no longer centers on them.*
 
-**What actually matters next, in order:**
+**Where it stands.** Backend is live and broadly trustworthy; the site is built and merged but
+**not deployed by design**. Suite: **2,192/2,192 green** (live-verified 2026-08-02, `node --test`
+from repo root), tree clean, migrations 0001-0020 (+0018a) applied. Summary waves: wave 1
+(2026-07-31, 40 bills: 26 published/12 flagged/2 shape failures, both recovered) → wave 2
+(2026-08-01, 60 bills: 31 published/29 flagged) → a review-queue backfill (2026-08-02, 15 of the
+106 stale-verdict drafts re-checked: 8 auto-published, 7 flagged with a named specific gap). Live
+totals (`npm run status`, 2026-08-02): **115 summaries published, 98 still draft/flagged** awaiting
+Lance's read. Identity merge sits at 37 clusters, 4 open flags awaiting Lance (unchanged). Glossary
+has 116 real entries and a never-run billed E2E (unchanged — still blocked on the spend hold).
 
-1. **The five audit defects (TODO 25-29)** — this is what "locked in and accurate" now means, and defect 25 grows on a 30-minute timer. Confirm whether the cron is still writing. All are draft-then-apply: Lance runs the SQL.
-2. **The two ungated model CLIs** (`summarize.js`, `verify.js`) and **`summarize.js`'s truncating `.select()`** — cheap, and both are live foot-guns under a standing spend hold.
-3. **Put the MO House `unique` trap on the record** before anyone proposes a House multi-era backfill.
-4. **Lance's 4 identity flags** (Brown ×3, Moore ×2, Johnson ×2, Menendez informational) — structurally his decision, not an agent's.
-5. **Two scope questions to surface, not solve:** "Upcoming bills" and static pre-rendering. Both were Lance's founding decisions that later work quietly narrowed without a recorded call.
+**What actually matters next, in order (revised 2026-08-02):**
+
+1. **Display-time dedup (§3 item 5)** — the one item from the original 5-item blocking list that is
+   genuinely still open. No dedup logic exists in `site/js/` for cross-adapter duplicate votes.
+   This is a display-logic build, not a draft-then-apply SQL correction like items 1-4 were.
+2. **The remaining open landmines (§3 items 6, 7, 9, 11, 12)** — re-verified still open 2026-08-02:
+   the MO House cross-era `unique` trap (now on the record as TODO 31 — put it there before anyone
+   proposes a House multi-era backfill), `summarize.js`'s still-truncating bare `.select()`s (TODO
+   32 — dodged twice by routing around the CLI, still armed), no in-app unlink route (still
+   controller-executed raw SQL only), and the two RLS over-exposures
+   (`legiscan_datasets.local_cache_path`, `public_reconciliation_flags.discrepancy` — the latter now
+   covers 49 rows, up from 9, after TODO-25's fix). Item 8 (the ungated `summarize.js`/`verify.js`
+   spend risk) is CLOSED as of 2026-07-31 — no longer on this list.
+3. **Lance's 4 identity flags** (Brown ×3, Moore ×2, Johnson ×2, Menendez informational) —
+   structurally his decision, not an agent's. Unchanged.
+4. **98 unpublished summaries** — all now genuinely judgment-requiring (the 15 that needed zero
+   judgment were cleared 2026-08-02). Lance was explicit he can't hand-process 106: *"I cannot
+   process 106 summaries, I don't have the time or knowledge."* A severity-sorted review view was
+   offered but not built — his call whether it's worth building.
+5. **49 open reconciliation flags** (up from 9 at compile time) — expected fallout of TODO-25's fix
+   surfacing a real Fitzwater-undercount discrepancy class, not new decay. Will not self-clear.
+6. **Two scope questions to surface, not solve:** "Upcoming bills" and static pre-rendering. Both
+   were Lance's founding decisions that later work quietly narrowed without a recorded call.
+   Unchanged from the original compile.
 
 **Number discipline** (Lance: *"review the documentation... and clarify what we have then document it so we don't get confused again"*): `npm run status` is the **only** source of truth for numbers; `docs/DATA_INVENTORY.md` is the source of truth for structure and meaning. Never hardcode bills / votes / vote_casts counts into a doc. CLAUDE.md's fresh-session read-first list omits both of these — the two artifacts created specifically to stop that confusion.
 

@@ -2,8 +2,23 @@
 
 The first thing in this repo designed to run **unattended, on Lance's machine, forever**, with no
 human watching a single invocation. Everything about its design follows from that one fact. This
-doc is what he needs to register it (his own step — an agent never runs `schtasks`) and to keep an
-eye on it afterward.
+doc is what let him register it (his own step — an agent never runs `schtasks`) and is what he uses
+to keep an eye on it now that it's running.
+
+> **Status (updated 2026-08-02): ALREADY REGISTERED AND RUNNING.** Lance ran the registration
+> 2026-07-31 late night — see "Registering it" below for the exact command, kept for reference (a
+> reinstall, a new machine, or a schedule change would use the same one, with `/f` safely
+> overwriting the existing registration). He also switched the task to **S4U logon** ("run whether
+> logged on or not, no stored password"), so it survives logouts/reboots. Confirmed alive by two
+> independent signals, both checked live 2026-08-02: (1) `.superpowers/artifacts/scheduler-logs/`
+> has a dated entry roughly every 15 minutes through the day of this check, alternating
+> `nothing-due`/`already-running`/`live`, exactly the healthy pattern described below; (2)
+> `ingestion_runs` shows `mo-senate-web` and `mo-house-xml` both finishing 15 minutes apart
+> (`21:00:07` and `21:15:07` on 2026-08-02, in the same log entry) — a spacing that matches the
+> scheduler's own 15-minute Task Scheduler tick picking off each source right as its 30-minute
+> cooldown clears, not the manual bash loop's old shape (which died with its session and produced
+> irregular gaps). The rest of this document, written before registration, still accurately
+> describes the script's behavior — read on for the mechanism, not just the history.
 
 ## What it does
 
@@ -140,6 +155,10 @@ source's real timeout right before that source is spawned (see "What it does," s
 
 ## Registering it (Lance's step — never run `schtasks` from an agent)
 
+**Already done (2026-07-31 late night) — this section is kept for reference,** not as an
+outstanding step. Use it again only to re-register (new machine, schedule change — `/f` overwrites
+the existing task safely) or to remind yourself what the registered task actually runs.
+
 Run every 15 minutes — deliberately shorter than every source's own interval above, so a tick is
 never more than ~15 minutes late; the per-source cooldowns above do the real gating, not this
 number.
@@ -164,7 +183,9 @@ been created.`
 - `/ru "%USERNAME%"` runs it as your own account, only while you're logged on (no password
   needed). If you want it to run even while logged out, use the Task Scheduler GUI instead
   (Actions tab → this same command; General tab → "Run whether user is logged on or not," which
-  will prompt for your password once).
+  will prompt for your password once). **This is what Lance actually did (2026-07-31 late night):**
+  ran the one-liner above first, then switched the task to this S4U/"logged on or not" mode via
+  the GUI, so it survives logouts and reboots without needing to stay signed in.
 - `/f` overwrites a prior registration with the same name — safe to re-run this command if you
   ever change the schedule.
 
@@ -249,25 +270,29 @@ resolves correctly (session `261` → LegiScan session `2239`). If it ever stops
 guessing — it does not block the other four sources (a lookup failure for any one source is
 isolated from the rest; see "What it does," step 2).
 
-## ⚠️ This scheduler CONTINUES feeding a known, currently-open data defect (TODO item 25) — read before registering
+## ✅ RESOLVED 2026-08-02: the TODO item 25 duplicate-session defect this scheduler used to feed is now fixed
 
-**TODO.md item 25** documents a real, currently-open duplicate-MO-session defect: session
-identifier `'2026'` (no `legiscan_session_id`) duplicates session `'261'` (the correct one,
-`legiscan_session_id = 2239`) — the same real legislative session recorded twice, splitting its
-bills/votes across two session rows on the public site. TODO.md's own words: *"it grew 15→16 bills
-during the audit: the cron is feeding the duplicate."*
+**This section originally warned (correctly, at the time) that registering this scheduler would
+mean `mo-senate-web` kept feeding a known, currently-open duplicate-MO-session defect forever.**
+That defect (TODO.md item 25: session identifier `'2026'`, no `legiscan_session_id`, duplicating
+the real session `'261'`/`legiscan_session_id 2239`) is now closed, verified against CHATLOG.md's
+2026-08-01/02 entries and TODO.md's own item 25 (struck through as done):
 
-**The feeder is `mo-senate-web`, which IS in this registry.** `ingest-mo-senate.js`'s
-`ensureSessionRow` inserts a `sessions` row keyed on the bare calendar year (`identifier:
-String(year)`, e.g. `'2026'`, with no `legiscan_session_id`) on **every single invocation** —
-this is not a rare edge case, it is what that CLI's normal `--year <current> --limit 1` run always
-does. Registering this scheduler means `mo-senate-web` keeps running on its own 30-minute cadence
-forever, which means this duplicate keeps growing forever too, until TODO 25's session-merge fix
-is applied at the database level.
+- **The existing duplicate was cleaned up 2026-08-01:** 34 duplicate bills merged into their
+  canonical twins, 31 votes redirected, the duplicate `'2026'` session row deleted —
+  independently re-verified against the live DB afterward (0 duplicate bills, 0 orphaned votes,
+  31/31 redirected votes correct).
+- **The ROOT CAUSE — not just the cleanup — was closed 2026-08-02.** `ensureSessionRow`
+  (`src/cli/ingest-mo-senate.js`) no longer inserts a bare-year `sessions` row with no
+  `legiscan_session_id` on every invocation; it now uses the same year+name session resolution
+  `ensureLegiscanSessionRow` already proved correct, so `mo-senate-web`'s normal
+  `--year <current> --limit 1` run can no longer mint a fresh `'2026'`-style duplicate. (A same-day
+  self-correction closed a false-ambiguity risk the first cut of this fix would have introduced the
+  next time MO calls a special session — see CHATLOG 2026-08-02.)
 
-**The honest framing is neutral-vs-today, not "unrelated."** This scheduler does exactly what the
-manual bash loop already did before it — it neither creates nor worsens the defect relative to
-current practice — but it is **not unrelated to it**, and running it unattended means the defect
-now grows on a durable, forever cadence instead of a session-lifetime one. Registering this
-scheduler is not blocked on TODO 25 being fixed first (the brief scoped this build to the
-scheduler, not to that merge), but Lance should register it knowing this, not discover it later.
+**What this means for the scheduler:** `mo-senate-web` keeps running on its registered 30-minute
+cadence exactly as before — nothing about the scheduler itself changed — but it is no longer
+feeding a duplicate-session defect while it does. Re-verify this claim against `sessions` /
+TODO.md if this document is read long after 2026-08-02 and the fix's continued correctness matters
+(12 real scheduler ticks had run clean with zero duplicates recreated as of the 2026-08-02 check
+that closed this item).
