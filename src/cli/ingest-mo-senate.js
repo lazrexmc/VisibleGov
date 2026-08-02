@@ -8,6 +8,7 @@ import { fetchWithLimit } from '../lib/http.js';
 import { SourceFetchError } from '../lib/errors.js';
 import * as senateWeb from '../adapters/mo-senate-web.js';
 import * as journalPdf from '../adapters/mo-senate-journal-pdf.js';
+import { SPECIAL_IDENTIFIER_PATTERN } from './ingest-legiscan.js';
 
 // Journals-first MO Senate driver: roster ensure -> journal-day worklist -> per-day PDF
 // extraction/parsing -> votes + gated casts. Separate small CLI (same rationale as
@@ -507,8 +508,15 @@ export async function ensureSessionRow(client, runId, year) {
     filter: (q) => q.eq('jurisdiction_id', 'mo-legislature'),
   });
   if (candErr) throw new Error(`mo-senate session year/name candidate lookup failed: ${candErr.message}`);
+  // FIX (review finding, 2026-08-02): this scan reads the SAME shared `sessions` table
+  // ingest-legiscan.js populates with its own Special-session rows (e.g. "2022 1st Extraordinary
+  // Session") — excluding them mirrors ensureLegiscanSessionRow's own candidate filter exactly.
+  // The risk was never whether MO SENATE has a special-session concept of its own (it doesn't);
+  // it's that a LegiScan-minted special-session row for this same year would ALSO satisfy the
+  // name-prefix check and manufacture a false ambiguity this driver never actually has.
   const yearNameCandidates = (candidateRows ?? []).filter((row) => (
     row.identifier !== identifier
+    && !SPECIAL_IDENTIFIER_PATTERN.test(row.identifier)
     && typeof row.name === 'string'
     && row.name.trim().startsWith(identifier)
   ));

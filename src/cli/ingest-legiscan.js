@@ -154,7 +154,12 @@ export function buildLegiscanSpecialSessionIdentifier(datasetMeta) {
 // (their own `name` also starts with the year) and either wrongly attach to one or spuriously
 // throw AmbiguousLegiscanSessionMatchError. See ensureLegiscanSessionRow's own test coverage for
 // the concrete scenario this guards.
-const SPECIAL_IDENTIFIER_PATTERN = /-special-\d+$/;
+// Exported (2026-08-02, review finding) so any OTHER driver scanning the shared `sessions` table
+// for year+name candidates can exclude rows THIS driver minted for a Special session — see
+// ensureSessionRow's own candidate filter in ingest-mo-senate.js for why this matters there too:
+// the risk isn't whether that driver has its own special-session concept, it's that this table is
+// shared and already contains special-session rows this pattern must keep excluding everywhere.
+export const SPECIAL_IDENTIFIER_PATTERN = /-special-\d+$/;
 
 async function patchSessionRow(client, row, legiscanSessionId) {
   // Conflict guard (mirrors legiscan-identity.js's resolveOrCreateLegiscanPerson exactly): a

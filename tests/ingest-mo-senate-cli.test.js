@@ -615,6 +615,22 @@ test('ensureSessionRow: (c) two differently-identified year+name candidates is g
   assert.equal(rows.length, 2, 'no row was created or mutated');
 });
 
+// (e) FIX (review finding, 2026-08-02): a Special-session row LegiScan minted for this same year
+// (identifier ending '-special-<n>', e.g. ingest-legiscan.js's own "2026 1st Extraordinary
+// Session" shape) must NOT be treated as a second year+name candidate — it shares this table but
+// isn't a regular-session duplicate of '261'. Without the SPECIAL_IDENTIFIER_PATTERN exclusion,
+// this would wrongly throw AmbiguousMoSenateSessionMatchError every run until manually resolved.
+test('ensureSessionRow: (e) a LegiScan Special-session row for the same year is excluded from the candidate scan — resolves cleanly onto the Regular session, never ambiguous', async () => {
+  const { client, rows, upserts } = makeFakeSessionsClient([
+    { id: 'sess-261', jurisdiction_id: 'mo-legislature', identifier: '261', name: '2026 2nd Regular, 103rd General Assembly' },
+    { id: 'sess-special', jurisdiction_id: 'mo-legislature', identifier: '2026-special-9999', name: '2026 1st Extraordinary Session' },
+  ]);
+  const row = await ensureSessionRow(client, 'run-1', 2026);
+  assert.equal(row.id, 'sess-261');
+  assert.equal(upserts.length, 0, 'a clean single-candidate resolution must never fall through to an insert');
+  assert.equal(rows.length, 2, 'no row created or mutated');
+});
+
 // (d) existing step-3 behavior, now the true fallback: neither a bare-year nor a name-prefix
 // match exists — mints a new bare-year row (task-5-brief.md step 2's original row shape).
 test('ensureSessionRow: (d) neither a bare-year nor any name-prefix match — falls through to creating a new bare-year row (step 3)', async () => {

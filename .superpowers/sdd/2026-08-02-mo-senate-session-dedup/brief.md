@@ -107,3 +107,26 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 
 Return: status, commit hash, fail-count line verbatim, the live-verification result for year=2026
 (does it now resolve onto session '261'?), and concerns.
+
+---
+
+## Ledger
+
+Review 1: SHIP, but Important-1 found the brief's own reasoning for skipping
+SPECIAL_IDENTIFIER_PATTERN was wrong — the risk isn't whether mo-senate-web has a special-session
+concept (it doesn't), it's that the shared `sessions` table already contains LegiScan-minted
+special-session rows this scan doesn't exclude. Fails loud (never silently wrong), dormant today
+(2026 is a Regular session), but a real gap, not a hypothetical one.
+
+Closed directly (small, well-scoped, high context already loaded): exported
+SPECIAL_IDENTIFIER_PATTERN from ingest-legiscan.js (additive), added the same exclusion to
+ensureSessionRow's candidate filter. Proven genuinely load-bearing by reverting the src fix and
+confirming the new test (e) throws the exact false-ambiguity error the review predicted, then
+restoring and confirming green. Full suite 2148/0.
+
+Also, independently, before this: found and removed a fresh EMPTY duplicate '2026' session row
+(0 bills attached) that the OLD code minted during the gap between yesterday's TODO-25 cleanup and
+this fix landing — verified empty before deleting, then traced the fixed resolution logic against
+live post-delete data and confirmed year=2026 now resolves onto session '261' (the canonical row)
+with zero ambiguity. TODO 25 root cause is closed: mechanically, verified, and battle-tested
+against the exact false-positive scenario a reviewer found.
