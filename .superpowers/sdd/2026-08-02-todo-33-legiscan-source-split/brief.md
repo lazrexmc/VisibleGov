@@ -153,3 +153,24 @@ current `source='legiscan'` rows (counts per bucket, and explicit disclosure of 
 not classify and left as `legiscan`), the `--dry-run` output of the new correction against the real
 live DB, and concerns — especially anything about the budget-summing logic you are not 100% certain
 is airtight, given the suspension-level stakes.
+
+---
+
+## Ledger — SHIP
+
+Independent adversarial review verified the budget-summing math by hand-tracing the actual
+production call sites (not just pure helpers) and hand-computing both refusal scenarios with real
+numbers: 29,900 spent under either label + a 200-query plan from the OTHER CLI → combined 30,100
+≥ 30,000 cap → correctly refuses, both directions. No doubt remaining on this.
+
+Historical classification independently re-derived from a from-scratch script against the live
+DB, not copied from the correction's own logic: 52 unchanged / 2 relabeled / 0 unclassified,
+same two row ids as the correction's own dry-run. The two error-string fallback markers were
+structurally verified, not just tested: grepped every real call site and confirmed
+ingest-legiscan-texts.js contains zero `insertIfAbsent` calls and never imports legiscan-votes.js
+— it is structurally incapable of producing either marker string.
+
+Write guard confirmed safe (id + source WHERE clause, row-count mismatch guard against a
+concurrent relabel), nothing in the diff runs it live. 2 Minor, non-blocking findings noted (a
+pre-existing stale doc comment; a documented-by-design backward-compat default). Suite and
+--dry-run both independently reproduced exactly.
