@@ -1166,3 +1166,23 @@ both its pending rows, correctly, with the new wording. Pure display fix — not
 
 **Where the day's non-usage queue stands: TODO 25, 26, 27, and 28 all closed**, plus two real
 production issues found and fixed along the way that weren't on anyone's list (lessons 20 and 21).
+
+## 2026-08-02 (continued) — TODO 29 confirmed clean; TODO 35 was never a real defect
+
+Working down the low-cost backlog. TODO 29 (hygiene) re-verified accurate, no action needed.
+
+**TODO 35 (MO Senate roster "duplication") turned out to be a false alarm, and worth documenting
+why.** Live investigation found 30 of 34 senate seats really do show two `legislators` rows per
+`mo_senate_id` — but they're two DIFFERENT real senators, not duplicates: normal district
+succession across eras (an earlier occupant's LegiScan-only row alongside the current occupant's
+linked one). Scott Sifton, cited as an example of the "problem," carries zero `terms` rows — the
+identity matcher correctly refuses to link him to anyone, because there's nothing to safely match
+against. The Mary Coleman / Mary Elizabeth Coleman pair, TODO 35's own headline example of a
+"missed unification," was already merged to one person. The one real ambiguity in this roster (Dan
+Brown / Justin Brown) was already a known, open flag — untouched, exactly where it should stay.
+
+Building the "identity merge pass" TODO 35 called for would have meant writing new automated
+merge logic for a same-seat pattern that is, by design, mostly DIFFERENT people — precisely the
+class of mistake (the Symington father/son near-miss) this project has been burned by before.
+Verifying against live data before writing any code caught that no fix was needed at all — the
+existing identity system was already right.

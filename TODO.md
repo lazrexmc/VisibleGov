@@ -302,15 +302,20 @@
     scheduler's frozen `--limit 1` is unaffected. 9 new tests
     (`tests/mo-house-xml.test.js`), 2101/2101 green.
 
-35. **MO Senate roster is duplicated in `legislators`** (found 2026-08-01, investigating TODO 25's
-    vote-reconciliation flags). Every current senator has TWO rows — one LegiScan-sourced (party
-    set), one mo-senate-web-sourced (party NULL) — plus at least one name-variant pair not
-    unified (Mary Coleman / Mary Elizabeth Coleman). Currently harmless for tally comparisons (the
-    duplication cancels out), but it's a live identity defect: casts and sponsorships could split
-    across the two rows for the same real person, undercounting either row's activity on their
-    profile page. Fix = identity merge pass scoped to the MO Senate roster (same exact-match
-    machinery as the existing person-identity merger, not new logic) — not urgent, not blocking,
-    but real and worth a dedicated pass.
+35. ~~**MO Senate roster is duplicated in `legislators`.**~~ **RE-INVESTIGATED 2026-08-02, NOT A
+    DEFECT — closing with a corrected record.** The original 2026-08-01 finding was based on an
+    incomplete read. Live check: 30 of 34 MO senate seats DO show two rows per `mo_senate_id`, but
+    they're two DIFFERENT real people, not duplicates — normal district succession across eras
+    (e.g. senate seat 1: Scott Sifton, an earlier occupant, vs Doug Beck, the current one).
+    Confirmed directly: Sifton carries ZERO `terms` rows, so the identity matcher correctly leaves
+    him unlinked — there's no era data to safely match against, exactly the right call, not a
+    missed merge. The Mary Coleman / Mary Elizabeth Coleman pair — TODO 35's own cited example —
+    is **already merged to the same person_id**, disproving the "not unified" claim outright. The
+    one genuine ambiguity in this roster (Dan Brown / Justin Brown, senate seat 16) was ALREADY a
+    known, open identity flag before this investigation — untouched, still awaiting Lance's read,
+    exactly where it belongs. Building an automated "MO Senate roster merge" as originally proposed
+    would have risked the exact cross-era mis-merge class this project has been hurt by before
+    (the Symington father/son near-miss); verifying first caught that a fix wasn't needed at all.
 
 36. [x] ~~A live LegiScan run failed with an unhandled duplicate-key error on
     `vote_reconciliation_flags`.~~ **FIXED 2026-08-02**, found by a post-TODO-27 verification
@@ -377,9 +382,9 @@
     4 rows (2 real + 2 misleading stubs) to 2; a mo-house-only bill still shows both pending rows,
     correctly never suppressed, with the new honest wording.
 
-29. **Hygiene:** 555 of 1,607 legislator rows have zero votes; `districts` table is empty (0 rows,
+29. **Hygiene, re-verified 2026-08-02, no action needed:** `districts` table still empty (0 rows,
     never populated — the site never reads it); 0 rows have `image_url`/`contact` (photos derive
-    from bioguide at render time, by design).
+    from bioguide at render time, by design). Both confirmed by design, not decay.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
