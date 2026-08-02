@@ -73,12 +73,15 @@
   - **4 unresolved identity flags** — Hank vs. Speaker Mike Johnson; Barry vs. Blake Moore; Dan vs.
     Justin Brown (likely: link Justin's two rows, keep Dan separate — Lance's read, not assumed);
     plus the Menendez informational flag. Local review server, one decision each.
-  - **35 unpublished summaries — but "flagged" ≠ "draft", and only ~20 are actual problems.**
-    `status` lives on `summaries`; a *verdict* lives on `summary_verifications`. There is no
-    "flagged" status. Of the 35: ~20 carry an adverse verdict (real gaps), ~14 are clean but simply
-    never published, 1 was never verified. Each needs Lance's read or
-    a re-author. 2 of these failed shape validation on a stray line break (newline-injection guard)
-    and just need re-authoring.
+  - **98 unpublished summaries remaining (2026-08-02, corrected count — was 106 before today's
+    backfill).** `status` lives on `summaries`; a *verdict* lives on `summary_verifications`. There
+    is no "flagged" status. 15 of the original 106 needed zero judgment — they only ever had ONE
+    verification axis run (14 completeness-only, pre-dating the completeness axis; 1 fully
+    unverified). Ran the missing axis via the $0 subagent path, mechanically re-derived (never
+    trusting subagent self-report): **8 auto-published outright**, 7 joined the queue with a named,
+    specific missing-provision reason. Full trail: CHATLOG 2026-08-02 "the review queue backfill".
+    All 98 remaining need Lance's read or a re-author — a severity-sorted review view (single-issue
+    flags first) was offered but not yet built; Lance's call whether to build it.
   - **9 open vote-reconciliation flags** — source discrepancies held out of the clean record.
   - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**

@@ -1249,3 +1249,45 @@ classification from a script written from scratch against the live database — 
 **The day's full tally: TODO-25, 26, 27, 28, 29, 33, 35 all closed or corrected, two unlisted
 production issues found and fixed, zero data ever at risk.** The backlog from yesterday's audit is
 clear.
+
+## 2026-08-02 (later) — Lance: "I cannot process 106 summaries" — the review queue backfill
+
+Lance's honest pushback: *"i cannot process 106 summaries, I don't have the time or knowledge. All
+I can viably do is click accept and publish but that violates my program's intent."* Correctly
+diagnosed, not dismissed — 106 real items is not a meaningful human-review workload, and rubber-
+stamping would violate the project's own facts-only/verified principle. Investigated the actual
+composition rather than answering in the abstract: of the 106, 15 needed zero judgment at all —
+summaries that only ever went through ONE verification axis (14 completeness-only, pre-dating the
+completeness axis; 1 fully unverified) because the axis literally never ran, not because it failed.
+Running the missing check is mechanical, not a review decision — Lance approved running it ("yes").
+
+Built a backfill: reused `parseBullets` (`site/js/summary-parse.js`) to extract `{point, section}`
+bullets from each summary's real rendered `body_md` (a wrong assumption that `body_md` was raw JSON
+was caught before anything ran — a live row showed it's markdown). Dispatched the completeness
+axis's own two-phase contract (`src/lib/verifier.js`) via the $0 subagent path: phase 1 (key
+provisions, bill text only, zero summary knowledge) then phase 2 (coverage, given phase 1's own
+list back) — plus a support-verify dispatch for the one fully-unverified summary (SB 1019). Every
+phase-1 output was mechanically grounding-checked (the same whitespace-collapsed substring rule
+`assessCompleteness` enforces) before being trusted: 4 of 15 failed on the first pass, all the same
+defect — a checker concatenating a section heading and a subsection label with a `" -- "` separator
+it invented, never a real bill-text bytes. Retried those 4 with an explicit warning against that
+exact mistake; all 4 passed clean on retry. This is the same citation-invention class documented
+earlier in this file (six checkers synthesizing statute ranges) — the grounding gate keeps catching
+it, which is the point of having it.
+
+`summary-queue.js`'s own `record`/`classifyRecordItem` couldn't be reused directly — its
+`alreadySummarized` short-circuit exists specifically to refuse re-recording a summary that already
+has a live draft, which is exactly what every one of these 15 already is. Wrote a small adapter
+script that reuses every trust-critical primitive UNCHANGED — `assessVerdicts`, `assessCompleteness`,
+`validateVerdictBinding`, `checkStatedPurposeGrounding`, `autoPublishSummary`, and the project's own
+`getClient()` (real supabase-js, not a hand-rolled REST stub, so `autoPublishSummary`'s
+`.from().update().eq()` chain behaves exactly as it does in production) — and never re-derives or
+paraphrases their logic. `--dry-run` first, live run second, byte-for-byte matching output.
+
+Result, mechanically derived, never taken on the subagents' own "DONE, N/M covered" word: **8 of 15
+published outright** (both axes independently clean/complete), **7 joined the review queue with a
+named, specific reason** (which key provision the summary omits — a citation-lookup-sized task, not
+a re-analysis), **0 malformed, 0 gate failures**. Verified post-write against the live DB: 8
+`status=published` with both `support:clean` and `completeness:complete` rows; 7 still `draft` with
+an honest `completeness:incomplete` row naming what's missing. Review queue: 106 → 98 real items
+left, all now the genuinely-judgment-requiring kind trust-model v3 was actually designed for.
