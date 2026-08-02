@@ -328,8 +328,28 @@ function renderSponsors(container, sponsorRows) {
   }
 }
 
+// TODO 28 (2026-08-02 brief): a tally that is POSITIVELY known to be all-zero (the cast fetch
+// succeeded and simply found nothing) is a different fact from a tally that is unavailable (the
+// fetch itself failed, handled separately above via the `!tally` branch) — `null` must never be
+// mistaken for "confirmed zero" here or in filterRedundantOpenStatesVotes below.
+function tallyIsAllZero(tally) {
+  if (!tally) return false;
+  const otherSum = Object.values(tally.other || {}).reduce((sum, n) => sum + n, 0);
+  return tally.yea === 0 && tally.nay === 0 && tally.not_voting === 0 && tally.absent === 0 && otherSum === 0;
+}
+
+// Fix, TODO 28 (2026-08-02 brief): a bare "yea 0, nay 0, not voting 0, absent 0" line reads as a
+// real (and strange) unanimous-absent outcome, not as "no individual-member data available" — the
+// actual fact for every zero-cast row left standing after filterRedundantOpenStatesVotes (a
+// mo-house row still mid-pipeline, or one of the small set of OpenStates-only bills with nothing
+// else to show). One honest, source-agnostic wording covers both truthfully ("recorded", not
+// "existed" — a reader must not conclude nobody voted) — the brief is explicit that the frontend
+// should not try to guess which of the two causes applies from here.
+export const ZERO_CAST_TALLY_NOTE = '(no individual member votes recorded for this record)';
+
 function formatTallyLine(tally) {
   if (!tally) return 'Recorded-cast tally unavailable for this roll call.';
+  if (tallyIsAllZero(tally)) return ZERO_CAST_TALLY_NOTE;
   const parts = [
     `yea ${tally.yea}`, `nay ${tally.nay}`, `not voting ${tally.not_voting}`, `absent ${tally.absent}`,
   ];
@@ -337,6 +357,36 @@ function formatTallyLine(tally) {
     parts.push(`${key} ${tally.other[key]}`);
   }
   return `Recorded casts in our data — ${parts.join(', ')}`;
+}
+
+// filterRedundantOpenStatesVotes(votes, tallyByVoteId) -> votes, with redundant `mo-ocd-*`
+// zero-cast rows removed WHEN this bill has at least one vote elsewhere with a real (positively
+// non-zero) recorded tally. TODO 28 (2026-08-02 brief): `votes` rows carrying zero `vote_casts`
+// come from two structurally DIFFERENT causes that need DIFFERENT treatment:
+//   - `mo-ocd-*` (OpenStates) rows are permanent, structurally noisy bill-action-log stubs — a
+//     bare status word (`result: "pass"`), never a real tally, often many per bill. OpenStates has
+//     no per-member cast data for MO at all (a structural upstream gap, not "pending"). Once the
+//     bill has ANY real cast-bearing vote from another source, these add zero reader value.
+//   - `mo-house-xml-*` rows carry REAL, SPECIFIC tallies already (e.g. "20-0") — the vote row
+//     lands immediately from the bill's action history; casts arrive LATER from a separately
+//     polled roll-call PDF that UPDATES THE SAME vote_id in place (ingest-mo-house.js's
+//     persistRollCallCasts/processRollCallPdf — verified in the code, never a second vote row).
+//     These are real data, just incomplete, and are NEVER suppressed.
+// Scoped at the WHOLE-BILL level on purpose — this never attempts to pair one specific OpenStates
+// stub with one specific real vote by date/tally proximity. The sampled data proves no honest 1:1
+// correspondence exists (multiple stubs, no matching tallies, sometimes different dates entirely)
+// — inventing one would be exactly the fuzzy-matching this codebase has banned everywhere else.
+// A null/unavailable tally (the per-vote cast fetch itself failed) is never treated as "positively
+// zero," so an mo-ocd row is only ever suppressed when its own zero tally is actually confirmed.
+// Pure: never throws, never touches the DOM or network.
+export function filterRedundantOpenStatesVotes(votes, tallyByVoteId) {
+  const list = Array.isArray(votes) ? votes : [];
+  const hasRealDataElsewhere = list.some((v) => !tallyIsAllZero(tallyByVoteId.get(v.id)) && tallyByVoteId.get(v.id));
+  if (!hasRealDataElsewhere) return list;
+  return list.filter((v) => {
+    const isMoOcd = typeof v.source_key === 'string' && v.source_key.startsWith('mo-ocd-');
+    return !(isMoOcd && tallyIsAllZero(tallyByVoteId.get(v.id)));
+  });
 }
 
 // Fix round 1, HIGH-1 (task-9 review — 7 live unresolved flags all land on the roll-call surface
@@ -463,7 +513,10 @@ const BILL_SELECT = 'id,identifier,title,status,canonical_url,session_id,'
 // uses (never a bare `*`), and `.nullslast` on the vote_date ordering — Postgres's own default for
 // a bare DESC order is NULLS FIRST, which would put undated/procedural votes at the TOP of a
 // newest-first roll-call list; `.nullslast` keeps that honestly at the end instead.
-const VOTES_SELECT = 'id,jurisdiction_id,chamber,vote_date,question,result,source_url';
+//
+// `source_key` added, TODO 28 (2026-08-02 brief): cheap, additive, already exists on `votes` —
+// needed by filterRedundantOpenStatesVotes below to identify which rows are `mo-ocd-`-sourced.
+const VOTES_SELECT = 'id,jurisdiction_id,chamber,vote_date,question,result,source_url,source_key';
 
 // Fix round 1, MED-3 (task-9 review): groupSponsorships can THROW (UnknownSponsorTypeError, a
 // sponsor_type outside the 0015 vocabulary) — the fetch AND the render call are now inside the
@@ -568,9 +621,14 @@ export async function loadVotesSection(container, { billId }) {
   // renderVotes already has for source links) would escape past the already-painted 'ready' state
   // and be silently swallowed by bootstrapBillPage's own `.catch(() => {})` — a blank section with
   // no failed message and no retry, worse than either honest state.
+  // TODO 28 (2026-08-02 brief): whole-bill redundant-noise filter, applied AFTER the flags join
+  // (flaggedVotes still carries every real vote's own `id`, which is all the filter keys on) and
+  // BEFORE render — additive/display-only, never mutates `votes` or `tallyByVoteId` themselves.
+  const displayVotes = filterRedundantOpenStatesVotes(flaggedVotes, tallyByVoteId);
+
   try {
     sectionState(container, { state: 'ready' });
-    renderVotes(container, flaggedVotes, tallyByVoteId, flagsUnavailable);
+    renderVotes(container, displayVotes, tallyByVoteId, flagsUnavailable);
   } catch {
     sectionState(container, {
       state: 'failed', message: "Couldn't load roll calls — retry", onRetry: reload,

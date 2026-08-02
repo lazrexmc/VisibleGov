@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import {
   tallyPositions, renderSummaryStructured, buildVerificationNote, NO_SUMMARY_NOTE, PLAIN_TEXT_FALLBACK_NOTE,
   loadVotesSection, loadSummarySection, classifyVerificationOverall, selectVerificationNotes,
+  filterRedundantOpenStatesVotes, ZERO_CAST_TALLY_NOTE,
 } from '../site/js/bill-page.js';
 import { markTerms } from '../site/js/glossary-inline.js';
 import { renderMarkdown } from '../src/lib/summarizer.js';
@@ -76,6 +77,113 @@ test('tallyPositions: rows that are null/malformed are skipped, not crashed on',
   // A row present but with no `position` at all (position undefined) still counts honestly,
   // under its own raw (stringified) value, rather than being silently discarded.
   assert.equal(result.other.undefined, 1);
+});
+
+// ============================================================================
+// filterRedundantOpenStatesVotes — TODO 28 (2026-08-02 brief). Two structurally different
+// zero-cast causes on `votes` need DIFFERENT treatment: `mo-ocd-*` rows are OpenStates' own
+// bare-status-word bill-action stubs (permanent, structurally noisy — no per-member data ever
+// exists for MO from that source); `mo-house-xml-*` rows are real, specific tallies whose casts
+// land LATER via the same vote_id (transient, never a duplicate). Suppression is BILL-LEVEL only
+// ("real data exists elsewhere on this bill, so the noise adds nothing") — never a claimed
+// row-to-row pairing by date/tally proximity, which the sampled data proves does not exist
+// honestly. A null/unavailable tally (the per-vote cast fetch itself failed) is never treated as
+// "positively zero" — suppressing on an assumption would invent certainty the fetch never gave.
+// ============================================================================
+
+test('filterRedundantOpenStatesVotes: a mix of a cast-bearing vote and mo-ocd zero-cast noise -> the noise rows are excluded', () => {
+  const votes = [
+    { id: 'v-real', source_key: 'mo-house-xml-hb1-1' },
+    { id: 'v-ocd-1', source_key: 'mo-ocd-vote/1' },
+    { id: 'v-ocd-2', source_key: 'mo-ocd-vote/2' },
+  ];
+  const tallyByVoteId = new Map([
+    ['v-real', { yea: 20, nay: 0, not_voting: 0, absent: 0, other: {} }],
+    ['v-ocd-1', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+    ['v-ocd-2', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-real']);
+});
+
+test('filterRedundantOpenStatesVotes: a bill with ONLY mo-ocd zero-cast rows (no real data anywhere) -> nothing is suppressed', () => {
+  const votes = [
+    { id: 'v-ocd-1', source_key: 'mo-ocd-vote/1' },
+    { id: 'v-ocd-2', source_key: 'mo-ocd-vote/2' },
+  ];
+  const tallyByVoteId = new Map([
+    ['v-ocd-1', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+    ['v-ocd-2', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-ocd-1', 'v-ocd-2']);
+});
+
+test('filterRedundantOpenStatesVotes: mo-house zero-cast rows are NEVER suppressed, even alongside real data', () => {
+  const votes = [
+    { id: 'v-real', source_key: 'mo-house-xml-hb3-1' },
+    { id: 'v-house-pending', source_key: 'mo-house-xml-hb3-2' },
+  ];
+  const tallyByVoteId = new Map([
+    ['v-real', { yea: 6, nay: 3, not_voting: 0, absent: 0, other: {} }],
+    ['v-house-pending', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-real', 'v-house-pending']);
+});
+
+test('filterRedundantOpenStatesVotes: mo-house-only zero-cast bill (no real sibling) -> unaffected either way, both rows stay', () => {
+  const votes = [{ id: 'v-house-1', source_key: 'mo-house-xml-hb4-1' }];
+  const tallyByVoteId = new Map([
+    ['v-house-1', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-house-1']);
+});
+
+test('filterRedundantOpenStatesVotes: an mo-ocd row whose tally fetch FAILED (null, not positively zero) is never suppressed — no invented certainty', () => {
+  const votes = [
+    { id: 'v-real', source_key: 'mo-house-xml-hb5-1' },
+    { id: 'v-ocd-unknown', source_key: 'mo-ocd-vote/1' },
+  ];
+  const tallyByVoteId = new Map([
+    ['v-real', { yea: 10, nay: 0, not_voting: 0, absent: 0, other: {} }],
+    ['v-ocd-unknown', null],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-real', 'v-ocd-unknown']);
+});
+
+test('filterRedundantOpenStatesVotes: a non-mo-ocd, non-mo-house zero-cast source is never suppressed (only mo-ocd- rows are ever candidates)', () => {
+  const votes = [
+    { id: 'v-real', source_key: 'mo-house-xml-hb6-1' },
+    { id: 'v-other', source_key: 'us-congress-1' },
+  ];
+  const tallyByVoteId = new Map([
+    ['v-real', { yea: 10, nay: 0, not_voting: 0, absent: 0, other: {} }],
+    ['v-other', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-real', 'v-other']);
+});
+
+test('filterRedundantOpenStatesVotes: a missing/malformed source_key is never suppressed, never throws', () => {
+  const votes = [
+    { id: 'v-real', source_key: 'mo-house-xml-hb7-1' },
+    { id: 'v-no-source' },
+  ];
+  const tallyByVoteId = new Map([
+    ['v-real', { yea: 10, nay: 0, not_voting: 0, absent: 0, other: {} }],
+    ['v-no-source', { yea: 0, nay: 0, not_voting: 0, absent: 0, other: {} }],
+  ]);
+  const result = filterRedundantOpenStatesVotes(votes, tallyByVoteId);
+  assert.deepEqual(result.map((v) => v.id), ['v-real', 'v-no-source']);
+});
+
+test('filterRedundantOpenStatesVotes: empty/null votes -> empty array, never throws', () => {
+  assert.deepEqual(filterRedundantOpenStatesVotes([], new Map()), []);
+  assert.deepEqual(filterRedundantOpenStatesVotes(null, new Map()), []);
+  assert.deepEqual(filterRedundantOpenStatesVotes(undefined, new Map()), []);
 });
 
 // ============================================================================
@@ -554,6 +662,143 @@ test('loadVotesSection: a vote with NO matching flag row renders no badge (the p
 
   assert.equal(container.querySelector('.flag-badge'), null);
   assert.equal(container.querySelector('.flags-unavailable-notice'), null);
+});
+
+// ============================================================================
+// loadVotesSection — TODO 28 (2026-08-02 brief) DOM regression tests: the real fetch -> tally ->
+// filterRedundantOpenStatesVotes -> render pipeline, not just the pure filter tested above. Covers
+// the brief's four required cases (a)-(d).
+// ============================================================================
+
+function castsFor(byVoteId) {
+  return async (url) => {
+    const u = String(url);
+    for (const [voteId, casts] of Object.entries(byVoteId)) {
+      if (u.includes(`vote_id=eq.${voteId}`)) return okResponse(casts);
+    }
+    return okResponse([]);
+  };
+}
+
+test('loadVotesSection: (a) a mix of a cast-bearing vote and mo-ocd zero-cast noise — the noise rows do not render at all', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const castsByVote = castsFor({
+    'v-real': [{ position: 'yea' }, { position: 'yea' }],
+    'v-ocd-1': [],
+    'v-ocd-2': [],
+  });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/votes?')) {
+      return okResponse([
+        {
+          id: 'v-real', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '20-0', source_url: null, source_key: 'mo-house-xml-hb1-1',
+        },
+        {
+          id: 'v-ocd-1', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-02-01T00:00:00Z', question: 'Referred', result: 'pass', source_url: null, source_key: 'mo-ocd-vote/1',
+        },
+        {
+          id: 'v-ocd-2', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-02-15T00:00:00Z', question: 'Perfected', result: 'pass', source_url: null, source_key: 'mo-ocd-vote/2',
+        },
+      ]);
+    }
+    if (u.includes('/vote_casts?')) return castsByVote(url);
+    if (u.includes('/public_reconciliation_flags?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadVotesSection(container, { billId: 'bill-mixed-ocd' });
+
+  const rows = container.querySelectorAll('.bill-vote-row');
+  assert.equal(rows.length, 1, 'only the real cast-bearing vote renders — both mo-ocd stubs are suppressed');
+  assert.match(rows[0].querySelector('.bill-vote-result').textContent, /20-0/);
+});
+
+test('loadVotesSection: (b) a bill with ONLY mo-ocd zero-cast rows (nothing else to show) — both still render, with the honest zero-cast wording', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const castsByVote = castsFor({ 'v-ocd-1': [], 'v-ocd-2': [] });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/votes?')) {
+      return okResponse([
+        {
+          id: 'v-ocd-1', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-02-01T00:00:00Z', question: 'Referred', result: 'pass', source_url: null, source_key: 'mo-ocd-vote/1',
+        },
+        {
+          id: 'v-ocd-2', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-02-15T00:00:00Z', question: 'Perfected', result: 'pass', source_url: null, source_key: 'mo-ocd-vote/2',
+        },
+      ]);
+    }
+    if (u.includes('/vote_casts?')) return castsByVote(url);
+    if (u.includes('/public_reconciliation_flags?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadVotesSection(container, { billId: 'bill-ocd-only' });
+
+  const rows = container.querySelectorAll('.bill-vote-row');
+  assert.equal(rows.length, 2, 'nothing else exists to show — neither mo-ocd stub is suppressed');
+  for (const row of rows) {
+    assert.equal(row.querySelector('.bill-vote-tally').textContent, ZERO_CAST_TALLY_NOTE);
+  }
+});
+
+test('loadVotesSection: (c) a bill with mo-house zero-cast rows only — never suppressed, honest wording applied', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const castsByVote = castsFor({ 'v-house-pending': [] });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/votes?')) {
+      return okResponse([{
+        id: 'v-house-pending', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '20-0', source_url: null, source_key: 'mo-house-xml-hb2-1',
+      }]);
+    }
+    if (u.includes('/vote_casts?')) return castsByVote(url);
+    if (u.includes('/public_reconciliation_flags?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadVotesSection(container, { billId: 'bill-house-only' });
+
+  const rows = container.querySelectorAll('.bill-vote-row');
+  assert.equal(rows.length, 1, 'the mo-house row still renders — it is real data, just mid-pipeline');
+  assert.equal(rows[0].querySelector('.bill-vote-tally').textContent, ZERO_CAST_TALLY_NOTE);
+});
+
+test('loadVotesSection: (d) a cast-bearing vote plus an mo-house zero-cast row — the mo-house row is NOT suppressed (only mo-ocd rows ever are)', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  const castsByVote = castsFor({
+    'v-real': [{ position: 'yea' }, { position: 'yea' }, { position: 'nay' }],
+    'v-house-pending': [],
+  });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/votes?')) {
+      return okResponse([
+        {
+          id: 'v-real', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '2-1', source_url: null, source_key: 'mo-house-xml-hb3-1',
+        },
+        {
+          id: 'v-house-pending', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-05T00:00:00Z', question: 'On passage as amended', result: '6-3', source_url: null, source_key: 'mo-house-xml-hb3-2',
+        },
+      ]);
+    }
+    if (u.includes('/vote_casts?')) return castsByVote(url);
+    if (u.includes('/public_reconciliation_flags?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadVotesSection(container, { billId: 'bill-mixed-house' });
+
+  const rows = container.querySelectorAll('.bill-vote-row');
+  assert.equal(rows.length, 2, 'both rows render — the mo-house zero-cast row is real data, never suppressed by the presence of a real sibling');
+  const tallies = [...rows].map((r) => r.querySelector('.bill-vote-tally').textContent);
+  assert.ok(tallies.some((t) => t.includes('Recorded casts in our data')), 'the real vote still shows its actual tally');
+  assert.ok(tallies.includes(ZERO_CAST_TALLY_NOTE), 'the mo-house pending row shows the honest zero-cast wording, not a bare all-zero line');
 });
 
 // ============================================================================
