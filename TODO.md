@@ -361,11 +361,21 @@
       PLAYBOOK_DELTA lesson 20 for the full mechanism and the fake-test-client fix that had been
       masking it.
 
-28. **152 roll calls show a result with no member positions** (95 OpenStates 2022, 57 mo-house-xml
-    2026). Affects **52 bills**: 23 also have a real cast-bearing row for the same event (so a bill
-    page shows the same vote twice, e.g. HB 1800 "82-61 / 1 cast" beside "82-61 / 158 casts"), and
-    29 show a printed result with zero names. Not data loss — LegiScan supplies the real casts — but
-    it reads as broken. Fix = suppress or merge stub rows on the bill page.
+28. ~~**152 roll calls show a result with no member positions.**~~ **DONE 2026-08-02.** Live
+    investigation found the original framing conflated two structurally different causes needing
+    different treatment (167 rows / 60 bills by the time this ran, up from 152/52 — ongoing
+    ingestion, not drift): `mo-ocd` (OpenStates, 95 rows) are permanent bill-action-log stubs — a
+    bare "pass," never a real tally, several per bill, zero reader value once real data exists
+    elsewhere on the bill. `mo-house-xml` (72 rows) carry real specific tallies already ("93-42")
+    with casts landing later from a separately-polled PDF that updates the SAME `vote_id` in place
+    — never a duplicate, never safe to suppress. Fix (display-only, `site/js/bill-page.js`, no data
+    touched): OpenStates zero-cast rows are hidden ONLY when the bill has a real cast-bearing vote
+    elsewhere (bill-level, never a row-to-row pairing — the sampled data proved no honest 1:1
+    correspondence exists to find); any zero-cast row that still renders gets honest wording
+    ("no individual member votes recorded for this record") instead of a bare all-zero line that
+    reads as a real, strange outcome. Verified live via dev server + Playwright: HR 3737 went from
+    4 rows (2 real + 2 misleading stubs) to 2; a mo-house-only bill still shows both pending rows,
+    correctly never suppressed, with the new honest wording.
 
 29. **Hygiene:** 555 of 1,607 legislator rows have zero votes; `districts` table is empty (0 rows,
     never populated — the site never reads it); 0 rows have `image_url`/`contact` (photos derive

@@ -1144,3 +1144,25 @@ would be wasteful.
 Verdict on the original question: the scoped pass was worth exactly what it cost — found two real
 issues a full README read wouldn't have surfaced, one of them actively blocking production.
 Resuming TODO-28 next, as agreed.
+
+## 2026-08-02 (continued) — TODO-28 closed: the "duplicate vote" bug was actually two different bugs
+
+Investigating live data before writing any fix found the original framing was too simple. 167
+zero-cast roll calls (up from 152 — ongoing ingestion) split into two structurally different causes:
+**OpenStates contributes generic "pass"-only bill-action-log stubs** — sampled bills show as many as
+16 of these against 7 real votes, no real tally, a genuinely permanent upstream gap, not pending —
+while **MO House's own pipeline shows real, specific tallies already** ("93-42") with individual
+casts landing later from a separately-polled PDF that updates the SAME vote row in place, confirmed
+directly in the code — never a duplicate, ever.
+
+That distinction is what the fix is built on: OpenStates noise gets hidden, but only at the whole-
+bill level (never inventing a row-to-row pairing the data doesn't honestly support — the sampled
+tallies never matched), and only when real data exists elsewhere on the bill to justify hiding it.
+MO House's pending rows are never touched — they're real, just incomplete, and get honest wording
+instead of a bare "yea 0, nay 0" line that reads as an actual outcome. Verified live via dev server
++ Playwright, not just unit tests: HR 3737 went from 4 rendered rows to 2; a mo-house-only bill kept
+both its pending rows, correctly, with the new wording. Pure display fix — nothing in `votes` or
+`vote_casts` was touched.
+
+**Where the day's non-usage queue stands: TODO 25, 26, 27, and 28 all closed**, plus two real
+production issues found and fixed along the way that weren't on anyone's list (lessons 20 and 21).
