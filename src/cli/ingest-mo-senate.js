@@ -2,7 +2,7 @@ import {
   existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import {
-  getClient, openRun, closeRun, insertIfAbsent, isMissingColumnError, isMissingRelationError,
+  getClient, openRun, closeRun, insertIfAbsent, selectAll, isMissingColumnError, isMissingRelationError,
 } from '../lib/db.js';
 import { fetchWithLimit } from '../lib/http.js';
 import { SourceFetchError } from '../lib/errors.js';
@@ -465,10 +465,64 @@ export async function enforceDurableCooldown(
 
 // ---- session + roster persistence ----
 
+// TODO 25 root cause (.superpowers/sdd/2026-08-02-mo-senate-session-dedup/brief.md): MO's CURRENT
+// session is identified '261' (LegiScan's own scheme), not a bare calendar year — a bare-year-only
+// dedup has no way to discover that, so it re-minted a duplicate '2026' row on every journal-day
+// ingest (confirmed live; cleaned up once by TODO 25's live correction, but that cleanup is
+// one-time data surgery, not a code fix — this function was unchanged and would recreate the
+// duplicate on the very next run). Thrown here, never guessed.
+export class AmbiguousMoSenateSessionMatchError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'AmbiguousMoSenateSessionMatchError';
+    Object.assign(this, meta);
+  }
+}
+
 // task-5-brief.md step 2, exact row shape: identifier deliberately collides with OpenStates' own
-// year-keyed session rows so both sources dedupe to one row.
+// year-keyed session rows so both sources dedupe to one row. EXTENDED (TODO 25 root cause, see
+// AmbiguousMoSenateSessionMatchError's own comment above): step 2 below ports
+// ensureLegiscanSessionRow's own year+name resolution (src/cli/ingest-legiscan.js) — the proven,
+// reviewed fix for the identical problem shape (a Regular Session that may already have a row
+// under a DIFFERENT pre-existing identifier convention) — adapted for this file: no
+// legiscan_session_id to patch here (mo-senate-web carries no such column), so a match just
+// resolves onto the existing row's id, no write. No SPECIAL_IDENTIFIER_PATTERN guard ported —
+// this driver's `year` param is always a bare calendar year; it has no special-session identifier
+// concept of its own for that guard to protect against (confirmed by reading this whole file).
 export async function ensureSessionRow(client, runId, year) {
   const identifier = String(year);
+
+  // Step 1 (unchanged): exact bare-year match — still the common case for older sessions where no
+  // LegiScan session row was ever created under a different identifier.
+  const { data: bareYearRow, error: bareYearErr } = await client.from('sessions').select('id')
+    .eq('jurisdiction_id', 'mo-legislature').eq('identifier', identifier).maybeSingle();
+  if (bareYearErr) throw new Error(`mo-senate bare-year session lookup failed: ${bareYearErr.message}`);
+  if (bareYearRow) return { id: bareYearRow.id };
+
+  // Step 2 (new): year+name mapping — a Regular Session that already has a row under a DIFFERENT
+  // pre-existing identifier convention (the real '261' case). selectAll, never a bare .select()
+  // (this repo has been bitten by the 1000-row cap repeatedly) — sessions is small today but the
+  // pattern must be right regardless.
+  const { data: candidateRows, error: candErr } = await selectAll(client, 'sessions', 'id,identifier,name', {
+    filter: (q) => q.eq('jurisdiction_id', 'mo-legislature'),
+  });
+  if (candErr) throw new Error(`mo-senate session year/name candidate lookup failed: ${candErr.message}`);
+  const yearNameCandidates = (candidateRows ?? []).filter((row) => (
+    row.identifier !== identifier
+    && typeof row.name === 'string'
+    && row.name.trim().startsWith(identifier)
+  ));
+  if (yearNameCandidates.length > 1) {
+    throw new AmbiguousMoSenateSessionMatchError(
+      `mo-senate: year ${identifier} matches ${yearNameCandidates.length} existing sessions rows by `
+        + `year+name — never guessed between them: ${yearNameCandidates.map((r) => `${r.identifier} (${r.name})`).join(', ')}`,
+      { year: identifier, candidates: yearNameCandidates },
+    );
+  }
+  if (yearNameCandidates.length === 1) return { id: yearNameCandidates[0].id };
+
+  // Step 3 (existing behavior, now the true fallback): only reached when steps 1 and 2 both found
+  // nothing — mint a new bare-year row.
   await insertIfAbsent(client, 'sessions', [{
     jurisdiction_id: 'mo-legislature', identifier, name: `${year} Regular Session (MO Senate journals)`,
   }], 'jurisdiction_id,identifier');

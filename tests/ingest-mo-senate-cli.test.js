@@ -15,7 +15,7 @@ import {
   hasDoneMarker, writeDoneMarker,
   selectJournalDayWorklist,
   remainingCooldownMs, formatCooldownWait, enforceDurableCooldown, CooldownConvergenceError,
-  ensureSessionRow, ensureRosterIdentities,
+  ensureSessionRow, AmbiguousMoSenateSessionMatchError, ensureRosterIdentities,
   ensureRosterForRun, ensureIndexForRun,
   processJournalDay, replayJournalArtifacts, dryRunReport,
   runMoSenate,
@@ -514,43 +514,119 @@ test('remainingCooldownMs / formatCooldownWait: pure helpers', () => {
   assert.equal(formatCooldownWait(65000), '1m 5s');
 });
 
-// ---- session ensure ----
-
-function fakeSessionClient(existingRows = []) {
-  const upserts = [];
-  const rows = [...existingRows];
-  return {
-    upserts,
-    client: {
-      from(table) {
-        assert.equal(table, 'sessions');
-        return {
-          upsert: async (r, opts) => { upserts.push({ rows: r, opts }); rows.push(...r.map((x) => ({ id: 'sess-1', ...x }))); return { error: null }; },
-          select: () => ({
-            eq: (c1, v1) => ({
-              eq: (c2, v2) => ({
-                single: async () => {
-                  const found = rows.find((r) => r[c1] === v1 && r[c2] === v2);
-                  return found ? { data: { id: found.id }, error: null } : { data: null, error: { message: 'not found' } };
-                },
-              }),
-            }),
-          }),
-        };
-      },
-    },
-  };
+// ---- session ensure (TODO 25 root cause fix, 2026-08-02 —
+// .superpowers/sdd/2026-08-02-mo-senate-session-dedup/brief.md) ----
+//
+// A fuller in-memory 'sessions' table fake, wide enough to drive ensureSessionRow's three-step
+// resolution (bare-year exact match -> selectAll year+name candidate scan -> insertIfAbsent mint)
+// — same query shapes (select/eq/order/range/maybeSingle/single/upsert) as
+// ensureLegiscanSessionRow's own test fake (tests/ingest-legiscan-cli.test.js's makeQueryBuilder/
+// makeFakeLegiscanClient), scoped to just this one table since that's all this file's session
+// tests touch.
+function applyMoSessionFilters(rows, filters) {
+  return rows.filter((row) => filters.every((f) => row[f.col] === f.val));
 }
 
-test('ensureSessionRow: inserts the exact row shape (task-5-brief.md step 2) and selects it back', async () => {
-  const { client, upserts } = fakeSessionClient();
+function makeFakeSessionsClient(seedRows = []) {
+  const rows = seedRows.map((r) => ({ ...r }));
+  const upserts = [];
+  let counter = 0;
+  const client = {
+    from(table) {
+      assert.equal(table, 'sessions');
+      const buildQuery = (filters) => ({
+        eq: (col, val) => buildQuery([...filters, { col, val }]),
+        order: () => buildQuery(filters),
+        range: (from, to) => {
+          const matched = applyMoSessionFilters(rows, filters);
+          return Promise.resolve({ data: matched.slice(from, to + 1).map((r) => ({ ...r })), error: null });
+        },
+        maybeSingle: async () => {
+          const matched = applyMoSessionFilters(rows, filters);
+          return { data: matched[0] ? { ...matched[0] } : null, error: null };
+        },
+        single: async () => {
+          const matched = applyMoSessionFilters(rows, filters);
+          if (matched.length !== 1) return { data: null, error: { message: `fake sessions db: expected 1 row, got ${matched.length}` } };
+          return { data: { ...matched[0] }, error: null };
+        },
+      });
+      return {
+        select: () => buildQuery([]),
+        upsert: async (newRows, opts) => {
+          upserts.push({ rows: newRows, opts });
+          const conflictCols = (opts?.onConflict || '').split(',').filter(Boolean);
+          for (const r of newRows) {
+            const existing = conflictCols.length > 0 ? rows.find((row) => conflictCols.every((c) => row[c] === r[c])) : null;
+            if (!existing) {
+              counter += 1;
+              rows.push({ id: `sess-${counter}`, ...r });
+            }
+          }
+          return { error: null };
+        },
+      };
+    },
+  };
+  return { client, rows, upserts };
+}
+
+// (a) regression: a pre-existing bare-year row still resolves via step 1, zero writes.
+test('ensureSessionRow: (a) an existing bare-year row still resolves onto it directly (step 1, regression) — zero writes', async () => {
+  const { client, rows, upserts } = makeFakeSessionsClient([
+    { id: 'sess-2018', jurisdiction_id: 'mo-legislature', identifier: '2018', name: '2018 Regular Session' },
+  ]);
+  const row = await ensureSessionRow(client, 'run-1', 2018);
+  assert.equal(row.id, 'sess-2018');
+  assert.equal(upserts.length, 0, 'step 1 match must never fall through to an insert');
+  assert.equal(rows.length, 1, 'no new row created');
+});
+
+// (b) the real TODO-25 shape: no bare-year '2026' row, but '261' already exists and its name
+// starts with '2026' — resolves onto it via step 2, zero writes, never mints a duplicate '2026'.
+test('ensureSessionRow: (b) no bare-year row, but a differently-identified row\'s name starts with the year (the real \'261\' case) — resolves onto it via step 2, zero writes', async () => {
+  const { client, rows, upserts } = makeFakeSessionsClient([
+    { id: 'sess-261', jurisdiction_id: 'mo-legislature', identifier: '261', name: '2026 2nd Regular, 103rd General Assembly' },
+  ]);
+  const row = await ensureSessionRow(client, 'run-1', 2026);
+  assert.equal(row.id, 'sess-261');
+  assert.equal(upserts.length, 0, 'step 2 match must never fall through to an insert');
+  assert.equal(rows.length, 1, 'no duplicate \'2026\' row created');
+  assert.equal(rows.some((r) => r.identifier === '2026'), false);
+});
+
+// (c) two differently-identified candidates both matching by year+name is genuinely ambiguous —
+// never guess between them, name both candidates in the thrown error, zero writes.
+test('ensureSessionRow: (c) two differently-identified year+name candidates is genuinely ambiguous — throws naming both, zero writes', async () => {
+  const { client, rows, upserts } = makeFakeSessionsClient([
+    { id: 'sess-261', jurisdiction_id: 'mo-legislature', identifier: '261', name: '2026 2nd Regular, 103rd General Assembly' },
+    { id: 'sess-extra', jurisdiction_id: 'mo-legislature', identifier: 'extra-2026-row', name: '2026 Special Legislative Something' },
+  ]);
+  await assert.rejects(
+    () => ensureSessionRow(client, 'run-1', 2026),
+    (err) => {
+      assert.ok(err instanceof AmbiguousMoSenateSessionMatchError);
+      assert.match(err.message, /261/);
+      assert.match(err.message, /extra-2026-row/);
+      return true;
+    },
+  );
+  assert.equal(upserts.length, 0, 'an ambiguous match must never fall through to an insert');
+  assert.equal(rows.length, 2, 'no row was created or mutated');
+});
+
+// (d) existing step-3 behavior, now the true fallback: neither a bare-year nor a name-prefix
+// match exists — mints a new bare-year row (task-5-brief.md step 2's original row shape).
+test('ensureSessionRow: (d) neither a bare-year nor any name-prefix match — falls through to creating a new bare-year row (step 3)', async () => {
+  const { client, rows, upserts } = makeFakeSessionsClient();
   const row = await ensureSessionRow(client, 'run-1', 2018);
   assert.equal(upserts.length, 1);
   assert.deepEqual(upserts[0].rows, [{
     jurisdiction_id: 'mo-legislature', identifier: '2018', name: '2018 Regular Session (MO Senate journals)',
   }]);
   assert.equal(upserts[0].opts.onConflict, 'jurisdiction_id,identifier');
-  assert.equal(row.id, 'sess-1');
+  assert.equal(rows.length, 1);
+  assert.equal(row.id, rows[0].id);
 });
 
 // ---- roster identity (FIX ROUND 1, CRITICAL — cross-era mo_senate_id collision) ----
@@ -1453,6 +1529,18 @@ function makeGenericTable(store, idPrefix) {
       const filters = [];
       const builder = {
         eq(col, val) { filters.push([col, val]); return builder; },
+        // order/range: ensureSessionRow's step-2 selectAll scan (src/lib/db.js) issues these on
+        // this same table — order is a no-op here (single-page fixtures, ordering doesn't matter
+        // for correctness), range resolves the paginated read.
+        order() { return builder; },
+        range: async (from, to) => {
+          const found = store.filter((r) => filters.every(([c, v]) => r[c] === v));
+          return { data: found.slice(from, to + 1), error: null };
+        },
+        maybeSingle: async () => {
+          const found = store.filter((r) => filters.every(([c, v]) => r[c] === v));
+          return { data: found[0] ?? null, error: null };
+        },
         single: async () => {
           const found = store.filter((r) => filters.every(([c, v]) => r[c] === v));
           if (found.length !== 1) return { data: null, error: { message: `expected 1 row for a fake table, got ${found.length}` } };
