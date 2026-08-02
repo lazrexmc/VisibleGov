@@ -298,6 +298,10 @@ function makeFakeWriteClient({ rejectVersions = [] } = {}) {
         const builder = {
           select() { return this; },
           eq(col, val) { predicates.push((r) => r[col] === val); return this; },
+          // TODO-33 — this CLI's own budget check now passes an ARRAY of sources
+          // (ALL_LEGISCAN_SOURCES), summed via `.in()` — this fake must support it, not just the
+          // pre-existing single-string `.eq()`.
+          in(col, vals) { predicates.push((r) => vals.includes(r[col])); return this; },
           gte(col, val) { predicates.push((r) => r[col] >= val); return this; },
           lt(col, val) { predicates.push((r) => r[col] < val); return this; },
           order() { return this; },
@@ -599,6 +603,7 @@ test('runIngestLegiscanTexts: an unrelated DB error on insert is thrown, never s
           return {
             select() { return this; },
             eq() { return this; },
+            in() { return this; }, // TODO-33 — budget check now may call .in(); this fake ignores filtering either way
             gte() { return this; },
             lt() { return this; },
             order() { return this; },
@@ -687,6 +692,9 @@ function makeFakeUsageClient(rows) {
       const builder = {
         select() { return this; },
         eq(col, val) { predicates.push((r) => r[col] === val); return this; },
+        // TODO-33 — this CLI's own budget check now passes ALL_LEGISCAN_SOURCES (an array), summed
+        // via `.in()` — this fake must support it, not just the pre-existing single-string `.eq()`.
+        in(col, vals) { predicates.push((r) => vals.includes(r[col])); return this; },
         gte(col, val) { predicates.push((r) => r[col] >= val); return this; },
         lt(col, val) { predicates.push((r) => r[col] < val); return this; },
         order() { return this; },
@@ -699,6 +707,47 @@ function makeFakeUsageClient(rows) {
     },
   };
 }
+
+// ---- TODO-33 (.superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md, part 2) —
+// cross-CLI budget refusal, THIS CLI's own real production call site (default assertBudgetFn, not
+// overridden): this CLI must refuse because of ingest-legiscan.js's OWN spend under the 'legiscan'
+// label, even though THIS CLI's own future writes will land under 'legiscan-texts' and have never
+// spent anything yet. Proves the real wiring inside runIngestLegiscanTexts, not just the underlying
+// assertRunUnderBudget mechanism (already proven generically in tests/ingest-legiscan-cli.test.js). ----
+
+test('runIngestLegiscanTexts: CROSS-CLI — the COMBINED usage across BOTH \'legiscan\' (ingest-legiscan.js) '
+  + 'and \'legiscan-texts\' (this CLI\'s own past runs) triggers refusal even though NEITHER source '
+  + 'ALONE is anywhere near the cap — proves the real production call site sums both labels, not just '
+  + 'its own', async () => {
+  await withScratchDirAsync(async (textCacheDir) => {
+    const usageRows = [
+      { id: '1', source: 'legiscan', started_at: new Date().toISOString(), detail: { queries_used: 10 } },
+      { id: '2', source: 'legiscan-texts', started_at: new Date().toISOString(), detail: { queries_used: 89 } },
+    ];
+    // Sanity: neither source alone would refuse at capPerMonth=100 with 1 planned query
+    // (10+1=11 and 89+1=90, both < 100) — only the TRUE combined total (10+89=99, +1=100) does.
+    const writeClient = makeFakeWriteClient();
+    const usageClient = makeFakeUsageClient(usageRows);
+    const client = {
+      from: (table) => (table === 'ingestion_runs' ? usageClient.from(table) : writeClient.from(table)),
+    };
+    let getBillTextCalled = false;
+    const report = await runIngestLegiscanTexts(client, {
+      dryRun: false,
+      runId: 'run-1',
+      cacheDir: textCacheDir,
+      capPerMonth: 100,
+      listFilesFn: () => ['a.json'],
+      readDatasetFn: async () => ONE_BILL_DATASET(),
+      ...baseLoaders(),
+      getBillTextFn: async () => { getBillTextCalled = true; return billTextPayload(); },
+      extractFn: async () => 'text',
+    });
+    assert.equal(getBillTextCalled, false, 'refuses to start — the COMBINED usage must be visible to this CLI\'s own check, not just its own label\'s usage');
+    assert.equal(report.counts.budgetRefused, 1);
+    assert.equal(report.budgetError.usage, 99, 'must be the SUM across both source labels (10+89), not either one alone');
+  });
+});
 
 test('runIngestLegiscanTexts: budget-cap refusal happens BEFORE any query — getBillTextFn is never invoked, nothing is written', async () => {
   await withScratchDirAsync(async (textCacheDir) => {

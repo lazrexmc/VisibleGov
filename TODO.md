@@ -266,16 +266,22 @@
     Fix before anyone reaches for `summarize.js` again. (TODO 18 tracks this as "hygiene" — the
     ledger's own word was URGENT.)
 
-33. **Two CLIs share `source='legiscan'` in `ingestion_runs` with different detail shapes**
-    (surfaced by the 2026-07-31 scheduler review, reviewer-confirmed out-of-scope-but-ledger).
-    `ingest-legiscan.js` (votes/bills) and `ingest-legiscan-texts.js` (doc blobs,
-    `ingest-legiscan-texts.js:781`, deliberate per its own comment) both write the same source
-    key, so any latest-row read — scheduler due-ness, `public_freshness` — sees whichever ran
-    last. Every current consequence is fail-safe (a manual texts run can only *delay* the next
-    scheduled legiscan tick, never advance it; the scheduler's refresh gate fails open on the
-    texts shape). Real fix = split the source key (schema + CLI + historical-row migration
-    touching `public_freshness`) — **draft-then-apply, Lance runs it**. Not urgent; recorded so
-    the shared key stops being a surprise.
+33. [x] ~~Two CLIs share `source='legiscan'` in `ingestion_runs` with different detail shapes~~
+    **CODE FIX SHIPPED 2026-08-02** (`.superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/
+    brief.md). `ingest-legiscan-texts.js` now writes its own `RUN_SOURCE='legiscan-texts'`
+    (`src/cli/ingest-legiscan-texts.js`), never the shared `SOURCE`. This entry's own original
+    text understated the risk: splitting the key naively (no other change) would have let each
+    CLI's own pre-flight budget check see only ITS half of the real spend against the ONE real
+    LegiScan account's 30,000/month cap — a genuine terms-violation risk, not just a display bug.
+    Fixed alongside the split: `getMonthlyQueryUsage`/`assertRunUnderBudget`
+    (`src/adapters/legiscan.js`, `src/cli/ingest-legiscan.js`) now accept an array of sources and
+    sum them; BOTH CLIs' own budget checks pass `ALL_LEGISCAN_SOURCES` (the combined pair), proven
+    by an explicit cross-CLI refusal test in each direction. No schema migration was needed
+    (`ingestion_runs.source` is unconstrained `text`) — `correct-data.js`'s new
+    `legiscan-source-split` correction (`runCorrectLegiscanSourceSplit`) is the historical-row
+    fix, **built ready, `--dry-run` verified against the real live DB (54 rows: 2 relabel to
+    `legiscan-texts`, 52 stay `legiscan`, 0 unclassified) — Lance runs the live pass himself**,
+    same draft-then-apply convention as every other correction in that file.
 
 34. [x] ~~MO House driver silently slept ~30 minutes mid-run, wedged behind its own rate
     limiter — every scheduled run ETIMEDOUT.~~ **FIXED 2026-08-01.** `mo-house-xml.js:12`'s

@@ -21,6 +21,9 @@ import {
   runReconcileMo2026Votes,
   runReconcileMo2026VotesStandalone,
   runCorrectMo2026SessionMerge,
+  classifyLegiscanSourceRow,
+  LEGISCAN_TEXTS_ERROR_MARKERS,
+  runCorrectLegiscanSourceSplit,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -52,6 +55,10 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     bill_actions: [],
     vote_reconciliation_flags: [],
     legislators: [],
+    // legiscan-source-split (TODO-33) reads this table too — defaulted empty so every EXISTING
+    // 'all' test (none of which seed it) still works as a harmless no-op, not an undefined-table
+    // crash.
+    ingestion_runs: [],
     ...seed,
   };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
@@ -1539,4 +1546,205 @@ test('reconcileOneVote (via runReconcileMo2026Votes): a primary (mo-senate-web) 
   assert.equal(report.flaggedCount, 0, 'never hard-flags on incomplete primary cast data');
   assert.equal(report.notComparableCount, 1);
   assert.equal(client.tables.vote_reconciliation_flags.length, 0);
+});
+
+// ============================================================================================
+// legiscan-source-split (TODO-33 — .superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/
+// brief.md, part 3): historical `ingestion_runs.source='legiscan'` rows that were actually written
+// by ingest-legiscan-texts.js (before that CLI got its own distinct 'legiscan-texts' label) are
+// relabeled. Classification rule, verified against ALL 54 real live rows at implementation time
+// (48 votes-shape / 2 texts-shape / 4 error-marker / 0 unclassified — exactly the brief's own
+// counts, re-confirmed live, not stale):
+//   - detail.votes is a number, no detail.counts object -> ingest-legiscan.js's OWN shape -> stays
+//     'legiscan'.
+//   - no top-level detail.votes, detail.counts IS an object -> ingest-legiscan-texts.js's OWN shape
+//     -> relabel to 'legiscan-texts'.
+//   - neither shape (a bare {error, queries_used} failure detail) -> classified by an exact,
+//     sourced error-string marker only ingest-legiscan.js's own code paths can produce -> stays
+//     'legiscan'.
+//   - anything matching NONE of the above is NEVER guessed — left as 'legiscan' (today's safe
+//     default) and reported explicitly, never silently folded into "unchanged."
+// ============================================================================================
+
+const votesShapeDetail = () => ({
+  votes: 12, casts: 40, sessions: 1, bills: 5, queriesUsed: 2, attribution: { license: 'CC BY 4.0' },
+});
+const textsShapeDetail = () => ({
+  counts: {
+    billsPlanned: 5, docCacheHits: 2, queriesSpent: 3, inserted: 3,
+  },
+  failures: [],
+  queries_used: 3,
+});
+const insertVotesErrorDetail = () => ({
+  error: 'Error: insertIfAbsent(votes) failed: date/time field value out of range: "0000-00-00"', queries_used: 2,
+});
+const legiscanVotesModuleErrorDetail = () => ({
+  error: 'Error: legiscan-votes: could not write vote_reconciliation_flags row: duplicate key value violates unique constraint "vote_reconciliation_flags_dedup_key"', queries_used: 1,
+});
+const genuinelyUnclassifiableDetail = () => ({
+  error: 'Error: some totally unrelated failure with no recognizable marker', queries_used: 1,
+});
+
+// ---- classifyLegiscanSourceRow (pure) ----
+
+test('classifyLegiscanSourceRow: votes-shape (detail.votes number, no detail.counts object) classifies "legiscan" (unchanged)', () => {
+  assert.equal(classifyLegiscanSourceRow(votesShapeDetail()), 'legiscan');
+});
+
+test('classifyLegiscanSourceRow: texts-shape (no detail.votes, detail.counts IS an object) classifies "legiscan-texts" (relabel)', () => {
+  assert.equal(classifyLegiscanSourceRow(textsShapeDetail()), 'legiscan-texts');
+});
+
+test('classifyLegiscanSourceRow: a bare failure detail carrying the "insertIfAbsent(votes) failed" marker classifies "legiscan" (unchanged)', () => {
+  assert.equal(classifyLegiscanSourceRow(insertVotesErrorDetail()), 'legiscan');
+});
+
+test('classifyLegiscanSourceRow: a bare failure detail carrying the "legiscan-votes:" marker classifies "legiscan" (unchanged)', () => {
+  assert.equal(classifyLegiscanSourceRow(legiscanVotesModuleErrorDetail()), 'legiscan');
+});
+
+test('classifyLegiscanSourceRow: a genuinely unrecognized shape (no votes number, no counts object, no known error marker) is NEVER guessed — returns null', () => {
+  assert.equal(classifyLegiscanSourceRow(genuinelyUnclassifiableDetail()), null);
+});
+
+test('classifyLegiscanSourceRow: null/undefined/empty detail is never guessed — returns null', () => {
+  assert.equal(classifyLegiscanSourceRow(null), null);
+  assert.equal(classifyLegiscanSourceRow(undefined), null);
+  assert.equal(classifyLegiscanSourceRow({}), null);
+});
+
+test('LEGISCAN_TEXTS_ERROR_MARKERS: exactly the two real, sourced markers named in the brief', () => {
+  assert.deepEqual(LEGISCAN_TEXTS_ERROR_MARKERS, ['insertIfAbsent(votes) failed', 'legiscan-votes:']);
+});
+
+// ---- runCorrectLegiscanSourceSplit ----
+
+function legiscanRunRow(id, detail, { source = 'legiscan' } = {}) {
+  return {
+    id, source, status: 'succeeded', started_at: '2026-07-30T00:00:00.000Z', detail,
+  };
+}
+
+test('runCorrectLegiscanSourceSplit: --dry-run classifies all rows correctly and performs ZERO writes, reporting the exact counts a live run would produce', async () => {
+  const seed = {
+    ingestion_runs: [
+      legiscanRunRow('r1', votesShapeDetail()),
+      legiscanRunRow('r2', votesShapeDetail()),
+      legiscanRunRow('r3', textsShapeDetail()),
+      legiscanRunRow('r4', textsShapeDetail()),
+      legiscanRunRow('r5', insertVotesErrorDetail()),
+      legiscanRunRow('r6', legiscanVotesModuleErrorDetail()),
+      legiscanRunRow('r7', genuinelyUnclassifiableDetail()),
+      // a different source entirely — must never be touched/counted at all (scope query only reads source='legiscan')
+      legiscanRunRow('r8', votesShapeDetail(), { source: 'mo-house-xml' }),
+    ],
+  };
+  const client = makeFakeClient(seed);
+  const report = await runCorrectLegiscanSourceSplit(client, { dryRun: true });
+
+  assert.equal(report.seen, 7, 'only source=legiscan rows are in scope — the mo-house-xml row is excluded entirely');
+  assert.equal(report.relabeledToTexts, 2);
+  assert.deepEqual(report.relabeled.map((r) => r.id).sort(), ['r3', 'r4']);
+  assert.equal(report.unchangedLegiscan, 4, '2 votes-shape + 2 error-marker rows');
+  assert.equal(report.unclassified, 1);
+  assert.deepEqual(report.unclassifiedRows.map((r) => r.id), ['r7']);
+  assert.equal(report.failures.length, 0);
+
+  assert.equal(
+    client.calls.some((c) => c.table === 'ingestion_runs' && c.mode === 'update'),
+    false,
+    'dry-run must perform ZERO writes',
+  );
+  // Reconciliation invariant, same convention as runCorrectMoStatus's own "updated always equals
+  // the sum of perCode": every seen row lands in exactly one of the three honest buckets.
+  assert.equal(report.relabeledToTexts + report.unchangedLegiscan + report.unclassified, report.seen);
+});
+
+test('runCorrectLegiscanSourceSplit: LIVE — relabels ONLY the texts-shape rows to \'legiscan-texts\', leaves every other row\'s source untouched, and reproduces the dry-run\'s own counts', async () => {
+  const seed = {
+    ingestion_runs: [
+      legiscanRunRow('r1', votesShapeDetail()),
+      legiscanRunRow('r2', textsShapeDetail()),
+      legiscanRunRow('r3', insertVotesErrorDetail()),
+      legiscanRunRow('r4', genuinelyUnclassifiableDetail()),
+    ],
+  };
+  const client = makeFakeClient(seed);
+  const report = await runCorrectLegiscanSourceSplit(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.relabeledToTexts, 1);
+  assert.equal(report.unchangedLegiscan, 2);
+  assert.equal(report.unclassified, 1);
+
+  const byId = Object.fromEntries(client.tables.ingestion_runs.map((r) => [r.id, r]));
+  assert.equal(byId.r1.source, 'legiscan', 'votes-shape row: untouched');
+  assert.equal(byId.r2.source, 'legiscan-texts', 'texts-shape row: relabeled live');
+  assert.equal(byId.r3.source, 'legiscan', 'error-marker row: untouched');
+  assert.equal(byId.r4.source, 'legiscan', 'genuinely unclassifiable row: left as legiscan, the safe default');
+});
+
+test('runCorrectLegiscanSourceSplit: a genuinely unrelated DB error on ONE relabel is isolated into failures[] — the run continues and still relabels the OTHER texts-shape row', async () => {
+  const seed = {
+    ingestion_runs: [
+      legiscanRunRow('r1', textsShapeDetail()),
+      legiscanRunRow('r2', textsShapeDetail()),
+    ],
+  };
+  const client = makeFakeClient(
+    seed,
+    {
+      forceError: (table, mode, filters) => (
+        table === 'ingestion_runs' && mode === 'update' && filters.some((f) => f.op === 'eq' && f.col === 'id' && f.val === 'r1')
+          ? { message: 'connection reset' }
+          : null
+      ),
+    },
+  );
+  const report = await runCorrectLegiscanSourceSplit(client, { dryRun: false, runId: 'run-1' });
+
+  assert.equal(report.relabeledToTexts, 1, 'r2 still relabels despite r1\'s failure');
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].id, 'r1');
+  assert.match(report.failures[0].error, /connection reset/);
+  const byId = Object.fromEntries(client.tables.ingestion_runs.map((r) => [r.id, r]));
+  assert.equal(byId.r1.source, 'legiscan', 'never relabeled — its update failed');
+  assert.equal(byId.r2.source, 'legiscan-texts');
+});
+
+test('runCorrectLegiscanSourceSplit: --limit scopes which rows are processed (deterministic id order), same convention as this file\'s other corrections', async () => {
+  const seed = {
+    ingestion_runs: [
+      legiscanRunRow('r1', textsShapeDetail()),
+      legiscanRunRow('r2', textsShapeDetail()),
+      legiscanRunRow('r3', textsShapeDetail()),
+    ],
+  };
+  const client = makeFakeClient(seed);
+  const report = await runCorrectLegiscanSourceSplit(client, { dryRun: true, limit: 2 });
+  assert.equal(report.seen, 2);
+  assert.deepEqual(report.relabeled.map((r) => r.id).sort(), ['r1', 'r2']);
+});
+
+// ---- wiring: parseArgs + runCorrectData dispatcher ----
+
+test('parseArgs: accepts legiscan-source-split as a <which> value', () => {
+  assert.equal(parseArgs(['legiscan-source-split']).which, 'legiscan-source-split');
+  assert.equal(parseArgs(['legiscan-source-split', '--dry-run']).dryRun, true);
+});
+
+test('runCorrectData: "legiscan-source-split" runs only that correction, and it also participates in "all" (a guarded single-column UPDATE by primary key, same in-place-rewrite risk class as mo-status/party-normalize, never a delete or FK redirect)', async () => {
+  const seed = { ingestion_runs: [legiscanRunRow('r1', textsShapeDetail())] };
+
+  const onlyThis = await runCorrectData(makeFakeClient(seed), { which: 'legiscan-source-split', dryRun: true });
+  assert.ok(onlyThis.legiscanSourceSplit);
+  assert.equal(onlyThis.moStatus, undefined);
+  assert.equal(onlyThis.legiscanSourceSplit.relabeledToTexts, 1);
+
+  const all = await runCorrectData(makeFakeClient({
+    ...seed, bills: [], votes: [], vote_casts: [],
+  }), { which: 'all', dryRun: true });
+  assert.ok(all.legiscanSourceSplit, '"all" must include this correction');
+  assert.ok(all.moStatus);
+  assert.equal(all.failures.length, 0);
 });

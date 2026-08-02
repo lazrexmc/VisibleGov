@@ -96,13 +96,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | all`);
   }
   out.which = which;
   return out;
@@ -1174,6 +1174,143 @@ export async function runCorrectMo2026SessionMerge(client, {
 }
 
 // ============================================================================================
+// Correction — legiscan-source-split (TODO-33, .superpowers/sdd/2026-08-02-todo-33-legiscan-
+// source-split/brief.md, part 3): historical-row backfill for the source-key split. Before this
+// fix, BOTH `ingest-legiscan.js` (votes/bills) and `ingest-legiscan-texts.js` (doc-blob text
+// fetches) wrote `ingestion_runs.source = 'legiscan'` — deliberately shared, because both CLIs
+// spend queries against the SAME real LegiScan account/30,000-per-month cap (docs/research/
+// 2026-07-28-legiscan-terms.md, Rule 1) and the budget check summed usage per exact source string.
+// `ingest-legiscan-texts.js` now writes its own distinct `'legiscan-texts'` label going forward
+// (src/cli/ingest-legiscan-texts.js's RUN_SOURCE; the budget check itself was separately fixed to
+// sum BOTH labels together — src/adapters/legiscan.js's ALL_LEGISCAN_SOURCES/getMonthlyQueryUsage —
+// see that module's own header comment for why splitting the label without ALSO fixing the budget
+// summing would have been dangerous). This correction relabels the historical rows that were
+// ALREADY written under the old shared key but actually belong to ingest-legiscan-texts.js, so
+// public_freshness and the scheduler's own due-ness read both start reporting two genuinely
+// distinct pipelines immediately, not just for runs going forward.
+//
+// CLASSIFICATION RULE — verified against ALL 54 real live `source='legiscan'` rows on file at
+// implementation time (48 votes-shape / 2 texts-shape / 4 error-marker / 0 unclassified):
+//   1. `detail.votes` is a number, no `detail.counts` object -> ingest-legiscan.js's OWN shape
+//      (buildSuccessCloseDetail spreads `result.counts` — votes included — at the TOP level of
+//      detail, never nested). Classify -> 'legiscan' (unchanged).
+//   2. No top-level `detail.votes`, `detail.counts` IS an object -> ingest-legiscan-texts.js's OWN
+//      shape (billsPlanned/docCacheHits/alreadyHasVersion/... nested under `.counts`, no `votes`
+//      field anywhere in that CLI). Classify -> 'legiscan-texts' (the new label — RELABEL).
+//   3. Neither shape (a bare `{error, queries_used}` failure detail — both CLIs' failure paths
+//      converge to this simpler shape, so detail-shape alone can't distinguish them here) ->
+//      classified by an exact, SOURCED error-string marker (LEGISCAN_TEXTS_ERROR_MARKERS' own name
+//      is backwards from its role — see that constant's own comment): `"insertIfAbsent(votes)
+//      failed"` (src/lib/db.js's own generic error message, only ever produced when insertIfAbsent
+//      is called with table='votes' — ingest-legiscan-texts.js never calls insertIfAbsent with
+//      'votes' anywhere) or `"legiscan-votes:"` (src/adapters/legiscan-votes.js's own throw-
+//      statement prefix — a module ingest-legiscan-texts.js never imports at all). Either marker ->
+//      classify 'legiscan' (unchanged; a genuine ingest-legiscan.js failure).
+//   4. Anything matching NONE of the above is NEVER guessed: misclassifying a real
+//      ingest-legiscan.js query as 'legiscan-texts' would UNDERCOUNT that CLI's own budget usage on
+//      its NEXT self-check (the dangerous direction — could let real usage exceed the real cap
+//      unnoticed); leaving a genuinely ambiguous row as 'legiscan' is always safe — it just stays
+//      combined, exactly like today, introducing no new risk. Counted honestly (`unclassified`) and
+//      surfaced (`unclassifiedRows`), never silently folded into `unchangedLegiscan`.
+//
+// DRAFT-THEN-APPLY (same established convention as every other correction in this file): built
+// READY, --dry-run verified against the real live DB, Lance runs the live pass himself.
+// ============================================================================================
+
+// LEGISCAN_TEXTS_ERROR_MARKERS — named for what they PROVE (an ingest-legiscan.js-only failure
+// shape), not what they cause: a match keeps the row classified 'legiscan' (the SAFE, unchanged
+// outcome), it never triggers a relabel. Both are literal, sourced strings this project's own code
+// produces — src/lib/db.js's insertIfAbsent (table='votes' only) and
+// src/adapters/legiscan-votes.js's own throw-statement prefix — never invented or fuzzy-matched.
+export const LEGISCAN_TEXTS_ERROR_MARKERS = ['insertIfAbsent(votes) failed', 'legiscan-votes:'];
+
+// classifyLegiscanSourceRow — pure. Returns 'legiscan' | 'legiscan-texts' | null (never guessed —
+// see rule 4 above). `detail` is one row's own `ingestion_runs.detail` jsonb value, as read from
+// the DB (a plain object, or null/undefined for a genuinely empty/missing detail).
+export function classifyLegiscanSourceRow(detail) {
+  const hasVotesNumber = typeof detail?.votes === 'number';
+  const hasCountsObject = detail?.counts != null && typeof detail.counts === 'object' && !Array.isArray(detail.counts);
+  if (hasVotesNumber && !hasCountsObject) return 'legiscan';
+  if (!hasVotesNumber && hasCountsObject) return 'legiscan-texts';
+  if (!hasVotesNumber && !hasCountsObject) {
+    const errText = typeof detail?.error === 'string' ? detail.error : '';
+    if (LEGISCAN_TEXTS_ERROR_MARKERS.some((marker) => errText.includes(marker))) return 'legiscan';
+  }
+  return null;
+}
+
+// runCorrectLegiscanSourceSplit — reads every `source='legiscan'` row via selectAll (project law:
+// no bare .select() on a multi-row table — 54 rows today is well under the 1000-row server page
+// cap, but this correction should never silently truncate if that count grows before it runs).
+// `updated always equal to relabeledToTexts + unchangedLegiscan + unclassified` is the same
+// reconciliation invariant this file's other corrections carry (e.g. runCorrectMoStatus's own
+// "updated always equals the sum of perCode").
+// NOTE: no `runId` param, unlike this file's other corrections — ingestion_runs has no run_id
+// column (it IS a run, not a row referencing one — supabase/migrations/0001_core_schema.sql), so
+// there is nothing for one to write. The top-level dispatcher still passes `runId` uniformly to
+// every correction; it is simply not destructured here.
+export async function runCorrectLegiscanSourceSplit(client, {
+  dryRun = false, limit = null,
+} = {}) {
+  const { data: rows, error } = await selectAll(client, 'ingestion_runs', 'id,source,detail', {
+    filter: (q) => q.eq('source', 'legiscan'),
+  });
+  if (error) throw new Error(`legiscan-source-split: scope query failed: ${error.message}`);
+
+  const sorted = [...(rows ?? [])].sort((a, b) => (a.id > b.id ? 1 : -1));
+  const scoped = limit != null ? sorted.slice(0, limit) : sorted;
+
+  const relabeled = [];
+  const unclassifiedRows = [];
+  const failures = [];
+  let unchangedLegiscan = 0;
+  let unclassified = 0;
+
+  for (const row of scoped) {
+    const classification = classifyLegiscanSourceRow(row.detail);
+    if (classification === 'legiscan') {
+      unchangedLegiscan += 1;
+      continue;
+    }
+    if (classification === null) {
+      unclassified += 1;
+      unclassifiedRows.push({ id: row.id, detail: row.detail });
+      continue;
+    }
+    // classification === 'legiscan-texts' — the only relabel-eligible outcome.
+    if (dryRun) {
+      relabeled.push({ id: row.id, from: 'legiscan', to: 'legiscan-texts' });
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop -- small/infrequent backlog (54 rows total as of
+    // this writing; brief: "no --limit/pagination-cap risk"), same "sequential" precedent as this
+    // file's other corrections' per-row loops.
+    const { data: updatedRows, error: updErr } = await client
+      .from('ingestion_runs').update({ source: 'legiscan-texts' })
+      .eq('id', row.id).eq('source', 'legiscan').select('id');
+    if (updErr) {
+      failures.push({ id: row.id, reason: 'relabel_failed', error: String(updErr.message ?? updErr) });
+      continue;
+    }
+    if (!updatedRows || updatedRows.length !== 1) {
+      failures.push({ id: row.id, reason: 'relabel_guard_mismatch', got: updatedRows?.length ?? 0 });
+      continue;
+    }
+    relabeled.push({ id: row.id, from: 'legiscan', to: 'legiscan-texts' });
+  }
+
+  return {
+    seen: scoped.length,
+    relabeledToTexts: relabeled.length,
+    unchangedLegiscan,
+    unclassified,
+    relabeled,
+    unclassifiedRows,
+    failures,
+  };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1196,6 +1333,14 @@ export async function runCorrectData(client, {
   if (which === 'party-normalize' || which === 'all') {
     out.partyNormalize = await runCorrectPartyNormalize(client, { dryRun, runId });
     failures.push(...out.partyNormalize.failures);
+  }
+  // legiscan-source-split (TODO-33) — same in-place-rewrite risk class as mo-status/party-normalize
+  // above (a guarded single-column UPDATE by primary key, no deletes, no FK redirects), so it joins
+  // 'all' alongside them rather than requiring an operator to name it separately the way the
+  // higher-stakes mo-2026-session-merge below does.
+  if (which === 'legiscan-source-split' || which === 'all') {
+    out.legiscanSourceSplit = await runCorrectLegiscanSourceSplit(client, { dryRun, limit, runId });
+    failures.push(...out.legiscanSourceSplit.failures);
   }
   // Deliberately EXCLUDED from 'all' (brief, explicit): bill/session merge + FK redirect + guarded
   // deletes is higher-stakes than A/B's in-place rewrites — an operator must name this one, never

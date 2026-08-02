@@ -1186,3 +1186,42 @@ merge logic for a same-seat pattern that is, by design, mostly DIFFERENT people 
 class of mistake (the Symington father/son near-miss) this project has been burned by before.
 Verifying against live data before writing any code caught that no fix was needed at all — the
 existing identity system was already right.
+
+## 2026-08-02 (continued) — TODO-33 closed: split the `source='legiscan'` key without breaking
+budget enforcement (Lance approved real Fable5 usage on this one for accuracy)
+
+TODO-33's own original text ("split the source key") was itself incomplete, same lesson as TODO-35
+above but with real stakes this time: `ingest-legiscan.js` (votes/bills) and
+`ingest-legiscan-texts.js` (doc-blob text fetches) share `ingestion_runs.source='legiscan'`
+specifically because both CLIs spend queries against the SAME real LegiScan account and its ONE
+real 30,000/month cap. Giving them distinct labels without ALSO fixing the budget-summing math
+would have been actively dangerous — each CLI's own pre-flight `getMonthlyQueryUsage`/
+`assertRunUnderBudget` check would only ever see its own half of the real spend, silently letting
+the combined total exceed the real cap without either CLI's own refusal ever noticing. Re-read
+`docs/research/2026-07-28-legiscan-terms.md` Rule 1 before touching the budget code, per the
+brief's own explicit instruction.
+
+The fix, in order: (1) `ingest-legiscan-texts.js` writes its own `RUN_SOURCE='legiscan-texts'`
+going forward; (2) `getMonthlyQueryUsage` (`src/adapters/legiscan.js`) now accepts either a bare
+source string (existing callers, byte-for-byte unchanged — still `.eq()`) or an array of sources,
+summed via `.in()`; both CLIs' own budget checks now pass `ALL_LEGISCAN_SOURCES` (the combined
+pair), including `ingest-legiscan.js`'s own main()-only call site, extracted into a new
+`runLegiscanBudgetGate` purely so it could be unit-tested directly (this repo's own established
+"extract for testability" precedent). Proved the load-bearing direction explicitly, twice, in both
+files: CLI A's own check refuses because of CLI B's spend, and vice versa, with a negative-control
+assertion showing an own-source-only check would have wrongly let the run proceed — the exact bug
+this fix closes. (3) No schema migration needed — `ingestion_runs.source` is unconstrained `text`,
+confirmed against all 21 migrations. The historical-row backfill is a new `correct-data.js`
+correction (`legiscan-source-split`), same draft-then-apply convention as every other correction in
+that file: built ready, `--dry-run` verified against the real live DB, Lance runs the live pass.
+Live-classified all 54 real `source='legiscan'` rows by detail shape (votes-number vs. counts-object)
+with two exact, sourced error-string markers as a fallback for the 4 rows whose failure detail is
+too generic to distinguish by shape alone — 48 stay `legiscan`, 2 relabel to `legiscan-texts`, 4
+stay `legiscan` (genuine `ingest-legiscan.js` failures), 0 unclassified. (4) The scheduler's own
+stale comment about a manual texts run polluting its due-ness read is corrected — that scenario
+can no longer happen once the historical rows are relabeled — `SOURCE_KEYS` and the scheduler's
+own registry are untouched, exactly as the brief required. (5) `public_freshness` needed no code
+change, confirmed by reading the view definition directly: a plain `distinct on (source)` with no
+hardcoded source enumeration.
+
+2170 → 2192 tests (22 new, all TDD red-first), 0 fail. Full suite green before committing.

@@ -7,7 +7,7 @@ import {
 } from '../lib/db.js';
 import {
   SOURCE, ATTRIBUTION, getDatasetList, getDataset, decodeDatasetHashGate,
-  getMonthlyQueryUsage, assertUnderBudget, DatasetHashMismatchError,
+  getMonthlyQueryUsage, assertUnderBudget, DatasetHashMismatchError, ALL_LEGISCAN_SOURCES,
 } from '../adapters/legiscan.js';
 import {
   decodeDatasetZip, extractDatasetFiles, normalizeBillIdentifier,
@@ -948,6 +948,24 @@ export async function assertRunUnderBudget(client, { source = SOURCE, plannedQue
   return { usage, plannedQueries, capPerMonth: cap };
 }
 
+// runLegiscanBudgetGate — main()'s OWN pre-flight budget gate (brief step 1: getMonthlyQueryUsage +
+// assertUnderBudget BEFORE any live call), extracted as its own function so THIS EXACT composition
+// is directly unit-testable, same "extract for testability without needing process.argv/
+// getClient()" precedent as assertRunUnderBudget/buildSuccessCloseDetail/closeRunOnFailure below.
+//
+// TODO-33 (source split, .superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md,
+// part 2 — the LOAD-BEARING part of that fix): passes source: ALL_LEGISCAN_SOURCES, never the bare
+// SOURCE default. ingest-legiscan-texts.js now writes its own distinct 'legiscan-texts' label, but
+// both CLIs still spend queries against the SAME real LegiScan account/30,000-per-month cap
+// (docs/research/2026-07-28-legiscan-terms.md, Rule 1) — this driver's own pre-flight check must
+// see the TRUE combined total (this run's own past spend AND the OTHER CLI's), never just its own
+// half, or a manual ingest-legiscan-texts.js run could push the real account past its real cap
+// without THIS driver's own refusal ever noticing.
+export async function runLegiscanBudgetGate(client, args) {
+  const plannedQueries = args.datasetFile ? 0 : PLANNED_QUERIES_PER_RUN;
+  return assertRunUnderBudget(client, { plannedQueries, source: ALL_LEGISCAN_SOURCES });
+}
+
 // ---- closeRun payload helpers (CRITICAL 1, final-review-findings.md) ----
 //
 // closeRun (src/lib/db.js) REPLACES detail jsonb wholesale — relied on repo-wide (every CLI driver
@@ -1074,15 +1092,18 @@ async function main() {
     // whether the hash gate will skip the getDataset call. This is the ONLY statement between
     // openRun and runLegiscanIngest — a refusal here means runLegiscanIngest (and therefore every
     // live LegiScan call and every DB write it could make) is never reached.
-    const plannedQueries = args.datasetFile ? 0 : PLANNED_QUERIES_PER_RUN;
     // MINOR 2 (Task 9 review, accepted as intentional-conservative, not a bug): a --dataset-file
-    // run still calls assertRunUnderBudget even though plannedQueries=0 here means it can never
-    // itself push usage over the cap — so a month that has ALREADY breached the cap from other
-    // (live) runs still refuses a zero-cost fixture-driven run too, rather than carving out an
-    // exception. Deliberate: refusal semantics stay uniform and simple to reason about (one gate,
-    // no special cases to remember), and it avoids a cap-breached month quietly continuing to run
-    // local-fixture backfills that would normally accompany live catches.
-    await assertRunUnderBudget(client, { plannedQueries });
+    // run still calls the budget gate even though plannedQueries=0 here means it can never itself
+    // push usage over the cap — so a month that has ALREADY breached the cap from other (live) runs
+    // still refuses a zero-cost fixture-driven run too, rather than carving out an exception.
+    // Deliberate: refusal semantics stay uniform and simple to reason about (one gate, no special
+    // cases to remember), and it avoids a cap-breached month quietly continuing to run local-fixture
+    // backfills that would normally accompany live catches.
+    // TODO-33: runLegiscanBudgetGate passes source: ALL_LEGISCAN_SOURCES (this CLI's own 'legiscan'
+    // label AND ingest-legiscan-texts.js's 'legiscan-texts' label, combined) — see that function's
+    // own header comment for why checking against 'legiscan' alone would be dangerous now that the
+    // two CLIs write distinct source labels but still share one real LegiScan account/cap.
+    await runLegiscanBudgetGate(client, args);
 
     const result = await runLegiscanIngest(client, runId, args);
 

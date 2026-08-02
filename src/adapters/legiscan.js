@@ -12,6 +12,22 @@ import { selectAll } from '../lib/db.js';
 export const SOURCE = 'legiscan';
 export const ATTRIBUTION = { license: 'CC BY 4.0', holder: 'LegiScan', url: 'https://legiscan.com' };
 
+// LEGISCAN_TEXTS_SOURCE / ALL_LEGISCAN_SOURCES — TODO-33 (source split,
+// .superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md). ingest-legiscan-texts.js
+// (doc-blob text fetches) writes its OWN distinct ingestion_runs.source label going forward
+// ('legiscan-texts') instead of sharing SOURCE with ingest-legiscan.js (votes/bills) — but both
+// CLIs still spend queries against the SAME real LegiScan account and the SAME real 30,000/month
+// cap (docs/research/2026-07-28-legiscan-terms.md, Rule 1, binding). Splitting the label WITHOUT
+// also making the budget check sum across BOTH labels would be actively dangerous: each CLI's own
+// pre-flight getMonthlyQueryUsage/assertRunUnderBudget call would then only ever see its OWN half
+// of the real spend, silently letting the TRUE combined total exceed the real account cap without
+// either CLI ever refusing — the exact terms violation the shared key was originally built to
+// prevent. ALL_LEGISCAN_SOURCES is the one canonical combined set both CLIs' own budget checks must
+// pass as `source` — defined once, here (next to SOURCE), so neither CLI hardcodes the pair
+// separately (which could silently drift if a source label is ever renamed again).
+export const LEGISCAN_TEXTS_SOURCE = 'legiscan-texts';
+export const ALL_LEGISCAN_SOURCES = [SOURCE, LEGISCAN_TEXTS_SOURCE];
+
 // Pull API base per the LegiScan API Manual (Task 2 WebFetch, see LEGISCAN_MIN_INTERVAL_MS comment
 // below for provenance): "https://api.legiscan.com/?key=APIKEY&op=OPERATION&PARAMS".
 const BASE = 'https://api.legiscan.com/';
@@ -217,6 +233,17 @@ export function decodeDatasetHashGate(sessionId, reportedHash, ledgerRow) {
 // query cap (Global Constraints #2 / terms doc rule 1) — the exact shape of bug selectAll itself
 // was written to close (see src/lib/db.js's own "finding 1" comment).
 //
+// TODO-33 (source split, .superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md,
+// part 2 — the LOAD-BEARING part of that fix): `source` may now be EITHER a single source string
+// (every existing caller, behavior byte-for-byte unchanged — still a plain `.eq('source', source)`)
+// OR an array of sources, summed TOGETHER via `.in('source', sources)`. This exists so
+// ingest-legiscan.js and ingest-legiscan-texts.js — two CLIs writing two DISTINCT source labels but
+// spending queries against the SAME real LegiScan account/30,000-per-month cap — can each pass
+// ALL_LEGISCAN_SOURCES (above) and see the TRUE combined total, not just their own half. A caller
+// that split its own source label without also switching its budget check to the array form would
+// silently undercount real usage — see ALL_LEGISCAN_SOURCES's own header comment for why that is a
+// genuine terms violation, not just an accounting nicety.
+//
 // Month boundary is UTC (ruling Q5, .superpowers/sdd/legiscan-plan-draft-notes.md) — LegiScan's own
 // reset is "resets the 1st" against its ET-based billing clock, so a run within a few hours of
 // midnight ET around the month edge could be scoped to the "wrong" UTC month by this boundary.
@@ -231,11 +258,14 @@ export async function getMonthlyQueryUsage(client, { source = SOURCE, now = new 
   const month = now.getUTCMonth();
   const monthStart = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
   const monthEnd = new Date(Date.UTC(year, month + 1, 1, 0, 0, 0, 0));
+  const sources = Array.isArray(source) ? source : [source];
   const { data, error } = await selectAll(client, 'ingestion_runs', 'detail', {
-    filter: (q) => q
-      .eq('source', source)
-      .gte('started_at', monthStart.toISOString())
-      .lt('started_at', monthEnd.toISOString()),
+    filter: (q) => {
+      const withSource = sources.length === 1 ? q.eq('source', sources[0]) : q.in('source', sources);
+      return withSource
+        .gte('started_at', monthStart.toISOString())
+        .lt('started_at', monthEnd.toISOString());
+    },
   });
   if (error) throw new Error(`getMonthlyQueryUsage: could not read ingestion_runs: ${error.message}`);
   return (data ?? []).reduce((sum, row) => sum + (Number(row?.detail?.queries_used) || 0), 0);

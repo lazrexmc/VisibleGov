@@ -11,12 +11,13 @@ import {
   billSourceUrl, rollCallSourceUrl,
   isLegiscanRegularSession, buildLegiscanSpecialSessionIdentifier,
   ensureLegiscanSessionRow, AmbiguousLegiscanSessionMatchError, LegiscanSessionIdentityConflictError,
-  runLegiscanIngest, resolveDatasetBytes, assertRunUnderBudget, dryRunReportFromDb,
+  runLegiscanIngest, resolveDatasetBytes, assertRunUnderBudget, runLegiscanBudgetGate, dryRunReportFromDb,
   planFromParsedDataset, retractLegiscanVoteIfStored, recordQueryUsage,
   buildSuccessCloseDetail, buildFailureCloseDetail, closeRunOnFailure,
 } from '../src/cli/ingest-legiscan.js';
 import {
   QueryBudgetExceededError, DatasetHashMismatchError, getMonthlyQueryUsage, ATTRIBUTION,
+  ALL_LEGISCAN_SOURCES,
 } from '../src/adapters/legiscan.js';
 import { decodeDatasetZip, extractDatasetFiles } from '../src/adapters/legiscan-dataset.js';
 import { crossCheckAgainstPrimarySource } from '../src/adapters/legiscan-votes.js';
@@ -59,6 +60,7 @@ function likeToRegExp(pattern) {
 function applyFilters(rows, filters) {
   return rows.filter((row) => filters.every((f) => {
     if (f.type === 'eq') return row[f.col] === f.val;
+    if (f.type === 'in') return f.vals.includes(row[f.col]);
     if (f.type === 'gte') return row[f.col] >= f.val;
     if (f.type === 'lt') return row[f.col] < f.val;
     if (f.type === 'like') return likeToRegExp(f.pattern).test(String(row[f.col] ?? ''));
@@ -70,6 +72,7 @@ function makeQueryBuilder(getRows, opts = {}) {
   function build(filters) {
     const api = {
       eq: (col, val) => build([...filters, { type: 'eq', col, val }]),
+      in: (col, vals) => build([...filters, { type: 'in', col, vals }]),
       gte: (col, val) => build([...filters, { type: 'gte', col, val }]),
       lt: (col, val) => build([...filters, { type: 'lt', col, val }]),
       like: (col, pattern) => build([...filters, { type: 'like', col, pattern }]),
@@ -397,6 +400,10 @@ function makeFakeUsageClient(rows) {
       const builder = {
         select() { return this; },
         eq(col, val) { predicates.push((r) => r[col] === val); return this; },
+        // TODO-33 — the load-bearing budget fix: `.in()` support so a test can prove the array-of-
+        // sources summing path (see the cross-CLI refusal tests below), not just the pre-existing
+        // single-string `.eq()` path.
+        in(col, vals) { predicates.push((r) => vals.includes(r[col])); return this; },
         gte(col, val) { predicates.push((r) => r[col] >= val); return this; },
         lt(col, val) { predicates.push((r) => r[col] < val); return this; },
         order() { return this; },
@@ -430,6 +437,119 @@ test('assertRunUnderBudget: does not throw with real headroom, and honors an exp
   const client = makeFakeUsageClient([]);
   const result = await assertRunUnderBudget(client, { plannedQueries: 2, capPerMonth: 100 });
   assert.deepEqual(result, { usage: 0, plannedQueries: 2, capPerMonth: 100 });
+});
+
+// ---- TODO-33 (.superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md, part 2) — THE
+// single most important behavior in this whole fix, per the brief's own explicit instruction to
+// "test this specifically": ingest-legiscan.js and ingest-legiscan-texts.js write DISTINCT
+// ingestion_runs.source labels ('legiscan' / 'legiscan-texts') but spend queries against the SAME
+// real LegiScan account/30,000-per-month cap (docs/research/2026-07-28-legiscan-terms.md, Rule 1,
+// re-read before writing these). Each CLI's own pre-flight budget check must pass
+// source: ALL_LEGISCAN_SOURCES (the combined pair) so it sees the TRUE combined total — never just
+// its own half. These tests prove BOTH directions: CLI A's own check must refuse because of CLI B's
+// spend, and vice versa — and, as a negative control, that checking against ONLY the caller's own
+// source label (the naive/dangerous "just split the key" approach) would have WRONGLY allowed the
+// run to proceed, which is exactly the bug this fix closes. ----
+
+test('CROSS-CLI BUDGET REFUSAL (direction 1): ingest-legiscan-texts.js\'s OWN budget check must refuse '
+  + 'because of ingest-legiscan.js\'s spend, even though the texts CLI\'s own source has spent almost '
+  + 'nothing — proves the combined-array check is load-bearing, not decorative', async () => {
+  const rows = [
+    { id: '1', source: 'legiscan', started_at: new Date().toISOString(), detail: { queries_used: 4990 } },
+    { id: '2', source: 'legiscan-texts', started_at: new Date().toISOString(), detail: { queries_used: 5 } },
+  ];
+  const client = makeFakeUsageClient(rows);
+
+  // The combined check (what the real code must do) correctly refuses: 4990+5=4995 used, +10 planned = 5005 >= 5000.
+  await assert.rejects(
+    () => assertRunUnderBudget(client, { source: ALL_LEGISCAN_SOURCES, plannedQueries: 10, capPerMonth: 5000 }),
+    (err) => {
+      assert.ok(err instanceof QueryBudgetExceededError);
+      assert.equal(err.usage, 4995, 'must see the COMBINED usage across both labels, not just legiscan-texts\' own 5');
+      return true;
+    },
+  );
+
+  // Negative control — the naive "just split the key" bug this fix prevents: checking against ONLY
+  // the texts CLI's own source label would have seen just 5 used and WRONGLY allowed the run to
+  // proceed, blind to ingest-legiscan.js's real 4990. This is the exact scenario the brief calls
+  // "a real risk of exceeding LegiScan's terms" if gotten wrong.
+  await assert.doesNotThrow(
+    () => assertRunUnderBudget(client, { source: 'legiscan-texts', plannedQueries: 10, capPerMonth: 5000 }),
+    'documents the danger: an own-source-only check is blind to the other CLI\'s real spend',
+  );
+});
+
+test('CROSS-CLI BUDGET REFUSAL (direction 2, vice versa): ingest-legiscan.js\'s OWN budget check must '
+  + 'refuse because of ingest-legiscan-texts.js\'s spend, even though ingest-legiscan.js\'s own source '
+  + 'has spent almost nothing', async () => {
+  const rows = [
+    { id: '1', source: 'legiscan-texts', started_at: new Date().toISOString(), detail: { queries_used: 4995 } },
+    { id: '2', source: 'legiscan', started_at: new Date().toISOString(), detail: { queries_used: 3 } },
+  ];
+  const client = makeFakeUsageClient(rows);
+
+  await assert.rejects(
+    () => assertRunUnderBudget(client, { source: ALL_LEGISCAN_SOURCES, plannedQueries: 2, capPerMonth: 5000 }),
+    (err) => {
+      assert.ok(err instanceof QueryBudgetExceededError);
+      assert.equal(err.usage, 4998, 'must see the COMBINED usage, not just legiscan\'s own 3');
+      return true;
+    },
+  );
+
+  // Negative control, same danger, opposite direction: checking against ONLY 'legiscan' would see 3
+  // used and wrongly allow the run to proceed, blind to the texts CLI's real 4995.
+  await assert.doesNotThrow(
+    () => assertRunUnderBudget(client, { source: 'legiscan', plannedQueries: 2, capPerMonth: 5000 }),
+  );
+});
+
+test('CROSS-CLI BUDGET REFUSAL: with real combined headroom, the combined check does NOT refuse either CLI', async () => {
+  const rows = [
+    { id: '1', source: 'legiscan', started_at: new Date().toISOString(), detail: { queries_used: 100 } },
+    { id: '2', source: 'legiscan-texts', started_at: new Date().toISOString(), detail: { queries_used: 50 } },
+  ];
+  const client = makeFakeUsageClient(rows);
+  const resultA = await assertRunUnderBudget(client, { source: ALL_LEGISCAN_SOURCES, plannedQueries: 2, capPerMonth: 5000 });
+  const resultB = await assertRunUnderBudget(client, { source: ALL_LEGISCAN_SOURCES, plannedQueries: 10, capPerMonth: 5000 });
+  assert.equal(resultA.usage, 150);
+  assert.equal(resultB.usage, 150);
+});
+
+// ---- runLegiscanBudgetGate — main()'s OWN pre-flight budget gate, extracted for testability (same
+// "extract for testability without needing process.argv/getClient()" precedent as
+// assertRunUnderBudget/buildSuccessCloseDetail/closeRunOnFailure). TODO-33: THIS is the real
+// production call site that must pass ALL_LEGISCAN_SOURCES — proving it here closes the gap a bare
+// assertRunUnderBudget unit test can't: that main() itself is actually wired to the combined set,
+// not just that the underlying mechanism CAN sum correctly when told to. ----
+
+test('runLegiscanBudgetGate: wired to ALL_LEGISCAN_SOURCES — refuses because of ingest-legiscan-texts.js\'s '
+  + 'own spend even though THIS CLI\'s own "legiscan" usage alone has plenty of headroom (proves the '
+  + 'real main() call site, not just the underlying assertRunUnderBudget mechanism)', async () => {
+  const rows = [
+    { id: '1', source: 'legiscan', started_at: new Date().toISOString(), detail: { queries_used: 10 } },
+    { id: '2', source: 'legiscan-texts', started_at: new Date().toISOString(), detail: { queries_used: 4988 } },
+  ];
+  const client = makeFakeUsageClient(rows);
+  // Live run (no --dataset-file): plannedQueries = PLANNED_QUERIES_PER_RUN = 2. Combined usage
+  // 10+4988=4998, +2 = 5000 >= the DEFAULT_MONTHLY_QUERY_CAP (5000) — refuses at the cap (Minor 2).
+  // An own-source-only view (just 'legiscan'=10) would see 10+2=12, nowhere near the cap.
+  await assert.rejects(
+    () => runLegiscanBudgetGate(client, { session: 1608, datasetFile: null }),
+    (err) => {
+      assert.ok(err instanceof QueryBudgetExceededError);
+      assert.equal(err.usage, 4998, 'must be the COMBINED usage across both source labels');
+      return true;
+    },
+  );
+});
+
+test('runLegiscanBudgetGate: a --dataset-file run plans 0 queries (the local-fixture smoke path spends zero live LegiScan queries) regardless of live headroom', async () => {
+  const client = makeFakeUsageClient([]);
+  const result = await runLegiscanBudgetGate(client, { datasetFile: 'x.json' });
+  assert.equal(result.plannedQueries, 0);
+  assert.equal(result.usage, 0);
 });
 
 // ---- resolveDatasetBytes: hash gate + local cache + write-ahead query accounting (CONTROLLER

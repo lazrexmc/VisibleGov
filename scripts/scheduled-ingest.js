@@ -460,15 +460,24 @@ export function moHouseWroteSomething(detail, status) {
 // `detail.counts.votes` lookup could never have matched (there is no `detail.counts` for this
 // CLI's own runs at all, which is the actual root cause of NEW-1's 0/52).
 //
-// `src/cli/ingest-legiscan-texts.js` ALSO writes to `source='legiscan'` — its own header comment
-// says so explicitly ("SAME source as ingest-legiscan.js") — with a COMPLETELY different,
-// votes-unrelated close-detail shape (billsPlanned/docCacheHits/alreadyHasVersion/... — text-cache
-// counters, nested under `detail.counts`, no votes field anywhere; 2 of the 52 real rows). This
-// scheduler's own registry only ever invokes ingest-legiscan.js, never ingest-legiscan-texts.js —
-// but queryLatestRun reads whatever the LATEST row for source='legiscan' happens to be, so if that
-// text CLI is ever run manually between scheduler ticks, this predicate would see ITS shape
-// instead. No honest votes signal exists there either, so it falls through to the same fail-open
-// default as every other unrecognized shape.
+// UPDATE (TODO-33, .superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md): at the time
+// this predicate was written, `src/cli/ingest-legiscan-texts.js` ALSO wrote to `source='legiscan'`
+// (its own header comment used to say so explicitly, "SAME source as ingest-legiscan.js") — a
+// manual texts run between scheduler ticks could pollute `queryLatestRun`'s read for
+// source='legiscan' with that CLI's own COMPLETELY different, votes-unrelated close-detail shape
+// (billsPlanned/docCacheHits/alreadyHasVersion/... — text-cache counters, nested under
+// `detail.counts`, no votes field anywhere), which this predicate would see with no honest votes
+// signal to read, falling through to the same fail-open default as any unrecognized shape — accepted
+// at the time as fail-safe (delay only, never skip or advance) but a real, unnecessary imprecision.
+// TODO-33 gives `ingest-legiscan-texts.js` its own distinct `source='legiscan-texts'` label going
+// forward (with the historical rows relabeled too) — this scenario can no longer happen: every row
+// this predicate ever reads for source='legiscan' is now genuinely, exclusively an
+// `ingest-legiscan.js` row. `legiscanWroteSomething`'s own final fallback (below) stays exactly as
+// it was — defensive, in case a SIXTH source is ever added without its own predicate wired in — that
+// is a different, still-valid concern, unrelated to this one now-closed scenario. SOURCE_KEYS
+// (below) and this registry's own scheduling logic are untouched: the scheduler never invoked
+// `ingest-legiscan-texts.js` before this fix and still doesn't — only what THAT CLI itself writes to
+// `ingestion_runs.source` has changed.
 export function legiscanWroteSomething(detail, status) {
   const votes = detail?.votes;
   if (typeof votes === 'number') return votes > 0;

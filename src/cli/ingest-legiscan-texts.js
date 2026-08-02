@@ -9,7 +9,8 @@ import { sha256 } from '../adapters/us-congress-text.js';
 import { extractPdfText } from '../adapters/pdf-text.js';
 import { normalizeBillIdentifier } from '../adapters/legiscan-dataset.js';
 import {
-  SOURCE, ATTRIBUTION, getBillText, LegiScanApiError, QueryBudgetExceededError,
+  ATTRIBUTION, getBillText, LegiScanApiError, QueryBudgetExceededError,
+  LEGISCAN_TEXTS_SOURCE as RUN_SOURCE, ALL_LEGISCAN_SOURCES,
 } from '../adapters/legiscan.js';
 import {
   assertRunUnderBudget, recordQueryUsage, buildFailureCloseDetail,
@@ -55,14 +56,26 @@ import { isUniqueViolation } from './link-persons.js';
 // pickLatestTextEntry, the two bulk indexes, normalizeBillIdentifier) as the sibling but keeps its
 // own routing rules: mime IS gated at planning time again, host is not.
 //
-// BUDGET SOURCE (critical, easy to get wrong): this run's own ingestion_runs.source MUST be the
-// SAME `SOURCE` ('legiscan') ingest-legiscan.js already writes — getMonthlyQueryUsage sums usage
-// PER SOURCE, and both this CLI and ingest-legiscan.js spend queries against the SAME real LegiScan
-// account/monthly quota. Using a distinct source string here (e.g. 'ingest-legiscan-texts') would
-// silently let the two CLIs each think they had the FULL cap to themselves, doubling the effective
-// budget against the one real account limit — exactly the terms violation binding rule 1 exists to
-// prevent. openRun/closeRun/assertRunUnderBudget/recordQueryUsage below all use the imported
-// `SOURCE` constant for this reason, never a bespoke label.
+// BUDGET SOURCE (critical, easy to get wrong — TODO-33, .superpowers/sdd/2026-08-02-todo-33-
+// legiscan-source-split/brief.md): this run's own ingestion_runs.source is now its OWN distinct
+// label, RUN_SOURCE ('legiscan-texts', imported above as `LEGISCAN_TEXTS_SOURCE as RUN_SOURCE`) —
+// NOT the same `SOURCE` ('legiscan') ingest-legiscan.js writes. Splitting the label fixes two real,
+// confirmed defects the shared key caused: public_freshness showing one blended row for two
+// unrelated pipelines, and the scheduler's own due-ness read (scripts/scheduled-ingest.js) treating
+// a manual texts run as if it were a votes/bills tick.
+//
+// BUT — and this is the part a naive "just split the key" fix would get dangerously wrong — this
+// CLI and ingest-legiscan.js still spend queries against the SAME real LegiScan account and the
+// SAME real 30,000/month cap (docs/research/2026-07-28-legiscan-terms.md, Rule 1, binding). If this
+// run's OWN pre-flight budget check only ever asked "how much has 'legiscan-texts' spent?" it would
+// be blind to ingest-legiscan.js's real spend under 'legiscan' — each CLI would only ever see its
+// own half of the true total, silently letting the COMBINED real spend exceed the real account cap
+// without either CLI's own refusal ever noticing. So: openRun/closeRun/the printed `source` field
+// below all use RUN_SOURCE (this run's own honest identity in the ledger), but the budget
+// check — assertBudgetFn below — is explicitly passed `source: ALL_LEGISCAN_SOURCES` (both labels,
+// combined; adapters/legiscan.js's own header comment on that constant has the full reasoning).
+// Never conflate the two: RUN_SOURCE says WHO wrote this row; ALL_LEGISCAN_SOURCES says WHAT the
+// budget check must sum before either CLI is allowed to spend another query.
 //
 // DOC CACHE (Rule 7, suspension-level): a document blob is downloaded at most once per doc_id,
 // EVER — .superpowers/artifacts/legiscan-texts/<doc_id>.json (gitignored via the repo's blanket
@@ -563,7 +576,10 @@ export async function runIngestLegiscanTexts(client, {
   let budgetError;
   if (plannedFreshQueries > 0) {
     try {
-      await assertBudgetFn(client, { plannedQueries: plannedFreshQueries, capPerMonth });
+      // TODO-33: source: ALL_LEGISCAN_SOURCES — the load-bearing part of the source split (see the
+      // file header's BUDGET SOURCE comment). Never `source: RUN_SOURCE` here, and never the bare
+      // default either — both would be blind to ingest-legiscan.js's own real spend.
+      await assertBudgetFn(client, { plannedQueries: plannedFreshQueries, capPerMonth, source: ALL_LEGISCAN_SOURCES });
     } catch (err) {
       if (!(err instanceof QueryBudgetExceededError)) throw err;
       budgetOk = false;
@@ -774,11 +790,14 @@ async function main() {
     const report = await runIngestLegiscanTexts(client, {
       dryRun: true, limit: args.limit, session: args.session, priorityOnly: args.priorityOnly,
     });
-    console.log(JSON.stringify({ source: SOURCE, ...report }, null, 2));
+    console.log(JSON.stringify({ source: RUN_SOURCE, ...report }, null, 2));
     return;
   }
 
-  const runId = await openRun(client, SOURCE); // SAME source as ingest-legiscan.js — see file header
+  // TODO-33: RUN_SOURCE ('legiscan-texts'), not SOURCE — this run's own honest identity in the
+  // ledger. See the file header's BUDGET SOURCE comment for why the budget check (inside
+  // runIngestLegiscanTexts) is a DIFFERENT value (ALL_LEGISCAN_SOURCES) from this one.
+  const runId = await openRun(client, RUN_SOURCE);
   try {
     const report = await runIngestLegiscanTexts(client, {
       dryRun: false, runId, limit: args.limit, session: args.session, priorityOnly: args.priorityOnly,
@@ -796,7 +815,7 @@ async function main() {
       attribution: ATTRIBUTION,
     });
     console.log(JSON.stringify({
-      source: SOURCE, run_id: runId, status, partialReason, ...report,
+      source: RUN_SOURCE, run_id: runId, status, partialReason, ...report,
     }, null, 2));
     if (status !== 'succeeded') process.exitCode = 2;
   } catch (err) {

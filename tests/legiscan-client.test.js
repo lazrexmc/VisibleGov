@@ -210,6 +210,11 @@ function makeFakeIngestionRunsClient(rows, { serverCap = 1000 } = {}) {
       const builder = {
         select() { return this; },
         eq(col, val) { predicates.push((r) => r[col] === val); return this; },
+        // TODO-33 (.superpowers/sdd/2026-08-02-todo-33-legiscan-source-split/brief.md, part 2):
+        // getMonthlyQueryUsage now accepts an ARRAY of sources to sum together (the load-bearing
+        // budget fix — see this file's own new tests below) — this fake must support `.in()`
+        // so a test can actually prove that path, not just the pre-existing single-string `.eq()`.
+        in(col, vals) { predicates.push((r) => vals.includes(r[col])); return this; },
         gte(col, val) { predicates.push((r) => r[col] >= val); return this; },
         lt(col, val) { predicates.push((r) => r[col] < val); return this; },
         order() { return this; },
@@ -271,6 +276,50 @@ test('getMonthlyQueryUsage calls through selectAll — a busy month past the 100
   const usage = await getMonthlyQueryUsage(client, { now: new Date('2026-07-20T00:00:00.000Z') });
   assert.equal(usage, 1500);
   assert.ok(client.rangeCalls.length >= 2, 'must have paged past the first 1000-row server cap');
+});
+
+// ---- TODO-33: source as an ARRAY sums across multiple ingestion_runs.source labels — the
+// load-bearing fix. ingest-legiscan.js and ingest-legiscan-texts.js write DISTINCT source labels
+// ('legiscan' / 'legiscan-texts') but spend queries against the SAME real LegiScan account/30,000-
+// per-month cap; each CLI's own pre-flight budget check must sum BOTH labels together, or each one
+// would only ever see its own half of the real spend. Re-read docs/research/2026-07-28-legiscan-
+// terms.md's Rule 1 before trusting this: "the adapter refuses to start a run that could plausibly
+// exceed a configured monthly cap" — that promise is only honest if the usage being compared
+// against the cap is the REAL total, not one CLI's own partial view of it. ----
+
+test('getMonthlyQueryUsage: source as an array of TWO labels sums BOTH together, excluding a third, unrelated source — the exact TODO-33 budget-summing behavior', async () => {
+  const rows = [
+    { id: '00001', source: 'legiscan', started_at: '2026-07-05T00:00:00.000Z', detail: { queries_used: 100 } },
+    { id: '00002', source: 'legiscan-texts', started_at: '2026-07-06T00:00:00.000Z', detail: { queries_used: 50 } },
+    { id: '00003', source: 'mo-house-xml', started_at: '2026-07-07T00:00:00.000Z', detail: { queries_used: 999 } },
+  ];
+  const client = makeFakeIngestionRunsClient(rows);
+  const usage = await getMonthlyQueryUsage(client, {
+    source: ['legiscan', 'legiscan-texts'], now: new Date('2026-07-20T00:00:00.000Z'),
+  });
+  assert.equal(usage, 150, 'must sum BOTH labels together, and must NOT include the unrelated third source');
+});
+
+test('getMonthlyQueryUsage: a single-element array behaves identically to the bare-string call — same total, same exclusions', async () => {
+  const rows = [
+    { id: '00001', source: 'legiscan', started_at: '2026-07-05T00:00:00.000Z', detail: { queries_used: 100 } },
+    { id: '00002', source: 'legiscan-texts', started_at: '2026-07-06T00:00:00.000Z', detail: { queries_used: 50 } },
+  ];
+  const client = makeFakeIngestionRunsClient(rows);
+  const usageArray = await getMonthlyQueryUsage(client, { source: ['legiscan'], now: new Date('2026-07-20T00:00:00.000Z') });
+  const usageString = await getMonthlyQueryUsage(client, { source: 'legiscan', now: new Date('2026-07-20T00:00:00.000Z') });
+  assert.equal(usageArray, 100);
+  assert.equal(usageString, 100);
+});
+
+test('getMonthlyQueryUsage: REGRESSION — a bare string source is unchanged from before this task (still filters to exactly that one source, still excludes every other source)', async () => {
+  const rows = [
+    { id: '00001', source: 'legiscan', started_at: '2026-07-10T00:00:00.000Z', detail: { queries_used: 7 } },
+    { id: '00002', source: 'legiscan-texts', started_at: '2026-07-10T00:00:00.000Z', detail: { queries_used: 200 } },
+  ];
+  const client = makeFakeIngestionRunsClient(rows);
+  const usage = await getMonthlyQueryUsage(client, { source: 'legiscan', now: new Date('2026-07-20T00:00:00.000Z') });
+  assert.equal(usage, 7, 'the default single-source call must never accidentally pick up the other CLI\'s rows');
 });
 
 test('getMonthlyQueryUsage propagates a selectAll read error rather than swallowing it', async () => {
