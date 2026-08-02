@@ -324,10 +324,12 @@
     **Highest-priority data defect** — it splits one session's record across two sessions on the
     public site. Fix = merge `'2026'` into `'261'` (draft-then-apply, Lance runs it).
 
-26. **2,005 bills have NULL title AND NULL canonical_url** — 1,986 of them in session `'261'`, i.e.
-    ~63% of the current 2026 Missouri session. 209 are reachable from a roll call, 190 have text,
-    and **3 already have a published summary rendering under a blank title**. Fix = backfill titles
-    from the cached LegiScan datasets ($0, data already on disk).
+26. ~~**2,005 bills have NULL title AND NULL canonical_url**~~ **DONE 2026-08-02.**
+    `backfill-bill-titles.js` (commit 5ecd938) ran live: 1,972 of 1,975 NULL-title bills resolved
+    from the cached LegiScan datasets, 0 failures. 3 remain (all `SRM` remonstrance resolutions
+    LegiScan's own cache also has no title for — left untouched, never guessed). Independently
+    verified against the live DB post-run. `canonical_url` NULL rows may still exist where
+    LegiScan's cache carries no state link; not re-checked here, may be worth a follow-up count.
 
 27. **Party vocabulary is unnormalized at the source table.** `legislators.party` holds `R` 391 /
     `Republican` 469 / `D` 209 / `Democratic` 463 / NULL 65 / `Independent Democrat` 1 / `''` 1.

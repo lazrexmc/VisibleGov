@@ -1062,3 +1062,12 @@ surfaced along the way (the MO Senate roster duplicated in `legislators`) and is
 Two things intentionally left open, surfaced not resolved: 29 bill pages will show disagreeing
 vote pairs until the flag queue clears; and the code that created the duplicate session is
 unchanged, so this is a cleanup, not yet a prevention.
+
+## 2026-08-02 — TODO-26 closed: 1,972 blank bill titles filled, $0
+
+Lance: *"proceed with non-usage items if you can."* Ran `backfill-bill-titles.js` live (built and
+dry-run-verified 2026-08-01): **1,972 of 1,975 NULL-title bills backfilled from the cached LegiScan
+datasets, 0 failures.** 3 remain — LegiScan's own cache has no title for any of them either (all
+`SRM` remonstrance resolutions), correctly left untouched rather than guessed. Independently
+verified against the live database post-run (NULL count 3, exact titles spot-checked correct).
+Zero model calls, zero network calls, zero live-API spend — pure cached-data extraction.
