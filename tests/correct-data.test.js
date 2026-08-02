@@ -12,6 +12,7 @@ import {
   VOTE_DATE_1969_SENTINEL,
   runCorrectMoStatus,
   runCorrectMo1969Dates,
+  runCorrectPartyNormalize,
   runCorrectData,
   CANONICAL_MO_2026_SESSION_IDENTIFIER,
   DUPLICATE_MO_2026_SESSION_IDENTIFIER,
@@ -50,6 +51,7 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     summaries: [],
     bill_actions: [],
     vote_reconciliation_flags: [],
+    legislators: [],
     ...seed,
   };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
@@ -121,7 +123,17 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
         for (const row of matched) Object.assign(row, patch);
         if (selectCols) {
           const data = matched.map((r) => ({ id: r.id }));
-          result = selectOpts.count === 'exact' ? { data, error: null, count: matched.length } : { data, error: null };
+          // FIX (2026-08-02, found live): the real Supabase/PostgREST endpoint this project talks
+          // to does NOT populate `count` for .update().select({count:'exact'}) — verified by direct
+          // probe against production (party-normalize's live run reported updated:0 while the DATA
+          // genuinely changed for 601 rows). `data` is always populated correctly regardless. This
+          // fake previously computed a faithful `count: matched.length` here, which is MORE
+          // accurate than reality and was silently masking every call site that read `count`
+          // instead of `data.length` — mirror the real (broken) behavior so a test proves the
+          // production code path actually works, not just that it works against a too-generous
+          // fake. SELECT's own count:'exact' (the `mode === 'select'` branch above) is unaffected
+          // — that's a genuinely different, more standard PostgREST feature, not disproven here.
+          result = { data, error: null, count: null };
         } else {
           result = { data: null, error: null };
         }
@@ -384,6 +396,69 @@ test('runCorrectMoStatus: a query failure for one code is an honest, named failu
   assert.match(report.failures[0].error, /connection reset/);
   assert.equal(report.perCode[2], 1, 'code 2 still processed despite code 1 failing');
   assert.equal(client.tables.bills.find((b) => b.id === 'b2').status, 'Engrossed');
+});
+
+// ---- runCorrectPartyNormalize ----
+
+function legislatorRow(id, party) { return { id, party }; }
+
+test('runCorrectPartyNormalize: R/D decode to full words; Independent, Independent Democrat, and NULL are never touched; empty string becomes NULL', async () => {
+  const client = makeFakeClient({
+    legislators: [
+      legislatorRow('l1', 'R'), legislatorRow('l2', 'R'), legislatorRow('l3', 'D'),
+      legislatorRow('l4', 'Independent'), // already a full word — must never be rewritten
+      legislatorRow('l5', 'Independent Democrat'), // Lieberman's real affiliation — never collapsed
+      legislatorRow('l6', null), // genuinely unknown — stays null, not normalized to anything
+      legislatorRow('l7', ''), // LegiScan's blank — becomes null, not a word
+    ],
+  });
+  const report = await runCorrectPartyNormalize(client, { dryRun: false, runId: 'run-1' });
+
+  assert.deepEqual(report.perCode, { R: 2, D: 1 });
+  assert.equal(report.emptyStringToNull, 1);
+  assert.equal(report.updated, 4, 'sum of perCode + emptyStringToNull');
+  assert.deepEqual(report.failures, []);
+
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l1').party, 'Republican');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l2').party, 'Republican');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l3').party, 'Democratic');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l4').party, 'Independent', 'already a word — untouched');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l5').party, 'Independent Democrat', 'Lieberman — never collapsed into a different party');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l6').party, null, 'genuinely unknown — stays null');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l7').party, null, 'blank string normalized to null, not a guessed word');
+
+  const updateCalls = client.calls.filter((c) => c.mode === 'update' && c.table === 'legislators');
+  for (const c of updateCalls) {
+    assert.ok(c.filters.some((f) => f.op === 'eq' && f.col === 'party'), 'every write is guarded by an exact party .eq()');
+  }
+});
+
+test('runCorrectPartyNormalize: --dry-run performs ZERO writes — reports the same honest matched counts', async () => {
+  const client = makeFakeClient({
+    legislators: [legislatorRow('l1', 'R'), legislatorRow('l2', 'D'), legislatorRow('l3', '')],
+  });
+  const before = JSON.stringify(client.tables.legislators);
+  const report = await runCorrectPartyNormalize(client, { dryRun: true, runId: null });
+
+  assert.deepEqual(report.perCode, { R: 1, D: 1 });
+  assert.equal(report.emptyStringToNull, 1);
+  assert.equal(report.updated, 3, 'sum of perCode (2) + emptyStringToNull (1)');
+  assert.equal(JSON.stringify(client.tables.legislators), before, 'zero writes in dry-run');
+  assert.equal(client.calls.filter((c) => c.mode === 'update').length, 0);
+});
+
+test('runCorrectPartyNormalize: a write failure on one value is recorded and does not block the other', async () => {
+  const client = makeFakeClient(
+    { legislators: [legislatorRow('l1', 'R'), legislatorRow('l2', 'D')] },
+    { forceError: (table, mode, filters) => (table === 'legislators' && mode === 'update' && filters.some((f) => f.val === 'R') ? { message: 'connection reset' } : null) },
+  );
+  const report = await runCorrectPartyNormalize(client, { dryRun: false, runId: 'run-1' });
+  assert.equal(report.failures.length, 1);
+  assert.equal(report.failures[0].code, 'R');
+  assert.match(report.failures[0].error, /connection reset/);
+  assert.equal(report.perCode.D, 1, 'D still processed despite R failing');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l2').party, 'Democratic');
+  assert.equal(client.tables.legislators.find((l) => l.id === 'l1').party, 'R', 'the failed write left the source value untouched, not corrupted');
 });
 
 // ---- runCorrectMo1969Dates ----

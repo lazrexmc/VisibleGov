@@ -317,3 +317,33 @@ returns (fixture it — ours proved byte-identical across vote numbers, so exact
 is safe) and classify it as a typed expected-miss; any OTHER structure-missing payload must
 stay a loud failure so real outages can't hide inside the expected-miss class. Related: §7
 lesson 3 (government HTML inside expected-XML channels).
+
+## Lesson 20 — This project's Supabase endpoint never populates `count` on `.update().select()` (2026-08-02)
+
+`.from(t).update(patch).eq(...).select('id', { count: 'exact' })` returns `count: null` — always,
+verified by direct production probe (an update that genuinely touched 8 real rows still returned
+`count: null`; `data` correctly held all 8). Three call sites across two files read `count ?? 0`
+instead of `data.length` and were silently broken: two branches of the shipped `mo-status`
+correction (37,662 rows corrected live on 2026-07-31 — the DATA was right, independently verified
+at the time, but every reported `matched` count was 0, previously misdiagnosed in this very log as
+"the counters read post-write state" rather than the real cause), a brand-new `party-normalize`
+correction (601 rows correctly changed, reported `updated: 0`), and a dead concurrent-write safety
+check in `backfill-bill-titles.js` (`count === 0` can never be true against `null` — the underlying
+`.is('title', null)` WHERE guard still protected the data, but the intended race detection never
+fired). Caught because the SAME broken pattern recurred a third time and this time got investigated
+instead of re-explained away.
+
+**Root cause of it staying hidden:** the shared test fake client faithfully computed
+`count: matched.length` for every mode including `update` — MORE accurate than the real endpoint,
+which meant every test built against it was proving code worked against a fantasy backend. Fixed
+the fake to mirror reality (`update` mode always returns `count: null`, matching the live probe)
+before touching any production code — this immediately turned 6 previously-green tests red across
+two files, proving the bug was real and shipped, not hypothetical.
+
+**Rule, mechanically: after any `.update()` or `.delete()`, read `data.length` (or `(data ?? [])
+.length`) for an affected-row count — never the `count` metadata field, on this project's endpoint,
+regardless of whether `{count:'exact'}` was requested.** `select()`'s own `count:'exact'` (including
+`head:true`) IS reliable — this is scoped specifically to update/delete, confirmed by direct probe,
+not a blanket "count is broken" claim. A test fake for this project's DB layer must reproduce this
+asymmetry (`select` count real, `update`/`delete` count always null) or it will mask the exact class
+of defect this lesson exists to prevent recurring a fourth time.

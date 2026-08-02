@@ -1,9 +1,56 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildTitleIndex, resolveBillTitle, runBackfill,
+  buildTitleIndex, resolveBillTitle, runBackfill, writeTitleGuarded,
 } from '../src/cli/backfill-bill-titles.js';
 import { parsePositiveIntegerFlag } from '../src/lib/errors.js';
+
+// Fake mirroring the REAL Supabase/PostgREST behavior this project's endpoint has (found live,
+// 2026-08-02): .update().select() never populates the `count` metadata field (always null), only
+// `data` (the actual affected rows) is reliable. A fake that faithfully computed `count` here would
+// mask exactly the bug this test exists to catch — see correct-data.test.js's own fake client for
+// the same fix applied there.
+function makeFakeBillsClient(rows) {
+  const table = rows.map((r) => ({ ...r }));
+  return {
+    from(name) {
+      if (name !== 'bills') throw new Error(`unexpected table ${name}`);
+      return {
+        update(patch) {
+          const filters = [];
+          const chain = {
+            eq(col, val) { filters.push({ col, val, isNull: false }); return chain; },
+            is(col, val) { filters.push({ col, val, isNull: val === null }); return chain; },
+            // Deferred to here (real supabase-js semantics): filters accumulate via .eq()/.is()
+            // AFTER .update() is called, and only THIS terminal call actually executes the write.
+            select() {
+              const matched = table.filter((r) => filters.every((f) => (f.isNull ? r[f.col] === null : r[f.col] === f.val)));
+              for (const row of matched) Object.assign(row, patch);
+              return Promise.resolve({ data: matched.map((r) => ({ id: r.id })), error: null, count: null });
+            },
+          };
+          return chain;
+        },
+      };
+    },
+    tableSnapshot: () => table.map((r) => ({ ...r })),
+  };
+}
+
+test('writeTitleGuarded: a clean write (title still NULL) succeeds and writes the title', async () => {
+  const client = makeFakeBillsClient([{ id: 'b1', title: null }]);
+  await writeTitleGuarded(client, 'b1', 'Real Title');
+  assert.equal(client.tableSnapshot().find((r) => r.id === 'b1').title, 'Real Title');
+});
+
+test('writeTitleGuarded: a concurrent write (title no longer NULL) throws, proven via data.length not the broken count field', async () => {
+  const client = makeFakeBillsClient([{ id: 'b1', title: 'Someone else set this already' }]);
+  await assert.rejects(
+    () => writeTitleGuarded(client, 'b1', 'Would-be title'),
+    /title was no longer NULL at write time/,
+  );
+  assert.equal(client.tableSnapshot().find((r) => r.id === 'b1').title, 'Someone else set this already', 'never overwritten');
+});
 
 // buildTitleIndex consumes the SAME shape readCachedDatasetBills (backfill-mo-bill-meta.js)
 // returns for a successfully-parsed cache file: { ok: true, sessionId, bills: [...] } — and the

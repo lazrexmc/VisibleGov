@@ -95,13 +95,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | mo-2026-session-merge | mo-2026-vote-reconcile | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | mo-2026-session-merge | mo-2026-vote-reconcile | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | all`);
   }
   out.which = which;
   return out;
@@ -185,18 +185,22 @@ async function correctOneStatusCode(client, code, {
     const ids = (idRows ?? []).map((r) => r.id);
     if (ids.length === 0) return { matched: 0, error: null };
     if (dryRun) return { matched: ids.length, error: null };
-    // FIX (review, MEDIUM finding): use the update's own returned `count`, not `ids.length` — a
+    // FIX (review, MEDIUM finding): use the update's own returned ROWS, not `ids.length` — a
     // race between the id-select above and this update (another process changing one of those
     // rows' status in between) would make the actual number of rows this update matched/changed
     // LESS than the id list it was given (the `.eq('status', codeStr)` guard on the update itself
-    // would simply exclude that row) — trusting `ids.length` would silently OVERCOUNT. Same
-    // count-vs-data-cap reasoning as the unlimited branch below: `count` (from `{count:'exact'}`)
-    // is the actual server-side truth, never assumed from what was merely requested.
-    const { count, error: updErr } = await client
+    // would simply exclude that row) — trusting `ids.length` would silently OVERCOUNT.
+    // FIX (2026-08-02, found live): originally read the `count` metadata field from
+    // `{count:'exact'}` — this project's real Supabase/PostgREST endpoint does NOT populate
+    // `count` for .update().select() (verified by direct production probe: count came back null
+    // even when rows genuinely matched and updated). `data` IS always populated correctly with the
+    // actual affected rows, which carries the exact same "server-side truth, not what was merely
+    // requested" guarantee the original comment wanted — read data.length, never the count field.
+    const { data: updatedRows, error: updErr } = await client
       .from('bills').update({ status: word, run_id: runId })
-      .eq('status', codeStr).in('id', ids).select('id', { count: 'exact' });
+      .eq('status', codeStr).in('id', ids).select('id');
     if (updErr) return { matched: 0, error: updErr };
-    return { matched: count ?? 0, error: null };
+    return { matched: (updatedRows ?? []).length, error: null };
   }
 
   if (dryRun) {
@@ -205,11 +209,13 @@ async function correctOneStatusCode(client, code, {
     if (error) return { matched: 0, error };
     return { matched: count ?? 0, error: null };
   }
-  const { count, error } = await client
+  // FIX (2026-08-02, found live): same as the limited branch above — read data.length, never the
+  // `count` metadata field, which this project's real endpoint does not populate for update+select.
+  const { data: updatedRows, error } = await client
     .from('bills').update({ status: word, run_id: runId })
-    .eq('status', codeStr).select('id', { count: 'exact' });
+    .eq('status', codeStr).select('id');
   if (error) return { matched: 0, error };
-  return { matched: count ?? 0, error: null };
+  return { matched: (updatedRows ?? []).length, error: null };
 }
 
 // countBillsWithStatusIn — the honest-visibility counters for 0 and 7-12 (never written). Also
@@ -224,6 +230,85 @@ async function countBillsWithStatusIn(client, codes, failures, label) {
     return 0;
   }
   return count ?? 0;
+}
+
+// ============================================================================================
+// Correction — party-normalize: legislators.party abbreviated codes -> full printed words
+// ============================================================================================
+
+// PARTY_WORD_MAP — SOURCED, not invented: the exact R->Republican / D->Democratic mapping already
+// reviewed and shipped in migration 0018's public_position_totals CASE expression (this file's own
+// header cites it) — the raw column is being brought into line with a target this codebase already
+// established and trusted for aggregates, not a new decision. 'I'->'Independent' is deliberately
+// NOT included: zero live rows carry bare 'I' (checked before writing this), and the live '' (empty
+// string, 1 row, LegiScan-sourced) is a DIFFERENT defect — a missing value stored as blank rather
+// than NULL, corrected by PARTY_EMPTY_TO_NULL below, never conflated with a code decode.
+export const PARTY_WORD_MAP = { R: 'Republican', D: 'Democratic' };
+export const PARTY_MAPPED_CODES = Object.keys(PARTY_WORD_MAP);
+
+// Deliberately NEVER touched by this correction — both are real, honest data, not defects:
+//   - 'Independent' (already a full word, nothing to decode).
+//   - 'Independent Democrat' (1 live row: Joseph Lieberman, bioguide L000304 — his own real,
+//     historically accurate post-2006 affiliation label; collapsing it into 'Democratic' or
+//     'Independent' would misrepresent a real senator's recorded affiliation, not fix a typo).
+//   - NULL (genuinely unknown party — nothing to normalize onto).
+
+async function correctOnePartyCode(client, code, { dryRun, runId }) {
+  const word = PARTY_WORD_MAP[code];
+  if (dryRun) {
+    const { count, error } = await client
+      .from('legislators').select('id', { count: 'exact', head: true }).eq('party', code);
+    if (error) return { matched: 0, error };
+    return { matched: count ?? 0, error: null };
+  }
+  // FIX (2026-08-02, found live): read data.length, never the `count` metadata field — this
+  // project's real Supabase/PostgREST endpoint does not populate `count` for update+select
+  // (verified by direct production probe: a live run against 391 real R rows reported
+  // matched:0 while the actual party values genuinely changed to 'Republican'). `data` is always
+  // populated correctly with the actual affected rows.
+  const { data: updatedRows, error } = await client
+    .from('legislators').update({ party: word, run_id: runId })
+    .eq('party', code).select('id');
+  if (error) return { matched: 0, error };
+  return { matched: (updatedRows ?? []).length, error: null };
+}
+
+// correctPartyEmptyString — a distinct, smaller correction from the word-decode above: a live row
+// (LegiScan-sourced, Hope Whitehead, legiscan_people_id 7658) carries party='' rather than the NULL
+// every other unknown-party row uses. An empty string isn't a valid party value under any reading;
+// NULL is the honest "no data" representation already used everywhere else in this column.
+async function correctPartyEmptyString(client, { dryRun, runId }) {
+  if (dryRun) {
+    const { count, error } = await client
+      .from('legislators').select('id', { count: 'exact', head: true }).eq('party', '');
+    if (error) return { matched: 0, error };
+    return { matched: count ?? 0, error: null };
+  }
+  // FIX (2026-08-02, found live): same as correctOnePartyCode above — read data.length, never count.
+  const { data: updatedRows, error } = await client
+    .from('legislators').update({ party: null, run_id: runId })
+    .eq('party', '').select('id');
+  if (error) return { matched: 0, error };
+  return { matched: (updatedRows ?? []).length, error: null };
+}
+
+export async function runCorrectPartyNormalize(client, { dryRun = false, runId = null } = {}) {
+  const perCode = {};
+  const failures = [];
+  for (const code of PARTY_MAPPED_CODES) {
+    // eslint-disable-next-line no-await-in-loop -- sequential, 2-value backlog, same precedent as
+    // correctOneStatusCode's own loop
+    const result = await correctOnePartyCode(client, code, { dryRun, runId });
+    perCode[code] = result.matched;
+    if (result.error) failures.push({ code, reason: 'query_failed', error: String(result.error.message ?? result.error) });
+  }
+  const emptyResult = await correctPartyEmptyString(client, { dryRun, runId });
+  if (emptyResult.error) failures.push({ code: '(empty string)', reason: 'query_failed', error: String(emptyResult.error.message ?? emptyResult.error) });
+
+  const updated = Object.values(perCode).reduce((a, b) => a + b, 0) + emptyResult.matched;
+  return {
+    perCode, emptyStringToNull: emptyResult.matched, updated, failures,
+  };
 }
 
 // runCorrectMoStatus — dry-run and live both report the SAME honest `matched` counts per code
@@ -1094,6 +1179,12 @@ export async function runCorrectData(client, {
   if (which === 'mo-1969-dates' || which === 'all') {
     out.mo1969Dates = await runCorrectMo1969Dates(client, { dryRun, limit, runId });
     failures.push(...out.mo1969Dates.failures);
+  }
+  // Joins 'all': same in-place-rewrite risk class as the two corrections above it (no deletes, no
+  // FK redirects — a guarded UPDATE per exact source value), unlike the session-merge below.
+  if (which === 'party-normalize' || which === 'all') {
+    out.partyNormalize = await runCorrectPartyNormalize(client, { dryRun, runId });
+    failures.push(...out.partyNormalize.failures);
   }
   // Deliberately EXCLUDED from 'all' (brief, explicit): bill/session merge + FK redirect + guarded
   // deletes is higher-stakes than A/B's in-place rewrites — an operator must name this one, never

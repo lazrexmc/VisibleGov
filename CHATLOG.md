@@ -1071,3 +1071,40 @@ datasets, 0 failures.** 3 remain — LegiScan's own cache has no title for any o
 `SRM` remonstrance resolutions), correctly left untouched rather than guessed. Independently
 verified against the live database post-run (NULL count 3, exact titles spot-checked correct).
 Zero model calls, zero network calls, zero live-API spend — pure cached-data extraction.
+
+## 2026-08-02 — TODO-25 root cause closed; TODO-27 closed; a real reporting bug found and fixed in 3 places
+
+Lance: *"proceed with non-usage items if you can."* Three things landed, one of them a genuine
+surprise.
+
+**TODO-25's root cause is now closed, not just cleaned up.** `ensureSessionRow` (mo-senate-web)
+ported the same year+name session resolution `ensureLegiscanSessionRow` already proved correct.
+Caught the old buggy code mid-fix — it had already minted a fresh EMPTY duplicate `'2026'` session
+during the gap between yesterday's cleanup and this fix landing; verified it was genuinely empty
+(0 bills) before deleting it, then confirmed live that year=2026 now resolves cleanly onto the
+canonical session. A review then caught that the brief's own reasoning for skipping a guard
+(`SPECIAL_IDENTIFIER_PATTERN`) was actually wrong — the shared `sessions` table already holds
+LegiScan-minted special-session rows this new scan didn't exclude, which would have manufactured a
+false ambiguity the moment MO called an extraordinary session. Closed the same day: reverted the
+fix, watched the new test throw the exact predicted false ambiguity, restored, confirmed green.
+
+**TODO-27 (unnormalized party vocabulary) closed live: 391 `R`→Republican, 209 `D`→Democratic, 1
+LegiScan blank→NULL.** Checked both edge cases by hand before writing anything — the one
+`Independent Democrat` row is Joseph Lieberman's real, historically accurate affiliation
+(bioguide L000304), never touched.
+
+**The surprise: running this live exposed a real, previously-shipped bug.** The correction reported
+`updated: 0` while the actual data changed correctly (independently verified: 860 Republican, exact
++391). Traced it to a hard fact about this project's Supabase endpoint — `.update().select()` never
+populates the `count` metadata field, confirmed by direct probe. Two branches of the ALREADY-SHIPPED
+`mo-status` correction (37,662 bills, live 2026-07-31) read this same broken field — meaning that
+correction's reported per-code counts were likely always zero too, and an earlier CHATLOG entry
+("the counters read post-write state") had misdiagnosed the real cause. The data itself was fine
+both times (independently verified at the time and again today) — only the reporting was silently
+wrong. Also found and fixed a genuinely dead concurrent-write safety check in
+`backfill-bill-titles.js` (`count === 0` can never be true against `null`) — the underlying database
+guard still protected the data, but the intended race detection never actually fired. Root cause of
+it staying hidden for so long: the shared test fake client computed `count` MORE accurately than the
+real backend does, silently proving code against a fantasy. Fixed the fake to mirror reality first —
+immediately turned 6 previously-green tests red, then fixed the production code genuinely. Playbook
+lesson 20 records the mechanism.

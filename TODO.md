@@ -331,12 +331,20 @@
     verified against the live DB post-run. `canonical_url` NULL rows may still exist where
     LegiScan's cache carries no state link; not re-checked here, may be worth a follow-up count.
 
-27. **Party vocabulary is unnormalized at the source table.** `legislators.party` holds `R` 391 /
-    `Republican` 469 / `D` 209 / `Democratic` 463 / NULL 65 / `Independent Democrat` 1 / `''` 1.
-    Migration 0018's matviews normalize R/D/I *for the aggregates*, but ~41.5k casts still fall out
-    of party comparisons silently, and any consumer reading `legislators.party` directly sees the
-    raw mess. Fix = normalize the column itself (same sourced-mapping discipline as the MO status
-    correction), or make every consumer use the documented CASE.
+27. ~~**Party vocabulary is unnormalized at the source table.**~~ **DONE 2026-08-02.**
+    `correct-data.js party-normalize` ran live: 391 `R`→Republican, 209 `D`→Democratic, 1 empty
+    string→NULL (a LegiScan-sourced blank, not a valid party value). Independently verified against
+    the live DB (860 Republican, 672 Democratic, 66 NULL — exact expected deltas). `Independent`
+    (already a word) and `Independent Democrat` (Joseph Lieberman's real, historically accurate
+    affiliation, bioguide L000304) deliberately left untouched — checked both by hand before
+    writing any code, never guessed. Mapping sourced from migration 0018's own already-reviewed
+    CASE expression, not invented.
+    - **Found along the way (real, unrelated, worth its own entry): this project's Supabase
+      endpoint never populates `count` on `.update().select()`.** Silently broke the REPORTED
+      counts (not the data) on two shipped corrections (`mo-status`, `party-normalize` itself) and
+      a concurrent-write safety check in `backfill-bill-titles.js` — all fixed same-day, see
+      PLAYBOOK_DELTA lesson 20 for the full mechanism and the fake-test-client fix that had been
+      masking it.
 
 28. **152 roll calls show a result with no member positions** (95 OpenStates 2022, 57 mo-house-xml
     2026). Affects **52 bills**: 23 also have a real cast-bearing row for the same event (so a bill

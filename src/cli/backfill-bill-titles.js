@@ -104,6 +104,21 @@ function parseArgs(argv) {
   return out;
 }
 
+// Extracted (2026-08-02) so the concurrent-write guard is independently testable against a fake
+// client, not only exercisable via a live probe — this repo's convention is that a CLI's main()
+// itself isn't unit-tested, but the DB-facing logic it wires up should be, when it carries a real
+// safety check like this one.
+export async function writeTitleGuarded(client, id, title) {
+  const { error, data } = await client
+    .from('bills')
+    .update({ title })
+    .eq('id', id)
+    .is('title', null)
+    .select('id');
+  if (error) throw new Error(error.message);
+  if ((data ?? []).length === 0) throw new Error('title was no longer NULL at write time (concurrent write) — skipped, not overwritten');
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const client = getClient();
@@ -137,16 +152,7 @@ async function main() {
       limit: args.limit,
       // Conditioned on title IS NULL at write time — a bill can legitimately gain a title via
       // concurrent ingestion between our read and this write (the scheduler runs independently).
-      writeTitle: async (id, title) => {
-        const { error, count } = await client
-          .from('bills')
-          .update({ title })
-          .eq('id', id)
-          .is('title', null)
-          .select('id', { count: 'exact', head: true });
-        if (error) throw new Error(error.message);
-        if (count === 0) throw new Error('title was no longer NULL at write time (concurrent write) — skipped, not overwritten');
-      },
+      writeTitle: (id, title) => writeTitleGuarded(client, id, title),
     });
 
     if (!args.dryRun) {
