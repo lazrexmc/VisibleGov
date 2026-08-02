@@ -73,6 +73,25 @@ export function normalizeLegiscanDistrict(district) {
   return String(Number(m[1]));
 }
 
+// LEGISCAN_PARTY_WORD_MAP / normalizeLegiscanParty — FIX (2026-08-02, found during a post-TODO-27
+// verification sweep). LegiScan's own cached datasets print party as a bare code ('R'/'D', verified
+// directly against the newest cached dataset's real `people[]` — never a full word), while every
+// OTHER active source (mo-house-xml, us-congress, us-senate) already writes the full printed word.
+// TODO 27's live correction (correct-data.js's party-normalize) fixed the HISTORICAL rows, but did
+// nothing to stop a FUTURE LegiScan-introduced legislator from re-dirtying the column the moment
+// this driver's own insertIfAbsent below writes their first row — this is that structural fix, at
+// the point of insertion, matching the SAME mapping (sourced from migration 0018's own already-
+// reviewed CASE expression, not reinvented) rather than leaving normalization to a periodic
+// re-correction someone has to remember to re-run. `correct-data.js`'s party-normalize now imports
+// this SAME map, so the historical correction and this insertion-time fix can never drift apart.
+export const LEGISCAN_PARTY_WORD_MAP = { R: 'Republican', D: 'Democratic' };
+
+export function normalizeLegiscanParty(party) {
+  if (party == null) return null;
+  return LEGISCAN_PARTY_WORD_MAP[party] ?? party; // unrecognized code (e.g. already 'Independent',
+  // or a future code this map doesn't know): pass through unchanged rather than guess.
+}
+
 // buildLegiscanNameVariants — CONTROLLER RULING 3, AMENDED (fix round 1). LegiScan's own person
 // record prints a `nickname` field alongside `name`/`first_name`/`last_name` (verified in the real
 // fixture: Robert Onder, people_id 16351, `name:"Robert Onder"`, `nickname:"Bob"`). When present,
@@ -288,7 +307,7 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
         // visible to the cluster pass, no separate backfill run required). `?? null`: absent on the
         // source record -> null, never guessed, same convention as legiscanSurname above.
         nickname: legiscanPerson.nickname ?? null,
-        party: legiscanPerson.party ?? null,
+        party: normalizeLegiscanParty(legiscanPerson.party),
         legiscan_people_id: legiscanPerson.people_id,
         run_id: runId,
       })
@@ -355,7 +374,7 @@ export async function resolveOrCreateLegiscanPerson(client, runId, legiscanPerso
       // finding 8 (final wave): same reasoning as the no_candidate insert above — persist the
       // source-printed nickname at ingest time, never guessed.
       nickname: legiscanPerson.nickname ?? null,
-      party: legiscanPerson.party ?? null,
+      party: normalizeLegiscanParty(legiscanPerson.party),
       legiscan_people_id: legiscanPerson.people_id,
       run_id: runId,
     })

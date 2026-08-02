@@ -497,8 +497,17 @@ async function findExistingReconciliationFlag(client, {
     if (isMissingRelationError(error, 'vote_reconciliation_flags')) return { gated: true, existing: null };
     throw new Error(`legiscan-votes: could not check existing vote_reconciliation_flags: ${error.message}`);
   }
+  // FIX (2026-08-02, found live: this pre-check missed a real match, the DB's own unique index
+  // caught the resulting duplicate insert, and the recheck below hit the SAME miss — a whole
+  // legiscan run failed on it). The unique index (migration 0011) casts roll_call_id to ::integer
+  // on BOTH sides before comparing; this in-memory check used strict === and a differently-typed
+  // roll_call_id (a string, from a source that parsed it out of a source_key via regex rather than
+  // reading it as JSON) will never strictly-equal a number, even though the DB considers them the
+  // SAME row. Coerce both sides to Number so this check matches the DB's own type-tolerant
+  // definition of "the same roll call" — never trust two callers to agree on a type the schema
+  // itself doesn't enforce.
   const existing = (data ?? []).find((row) => (
-    row?.discrepancy?.roll_call_id === rollCallId && row?.discrepancy?.reason === reason
+    Number(row?.discrepancy?.roll_call_id) === Number(rollCallId) && row?.discrepancy?.reason === reason
   )) ?? null;
   return { gated: false, existing };
 }

@@ -13,6 +13,7 @@ import {
   parsePrimaryResultAggregate,
   isPrimaryCastDataComparable,
 } from '../adapters/legiscan-votes.js';
+import { LEGISCAN_PARTY_WORD_MAP } from '../adapters/legiscan-identity.js';
 
 // correct-data — data-correction CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md,
 // .superpowers/sdd/2026-08-01-mo-2026-session-merge/brief.md).
@@ -236,14 +237,17 @@ async function countBillsWithStatusIn(client, codes, failures, label) {
 // Correction — party-normalize: legislators.party abbreviated codes -> full printed words
 // ============================================================================================
 
-// PARTY_WORD_MAP — SOURCED, not invented: the exact R->Republican / D->Democratic mapping already
-// reviewed and shipped in migration 0018's public_position_totals CASE expression (this file's own
-// header cites it) — the raw column is being brought into line with a target this codebase already
-// established and trusted for aggregates, not a new decision. 'I'->'Independent' is deliberately
-// NOT included: zero live rows carry bare 'I' (checked before writing this), and the live '' (empty
-// string, 1 row, LegiScan-sourced) is a DIFFERENT defect — a missing value stored as blank rather
-// than NULL, corrected by PARTY_EMPTY_TO_NULL below, never conflated with a code decode.
-export const PARTY_WORD_MAP = { R: 'Republican', D: 'Democratic' };
+// PARTY_WORD_MAP — re-exported from legiscan-identity.js's LEGISCAN_PARTY_WORD_MAP (2026-08-02),
+// NOT a separate copy: that module now applies this SAME mapping at insertion time (a live
+// verification sweep found LegiScan's own cached datasets print bare 'R'/'D' codes, and without an
+// insertion-time fix a future LegiScan-introduced legislator would silently re-dirty the column
+// this correction cleans). One source of truth — this correction and the insertion-time fix can
+// never drift apart. Originally sourced from migration 0018's own already-reviewed CASE expression.
+// 'I'->'Independent' is deliberately NOT included: zero live rows carry bare 'I' (checked before
+// writing this), and the live '' (empty string, 1 row, LegiScan-sourced) is a DIFFERENT defect — a
+// missing value stored as blank rather than NULL, corrected by correctPartyEmptyString below, never
+// conflated with a code decode.
+export const PARTY_WORD_MAP = LEGISCAN_PARTY_WORD_MAP;
 export const PARTY_MAPPED_CODES = Object.keys(PARTY_WORD_MAP);
 
 // Deliberately NEVER touched by this correction — both are real, honest data, not defects:
@@ -631,7 +635,14 @@ const LEGISCAN_ROLLCALL_SOURCE_KEY_PATTERN = /^legiscan-(\d+)-rollcall-(\d+)$/;
 export function parseLegiscanRollCallSourceKey(sourceKey) {
   const m = LEGISCAN_ROLLCALL_SOURCE_KEY_PATTERN.exec(String(sourceKey ?? ''));
   if (!m) return null;
-  return { legiscanSessionId: m[1], rollCallId: m[2] };
+  // FIX (2026-08-02, found live): rollCallId MUST be a number, not the regex capture's raw string
+  // — legiscan-votes.js's own live path (reconcileLegiscanTallies) reads roll_call_id straight out
+  // of LegiScan's JSON as a number, and a string here silently defeated the reconciliation flag
+  // idempotency check's strict-equality comparison (fixed separately in legiscan-votes.js), which
+  // caused a real live legiscan run to fail on an unhandled duplicate-key error. Both fixes stand:
+  // this one so a NEW write is correctly typed from the source; that one so ANY differently-typed
+  // existing row (including the 29 written before this fix — see the live backfill) still matches.
+  return { legiscanSessionId: m[1], rollCallId: Number(m[2]) };
 }
 
 // processDuplicateBill — one duplicate bill (session '2026') -> 'merged' | 'stopped' | 'failed'.

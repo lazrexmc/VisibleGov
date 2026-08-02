@@ -312,6 +312,21 @@
     machinery as the existing person-identity merger, not new logic) — not urgent, not blocking,
     but real and worth a dedicated pass.
 
+36. [x] ~~A live LegiScan run failed with an unhandled duplicate-key error on
+    `vote_reconciliation_flags`.~~ **FIXED 2026-08-02**, found by a post-TODO-27 verification
+    sweep, not by the failure itself surfacing loudly. Root cause: TODO 25's vote-reconciliation
+    correction parsed `roll_call_id` out of a `source_key` via regex (always a string); LegiScan's
+    own live path reads the same logical field straight out of JSON (a number). The idempotency
+    pre-check compared them with strict `===`, missed the match the DB's own type-coercing unique
+    index correctly caught, and the resulting duplicate-key error propagated because the
+    race-recovery recheck used the identical broken comparison. Fixed at both ends: the comparison
+    now coerces both sides to `Number` (`legiscan-votes.js`), and the parser now returns a real
+    number instead of a raw capture group (`correct-data.js`) — see PLAYBOOK_DELTA lesson 21. One
+    live legiscan run failed on this (2026-08-02T07:30, `queries_used:1`) — self-healing on the
+    next scheduled tick, no data lost (the flag rows themselves were written correctly, only a
+    LATER re-check of them failed) — not manually re-triggered here to avoid spending LegiScan
+    query budget confirming something a red-then-green unit test already proves precisely.
+
 ---
 
 ### Defects found by the 2026-07-31 data audit (docs vs live DB) — none were previously recorded

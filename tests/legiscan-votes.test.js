@@ -779,6 +779,28 @@ test('crossCheckAgainstPrimarySource: IMPORTANT 6 fix — 3 identical re-runs of
   assert.equal(flags.length, 1, 'the SAME discrepancy (same vote, same LegiScan roll call, same classification) re-detected across 3 runs must dedupe to exactly one durable row');
 });
 
+test('crossCheckAgainstPrimarySource: FIX (2026-08-02, found live) — an existing flag whose roll_call_id was stored as a STRING (a different writer\'s type, e.g. a regex-parsed source_key never coerced to Number) is still recognized as the SAME discrepancy when re-detected with a NUMBER rollCallId — a real live legiscan run failed with an unhandled duplicate-key error because this comparison used strict === and missed exactly this type mismatch', async () => {
+  const primaryVoteId = 'primary-vote-type-mismatch';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 115),
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14),
+    ],
+  });
+  await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(flags.length, 1, 'first detection writes exactly one flag');
+  // Simulate a DIFFERENT writer (this repo's own TODO-25 correction, live-confirmed) having stored
+  // this exact discrepancy with roll_call_id as a string — the DB's unique index (::integer cast on
+  // both sides) already treats this as the identical row; the app-level check must too.
+  flags[0].discrepancy = { ...flags[0].discrepancy, roll_call_id: String(flags[0].discrepancy.roll_call_id) };
+  await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(flags.length, 1, 'a differently-typed existing roll_call_id must still be recognized as the same discrepancy — never a second row, never an unhandled duplicate-key error');
+});
+
 test('crossCheckAgainstPrimarySource: IMPORTANT 6 fix — a human-resolved flag STAYS resolved across a re-run; re-detection never inserts a fresh resolved:false duplicate', async () => {
   const primaryVoteId = 'primary-vote-resolved-stays';
   const { client, flags } = makeFakeVotesDb({

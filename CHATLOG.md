@@ -1108,3 +1108,39 @@ it staying hidden for so long: the shared test fake client computed `count` MORE
 real backend does, silently proving code against a fantasy. Fixed the fake to mirror reality first —
 immediately turned 6 previously-green tests red, then fixed the production code genuinely. Playbook
 lesson 20 records the mechanism.
+
+## 2026-08-02 (continued) — the requested verification pass: clean sweep, two real finds, one active production fix
+
+Lance: *"Should we continue on or stop and perform a full audit before we continue?"* → a scoped
+three-part check, not a full re-audit, before resuming TODO-28.
+
+**Part 1 (broader count-bug sweep): clean.** Every other `count`-reading call site in the codebase
+uses the reliable plain-SELECT pattern; the three sites fixed earlier today were the only real
+instances.
+
+**Part 2 (live health check of today's shipped fixes): confirmed, then found a second real gap.**
+The mo-senate session-dedup fix has been exercised on 12 real scheduler ticks with zero duplicates
+recreated — solid, not just test-proven. But checking whether anything could re-dirty the party
+column just normalized found a genuine live risk: **LegiScan's own dataset — the primary MO bulk
+source — prints bare `R`/`D` codes**, confirmed directly against the cache, while every other
+active source already writes full words. Fixed at the point of insertion (`legiscan-identity.js`),
+not just the historical correction, so a future LegiScan-introduced legislator can never re-dirty
+the column. `correct-data.js` now imports the same mapping rather than keeping a second copy.
+
+**Part 3 (docs-vs-DB sanity check): surfaced an ACTIVE PRODUCTION FAILURE.** `legiscan` showed
+`status: failed` at 07:30 this morning — the primary MO ingestion source, not a minor path. Root
+cause: yesterday's TODO-25 vote-reconciliation correction parsed a roll-call id out of a source_key
+via regex (always a string); LegiScan's own live path reads the same field from JSON (a number).
+An idempotency pre-check compared them with strict equality, missed a real match the database's
+own type-coercing unique index correctly caught, and the race-recovery path meant to catch exactly
+this failure mode used the identical broken comparison — so the error propagated instead of being
+absorbed. Fixed at both ends (the comparison now coerces types; the parser now returns a real
+number) and proven with a test that reproduces the exact live failure: red without the fix
+(2 flags instead of 1), green with it. PLAYBOOK_DELTA lessons 20 and 21 record both findings from
+this pass. Not manually re-triggered against live LegiScan to confirm — the next scheduled tick
+will self-heal, and spending query budget to re-prove what a precise unit test already proves
+would be wasteful.
+
+Verdict on the original question: the scoped pass was worth exactly what it cost — found two real
+issues a full README read wouldn't have surfaced, one of them actively blocking production.
+Resuming TODO-28 next, as agreed.

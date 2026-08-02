@@ -5,6 +5,8 @@ import {
   normalizePersonName,
   chamberFromRole,
   normalizeLegiscanDistrict,
+  normalizeLegiscanParty,
+  LEGISCAN_PARTY_WORD_MAP,
   buildLegiscanNameVariants,
   findCandidateLegislatorRows,
   resolveOrCreateLegiscanPerson,
@@ -167,6 +169,28 @@ test('normalizeLegiscanDistrict: an unrecognized shape passes through unchanged 
   assert.equal(normalizeLegiscanDistrict('AL'), 'AL');
 });
 
+// ---- normalizeLegiscanParty (2026-08-02, found live: LegiScan's cached datasets print bare
+// 'R'/'D' codes — verified directly against the newest cached dataset's real people[]) ----
+
+test('normalizeLegiscanParty: bare R/D decode to the same full words every other active source already writes', () => {
+  assert.equal(normalizeLegiscanParty('R'), 'Republican');
+  assert.equal(normalizeLegiscanParty('D'), 'Democratic');
+});
+
+test('normalizeLegiscanParty: an unrecognized code (Independent, or a future one) passes through unchanged rather than guessing', () => {
+  assert.equal(normalizeLegiscanParty('Independent'), 'Independent');
+  assert.equal(normalizeLegiscanParty('X'), 'X');
+});
+
+test('normalizeLegiscanParty: null stays null, never coerced to a guessed word', () => {
+  assert.equal(normalizeLegiscanParty(null), null);
+  assert.equal(normalizeLegiscanParty(undefined), null);
+});
+
+test('LEGISCAN_PARTY_WORD_MAP: exactly the two codes LegiScan actually prints, matching migration 0018\'s already-reviewed CASE target', () => {
+  assert.deepEqual(LEGISCAN_PARTY_WORD_MAP, { R: 'Republican', D: 'Democratic' });
+});
+
 // ---- fixture test bed: real numbers from the 189-person fixture (CONTROLLER RULING 4) ----
 
 test('fixture test bed: dataset 1608 has 189 people, every one carries a district, role is Rep(156)/Sen(33) only', () => {
@@ -263,7 +287,10 @@ test('resolveOrCreateLegiscanPerson: REAL Libla sponsor (people_id 14996, Sen, S
   assert.equal(result.reason, 'no_candidate');
   assert.equal(legislators.length, 1);
   assert.deepEqual(legislators[0], {
-    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', surname: 'Libla', nickname: 'Doug', party: 'R', run_id: 'run-1',
+    // party: 'Republican', not the fixture's raw 'R' — normalizeLegiscanParty now applies at
+    // insertion time (2026-08-02 fix), matching every other active source's already-full-word
+    // convention rather than writing LegiScan's bare code verbatim.
+    id: result.legislator_id, legiscan_people_id: 14996, full_name: 'Douglas Libla', surname: 'Libla', nickname: 'Doug', party: 'Republican', run_id: 'run-1',
   });
 });
 

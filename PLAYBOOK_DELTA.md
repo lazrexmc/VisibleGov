@@ -347,3 +347,24 @@ regardless of whether `{count:'exact'}` was requested.** `select()`'s own `count
 not a blanket "count is broken" claim. A test fake for this project's DB layer must reproduce this
 asymmetry (`select` count real, `update`/`delete` count always null) or it will mask the exact class
 of defect this lesson exists to prevent recurring a fourth time.
+
+## Lesson 21 — A regex capture group is a string; a JSON field of the same name may not be (2026-08-02)
+
+Two different writers produced `roll_call_id` for the SAME logical field with different JS types:
+LegiScan's own live ingest path reads it straight out of parsed JSON (a genuine number), while a
+same-day correction (TODO 25's vote reconciliation) parsed it out of a `source_key` string via
+regex (`m[2]`, always a string, never coerced). Both wrote into the same `discrepancy` JSONB
+column read by an idempotency check using strict `===`. The DB's own unique index (migration 0011)
+casts both sides to `::integer` before comparing and correctly treated them as the same row; the
+in-memory pre-check did not, so a live LegiScan run hit a genuine duplicate-key error the code's
+own race-recovery branch was supposed to catch and couldn't, because THAT recheck used the exact
+same broken strict comparison. The failure surfaced hours later, on a routine scheduled tick, far
+from the commit that caused it — caught only by a post-hoc verification sweep, not by any test at
+the time (nothing asserted on the TYPE of a parsed id, only its value).
+
+**Rule: when a comparison exists specifically to mirror a DB-level uniqueness guarantee, it must be
+at least as type-tolerant as the guarantee it mirrors.** A Postgres unique index over a JSONB
+`->>'field'` expression coerces types by construction (the `::integer` cast); an in-memory
+`===` check over the same logical field does not, unless written to. Never assume two writers of
+the same JSON key agree on JS type — coerce explicitly at the comparison, and coerce at the write
+site too (fixing only one is a patch; fixing both closes it for both directions).
