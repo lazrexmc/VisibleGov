@@ -911,6 +911,25 @@ test('crossCheckAgainstPrimarySource: the REAL HB 3 same-day pattern (5 real Hou
   assert.equal(flags.length, 0, 'exact-match verification passing writes no flag');
 });
 
+test('crossCheckAgainstPrimarySource: tally_unique_match ALWAYS carries primaryVoteId — the matched primary-source votes.id, for the dedup-marking caller to use', async () => {
+  const { voteRows, castRows } = buildHb3HouseCandidates(HB3_HOUSE_TALLIES);
+  const { client } = makeFakeVotesDb({ voteRows, castRows });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312);
+  assert.equal(result.reason, 'tally_unique_match');
+  // legiscanTallies774312 corresponds to HB3_HOUSE_TALLIES' ordinal 1 (yea:119/nay:23) ->
+  // buildHb3HouseCandidates' own id convention: 'primary-hb3-1'.
+  assert.equal(result.primaryVoteId, 'primary-hb3-1');
+});
+
+test('crossCheckAgainstPrimarySource: a FLAGGED (non-clean) result never carries primaryVoteId — the field is absent, not null, so a caller checking `in` never mistakes a flagged row for a clean match', async () => {
+  const mismatchedTallies = { ...legiscanTallies774312, tallies: { yea: 999, nay: 999 } };
+  const { voteRows, castRows } = buildHb3HouseCandidates(HB3_HOUSE_TALLIES);
+  const { client } = makeFakeVotesDb({ voteRows, castRows });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', mismatchedTallies);
+  assert.notEqual(result.reason, 'tally_unique_match');
+  assert.equal('primaryVoteId' in result, false);
+});
+
 // FIX ROUND 3 (re-review, execution-caught regression): round 2 returned matched:true the instant
 // exactly one candidate's (yea, nay) matched, without ever checking that candidate's own soft
 // (present/absent/not_voting) bucket — the re-reviewer proved this by construction: 500 doctored
@@ -1118,6 +1137,7 @@ test('crossCheckAgainstPrimarySource: THE REVIEWER\'S EXACT SCENARIO — one pri
   assert.equal(result312.quarantine, false);
   assert.equal(result312.flag, null);
   assert.equal(result312.reason, 'tally_unique_match');
+  assert.equal(result312.primaryVoteId, primaryVoteId, 'the tally-uniquely-selected candidate\'s own id must be reported, not just that a match happened');
 
   for (const rollCallId of [774313, 774314, 774315, 774316]) {
     const entry = HB3_HOUSE_LEGISCAN_TALLIES.find((e) => e.rollCallId === rollCallId);

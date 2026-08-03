@@ -815,7 +815,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
 
     if (hardMismatches.length === 0 && softMismatches.length === 0) {
       return {
-        checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match',
+        checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match', primaryVoteId: primaryVote.id,
       };
     }
 
@@ -893,7 +893,7 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
     if (hardMismatches.length === 0 && softMismatches.length === 0) {
       // The real happy path: verification actually passing, not just selection succeeding.
       return {
-        checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match',
+        checked: true, matched: true, flag: null, quarantine: false, reason: 'tally_unique_match', primaryVoteId: selectedCandidate.id,
       };
     }
 
