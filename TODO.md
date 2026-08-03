@@ -133,16 +133,16 @@
 
 ## 🛠 BUILD QUEUE
 
-0. **NEXT PLAN — LegiScan bulk adapter (unblocked 2026-07-28: Lance registered a key; probe
-   CONFIRMED MO individual votes populated — 161 {people_id, vote_id, vote_text} entries on a
-   real 2018 roll call; 31 MO sessions 2010-2026 available as weekly dataset ZIPs, ~tens of
-   queries for the whole backfill).** Supersedes the 30-min-cadence grind as the PRIMARY MO
-   ingestion path for both chambers; the mo-house/mo-senate primary-source parsers become the
-   reconciliation/audit layer (LegiScan casts must reconcile against official printed tallies
-   before storage). Binding operating terms: `docs/research/2026-07-28-legiscan-terms.md`
-   (dataset_hash gating is suspension-level mandatory). Known design task: substitute-vehicle
-   attribution (SB 894's Senate vote lives under the combined 'SBs 894 & 921' record, not
-   SB 894's own). Start AFTER the mo-senate-adapter branch merges.
+**Housekeeping note (2026-08-03): items 0 and 5-9 below were flagged as stale in an earlier
+review ("TODO build-queue items 5 and 6 are open... both completed and merged; the checkboxes are
+stale," `docs/CONTROLLER_BRIEFING.md`'s "Things I might wrongly believe" table) and never actually
+fixed until now. All are genuinely done — cross-checked against the NOW section above and this
+session's own direct work, not assumed.**
+
+0. [x] ~~NEXT PLAN — LegiScan bulk adapter~~ **DONE 2026-07-29, further refined 2026-08-02
+   (TODO-33 source split).** Live and is the primary MO ingestion path today, registered in
+   `scripts/scheduled-ingest.js`. Substitute-vehicle attribution (SB 894/SBs 894 & 921) resolved
+   per `docs/research/2026-07-29-legiscan-substitute-vehicles.md`.
 
 1. [x] ~~First vertical slice: Bob Onder end-to-end — ingestion half~~ **DONE 2026-07-27.**
    Ingested live from both jurisdictions and verified end-to-end (see TODO NOW + CHATLOG). The
@@ -155,13 +155,26 @@
 4. [x] ~~OpenStates/MO adapter~~ **DONE** — live-verified (Tasks 8 and 10). Known gap:
    OpenStates MO vote events carry no per-voter casts (confirmed 0/95 twice, in fixture and
    live) — see item 9.
-5. Summarization CLI (versioned prompt, hash-tied to bill text version, review queue).
-6. Public site: directory, legislator page, bill page, address lookup (Census Geocoder).
-7. Staff `/admin` review queue.
-8. Identity merge: link federal+MO legislator rows (Onder currently = 2 rows — one keyed by
-   `bioguide_id`, one by `openstates_id` — confirmed live 2026-07-27; expected until this is
-   built, not a bug).
-9. MO individual roll-call votes (OpenStates has none) — confirmed across 4 sessions/305 sampled
+5. [x] ~~Summarization CLI (versioned prompt, hash-tied to bill text version, review queue)~~
+   **DONE — Plan 2, complete 2026-07-28, trust model v3 fully live since 2026-07-31.**
+6. [x] ~~Public site: directory, legislator page, bill page, address lookup (Census Geocoder)~~
+   **DONE — Plan 3, complete 2026-07-30, merged to main.** Deploy itself is the separate,
+   deliberately-deferred Cloudflare milestone (see NOW above).
+7. [x] ~~Staff `/admin` review queue~~ **DONE** — `src/review/server.js` / `npm run review`,
+   severity-sorted as of 2026-08-03. Local-only (127.0.0.1) by design; no public-facing
+   `/admin` route exists or is planned.
+8. [x] ~~Identity merge: link federal+MO legislator rows~~ **DONE — complete 2026-07-31.**
+   1,607 rows → 37 merged persons; 4 identity flags remain open (Lance's own decisions, not a
+   build item).
+9. [x] ~~MO individual roll-call votes (OpenStates has none)~~ **DONE — the `mo-house-xml`
+   adapter this item specified was built exactly as researched** (XML action-history + linked
+   `RollCallPDF`, no OCR needed) and is one of the five sources `scripts/scheduled-ingest.js`
+   runs on its own registered schedule. The original item's text is kept below as the research
+   trail, not because the work is still open.
+
+   <details><summary>Original research (2026-07-27), preserved for context</summary>
+
+   MO individual roll-call votes (OpenStates has none) — confirmed across 4 sessions/305 sampled
    vote events (2022/2021/2019/2017: exactly 1 event with voter data). **Investigated 2026-07-27
    (Task 9, full findings in `docs/research/2026-07-27-mo-data-sources.md`).** Narrower than
    "scrape the journal": house.mo.gov runs its own no-auth, live, hourly XML export
@@ -169,20 +182,25 @@
    element is aggregate tallies only — individual votes live one hop away in a linked
    `RollCallPDF`, confirmed real and text-layer (not scanned — extracts cleanly, no OCR needed) via
    a live fetch. Build a `mo-house-xml` adapter against that XML + PDF pair (see the research doc's
-   proposed adapter shape) — no signup, no ToU ambiguity ("made available for public use"). Separately,
-   LegiScan's `getRollCall` operation is confirmed (via its own official client source, not a live
-   MO payload — no key was registered) to return individual `people_id`/`vote_id` votes in general;
-   whether MO's data is actually populated is the one open question a real key would settle in one
-   call, and could replace the PDF-parsing step if so. Bill full text is PDF-only at the MO primary
-   source either way (confirmed) — either path needs a new PDF-text-extraction dependency before
-   `summarizeBill()` can run on MO text, which isn't built yet.
-10. Plan-2 first commits (from final whole-branch review, 2026-07-27): (a) fail-loud chamber
-    parsing in both adapters (kill the silent 'house'/'senate' fallback guesses); (b) wire an
-    enrichment pass so placeholder rows (null bills, id-as-name legislators) can be filled —
-    additivePatch exists but nothing calls it; (c) resolve the editor_notes RLS decision (NOW)
-    before anything writes summaries; (d) consider a freshness view narrowing ingestion_runs
-    anon exposure to source/status/finished_at; (e) generalize or remove the Onder-specific
-    MO-term config fallback before MO ingestion widens.
+   proposed adapter shape) — no signup, no ToU ambiguity ("made available for public use").
+   Separately, LegiScan's `getRollCall` operation is confirmed (via its own official client source,
+   not a live MO payload — no key was registered) to return individual `people_id`/`vote_id` votes
+   in general; whether MO's data is actually populated is the one open question a real key would
+   settle in one call, and could replace the PDF-parsing step if so. Bill full text is PDF-only at
+   the MO primary source either way (confirmed) — either path needs a new PDF-text-extraction
+   dependency before `summarizeBill()` can run on MO text, which isn't built yet.
+
+   </details>
+10. [x] ~~Plan-2 first commits~~ **(b), (c), (d) confirmed DONE 2026-08-03**: (b) `additivePatch`
+    is now called from `legiscan-identity.js`, `backfill-mo-bill-meta.js`, `backfill-nicknames.js`,
+    `enrich-federal-bills.js`, `ingest-legiscan.js` (grep-verified — it was genuinely unwired at the
+    time this item was written); (c) editor_notes RLS resolved 2026-07-27, see NOW section above;
+    (d) `public_freshness` (migration 0016) is exactly this — source/status/finished_at only, no
+    `ingestion_runs` internals. **(a) and (e) NOT re-verified this pass — genuinely unknown status,
+    don't assume either way without checking.** Original text, for whoever checks next:
+    (a) fail-loud chamber parsing in both adapters (kill the silent 'house'/'senate' fallback
+    guesses); (e) generalize or remove the Onder-specific MO-term config fallback before MO
+    ingestion widens.
 
 11. **On-demand ingestion (launch architecture, Lance 2026-07-27):** capture the verified Onder
     end-to-end process as an executable runbook; when a user looks up a legislator with a
