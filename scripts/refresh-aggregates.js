@@ -17,7 +17,18 @@
 // supabase-js's own fetch (used by getClient()) is not browser-shaped, so this is safe run from
 // Node, unlike a raw PowerShell Invoke-RestMethod call.
 
-import { getClient } from '../src/lib/db.js';
+import { getClient, openRun, closeRun } from '../src/lib/db.js';
+
+// SOURCE: this script's own durable ingestion_runs identity (senior engineering audit, 2026-08-03,
+// finding 4). Before this, a refresh's outcome lived ONLY in this script's stdout / the
+// scheduler's own gitignored log file — `npm run status` reads public_freshness (migration 0016),
+// which is distinct-on-source over ingestion_runs, and nothing refresh-related ever wrote a row
+// there, so the exact class of outage 0026 fixed (refreshes silently failing for 14+ hours) would
+// have remained fully invisible to `npm run status` even after 0026 shipped. Writing a real row
+// under its own source name means the EXISTING freshness surface (and any future one built on
+// public_freshness) picks up refresh staleness for free — no new UI, no new query, just an honest
+// record where one was structurally missing before.
+const SOURCE = 'refresh-aggregates';
 
 async function main() {
   const client = getClient();
@@ -28,23 +39,42 @@ async function main() {
   }
 
   const startedAt = new Date().toISOString();
-  // refresh_vote_aggregates() is `returns void` — supabase-js's .rpc() posts to
-  // /rest/v1/rpc/refresh_vote_aggregates with the service-role key, exactly the call the review
-  // specified; `error` carries the typed PostgREST failure (e.g. permission denied if this ever
-  // runs against a stale schema cache, or before the unique indexes REFRESH CONCURRENTLY needs
-  // exist) instead of throwing, so this can report a clean structured failure either way.
-  const { error } = await client.rpc('refresh_vote_aggregates');
-  const finishedAt = new Date().toISOString();
+  // openRun's own failure is deliberately NOT caught here — if we can't even open a durable run
+  // record, something is wrong enough (DB unreachable, ingestion_runs missing/locked) that the
+  // refresh attempt below would almost certainly fail too, and main().catch() below still reports
+  // it as a clean, structured `mode: 'failed'` — this script's contract every OTHER exit path
+  // already honors — rather than a raw stack trace.
+  const runId = await openRun(client, SOURCE);
 
-  if (error) {
-    console.log(JSON.stringify({
-      mode: 'failed', startedAt, finishedAt, reason: error.message,
-    }, null, 2));
-    process.exitCode = 1;
-    return;
+  // Same open-then-try/catch-then-close shape as every other CLI's main() in this repo (e.g.
+  // src/cli/correct-data.js) — an unexpected throw from the RPC call (network-level failure, not
+  // just PostgREST's own {error} response shape) must still close this run as 'failed' rather than
+  // leaving it stuck at status='running' forever; the outer main().catch() below only reports
+  // clean JSON, it does not know about runId and cannot close it.
+  try {
+    // refresh_vote_aggregates() is `returns void` — supabase-js's .rpc() posts to
+    // /rest/v1/rpc/refresh_vote_aggregates with the service-role key, exactly the call the review
+    // specified; `error` carries the typed PostgREST failure (e.g. permission denied if this ever
+    // runs against a stale schema cache, or before the unique indexes REFRESH CONCURRENTLY needs
+    // exist) instead of throwing, so this can report a clean structured failure either way.
+    const { error } = await client.rpc('refresh_vote_aggregates');
+    const finishedAt = new Date().toISOString();
+
+    if (error) {
+      await closeRun(client, runId, 'failed', { startedAt, finishedAt, reason: error.message });
+      console.log(JSON.stringify({
+        mode: 'failed', startedAt, finishedAt, reason: error.message,
+      }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+
+    await closeRun(client, runId, 'succeeded', { startedAt, finishedAt });
+    console.log(JSON.stringify({ mode: 'refreshed', startedAt, finishedAt }, null, 2));
+  } catch (err) {
+    await closeRun(client, runId, 'failed', { startedAt, error: String(err && err.message ? err.message : err) });
+    throw err;
   }
-
-  console.log(JSON.stringify({ mode: 'refreshed', startedAt, finishedAt }, null, 2));
 }
 
 // N-H(d) (task 6b review, fix round 2): main() itself could throw on something the `error`-check

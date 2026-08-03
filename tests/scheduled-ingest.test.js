@@ -17,7 +17,7 @@ import {
   queryLatestStartedAt, queryLatestRun,
   resolveLegiscanSessionId, resolveUsCongressRollWindow, resolveUsSenateVoteWindow, buildRegistry,
   runChildCli, recordSchedulerAttemptFailure, closeOrphanedRunningRows, runChosenSource,
-  getSchedulerClient, envIntervalMs,
+  getSchedulerClient, envIntervalMs, pingHealthcheck,
   MAX_RUN_DURATION_MS, MAX_LOCK_DURATION_MS, CHILD_TIMEOUT_MS, CHILD_MAX_BUFFER,
   LEGISCAN_CHILD_TIMEOUT_MS, LOCK_GRACE_MS, ORPHAN_CLOSE_SKEW_GRACE_MS,
   US_CONGRESS_CONGRESS, US_CONGRESS_ROLL_WINDOW, US_SENATE_SESSION, US_SENATE_VOTE_WINDOW,
@@ -1472,6 +1472,78 @@ test('getSchedulerClient returns a truthy client when both env vars are set (con
   } finally {
     if (savedUrl !== undefined) process.env.SUPABASE_URL = savedUrl; else delete process.env.SUPABASE_URL;
     if (savedKey !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
+});
+
+// ---- pingHealthcheck (senior engineering audit, 2026-08-03, finding 2) ----
+// The optional dead-man's-switch alert: opt-in via HEALTHCHECK_PING_URL, complete no-op when
+// unset — same contract as getSchedulerClient's own env-var handling above.
+
+function withPingEnv(url, fn) {
+  const saved = process.env.HEALTHCHECK_PING_URL;
+  if (url === undefined) delete process.env.HEALTHCHECK_PING_URL; else process.env.HEALTHCHECK_PING_URL = url;
+  try {
+    return fn();
+  } finally {
+    if (saved !== undefined) process.env.HEALTHCHECK_PING_URL = saved; else delete process.env.HEALTHCHECK_PING_URL;
+  }
+}
+
+test('pingHealthcheck: a complete no-op (never touches fetch) when HEALTHCHECK_PING_URL is unset', () => {
+  const savedFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = () => { called = true; return Promise.resolve(); };
+  try {
+    withPingEnv(undefined, () => pingHealthcheck(true));
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
+
+test('pingHealthcheck: healthy=true hits the bare configured URL', () => {
+  const savedFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = (url) => { calls.push(url); return Promise.resolve(); };
+  try {
+    withPingEnv('https://hc-ping.com/abc123', () => pingHealthcheck(true));
+    assert.deepEqual(calls, ['https://hc-ping.com/abc123']);
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
+
+test('pingHealthcheck: healthy=false hits the /fail suffix, never the bare URL', () => {
+  const savedFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = (url) => { calls.push(url); return Promise.resolve(); };
+  try {
+    withPingEnv('https://hc-ping.com/abc123', () => pingHealthcheck(false));
+    assert.deepEqual(calls, ['https://hc-ping.com/abc123/fail']);
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
+
+test('pingHealthcheck: a trailing slash on the configured URL never produces a double slash before /fail', () => {
+  const savedFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = (url) => { calls.push(url); return Promise.resolve(); };
+  try {
+    withPingEnv('https://hc-ping.com/abc123/', () => pingHealthcheck(false));
+    assert.deepEqual(calls, ['https://hc-ping.com/abc123/fail']);
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
+
+test('pingHealthcheck: a rejected fetch is swallowed — never throws, never returns a rejected promise the caller must handle', () => {
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.reject(new Error('network blip'));
+  try {
+    assert.doesNotThrow(() => withPingEnv('https://hc-ping.com/abc123', () => pingHealthcheck(true)));
+  } finally {
+    globalThis.fetch = savedFetch;
   }
 });
 

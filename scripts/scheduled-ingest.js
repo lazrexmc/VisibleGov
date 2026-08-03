@@ -58,11 +58,14 @@ import { createClient } from '@supabase/supabase-js';
 
 import { selectAll, openRun, closeRun } from '../src/lib/db.js';
 // Reused, not reimplemented (brief's own explicit instruction): the exact arithmetic every ingest
-// CLI's own enforceDurableCooldown already relies on. Both ingest-mo-senate.js and
-// ingest-mo-house.js export an identical copy (the latter ported from the former, see that file's
-// own comment) — either is a correct, generic (lastStartedAtIso, minIntervalMs, now) function, not
-// specific to MO Senate; imported once here and reused for all five registry sources.
-import { remainingCooldownMs, formatCooldownWait } from '../src/cli/ingest-mo-senate.js';
+// CLI's own enforceDurableCooldown already relies on — generic (lastStartedAtIso, minIntervalMs,
+// now), not specific to any one source; used here for all five registry sources' due-ness.
+// Senior engineering audit (2026-08-03, finding 17): this used to import straight from
+// ingest-mo-senate.js — a 1,322-line CLI file, meaning this production scheduler's own due-ness
+// computation for ALL FIVE sources depended on undeclared identity with whichever copy of this
+// logic happened to live in that one chamber's CLI. Now sourced from src/lib, where both
+// ingest-mo-house.js and ingest-mo-senate.js get it from too — one definition, not a convention.
+import { remainingCooldownMs, formatCooldownWait } from '../src/lib/durable-cooldown.js';
 import { MO_SENATE_MIN_INTERVAL_MS } from '../src/adapters/mo-senate-web.js';
 import { MO_HOUSE_MIN_INTERVAL_MS, DEFAULT_MO_HOUSE_SESSION } from '../src/adapters/mo-house-xml.js';
 
@@ -958,18 +961,48 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+// ---- optional dead-man's-switch alerting (senior engineering audit, 2026-08-03, finding 2) ----
+//
+// This project had NO alerting anywhere — a 14-hour production outage (the 0026 regression) was
+// found only by accident. Fully opt-in and inert until Lance sets HEALTHCHECK_PING_URL (a
+// healthchecks.io/ntfy.sh-style check URL): same "unset env var = nothing happens" contract as
+// getSchedulerClient() above, so this ships without needing any account/setup right now. Pinging
+// on EVERY real tick (not just failures) is what makes this a dead-man's switch, not just a
+// failure notifier — a scheduler that stops running entirely (machine off, task disabled, this
+// script crashing before it can log) is exactly the failure mode an exit code can never signal,
+// and it's the ONE already-observed failure class in this project's history (a background loop
+// that silently died with its own session). Fire-and-forget: a ping failure (network blip, the
+// monitoring service itself being down) must never affect this scheduler's own exit code or lock —
+// it only ever augments the existing log, never replaces it.
+const HEALTHCHECK_PING_TIMEOUT_MS = 10 * 1000;
+
+export function pingHealthcheck(healthy) {
+  const baseUrl = process.env.HEALTHCHECK_PING_URL;
+  if (!baseUrl) return; // not configured — complete no-op, same as today
+  const url = healthy ? baseUrl : `${baseUrl.replace(/\/+$/, '')}/fail`;
+  try {
+    // try/catch (not just the .catch() below) because a malformed URL can make fetch() itself
+    // throw synchronously, before ever returning a promise to attach .catch() to.
+    fetch(url, { method: 'GET', signal: AbortSignal.timeout(HEALTHCHECK_PING_TIMEOUT_MS) }).catch(() => {});
+  } catch { /* fire-and-forget — a ping failure must never affect the scheduler itself */ }
+}
+
 // writeLog: appends the SAME pretty-printed JSON this script prints to stdout into a dated
 // (UTC — see LOG_DIR's own comment) file under .superpowers/artifacts/scheduler-logs/ (gitignored,
 // matches the existing cached-artifact subdirectory convention) — "Lance must be able to read one
 // file and know it is alive" (brief). One entry per invocation; every branch of main() below
 // funnels through this single function so the file and stdout can never drift out of sync.
-function writeLog(entry) {
+// `healthy` (default true) and `skipPing` (dry-run only — must never touch the real heartbeat)
+// drive the optional ping above; every real branch below states its own value explicitly rather
+// than relying on the default, so a reviewer can see the health verdict at each call site.
+function writeLog(entry, { healthy = true, skipPing = false } = {}) {
   mkdirSync(LOG_DIR, { recursive: true });
   const day = entry.timestamp.slice(0, 10); // YYYY-MM-DD, UTC
   const logPath = path.join(LOG_DIR, `${day}.log`);
   const block = `=== ${entry.timestamp} ===\n${JSON.stringify(entry, null, 2)}\n\n`;
   appendFileSync(logPath, block);
   console.log(JSON.stringify(entry, null, 2));
+  if (!skipPing) pingHealthcheck(healthy);
 }
 
 // ---- scheduler's own Supabase client (I2, fix round 1) ----
@@ -1036,7 +1069,7 @@ async function main() {
         mode: 'blocked',
         reason: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set — cannot compute source due-ness without reading ingestion_runs',
         lockReclaimed,
-      });
+      }, { healthy: false });
       process.exitCode = 1;
       return;
     }
@@ -1056,6 +1089,31 @@ async function main() {
       unresolvedReason: e.unresolvedReason,
       lastStartedAt: e.lastStartedAtIso,
     }));
+
+    // Senior engineering audit (2026-08-03, finding 5): a revoked/rotated service-role key (or a
+    // persistent DB outage) makes EVERY source's own due-ness lookup fail — buildRegistry's
+    // safeLookup degrades each one individually to resolvable:false rather than throwing, so
+    // pickMostOverdue correctly returns null and this used to fall straight into the 'nothing-due'
+    // branch below: a total, persistent failure reading back identically to a genuinely quiet tick,
+    // forever. This check fires ONLY when every scoped source is unresolvable — mechanically
+    // reproduced (see the audit report) to require a systemic cause; a source that's merely not yet
+    // configured (e.g. legiscan with no legiscan_session_id on file) never takes every OTHER
+    // source down with it, so this cannot fire on that already-accepted partial-degradation state.
+    const allUnresolvable = withDueness.length > 0 && withDueness.every((e) => !e.resolvable);
+    if (allUnresolvable) {
+      writeLog({
+        timestamp: nowIso(),
+        mode: 'all-lookups-failed',
+        chosen: null,
+        reason: 'every scoped source failed its own due-ness lookup this tick — a systemic cause (revoked/'
+          + 'rotated service-role key, persistent DB outage), never a normal quiet period; see each '
+          + "source's own unresolvedReason below",
+        sources: sourcesSummary,
+        lockReclaimed,
+      }, { healthy: false });
+      process.exitCode = 1;
+      return;
+    }
 
     if (!chosen) {
       writeLog({
@@ -1082,7 +1140,7 @@ async function main() {
         sources: sourcesSummary,
         note: 'zero fetches, zero writes — --dry-run',
         lockReclaimed,
-      });
+      }, { skipPing: true }); // a manual/local dry-run must never touch the real production heartbeat
       return;
     }
 
@@ -1114,44 +1172,86 @@ async function main() {
       return;
     }
 
-    const run = await runChosenSource(client, chosen, { tickStartIso: nowIsoAtTickStart });
+    // Senior engineering audit (2026-08-03, finding 5, second half): everything from here through
+    // the 'live' writeLog call below used to run OUTSIDE any try/catch — an unexpected DB failure
+    // during post-run reconciliation (queryLatestRun, recordSchedulerAttemptFailure,
+    // closeOrphanedRunningRows, all called inside runChosenSource) would propagate straight past
+    // writeLog to the top-level main().catch(), which only console.error()s — breaking this file's
+    // own documented "one log entry per invocation" invariant for exactly the tick that most needed
+    // a log entry. Wrapped so a failure here still produces one, same as every other branch.
+    try {
+      const run = await runChosenSource(client, chosen, { tickStartIso: nowIsoAtTickStart });
 
-    // I4b: refresh-aggregates fires ONLY when the run's own detail.counts show rows actually
-    // written (run.outcome.wroteRows) — never the old "mode==='live' && succeeded/partial"
-    // heuristic, which was true even on a tick where every us-congress probe 404s and nothing
-    // landed, so the refresh used to fire unconditionally every hour regardless.
-    let aggregatesResult = null;
-    if (run.outcome.wroteRows) {
-      const refreshResult = runChildCli('scripts/refresh-aggregates.js', []);
-      aggregatesResult = {
-        exitStatus: refreshResult.exitStatus, parsed: refreshResult.parsed, parseError: refreshResult.parseError,
-      };
+      // I4b: refresh-aggregates fires ONLY when the run's own detail.counts show rows actually
+      // written (run.outcome.wroteRows) — never the old "mode==='live' && succeeded/partial"
+      // heuristic, which was true even on a tick where every us-congress probe 404s and nothing
+      // landed, so the refresh used to fire unconditionally every hour regardless.
+      let aggregatesResult = null;
+      if (run.outcome.wroteRows) {
+        const refreshResult = runChildCli('scripts/refresh-aggregates.js', []);
+        aggregatesResult = {
+          exitStatus: refreshResult.exitStatus, parsed: refreshResult.parsed, parseError: refreshResult.parseError,
+        };
+      }
+
+      // Senior engineering audit (2026-08-03, finding 3): a failed refresh used to leave
+      // aggregatesRefreshed:true (it only ever meant "a refresh was ATTEMPTED", never "it
+      // succeeded") and the tick's own top-level healthy field never looked at the refresh outcome
+      // at all — every one of the 13 ticks in the real 0026 outage logged healthy:true,
+      // aggregatesRefreshed:true while refresh_vote_aggregates() was failing on a timeout.
+      // aggregatesAttempted keeps the old (honestly-named) "was a refresh due" signal;
+      // aggregatesHealthy is the new tri-state (null = not attempted this tick, so no verdict;
+      // true/false = the refresh's own reported outcome) that field was missing entirely.
+      // Deliberately does NOT flip process.exitCode: this scheduler's own established philosophy
+      // (see the 'lock-record-failed' branch's comment below) is that a transient/expected
+      // operational outcome exits 0 and relies on an honest log record, never process.exitCode, to
+      // surface itself — the SAME treatment a failed ingest child already gets (selfRecordedFailure
+      // stays exit 0 by design). aggregatesHealthy plus the ping above plus the durable
+      // ingestion_runs record refresh-aggregates.js now writes are the three real signals; exit
+      // code is deliberately left alone here to avoid contradicting that existing convention.
+      const aggregatesAttempted = run.outcome.wroteRows;
+      const aggregatesHealthy = aggregatesResult === null ? null : (aggregatesResult.parsed?.mode === 'refreshed');
+      const tickHealthy = run.outcome.healthy && aggregatesHealthy !== false;
+
+      writeLog({
+        timestamp: nowIso(),
+        mode: 'live',
+        chosen: chosen.key,
+        reason,
+        selfRecordedFailure: run.selfRecordedFailure,
+        killedByScheduler: run.killedByScheduler,
+        killClosedRunIds: run.killClosedRunIds,
+        result: {
+          exitStatus: run.childResult.exitStatus,
+          mode: run.childResult.parsed?.mode ?? null,
+          status: run.outcome.status,
+          healthy: run.outcome.healthy,
+          note: run.outcome.note,
+          counts: run.childResult.parsed?.counts ?? null,
+          failures: run.childResult.parsed?.failures ?? null,
+          parseError: run.childResult.parseError,
+          launchError: run.launchError,
+        },
+        aggregatesAttempted,
+        aggregatesHealthy,
+        aggregatesResult,
+        sources: sourcesSummary,
+        lockReclaimed,
+      }, { healthy: tickHealthy });
+    } catch (err) {
+      writeLog({
+        timestamp: nowIso(),
+        mode: 'run-failed',
+        chosen: chosen.key,
+        reason: 'an unexpected error interrupted this tick after a source was chosen and spawned (e.g. a '
+          + 'DB failure during post-run reconciliation) — the child process may have already run to '
+          + 'completion; see error below',
+        error: String(err && err.message ? err.message : err),
+        sources: sourcesSummary,
+        lockReclaimed,
+      }, { healthy: false });
+      process.exitCode = 1;
     }
-
-    writeLog({
-      timestamp: nowIso(),
-      mode: 'live',
-      chosen: chosen.key,
-      reason,
-      selfRecordedFailure: run.selfRecordedFailure,
-      killedByScheduler: run.killedByScheduler,
-      killClosedRunIds: run.killClosedRunIds,
-      result: {
-        exitStatus: run.childResult.exitStatus,
-        mode: run.childResult.parsed?.mode ?? null,
-        status: run.outcome.status,
-        healthy: run.outcome.healthy,
-        note: run.outcome.note,
-        counts: run.childResult.parsed?.counts ?? null,
-        failures: run.childResult.parsed?.failures ?? null,
-        parseError: run.childResult.parseError,
-        launchError: run.launchError,
-      },
-      aggregatesRefreshed: run.outcome.wroteRows,
-      aggregatesResult,
-      sources: sourcesSummary,
-      lockReclaimed,
-    });
   } finally {
     // Always released, including on throw — an overlapping tick after a genuine crash would
     // otherwise be permanently blocked until MAX_RUN_DURATION_MS's stale-reclaim kicks in.
