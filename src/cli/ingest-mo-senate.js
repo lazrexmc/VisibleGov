@@ -6,6 +6,9 @@ import {
 } from '../lib/db.js';
 import { fetchWithLimit } from '../lib/http.js';
 import { SourceFetchError } from '../lib/errors.js';
+import { journalPdfBasename } from '../lib/pdf-basename.js';
+import { remainingCooldownMs, formatCooldownWait, CooldownConvergenceError } from '../lib/durable-cooldown.js';
+import { readJsonCache, writeJsonCache } from '../lib/json-file-cache.js';
 import * as senateWeb from '../adapters/mo-senate-web.js';
 import * as journalPdf from '../adapters/mo-senate-journal-pdf.js';
 import { SPECIAL_IDENTIFIER_PATTERN } from './ingest-legiscan.js';
@@ -80,18 +83,10 @@ export function parseMoSenateArgs(argv) {
   return out;
 }
 
-// ---- source_key (CONTROLLER RULING 1) ----
-//
-// day_label ("Day 37") is NOT unique within a year — 2018's Veto Session reuses "Day 01" (12
-// duplicate labels in the real fixture, per progress.md). The journal PDF URL's own basename
-// (e.g. RDay370308587-610.pdf -> RDay370308587-610) is reviewer-verified unique per year and is
-// the day segment of source_key; journal_url is identity, day_label is display-only. Also used for
-// a local --journal-pdf-file path in dry-run mode (no journal_url available there at all).
-export function journalPdfBasename(urlOrPath) {
-  const clean = String(urlOrPath).split(/[?#]/)[0];
-  const base = clean.split(/[\\/]/).pop() ?? clean;
-  return base.replace(/\.pdf$/i, '');
-}
+// journalPdfBasename moved to src/lib/pdf-basename.js (senior engineering audit, 2026-08-03,
+// finding 16 — dissolves a genuine 3-node import cycle this file was part of), imported above and
+// re-exported here so every existing importer of THIS file keeps working unchanged.
+export { journalPdfBasename };
 
 export function buildVoteSourceKey(year, pdfBasename, ordinal) {
   return `mo-senate-web-${year}-${pdfBasename}-vote${ordinal}`;
@@ -244,24 +239,12 @@ async function fetchAndParseRosterLive(source) {
 export const MO_SENATE_ROSTER_MAX_AGE_MS = 24 * 60 * 60 * 1000; // roster changes rarely
 export const MO_SENATE_INDEX_MAX_AGE_MS = 60 * 60 * 1000; // matches mo-house's bill-list cache
 
-function cachePath(dir, key) {
-  return `${dir}/${key}.json`;
-}
-
-function readCache(dir, key) {
-  const p = cachePath(dir, key);
-  if (!existsSync(p)) return null;
-  try {
-    return JSON.parse(readFileSync(p, 'utf8'));
-  } catch {
-    return null; // a corrupt/partial cache file must never crash the driver — treated as "no cache"
-  }
-}
-
-function writeCache(dir, key, payload) {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(cachePath(dir, key), JSON.stringify({ fetched_at: new Date().toISOString(), ...payload }, null, 2));
-}
+// readCache/writeCache moved to src/lib/json-file-cache.js as readJsonCache/writeJsonCache
+// (senior engineering audit, 2026-08-03, finding 17 — the same mechanism ingest-mo-house.js's
+// readCachedBillList/writeCachedBillList used under a bill-list-specific shape). Local aliases
+// keep every call site in this file unchanged.
+const readCache = readJsonCache;
+const writeCache = writeJsonCache;
 
 // Pure + testable without touching the filesystem — mirrors ingest-mo-house.js's
 // shouldRefetchBillList convention exactly (no prior cache => must fetch).
@@ -411,27 +394,14 @@ export function selectJournalDayWorklist(indexRows, args, dir = JOURNAL_ARTIFACT
 // enforceDurableCooldown — see that file's own extensive comment for the double-fetch bug this
 // closes and the convergence-race fix; behavior here is intentionally identical, just re-keyed to
 // source='mo-senate-web' / MO_SENATE_MIN_INTERVAL_MS) ----
-
-export function remainingCooldownMs(lastStartedAtIso, minIntervalMs, now = Date.now()) {
-  if (!lastStartedAtIso) return 0;
-  const elapsed = now - new Date(lastStartedAtIso).getTime();
-  return Math.max(0, minIntervalMs - elapsed);
-}
-
-export function formatCooldownWait(ms) {
-  const totalSeconds = Math.ceil(ms / 1000);
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${mins}m ${secs}s`;
-}
-
-export class CooldownConvergenceError extends Error {
-  constructor(message, meta = {}) {
-    super(message);
-    this.name = 'CooldownConvergenceError';
-    Object.assign(this, meta);
-  }
-}
+//
+// remainingCooldownMs/formatCooldownWait/CooldownConvergenceError moved to
+// src/lib/durable-cooldown.js (senior engineering audit, 2026-08-03, finding 17 — these three were
+// byte-identical between this file and ingest-mo-house.js, and scripts/scheduled-ingest.js
+// depends on the first two for ALL FIVE registry sources' due-ness computation, not just MO
+// House/Senate). Imported above and re-exported here so every existing importer of THIS file keeps
+// working unchanged.
+export { remainingCooldownMs, formatCooldownWait, CooldownConvergenceError };
 
 async function queryLastMoSenateRunStartedAt(client) {
   const { data, error } = await client

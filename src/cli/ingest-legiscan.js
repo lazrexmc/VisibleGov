@@ -23,7 +23,9 @@ import {
 // ~37,662 already-numeric rows, imported here (never a second copy) so a bill first-seen by THIS
 // driver from now on stores LegiScan's printed status WORD, not its bare numeric code — the
 // regression correct-data.js's own live pass would otherwise be undone by the very next ingest run.
-import { mapMoStatusCode } from './correct-data.js';
+// Imported from src/lib (not correct-data.js directly) since senior engineering audit 2026-08-03,
+// finding 16 — this exact import used to be one edge of a genuine 3-node cli/cli import cycle.
+import { mapMoStatusCode } from '../lib/mo-status-codes.js';
 
 // LegiScan bulk adapter — driver (Task 9 of docs/superpowers/plans/2026-07-29-legiscan-bulk-
 // adapter.md). Composes Tasks 2/4/5/6/7 into the full dataset-bulk backfill pipeline: dataset

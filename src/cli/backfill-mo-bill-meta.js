@@ -7,7 +7,9 @@ import { listCachedDatasetFiles } from './backfill-nicknames.js';
 // mapMoStatusCode — data-corrections task (.superpowers/sdd/2026-07-31-data-corrections/brief.md),
 // "fix the writer too": same rationale as ingest-legiscan.js's own import of this — one exported
 // mapping, never a second copy, so a status this backfill fills in from now on is the printed word.
-import { mapMoStatusCode } from './correct-data.js';
+// Imported from src/lib (not correct-data.js directly) since senior engineering audit 2026-08-03,
+// finding 16 — this exact import used to be one edge of a genuine 3-node cli/cli import cycle.
+import { mapMoStatusCode } from '../lib/mo-status-codes.js';
 
 // backfill-mo-bill-meta — Task 2 of the profile-completeness plan
 // (.superpowers/sdd/2026-07-29-profile-completeness/task-2-brief.md). Closes two gaps in the
