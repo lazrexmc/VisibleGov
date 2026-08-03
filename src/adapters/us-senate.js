@@ -64,6 +64,19 @@ function textOf(node) {
 export function parseSenateVoteMenu(xmlString) {
   const doc = xmlParser.parse(xmlString);
   const root = doc.vote_summary;
+  // Senior engineering audit (2026-08-03, finding 8): the SAME unguarded-root crash class
+  // parseSenateRollCall (below) already guards against — this function never got the same fix.
+  // senate.gov can return HTTP 200 with a non-menu body (a template change, a truncated transfer);
+  // without this guard the very next line crashes the whole ingest run with a raw
+  // `TypeError: Cannot read properties of undefined (reading 'congress_year')`. A plain, loud
+  // Error, not a typed SourceFetchError — never silently swallowed as an expected miss.
+  if (!root) {
+    throw new Error(
+      'parseSenateVoteMenu: response has no <vote_summary> root — senate.gov returned an '
+      + 'unexpected HTTP 200 body (not a real vote-menu XML document), genuine parse failure, not '
+      + `an expected miss (first 200 chars: ${JSON.stringify(String(xmlString).slice(0, 200))})`,
+    );
+  }
   const year = String(root.congress_year);
   let votes = root.votes?.vote ?? [];
   if (!Array.isArray(votes)) votes = [votes];

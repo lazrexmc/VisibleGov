@@ -131,6 +131,25 @@ test('parseSenateRollCall lets a raw XML syntax error (e.g. mid-stream truncatio
   );
 });
 
+// Senior engineering audit (2026-08-03, finding 8): parseSenateVoteMenu had the SAME unguarded
+// `doc.vote_summary` root access parseSenateRollCall was already fixed for above — it just never
+// got the same fix, so a malformed HTTP-200 response here crashed the WHOLE ingest run with a raw
+// TypeError instead of a clean, loud Error. No known "not yet published" stub exists for the
+// session-wide vote menu (that's a per-vote-number concept), so every rootless response here is
+// treated as a genuine parse failure - proven against the SAME real captured fixture used above.
+test('parseSenateVoteMenu throws a plain, descriptive Error (never a raw TypeError) on a response with no <vote_summary> root', () => {
+  assert.throws(
+    () => parseSenateVoteMenu(notYetPublishedHtml),
+    (err) => {
+      assert.notEqual(err.constructor.name, 'TypeError');
+      assert.ok(!(err instanceof SourceFetchError), 'must not be misclassified as an expected miss - this needs to fail loudly');
+      assert.match(err.message, /genuine parse failure/);
+      assert.match(err.message, /<vote_summary>/);
+      return true;
+    },
+  );
+});
+
 test('mapSenatePosition covers the documented enum, including impeachment-style Guilty/Not Guilty', () => {
   assert.equal(mapSenatePosition('Yea'), 'yea');
   assert.equal(mapSenatePosition('Guilty'), 'yea');

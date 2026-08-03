@@ -82,6 +82,22 @@ function parseClerkDate(s) {
 export function parseHouseRollCall(xmlString, { year }) {
   const doc = xml.parse(xmlString);
   const root = doc['rollcall-vote'];
+  // Senior engineering audit (2026-08-03, finding 8): clerk.house.gov can return HTTP 200 with a
+  // non-roll-call HTML page (an error/interstitial page, a template change) — fetchWithLimit's
+  // !res.ok check never fires on a 200, and fast-xml-parser does not throw on this shape, it just
+  // silently parses to a tree with no `rollcall-vote` key. Without this guard, the very next line
+  // crashes the WHOLE ingest run with a raw `TypeError: Cannot read properties of undefined
+  // (reading 'vote-metadata')` — the exact bug class us-senate.js's parseSenateRollCall already
+  // guards against for the Senate side (this file had never gotten the same fix). A plain, loud
+  // Error (not a typed SourceFetchError) is deliberate: this must never be silently swallowed as
+  // an "expected miss" the way a genuine tail-probe 404 is.
+  if (!root) {
+    throw new Error(
+      'parseHouseRollCall: response has no <rollcall-vote> root — clerk.house.gov returned an '
+      + 'unexpected HTTP 200 body (not a real roll-call XML document), genuine parse failure, not '
+      + `an expected miss (first 200 chars: ${JSON.stringify(String(xmlString).slice(0, 200))})`,
+    );
+  }
   const meta = root['vote-metadata'];
   const roll = Number(meta['rollcall-num']);
   const legisNum = meta['legis-num'] ? normalizeBillIdentifier(meta['legis-num']) : null;

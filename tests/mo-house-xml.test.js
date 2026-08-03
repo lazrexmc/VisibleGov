@@ -14,6 +14,7 @@ import {
   parseMoHouseArgs, remainingCooldownMs, formatCooldownWait, selectTargets, reconstructSurnameHeuristic,
   enforceDurableCooldown, CooldownConvergenceError,
   writeFailureArtifact, readFailureArtifact, excludeQuarantinedPdfs, ROLLCALL_MAX_FAILED_ATTEMPTS,
+  excludeQuarantinedBills, MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS,
   replayArtifacts,
   persistBillDetail, hasEnrichedMarker, writeEnrichedMarker, backfillEnrichedMarkers,
   shouldRefetchBillList, readCachedBillList, writeCachedBillList, MO_BILL_LIST_MAX_AGE_MS,
@@ -84,6 +85,34 @@ test('parseMoBillList entries all have a fetchable bill_xml_url', () => {
   const complete = entries.slice(0, -1);
   assert.ok(complete.length > 40, `expected >40 complete entries, got ${complete.length}`);
   for (const e of complete) assert.ok(/^https:\/\/documents\.house\.mo\.gov\/xml\/.+\.xml$/i.test(e.bill_xml_url), e.bill_xml_url);
+});
+
+// Senior engineering audit (2026-08-03, finding 9): asArray(undefined) is [] by design, which used
+// to let ANY malformed response (missing ROOT, missing BillXML, an HTML error/interstitial page
+// house.mo.gov can return with HTTP 200) silently parse to an empty list instead of failing.
+// ingest-mo-house.js's caller then wrote that empty list into its own 24-hour bill-list cache as a
+// falsely-`succeeded` run — poisoning MO House bill discovery for a full day with no error
+// anywhere. Six real malformed shapes, all of which used to yield [] silently.
+test('parseMoBillList throws (never silently returns []) on a response with no recognizable <BillXML> entries', () => {
+  const malformedShapes = [
+    ['completely different root element', '<?xml version="1.0"?><UNEXPECTED>not a bill list</UNEXPECTED>'],
+    ['ROOT present but empty', '<?xml version="1.0"?><ROOT></ROOT>'],
+    ['ROOT with an unrelated child, no BillXML at all', '<?xml version="1.0"?><ROOT><Other>x</Other></ROOT>'],
+    ['an HTML error/interstitial page returned with HTTP 200 (the real-world trigger)', '<html><body><h1>Service Temporarily Unavailable</h1></body></html>'],
+    ['a plain empty string', ''],
+    ['whitespace only', '   \n  '],
+  ];
+  for (const [label, xmlString] of malformedShapes) {
+    assert.throws(
+      () => parseMoBillList(xmlString),
+      (err) => {
+        assert.notEqual(err.constructor.name, 'TypeError', `${label}: must fail loudly, not with a raw TypeError`);
+        assert.match(err.message, /no recognizable <BillXML> entries/, label);
+        return true;
+      },
+      label,
+    );
+  }
 });
 
 // ---- parseMoMemberList / parseMoRepresentative ----
@@ -830,6 +859,72 @@ test('selectTargets: --limit larger than the pending backlog returns only what i
   });
 });
 
+// ---- bill-detail quarantine (senior engineering audit, 2026-08-03, finding 10): the SAME
+// head-of-line-blocking bug the roll-call PDF quarantine above already fixes also existed,
+// unfixed, for bill-detail — a permanently-malformed bill's XML would never get an enriched
+// marker written, so it stayed first-in-list-order among not-yet-enriched bills FOREVER and got
+// re-selected (and re-failed) every cooldown slot, wedging the whole 1,946-bill backlog behind it
+// (with --limit 1, the scheduler's real argument, no other bill ever got a turn). ----
+
+test('excludeQuarantinedBills: an identifier below the retry cap (attempts < 3) is kept', () => {
+  withScratchArtifactDir((dir) => {
+    const err = new Error('boom');
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir); // attempts=1
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir); // attempts=2
+    const candidates = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }];
+    const { kept, skippedFailed } = excludeQuarantinedBills(candidates, dir);
+    assert.equal(skippedFailed, 0);
+    assert.deepEqual(kept, candidates);
+  });
+});
+
+test('excludeQuarantinedBills: skips an identifier once attempts reaches MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS (3), while an unrelated never-failed identifier stays', () => {
+  withScratchArtifactDir((dir) => {
+    assert.equal(MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS, 3);
+    const err = new Error('boom');
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir); // 3rd failure -> quarantined
+    const candidates = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' }, // never failed — must stay
+    ];
+    const { kept, skippedFailed, skippedKeys } = excludeQuarantinedBills(candidates, dir);
+    assert.equal(skippedFailed, 1);
+    assert.deepEqual(kept, [{ identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' }]);
+    assert.deepEqual(skippedKeys, ['HB 2']);
+  });
+});
+
+test('selectTargets (no explicit --bill): a permanently-failing bill (3 failed attempts) is quarantined and excluded, so the driver advances to the next pending bill instead of retrying it forever', () => {
+  withScratchArtifactDir((dir) => {
+    const err = new Error('boom');
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir); // 3rd failure -> quarantined
+    const entries = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' },
+    ];
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const targets = selectTargets(entries, args, dir);
+    assert.deepEqual(targets, [{ identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' }], 'must skip the quarantined HB 2 (never enriched, never marked) and select HB 3 next, not retry HB 2 forever');
+  });
+});
+
+test('selectTargets: an explicit --bill bypasses bill-detail quarantine too — an operator asking for a specific bill is honored even if it is quarantined', () => {
+  withScratchArtifactDir((dir) => {
+    const err = new Error('boom');
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, dir);
+    const entries = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }];
+    const args = parseMoHouseArgs(['--bill', 'HB 2']);
+    const targets = selectTargets(entries, args, dir);
+    assert.deepEqual(targets, [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }]);
+  });
+});
+
 // ---- backfillEnrichedMarkers (one-time migration helper: bills enriched under the OLD
 // title-only signal, before this marker mechanism existed, need a marker backfilled so
 // selectTargets doesn't reselect each of them exactly once more) ----
@@ -1201,6 +1296,75 @@ test('runMoHouse: SLOT (b) — a fresh cached list reads it (zero live list fetc
     assert.equal(result.counts.list_fetch_mode, 'cached');
     assert.equal(result.counts.bills_detailed, 1);
     assert.equal(result.counts.total_pending_bills, 3, 'reports the backlog size BEFORE this run\'s own selection, mirroring ingest-mo-senate.js\'s total_pending_days');
+  });
+});
+
+test('runMoHouse: SLOT (b) — a genuinely malformed bill XML quarantines that bill (writes a .failed.json) and reports a PARTIAL run, instead of failing the whole run or silently retrying forever', async () => {
+  // runMoHouse sets the REAL process.exitCode (a global, process-wide side effect, not
+  // test-scoped) on a partial run — save/restore it so exercising that real failure path here
+  // does not taint node's own test-runner process exit code for the whole file.
+  const savedExitCode = process.exitCode;
+  try {
+    await withScratchArtifactDirAsync(async (base) => {
+      const billsDir = join(base, 'bills');
+      const billListDir = join(base, 'bill-list');
+      const rollcallDir = join(base, 'rollcalls');
+      const entries = [{ identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' }];
+      writeCachedBillList('261', entries, billListDir);
+      const { client } = makeFakeMoHouseRunClient();
+
+      const fetchBillList = async () => { throw new Error('must not fetch the list live — the cache is fresh'); };
+      // Senior engineering audit (2026-08-03, finding 10): a real fetch succeeding with a body
+      // that is NOT valid bill XML — the exact shape that used to crash the whole run via an
+      // uncaught mo.parseMoBillXml throw, with no enriched marker ever written, so this same bill
+      // would be re-selected (and re-fail) every cooldown slot forever.
+      const fetchBillXml = async () => '<?xml version="1.0"?><UNEXPECTED>not a bill</UNEXPECTED>';
+
+      const args = parseMoHouseArgs(['--limit', '1']);
+      const result = await runMoHouse(client, args, {
+        billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+      });
+
+      assert.equal(result.status, 'partial', 'a bad document must be an honest partial failure, never a whole-run crash');
+      assert.equal(result.counts.bills_detailed, 0);
+      assert.equal(result.counts.failures, 1);
+      assert.equal(hasEnrichedMarker('HB 2', billsDir), false, 'never marked enriched — a failed parse is not a completed cycle');
+      const artifact = readFailureArtifact('HB 2', billsDir);
+      assert.ok(artifact, 'a .failed.json quarantine artifact must be written on a genuine parse failure');
+      assert.equal(artifact.attempts, 1);
+    });
+  } finally {
+    process.exitCode = savedExitCode;
+  }
+});
+
+test('runMoHouse: SLOT (b) — a bill with 2 prior failed attempts (below the 3-attempt cap) is still retried, not prematurely quarantined; a successful 3rd attempt recovers normally and gets marked enriched', async () => {
+  await withScratchArtifactDirAsync(async (base) => {
+    const billsDir = join(base, 'bills');
+    const billListDir = join(base, 'bill-list');
+    const rollcallDir = join(base, 'rollcalls');
+    const entries = [
+      { identifier: 'HB 2', bill_xml_url: 'https://x/HB2.xml' },
+      { identifier: 'HB 3', bill_xml_url: 'https://x/HB3.xml' },
+    ];
+    writeCachedBillList('261', entries, billListDir);
+    const err = new Error('boom');
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, billsDir);
+    writeFailureArtifact('HB 2', 'https://x/HB2.xml', err, billsDir); // attempts=2, still one short of quarantine
+    const { client } = makeFakeMoHouseRunClient();
+
+    const fetchBillList = async () => { throw new Error('must not fetch the list live'); };
+    let xmlCalls = 0;
+    const fetchBillXml = async (url) => { xmlCalls += 1; assert.equal(url, 'https://x/HB2.xml', 'attempts=2 is still below the cap, so HB 2 must be retried once more, not skipped early'); return hb2Xml; };
+
+    const args = parseMoHouseArgs(['--limit', '1']);
+    const result = await runMoHouse(client, args, {
+      billsDir, billListDir, rollcallDir, fetchBillList, fetchBillXml,
+    });
+
+    assert.equal(xmlCalls, 1);
+    assert.equal(result.status, 'succeeded', 'a 3rd attempt that actually SUCCEEDS still counts as recovery, not a forced quarantine — the cap only bites on a 3rd genuine FAILURE');
+    assert.equal(hasEnrichedMarker('HB 2', billsDir), true);
   });
 });
 

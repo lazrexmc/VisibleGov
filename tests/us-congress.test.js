@@ -52,6 +52,31 @@ test('parseHouseRollCall yields a full-chamber cast list including Onder', () =>
   assert.ok(casts.some((c) => c.bioguide_id === cfg.onder.bioguide_id));
 });
 
+// Senior engineering audit (2026-08-03, finding 8): parseHouseRollCall read `root['vote-metadata']`
+// immediately after an unguarded `doc['rollcall-vote']` lookup — clerk.house.gov returning HTTP 200
+// with anything other than real roll-call XML (an error/interstitial page, a template change) used
+// to crash the WHOLE ingest run with a raw TypeError, since fast-xml-parser does not throw on this
+// shape, it just parses to a tree with no `rollcall-vote` key. The fix mirrors us-senate.js's own
+// already-guarded parseSenateRollCall: fail loudly with a plain, descriptive Error, never a raw
+// TypeError.
+test('parseHouseRollCall throws a plain, descriptive Error (never a raw TypeError) on a response with no <rollcall-vote> root', () => {
+  const noRoot = '<?xml version="1.0" encoding="UTF-8"?><unexpected_response>not a roll call</unexpected_response>';
+  assert.throws(
+    () => parseHouseRollCall(noRoot, { year: 2025 }),
+    (err) => {
+      assert.notEqual(err.constructor.name, 'TypeError');
+      assert.match(err.message, /genuine parse failure/);
+      assert.match(err.message, /<rollcall-vote>/);
+      return true;
+    },
+  );
+});
+
+test('parseHouseRollCall lets a raw XML syntax error (mid-stream truncation) propagate unmodified — never reclassified', () => {
+  const truncated = rollXml.slice(0, 20);
+  assert.throws(() => parseHouseRollCall(truncated, { year: 2025 }));
+});
+
 test('parseMemberList throws on a member with no chamber signal', () => {
   const bad = { members: [{ bioguideId: 'X000000', name: 'Test', partyName: 'I', terms: { item: [] } }] };
   assert.throws(() => parseMemberList(bad), /unknown chamber/);

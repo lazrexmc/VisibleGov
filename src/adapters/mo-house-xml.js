@@ -77,6 +77,24 @@ export function normalizeMoBillIdentifier(billNumber) {
 export function parseMoBillList(xmlString) {
   const doc = xml.parse(xmlString);
   const entries = asArray(doc.ROOT?.BillXML);
+  // Senior engineering audit (2026-08-03, finding 9): asArray(undefined) is [] by design (a
+  // genuinely single-entry document coerces to a 1-element array, same as everywhere else this
+  // helper is used) — but that means ANY malformed response (a missing ROOT, a missing BillXML
+  // key, an HTML error/interstitial page house.mo.gov returns with HTTP 200) silently produced an
+  // EMPTY list here instead of failing. ingest-mo-house.js's caller then wrote that empty list to
+  // its own 24-hour bill-list cache as a `status: 'succeeded'` run — poisoning MO House bill
+  // discovery for a full day with no error anywhere, structurally indistinguishable from a
+  // genuinely quiet BillList. The current session already carries real bills (never legitimately
+  // zero once a General Assembly session is underway), so fail loudly here — the same "throw on an
+  // unrecognized/empty shape" convention every other MO adapter list-parser already follows (e.g.
+  // src/adapters/mo-senate-web.js's roster/journal-index parsers).
+  if (entries.length === 0) {
+    throw new Error(
+      'BillList.XML has no recognizable <BillXML> entries — structure may have changed, or '
+      + 'house.mo.gov returned an unexpected non-list response (first 200 chars: '
+      + `${JSON.stringify(String(xmlString).slice(0, 200))})`,
+    );
+  }
   return entries.map((e) => {
     const billType = trimmedString(e.BillType);
     const billNumber = trimmedString(e.BillNumber);

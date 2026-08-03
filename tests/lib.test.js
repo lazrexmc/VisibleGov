@@ -2,7 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SourceFetchError, RateLimitedError, RunNotApprovedError, assertRunApproved } from '../src/lib/errors.js';
 import { createLimiter } from '../src/lib/rate-limiter.js';
-import { redactUrl } from '../src/lib/http.js';
+import { redactUrl, fetchWithLimit } from '../src/lib/http.js';
+
+function noOpLimiter() {
+  return { take: async () => {} };
+}
+
+function withMockedFetch(impl, fn) {
+  const saved = globalThis.fetch;
+  globalThis.fetch = impl;
+  return Promise.resolve(fn()).finally(() => { globalThis.fetch = saved; });
+}
 
 test('RateLimitedError is a SourceFetchError with metadata', () => {
   const err = new RateLimitedError('slow down', { source: 'us-congress', url: 'https://x', status: 429 });
@@ -64,6 +74,84 @@ test('redactUrl also redacts access_key= (LegiScan\'s per-dataset token from get
 test('redactUrl passes through URLs with no query unchanged', () => {
   assert.equal(redactUrl('https://clerk.house.gov/evs/2025/roll358.xml'), 'https://clerk.house.gov/evs/2025/roll358.xml');
   assert.equal(redactUrl('https://x/y?format=json&limit=250'), 'https://x/y?format=json&limit=250');
+});
+
+// ---- fetchWithLimit body-read hardening (senior engineering audit, 2026-08-03, finding 11) ----
+// A 200-status response can still fail while its BODY is being read (res.json() throwing a raw
+// SyntaxError on non-JSON content; a mid-stream connection reset surfacing as a raw
+// `TypeError: terminated`) — previously ONLY the connection itself (fetch() throwing) was wrapped
+// into a SourceFetchError; a body-read failure escaped as a raw, unclassified error that the
+// near-universal "if (!(err instanceof SourceFetchError)) throw err;" catch pattern used
+// throughout this codebase would never catch.
+
+test('fetchWithLimit: a body-read failure (res.json() throwing on non-JSON content) is wrapped in a SourceFetchError, never a raw SyntaxError', async () => {
+  await withMockedFetch(
+    async () => ({
+      status: 200,
+      ok: true,
+      json: async () => { throw new SyntaxError('Unexpected token < in JSON at position 0'); },
+    }),
+    async () => {
+      await assert.rejects(
+        () => fetchWithLimit('https://x/y', { source: 'test-source', limiter: noOpLimiter(), as: 'json' }),
+        (err) => {
+          assert.ok(err instanceof SourceFetchError, `expected SourceFetchError, got ${err.constructor.name}`);
+          assert.equal(err.source, 'test-source');
+          assert.match(err.message, /failed reading response body/);
+          assert.ok(err.cause instanceof SyntaxError, 'the original error must be preserved as .cause');
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test('fetchWithLimit: a mid-stream connection reset during the body read (a raw TypeError) is wrapped in a SourceFetchError', async () => {
+  await withMockedFetch(
+    async () => ({
+      status: 200,
+      ok: true,
+      text: async () => { throw new TypeError('terminated'); },
+    }),
+    async () => {
+      await assert.rejects(
+        () => fetchWithLimit('https://x/y', { source: 'test-source', limiter: noOpLimiter(), as: 'text' }),
+        (err) => {
+          assert.ok(err instanceof SourceFetchError);
+          assert.ok(err.cause instanceof TypeError);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test('fetchWithLimit: a genuinely successful JSON body still returns normally (the wrap does not change the happy path)', async () => {
+  await withMockedFetch(
+    async () => ({ status: 200, ok: true, json: async () => ({ hello: 'world' }) }),
+    async () => {
+      const result = await fetchWithLimit('https://x/y', { source: 'test-source', limiter: noOpLimiter(), as: 'json' });
+      assert.deepEqual(result, { hello: 'world' });
+    },
+  );
+});
+
+test('fetchWithLimit: an HTTP error status still throws SourceFetchError from the status check, never even attempting a body read', async () => {
+  let bodyReadAttempted = false;
+  await withMockedFetch(
+    async () => ({
+      status: 500,
+      ok: false,
+      json: async () => { bodyReadAttempted = true; return {}; },
+    }),
+    async () => {
+      await assert.rejects(
+        () => fetchWithLimit('https://x/y', { source: 'test-source', limiter: noOpLimiter(), as: 'json' }),
+        SourceFetchError,
+      );
+    },
+  );
+  assert.equal(bodyReadAttempted, false);
 });
 
 // ---- assertRunApproved / RunNotApprovedError: the shared spend-gate primitive behind

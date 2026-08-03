@@ -5,6 +5,8 @@ import {
   getClient, openRun, closeRun, insertIfAbsent, additivePatch, isMissingColumnError, isMissingRelationError,
 } from '../lib/db.js';
 import { SourceFetchError, parsePositiveIntegerFlag } from '../lib/errors.js';
+import { remainingCooldownMs, formatCooldownWait, CooldownConvergenceError } from '../lib/durable-cooldown.js';
+import { readJsonCache, writeJsonCache } from '../lib/json-file-cache.js';
 import * as mo from '../adapters/mo-house-xml.js';
 import * as pdf from '../adapters/mo-rollcall-pdf.js';
 
@@ -188,7 +190,16 @@ export function selectTargets(entries, args, dir = MO_BILLS_ARTIFACT_DIR) {
   // (hasEnrichedMarker) are excluded before slicing to --limit, so this driver advances through
   // the backlog instead of reselecting the same already-done bill(s) forever.
   const pending = entries.filter((e) => !hasEnrichedMarker(e.identifier, dir));
-  return pending.slice(0, args.limit).map((e) => ({ identifier: e.identifier, bill_xml_url: e.bill_xml_url }));
+  // Senior engineering audit (2026-08-03, finding 10): the SAME head-of-line-blocking bug the
+  // roll-call PDF quarantine above already fixed also existed here, unfixed — a bill whose
+  // per-bill XML permanently fails to parse (mo.parseMoBillXml throwing on a genuinely malformed
+  // document) never gets an enriched marker written, so it stays first-in-list-order among
+  // not-yet-enriched bills FOREVER and gets re-selected (and re-fails) every single cooldown slot
+  // — with --limit 1 (the scheduler's own real argument), that means NO OTHER bill in the backlog
+  // (1,946 pending at audit time) ever gets a turn. excludeQuarantinedBills below is applied here,
+  // before the --limit slice, exactly where excludeQuarantinedPdfs is applied for roll-call PDFs.
+  const { kept } = excludeQuarantinedBills(pending, dir);
+  return kept.slice(0, args.limit).map((e) => ({ identifier: e.identifier, bill_xml_url: e.bill_xml_url }));
 }
 
 // Mirrors selectTargets's own "not yet enriched" filter exactly (same signal, same dir
@@ -197,6 +208,40 @@ export function selectTargets(entries, args, dir = MO_BILLS_ARTIFACT_DIR) {
 // selectTargets's own return shape, which many existing tests already pin as a bare array.
 export function countPendingBills(entries, dir = MO_BILLS_ARTIFACT_DIR) {
   return entries.filter((e) => !hasEnrichedMarker(e.identifier, dir)).length;
+}
+
+// ---- bill-detail quarantine (senior engineering audit, 2026-08-03, finding 10) ----
+//
+// Same idiom as the roll-call PDF quarantine above (readFailureArtifact/writeFailureArtifact are
+// already generic over sourceKey+dir, reused verbatim here — only the candidate shape and key
+// field differ: a bill-detail target has no `source_key`, it has `identifier`, e.g. "HB 2"), kept
+// as its own small filter rather than force-fitting bill-detail candidates into
+// excludeQuarantinedPdfs's PDF-specific shape.
+//
+// THRESHOLD (3): same reasoning as ROLLCALL_MAX_FAILED_ATTEMPTS — a single failure (or two) is
+// plausibly transient; MO House's own 30-min cooldown already spaces live retries far apart, so 3
+// independent failures on 3 separate cooldown slots is a genuinely bad document, not noise.
+//
+// "Don't count 429s" (the audit's own explicit caveat): a RateLimitedError (or any other
+// SourceFetchError) is thrown during the FETCH step, before mo.parseMoBillXml ever runs — the
+// existing fetch try/catch in runMoHouse already handles that case as a soft, non-quarantining
+// failure (unchanged by this fix). writeFailureArtifact for bill-detail is only ever called after
+// a SUCCESSFUL fetch, on a genuine parseMoBillXml failure — exactly mirroring how the roll-call
+// PDF quarantine already only counts RollCallParseError, never a fetch-level SourceFetchError,
+// against ITS OWN attempts cap.
+export const MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS = 3;
+
+export function excludeQuarantinedBills(candidates, dir = MO_BILLS_ARTIFACT_DIR) {
+  const skippedKeys = [];
+  const kept = candidates.filter((e) => {
+    const failure = readFailureArtifact(e.identifier, dir);
+    if (failure && failure.attempts >= MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS) {
+      skippedKeys.push(e.identifier);
+      return false;
+    }
+    return true;
+  });
+  return { kept, skippedFailed: skippedKeys.length, skippedKeys };
 }
 
 // ---- durable, cross-process ToU cooldown ----
@@ -209,33 +254,13 @@ export function countPendingBills(entries, dir = MO_BILLS_ARTIFACT_DIR) {
 // ToU. ingestion_runs is the durable, cross-process-visible record of "was a fetch recently
 // made (or attempted)" — these two pure helpers plus enforceDurableCooldown below close that gap.
 
-// Pure + testable without a DB: given the most recent run's started_at (ISO string) and the
-// required minimum interval, how much longer must we wait (0 if the cooldown has elapsed, or if
-// there is no prior run at all).
-export function remainingCooldownMs(lastStartedAtIso, minIntervalMs, now = Date.now()) {
-  if (!lastStartedAtIso) return 0;
-  const elapsed = now - new Date(lastStartedAtIso).getTime();
-  return Math.max(0, minIntervalMs - elapsed);
-}
-
-export function formatCooldownWait(ms) {
-  const totalSeconds = Math.ceil(ms / 1000);
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${mins}m ${secs}s`;
-}
-
-// FINAL-REVIEW FIX (convergence race): a typed, dedicated error for enforceDurableCooldown's
-// "never converged" case — never mistaken for the plain lookup-failed Error above, and carries
-// the iteration count for debugging. Thrown only if the loop below truly never converges, which
-// per its own comment should be impossible under normal operation.
-export class CooldownConvergenceError extends Error {
-  constructor(message, meta = {}) {
-    super(message);
-    this.name = 'CooldownConvergenceError';
-    Object.assign(this, meta);
-  }
-}
+// remainingCooldownMs/formatCooldownWait/CooldownConvergenceError moved to
+// src/lib/durable-cooldown.js (senior engineering audit, 2026-08-03, finding 17 — these three were
+// byte-identical between this file and ingest-mo-senate.js, and scripts/scheduled-ingest.js
+// depends on the first two for ALL FIVE registry sources' due-ness computation, not just MO
+// House/Senate). Imported above and re-exported here so every existing importer of THIS file keeps
+// working unchanged.
+export { remainingCooldownMs, formatCooldownWait, CooldownConvergenceError };
 
 async function queryLastMoHouseRunStartedAt(client) {
   const { data, error } = await client
@@ -339,10 +364,6 @@ export async function enforceDurableCooldown(
 // bill-detail progress instead.
 export const MO_BILL_LIST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-function billListCachePath(session, dir) {
-  return `${dir}/${session}.json`;
-}
-
 // Pure + testable without touching the filesystem or mocking a clock in the caller: given the ISO
 // timestamp of the last cached list fetch (or null/undefined if none exists yet), is a fresh live
 // fetch required this invocation? Mirrors remainingCooldownMs's own "no prior => must proceed"
@@ -352,21 +373,18 @@ export function shouldRefetchBillList(lastFetchIso, maxAgeMs = MO_BILL_LIST_MAX_
   return (now - new Date(lastFetchIso).getTime()) >= maxAgeMs;
 }
 
+// readCachedBillList/writeCachedBillList's underlying read/write-one-JSON-file-by-key mechanism
+// moved to src/lib/json-file-cache.js as readJsonCache/writeJsonCache (senior engineering audit,
+// 2026-08-03, finding 17 — the SAME mechanism ingest-mo-senate.js's own readCache/writeCache used
+// under a generic shape). The bill-list-specific shape ({session, fetched_at, entries}) and this
+// file's own external signature (session, dir) — both a real, existing test-covered contract —
+// stay exactly as they were.
 export function readCachedBillList(session, dir = MO_BILL_LIST_ARTIFACT_DIR) {
-  const p = billListCachePath(session, dir);
-  if (!existsSync(p)) return null;
-  try {
-    return JSON.parse(readFileSync(p, 'utf8'));
-  } catch {
-    return null; // a corrupt/partial cache file must never crash the driver — treated as "no cache"
-  }
+  return readJsonCache(dir, session);
 }
 
 export function writeCachedBillList(session, entries, dir = MO_BILL_LIST_ARTIFACT_DIR) {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(billListCachePath(session, dir), JSON.stringify({
-    session, fetched_at: new Date().toISOString(), entries,
-  }, null, 2));
+  writeJsonCache(dir, session, { session, entries });
 }
 
 // ---- persistence ----
@@ -1104,6 +1122,16 @@ export async function runMoHouse(client, args, {
     // enriched) so this reports the backlog size THIS RUN STARTED WITH, mirroring
     // ingest-mo-senate.js's worklist.totalPending/total_pending_days semantics exactly.
     const totalPendingBills = entries ? countPendingBills(entries, billsDir) : null;
+    // Same "mirrors selectTargets's own filter, computed separately for reporting" idiom as
+    // totalPendingBills above (and skippedFailedPdfs/skippedFailedPdfKeys for the roll-call PDF
+    // queue) — surfaces WHICH bill(s), if any, are currently quarantined, mirroring
+    // skipped_failed_pdfs/skipped_failed_pdf_keys below (finding 10's own point: a bare count
+    // gives an operator no way to know what's quarantined without listing the artifacts dir).
+    const pendingBillsForQuarantineReport = entries ? entries.filter((e) => !hasEnrichedMarker(e.identifier, billsDir)) : [];
+    const { skippedFailed: skippedFailedBills, skippedKeys: skippedFailedBillKeys } = excludeQuarantinedBills(pendingBillsForQuarantineReport, billsDir);
+    if (skippedFailedBills > 0) {
+      console.error(`[${new Date().toISOString()}] bill-detail queue: skipping ${skippedFailedBills} permanently-failing bill(s): ${skippedFailedBillKeys.join(', ')} (>= ${MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS} failed attempts — see *.failed.json in ${billsDir})`);
+    }
 
     const billResults = [];
     const failures = [];
@@ -1122,10 +1150,34 @@ export async function runMoHouse(client, args, {
         }
       } catch (err) {
         if (!(err instanceof SourceFetchError)) throw err;
+        // Deliberately does NOT write a quarantine artifact (finding 10's "don't count 429s" —
+        // and more generally, no fetch-level failure at all): a RateLimitedError or any other
+        // SourceFetchError here says nothing about whether THIS bill's XML is bad, only that the
+        // fetch didn't succeed this attempt. Exactly mirrors the roll-call PDF quarantine above,
+        // which only ever counts a genuine RollCallParseError against its own attempts cap, never
+        // a fetch-level failure.
         failures.push({ step: `bill xml ${target.identifier}`, message: err.message });
         continue;
       }
-      const parsed = mo.parseMoBillXml(xmlText);
+      let parsed;
+      try {
+        parsed = mo.parseMoBillXml(xmlText);
+      } catch (err) {
+        // Senior engineering audit (2026-08-03, finding 10): a genuinely malformed bill XML body
+        // (fetch succeeded — this document itself is bad) used to propagate all the way up to the
+        // outer catch, failing the WHOLE run — and either way, no enriched marker was ever
+        // written, so this exact bill would be re-selected (and re-fail) every single cooldown
+        // slot forever, permanently wedging the entire bill-detail backlog behind one bad
+        // document. Now recorded as a quarantine-worthy failure instead, same shape as the
+        // roll-call PDF fix above.
+        const failureArtifact = writeFailureArtifact(target.identifier, target.bill_xml_url, err, billsDir);
+        failures.push({
+          step: `bill xml parse ${target.identifier}`,
+          message: err.message,
+          failureArtifact: { attempts: failureArtifact.attempts, quarantined: failureArtifact.attempts >= MO_BILL_DETAIL_MAX_FAILED_ATTEMPTS },
+        });
+        continue;
+      }
       const result = await persistBillDetail(client, runId, sessionRow, parsed);
       billResults.push({ identifier: target.identifier, mode, ...result });
       // Task fix-mo-enrichment: the bill LEAVES the needs-enrichment set here, unconditionally,
@@ -1147,6 +1199,8 @@ export async function runMoHouse(client, args, {
       artifact_replay: artifactReplay,
       skipped_failed_pdfs: skippedFailedPdfs,
       skipped_failed_pdf_keys: skippedFailedPdfKeys,
+      skipped_failed_bills: skippedFailedBills,
+      skipped_failed_bill_keys: skippedFailedBillKeys,
     };
     const status = failures.length === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, { counts, billResults, failures, roster });

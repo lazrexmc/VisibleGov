@@ -30,7 +30,20 @@ export async function fetchWithLimit(url, { source, limiter, headers = {}, as = 
   if (!res.ok) {
     throw new SourceFetchError(`HTTP ${res.status} from ${source}: ${safeUrl}`, { source, url: safeUrl, status: res.status });
   }
-  if (as === 'json') return res.json();
-  if (as === 'arrayBuffer') return res.arrayBuffer(); // binary (PDFs) - added for mo-rollcall-pdf.js
-  return res.text();
+  // Senior engineering audit (2026-08-03, finding 11): a 200-status response can still fail while
+  // its BODY is being read — res.json() throws a raw SyntaxError on non-JSON content (a genuine
+  // 200 with an unexpected body shape), and a connection reset mid-stream surfaces as a raw
+  // `TypeError: terminated`, neither of which used to be wrapped. Every caller in this codebase
+  // that specifically catches SourceFetchError (the near-universal "if (!(err instanceof
+  // SourceFetchError)) throw err;" pattern) would NOT catch either shape — the raw error would
+  // escape as an unclassified crash instead of the typed fetch failure every OTHER failure mode
+  // above already produces. Every body-read call is caught here (was: only the connection itself,
+  // lines 22-26) and rethrown as the SAME typed error, "skip != empty" still holding either way.
+  try {
+    if (as === 'json') return await res.json();
+    if (as === 'arrayBuffer') return await res.arrayBuffer(); // binary (PDFs) - added for mo-rollcall-pdf.js
+    return await res.text();
+  } catch (cause) {
+    throw new SourceFetchError(`failed reading response body (as=${as}) from ${source}: ${safeUrl}`, { source, url: safeUrl, status: res.status, cause });
+  }
 }
