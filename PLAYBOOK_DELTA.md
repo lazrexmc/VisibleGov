@@ -441,3 +441,28 @@ primitives the gated function is built from; reimplement only the thin orchestra
 worth checking for a sibling implementation solving the identical problem before assuming a
 fresh design is needed. A full-suite run before considering a design "done" is what caught this; it
 would not have been caught by testing the new correction in isolation.
+
+## Lesson 25 — The Bash tool strips a layer of backslash-escaping before Node ever sees a `-e` command (2026-08-03)
+
+Diagnosing 7 corrupted glossary entries (undecoded `—` unicode-escape leaks, stray control
+characters) by running `node -e '...'` one-liners through the Bash tool, typing `\\u2014` to mean
+"a literal 6-character backslash-u-2014 sequence." The diagnosis came back silently wrong: a regex
+`.replace(/\\u2014/g, ...)` reported zero matches against text that (per a separate, correct
+character-code dump) definitely contained that exact sequence. The cause: the Bash tool's
+invocation path collapses `\\` to `\` before Node's parser ever runs — so `"field \\u2014 an"` typed
+in the command arrives at Node as `"field — an"`, which JavaScript's own double-quoted-string
+parser then decodes as a real em-dash character, not as the 6 literal characters intended. The
+diagnostic script "worked" (ran without error, printed plausible-looking output) while silently
+operating on a different string than the one actually stored in the database — the worst kind of
+tool failure, since nothing signals it happened.
+
+**Rule: never diagnose or fix byte-level string corruption (raw escape sequences, control
+characters, encoding artifacts) via inline `node -e`/`python -c` one-liners passed through a shell
+tool.** Write a real script file (`.mjs`/`.py`) instead and run it — a file's content reaches the
+interpreter exactly as written, with no shell-layer re-interpretation in between. This class of bug
+is specifically dangerous because the broken version doesn't error — it runs, looks reasonable, and
+produces confidently-wrong conclusions. Confirmed the fix by writing the diagnostic to a file,
+re-running it, and getting genuinely different (and this time internally consistent, cross-checked
+against explicit `codePointAt()` dumps) results. Applies to any tool-mediated shell invocation, not
+just this project — worth checking for the same stripping behavior in a new environment before
+trusting a quick one-liner for anything backslash-sensitive.
