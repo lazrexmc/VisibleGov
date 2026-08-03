@@ -54,6 +54,9 @@ const EXPECT_FRESH = ['source', 'status', 'finished_at', 'quarantined_days', 'la
 // false-flagging one of the two real, valid states on every run until someone remembers to update
 // this script in lockstep with the migration.
 const REQUIRED_NOTES = ['summary_id', 'model', 'overall', 'created_at'];
+// EXPECT_VOTES — vote-duplicate dedup (migration 0022, draft-then-apply). Same columns
+// bill-page.js's own VOTES_SELECT requests, now via public_votes instead of the raw votes table.
+const EXPECT_VOTES = ['id', 'bill_id', 'jurisdiction_id', 'chamber', 'vote_date', 'question', 'result', 'source_url', 'source_key'];
 
 // checkRequiredColumnsPresent(gotColumns, requiredColumns) -> {ok, missing} — SUPERSET-tolerant:
 // every required column must be present, but extra columns (e.g. 0020's `kind`) are fine and never
@@ -77,6 +80,18 @@ export function checkRowScoping(noteRows, publishedIds) {
   const leaked = rowsArr.filter((n) => !publishedIdSet.has(n.summary_id));
   const distinctSummaries = new Set(rowsArr.map((n) => n.summary_id)).size;
   return { ok: leaked.length === 0, leaked, distinctSummaries };
+}
+
+// checkNoSupersededVotes(voteRows, supersededIds) -> {ok, leaked} — vote-duplicate dedup (migration
+// 0022, draft-then-apply). public_votes/public_vote_feed/the vote-aggregate matviews all exclude
+// superseded_vote_id rows via a join; this proves that exclusion actually held for a live sample,
+// the same "prove the row-level effect, don't just trust the view definition" discipline
+// checkRowScoping already applies to public_verification_notes. Pure — no I/O, never throws.
+export function checkNoSupersededVotes(voteRows, supersededIds) {
+  const rowsArr = Array.isArray(voteRows) ? voteRows : [];
+  const ids = supersededIds instanceof Set ? supersededIds : new Set();
+  const leaked = rowsArr.filter((r) => ids.has(r.id)).map((r) => r.id);
+  return { ok: leaked.length === 0, leaked };
 }
 
 // checkCitationsShape(noteRows) -> {ok, violations} — migration 0021 (draft-then-apply, may not be
@@ -235,6 +250,26 @@ export async function main() {
     );
   } else {
     console.log('INFO  public_verification_notes.citations check skipped — migration 0021 not applied yet (or the request failed for another reason)');
+  }
+
+  // Migration 0022 (draft-then-apply) may or may not have landed yet — same graceful-skip pattern
+  // as the citations check above. This can only prove public_votes is reachable and correctly
+  // shaped from the anon key — NOT that the exclusion actually holds (vote_duplicates itself is
+  // deliberately not anon-readable, so there is no way to learn the superseded-id set from here;
+  // verifying the join's real effect is Lance's own live spot-check, per the implementation plan's
+  // handoff notes).
+  const publicVotesShape = await rows(url, H, 'public_votes?limit=1');
+  if (publicVotesShape.status === 200 && publicVotesShape.body?.[0]) {
+    const got = Object.keys(publicVotesShape.body[0]);
+    const { ok, missing } = checkRequiredColumnsPresent(got, EXPECT_VOTES);
+    check(
+      'public_votes has the required columns (migration 0022)',
+      ok,
+      missing.length ? `missing: ${missing.join(',')}` : got.sort().join(','),
+      state,
+    );
+  } else {
+    console.log('INFO  public_votes check skipped — migration 0022 not applied yet (or the request failed for another reason)');
   }
 
   process.exitCode = state.failed ? 1 : 0;

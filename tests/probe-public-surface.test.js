@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  checkRequiredColumnsPresent, checkRowScoping, checkCitationsShape, main,
+  checkRequiredColumnsPresent, checkRowScoping, checkCitationsShape, checkNoSupersededVotes, main,
 } from '../scripts/probe-public-surface.js';
 
 // Completeness axis follow-up (2026-07-31): scripts/probe-public-surface.js used to assert
@@ -180,6 +180,31 @@ test('checkCitationsShape: multiple violations across multiple rows are all repo
   const result = checkCitationsShape(rows);
   assert.equal(result.ok, false);
   assert.equal(result.violations.length, 2);
+});
+
+// ---- checkNoSupersededVotes — vote-duplicate dedup (migration 0022, draft-then-apply) ----
+
+test('checkNoSupersededVotes: no superseded ids among the rows -> ok, zero leaks', () => {
+  const rows = [{ id: 'v1' }, { id: 'v2' }];
+  const result = checkNoSupersededVotes(rows, new Set(['v3']));
+  assert.deepEqual(result, { ok: true, leaked: [] });
+});
+
+test('checkNoSupersededVotes: a superseded id present in the public rows is caught — the real leak this gate exists for', () => {
+  const rows = [{ id: 'v1' }, { id: 'v2' }];
+  const result = checkNoSupersededVotes(rows, new Set(['v2']));
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.leaked, ['v2']);
+});
+
+test('checkNoSupersededVotes: empty rows or empty superseded set -> ok trivially', () => {
+  assert.deepEqual(checkNoSupersededVotes([], new Set(['v1'])), { ok: true, leaked: [] });
+  assert.deepEqual(checkNoSupersededVotes([{ id: 'v1' }], new Set()), { ok: true, leaked: [] });
+});
+
+test('checkNoSupersededVotes: null/undefined rows -> ok, never throws', () => {
+  assert.deepEqual(checkNoSupersededVotes(null, new Set(['v1'])), { ok: true, leaked: [] });
+  assert.deepEqual(checkNoSupersededVotes(undefined, new Set(['v1'])), { ok: true, leaked: [] });
 });
 
 // ---- main(): env-var-missing branch, no network required (proves importing/exercising this
