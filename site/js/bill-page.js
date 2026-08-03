@@ -599,7 +599,7 @@ export async function loadVotesSection(container, { billId }) {
   const reload = () => loadVotesSection(container, { billId }).catch(() => {});
   let votes;
   try {
-    votes = (await restGet(`votes?bill_id=eq.${billId}&select=${VOTES_SELECT}&order=vote_date.desc.nullslast`)).rows;
+    votes = (await restGet(`public_votes?bill_id=eq.${billId}&select=${VOTES_SELECT}&order=vote_date.desc.nullslast`)).rows;
   } catch {
     sectionState(container, {
       state: 'failed', message: "Couldn't load roll calls — retry", onRetry: reload,

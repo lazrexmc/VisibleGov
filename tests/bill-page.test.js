@@ -609,7 +609,7 @@ test('loadVotesSection: HIGH-1 regression — a raw votes row whose `id` matches
   _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/votes?')) {
+    if (u.includes('/public_votes?')) {
       // A RAW votes row, exactly as bill-page.js's own VOTES_SELECT returns it — primary key
       // column is `id`, there is no `vote_id` column on this table at all (that alias only exists
       // on the public_vote_feed VIEW the profile page reads instead).
@@ -647,7 +647,7 @@ test('loadVotesSection: a vote with NO matching flag row renders no badge (the p
   _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/votes?')) {
+    if (u.includes('/public_votes?')) {
       return okResponse([{
         id: 'v-clean', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '103-48', source_url: null,
       }]);
@@ -689,7 +689,7 @@ test('loadVotesSection: (a) a mix of a cast-bearing vote and mo-ocd zero-cast no
   });
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/votes?')) {
+    if (u.includes('/public_votes?')) {
       return okResponse([
         {
           id: 'v-real', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '20-0', source_url: null, source_key: 'mo-house-xml-hb1-1',
@@ -720,7 +720,7 @@ test('loadVotesSection: (b) a bill with ONLY mo-ocd zero-cast rows (nothing else
   const castsByVote = castsFor({ 'v-ocd-1': [], 'v-ocd-2': [] });
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/votes?')) {
+    if (u.includes('/public_votes?')) {
       return okResponse([
         {
           id: 'v-ocd-1', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-02-01T00:00:00Z', question: 'Referred', result: 'pass', source_url: null, source_key: 'mo-ocd-vote/1',
@@ -750,7 +750,7 @@ test('loadVotesSection: (c) a bill with mo-house zero-cast rows only — never s
   const castsByVote = castsFor({ 'v-house-pending': [] });
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/votes?')) {
+    if (u.includes('/public_votes?')) {
       return okResponse([{
         id: 'v-house-pending', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '20-0', source_url: null, source_key: 'mo-house-xml-hb2-1',
       }]);
@@ -776,7 +776,7 @@ test('loadVotesSection: (d) a cast-bearing vote plus an mo-house zero-cast row �
   });
   _setFetch(async (url) => {
     const u = String(url);
-    if (u.includes('/votes?')) {
+    if (u.includes('/public_votes?')) {
       return okResponse([
         {
           id: 'v-real', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2026-03-01T00:00:00Z', question: 'On passage', result: '2-1', source_url: null, source_key: 'mo-house-xml-hb3-1',
