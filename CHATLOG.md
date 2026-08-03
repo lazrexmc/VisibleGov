@@ -1681,6 +1681,21 @@ Full suite 2255 → 2259 (all correction-CLI tests), 0 fail throughout, gated on
 fail` line at every commit, same as every other change this session. All 5 code-fix commits + 1
 migration-draft commit pushed individually as they landed, not batched at the end.
 
+## 2026-08-03 (continued) — `legiscan_datasets` locked down (gap-fill entry, added retroactively
+during the 2026-08-03 evening doc-refresh pass — this decision and its apply were never logged
+when they actually happened)
+
+Asked Lance directly whether to lock down `legiscan_datasets`'s anon-read policy (left open above
+as "his call"). Lance: **"Yes, lock it down (recommended)."** Drafted migration `0024_lock_down_
+legiscan_datasets.sql` (one line, `drop policy if exists anon_read on legiscan_datasets;` — RLS was
+already enabled, so this alone makes the table service-role-only, matching `vote_reconciliation_
+flags`' posture from the same original migration). Lance: **"0024 has been ran in supabase."**
+Verified live with both keys: anon now gets `200 []`, service-role still sees all 31 rows intact —
+migration landed clean, nothing touched but public reachability. `TODO.md` marked closed the same
+day; this entry exists only to close the gap in CHATLOG's own record (a documentation-discipline
+miss caught by the evening doc-refresh pass's own verification step — worth noting since CHATLOG's
+whole purpose is being the decision trail, and this decision briefly had none).
+
 ## 2026-08-03 (continued) — "it sure feels like we've locked the backend down"; Playwright proves it; Cloudflare deploy spec begins
 
 Lance: "It sure feels like we've locked the backend down and could potentially move to the
@@ -1748,3 +1763,47 @@ Lance then went AFK with a broad documentation-refresh instruction — this entr
 Cloudflare section rewrite are that pass's foreground half; the deeper docs (CONTROLLER_BRIEFING,
 DATA_INVENTORY) are next, followed by an independent verification pass before calling any of it
 done, per this project's own standing "never trust a self-report" discipline.
+
+## 2026-08-03 (continued) — full doc refresh while Lance is AFK finds a real, live production bug
+
+Foreground docs (`TODO.md`, this file, `README.md`, `CLAUDE.md`) updated directly first — the
+Cloudflare brainstorm progress snapshot, the Playwright verification, migration `0025` (column-
+scoping `summaries`/`glossary_terms` — RLS already correctly restricted anon to published ROWS,
+nothing ever restricted COLUMNS, so a bare `select=*` returned internal pipeline metadata; column-
+level `GRANT`, not a view rename, since site/js already queries these table names directly in
+three files). README/CLAUDE.md's status lines were genuinely stale (still described migration 0022
+as drafted-not-applied, the vote-duplicate defect as the one open item, deploy as merely
+"deferred") — corrected.
+
+Then ran an 8-agent workflow (4 parallel refreshes of `CONTROLLER_BRIEFING.md`/`DATA_INVENTORY.md`/
+`ARTIFACTS.md`/`SCHEDULED_INGESTION.md`, each independently live-reverified, plus a fresh spot-check
+of the foreground edits above) — same discipline as every doc pass this session, never trust a
+self-report. Caught and fixed two real errors before committing: `CONTROLLER_BRIEFING.md` asserted
+`DATA_INVENTORY.md` was still stale on the Pierson-split counts when a parallel pass had already
+fixed it (a race in the agents' own write order); `SCHEDULED_INGESTION.md` mislabeled 66/78
+live-mode tick counts as "refresh attempts" (only 14/19 actually attempted one).
+
+**The real find: the scheduler's own aggregate-refresh step had been failing on every single
+attempt since `2026-08-03T05:00:12Z`** — 11 consecutive `57014 statement timeout` failures by
+discovery (~18:23 UTC), nobody watching, ~14+ hours of the public profile/party-alignment charts
+silently not reflecting new votes. Root cause traced exactly: migration `0018a` fixed this same
+symptom on 2026-07-30 via a separate `ALTER FUNCTION ... SET statement_timeout`; migration `0022`
+(applied earlier today) later ran `CREATE OR REPLACE FUNCTION refresh_vote_aggregates()` to add the
+vote-duplicate exclusion join — and Postgres silently resets any config a prior, separate `ALTER
+FUNCTION` had set unless the new definition re-declares it. `0022`'s own comment ("body unchanged")
+was accurate about the SQL but didn't account for `0018a`'s separate, later config patch — a real
+blind spot in how that migration was reviewed at the time. Not data loss, purely staleness, and it
+self-heals the moment the fix lands. Drafted migration `0026` immediately (folds `statement_timeout`
+directly into the function's own `set` clause this time, so it survives any future `CREATE OR
+REPLACE` that copies this header — removes the separate, easy-to-forget step that caused the
+regression) and flagged it as the new top item in `TODO.md` NOW, ahead of everything else, since it
+keeps failing every tick until Lance applies it.
+
+Also filled a real gap CHATLOG's own verification caught: migration `0024` (`legiscan_datasets`
+lockdown) was decided and applied earlier today but never got its own entry here — backfilled
+above, dated at the point it actually happened, not appended out of order.
+
+Every migration this session (`0022`–`0026`) stays draft-then-apply — nothing here was applied by
+an agent; `0022`, `0024` are confirmed live because Lance ran them himself. Full suite 2259/2259
+throughout. Six commits this pass (four docs, one CHATLOG gap-fill, one TODO/CHATLOG update for
+this entry), each pushed as it landed.

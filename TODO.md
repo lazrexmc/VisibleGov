@@ -6,6 +6,23 @@
 
 ## NOW
 
+- [ ] **🔴 URGENT — apply migration `0026` ASAP: the scheduler's aggregate-refresh has been failing
+  on every attempt since 2026-08-03T05:00:12Z.** Found during the 2026-08-03 evening doc-refresh
+  pass (not by anyone watching it — nothing was watching it, that's the point). Migration 0022
+  (applied earlier today) silently dropped a `statement_timeout` fix migration 0018a had applied
+  via a separate `ALTER FUNCTION` — Postgres resets function-level config on `CREATE OR REPLACE
+  FUNCTION` unless the new definition re-declares it, and 0022's "body unchanged" comment didn't
+  account for 0018a's separate, later config patch. Result: `refresh_vote_aggregates()` has hit an
+  8-12s statement timeout on all 11 scheduler-triggered attempts since 05:00 UTC (10× after
+  `mo-house-xml`, 1× after `legiscan`) — the public profile/party-alignment charts
+  (`public_position_totals`/`public_party_alignment`/`public_party_position_totals`) stopped
+  auto-updating and are now 14+ hours stale as of discovery, growing every 15-30 min until this
+  lands. **Not data loss** — the underlying vote data is fine, this is purely staleness on three
+  derived matviews, and it self-heals the moment the migration runs (next tick that writes new
+  rows will refresh cleanly). Fix: `supabase/migrations/0026_fix_refresh_aggregates_timeout_
+  regression.sql` — one function redefinition, folds `statement_timeout` directly into the
+  function's own `set` clause this time so a future `CREATE OR REPLACE` can't silently drop it
+  again. Draft-then-apply, same SQL-editor pattern as every other migration tonight.
 - [ ] **Comprehensive accuracy audit, 2026-08-03 — all 4 criticals fixed live, 2 items left for
   Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
   **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus
