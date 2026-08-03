@@ -1839,3 +1839,47 @@ as designed, and a narrower verification (just checking the grants, the way the 
 did) would have called it done. Checking it against what the site *actually does*, live, in a real
 browser, is what caught it. `TODO.md`/`CLAUDE.md` updated to reflect all three migrations applied
 and verified, fallout fixed. Full suite 2259/2259 throughout.
+
+---
+
+## 2026-08-03 (continued) — senior engineering audit: "world's top leading software design fellow"
+
+**Lance:** "Let's just have a full, deep audit of the back end as if you were the world's top leading
+software design fellow."
+
+Different lens than the same-day accuracy audit — that one asked "is the data correct." This one
+asked "is this well-engineered." 11 domains (architecture, operational resilience/monitoring, DB
+migration hygiene, testing quality, security architecture, code quality/tech debt, scalability,
+tonight's own changes re-reviewed fresh, dependencies, docs/onboarding, external-integration
+robustness), Fable 5 at max effort, 33 agents total, every critical/important finding independently
+adversarially re-verified by a second agent trying to refute it.
+
+**Result: 21/21 confirmed, 0 refuted, 2 demoted important→minor, 0 escalated to critical.** Full
+report: `docs/audits/2026-08-03-senior-engineering-audit.md`.
+
+Overall verdict: well-engineered for a solo project at this pace — 2,259 behavioral tests, zero
+secrets in git history, layered XSS/zip-slip/CSRF defenses, mechanical rate-limit/budget
+enforcement, a clean dependency sweep. Security and supply-chain produced zero important findings.
+
+But: **every serious defect found fails silently**, and the top finding is live. `correct-data.js`'s
+vote-duplicate scan (`runCorrectVoteDuplicates`, line 1415) uses a bare `.select()` against 8,221
+legiscan votes; PostgREST caps it at 1,000 rows, so the scan only ever sees 12% of its target and
+`vote_duplicates` has stayed empty since migration 0022 shipped. The verifier ran the comparison
+functions against the full unpaginated set and found 63 real duplicate pairs, all beyond row 1,000,
+all 2018 MO Senate votes — meaning ~2,100 double-counted casts are live in public aggregates right
+now, and the earlier CHATLOG conclusion that the backfill's `matched:0` was "not a bug" was itself
+wrong (that session only sampled parseable-aggregate votes and never hit the senate shape). Nothing
+fixed yet — this is a finding, not a correction.
+
+Everything else converges on the same shape: no alerting exists anywhere in the project (dead
+scheduler or revoked key both read as healthy forever, confirmed via `schtasks` against the live
+task and a mechanical stubbed-client repro); the 0026 timeout fix is enforced by a comment, not a
+guard, and 0022 still contains both already-superseded definitions with no applied-state ledger to
+stop a partial re-paste from silently reverting 0023/0026 (a mechanism with realized precedent —
+it's exactly how the 0026 outage happened); a genuine 3-node import cycle in `src/cli`
+(`ingest-legiscan.js -> correct-data.js -> ingest-mo-senate.js -> back`), empirically demonstrated
+via a replica to crash under the right entry point; the two MO ingest CLIs carry parallel-drifting
+copies of ToU-compliance machinery, and the production scheduler already depends on cross-copy
+identity between them that nothing enforces. Full prioritized list, "if I had one week" order, and
+appendix of minor/informational items in the report. `TODO.md` NOW updated with the summary and
+top-priority item; nothing implemented yet — awaiting Lance's direction on scope/order.

@@ -22,6 +22,28 @@
   real `summaries`/`glossary_terms` query sites in `site/js/`, AND a real Playwright browser load
   of an actual bill page (summary rendered correctly, zero console errors). Every other query site
   already had an explicit `select=` and needed no change.
+- [ ] 🔴 **Senior engineering audit, 2026-08-03 — 21/21 findings confirmed (0 refuted), 1 is a LIVE
+  data-integrity defect, none fixed yet.** Full report:
+  `docs/audits/2026-08-03-senior-engineering-audit.md`. Different lens than the accuracy audit below
+  — architecture, operational resilience, DB/migration hygiene, testing quality, security
+  architecture, code quality, scalability, and a fresh adversarial re-review of everything shipped
+  tonight (migrations 0022-0026 + all corrections). 33 agents, every critical/important finding
+  independently re-verified by a second agent trying to refute it — nothing survived refutation.
+  **Top priority — a shipped remediation is silently defeated right now:** `runCorrectVoteDuplicates`
+  (`correct-data.js:1415`) uses a bare `.select()` against 8,221 legiscan votes; PostgREST caps it at
+  1,000, so the scan only ever sees 12% of its target and `vote_duplicates` has stayed empty. Verifier
+  found 63 real duplicate pairs beyond row 1,000 (all 2018 MO Senate) — ~2,100 double-counted casts
+  currently live in public aggregates, and this **refutes the CHATLOG's recorded conclusion** that the
+  backfill's `matched:0` was "not a bug." Fix = route through `selectAll`, re-run the backfill,
+  refresh aggregates. **Everything else found fails the same way — silently:** no alerting exists
+  anywhere in the project (a dead scheduler or a revoked key both read as healthy forever); the 0026
+  outage fix is enforced only by a comment, not a guard; migration 0022 still contains both
+  already-superseded definitions and a partial re-paste of it would silently revert 0023/0026; a
+  genuine 3-node import cycle in `src/cli` (empirically demonstrated to crash under the right entry
+  point); the two MO ingest CLIs carry parallel-drifting copies of ToU-compliance code (the production
+  scheduler already depends on cross-copy identity that isn't enforced). Zero criticals; security and
+  supply-chain came back clean. Full prioritized list and a "one week" fix-order plan in the report.
+  **Not yet started — awaiting Lance's direction on scope/order.**
 - [ ] **Comprehensive accuracy audit, 2026-08-03 — all 4 criticals fixed live, 2 items left for
   Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
   **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus
