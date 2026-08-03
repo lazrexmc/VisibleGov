@@ -57,17 +57,23 @@ editorializing in a summary. Check every design decision against this before it 
 Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) live in
 `~/.claude/CLAUDE.md` and apply here too. This file only holds what's specific to VisibleGov.
 
-**Standing policies (Lance, 2026-07-27, non-negotiable):**
+**Standing policies (Lance, 2026-07-27, non-negotiable unless marked otherwise below):**
 - **No live Claude/LLM API call runs without Lance's explicit per-run approval**, with call
   count + dollar estimate stated up front. Mechanical enforcement exists where possible (e.g.
   the golden-check `GOLDEN_CHECK_APPROVED` gate) - extend that pattern to new model-calling
   tools.
+  **TEMPORARILY SUSPENDED (Lance, 2026-08-03): "temporarily remove the usage and credit usage
+  restrictions from the rules and settings until I reinstate them."** Per-run approval + cost
+  statement is NOT required for live API calls while this is in effect. This is a suspension, not
+  a repeal — the rule text above stays in place so reinstating it is a one-line revert of this
+  note, not a rewrite. Treat this as still in effect until Lance says otherwise; do not assume it
+  has lapsed just because time has passed or the session has changed.
 - **Trust model v3 (adopted 2026-07-28 for glossary, 2026-07-31 for summaries — fully live, not
   pending; spec: docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from
   official text only → sonnet-5 adversarially verifies (mechanically completeness-gated - never
   trust the verifier's self-report) → verified-CLEAN items auto-approve and auto-publish with
   per-item audit logging; Lance reviews FLAGGED items only (process auditor, not truth
-  certifier). Public rendering must carry receipts (source link + supporting quote) — currently
-  true for glossary terms; bill-summary bullets have the quote data but don't render it yet
-  (spec: docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md, awaiting
-  implementation). Facts-only rule per the spec; nothing editorial, ever.
+  certifier). Public rendering must carry receipts (source link + supporting quote) — true for
+  both glossary terms and bill-summary bullets (bullet citations shipped 2026-08-03, migration
+  0021: docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md). Facts-only rule per
+  the spec; nothing editorial, ever.
