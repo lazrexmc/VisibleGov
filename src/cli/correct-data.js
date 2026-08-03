@@ -96,13 +96,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'glossary-corrupted-text', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | all`);
   }
   out.which = which;
   return out;
@@ -1661,6 +1661,128 @@ export async function runCorrectGlossaryRefutedClaims(client, { dryRun = false }
 }
 
 // ============================================================================================
+// Correction — glossary-corrupted-text: 7 auto-published glosses shipped with corrupted text
+// (accuracy audit, 2026-08-03)
+// ============================================================================================
+//
+// FOUND LIVE: 7 auto-published glossary terms carried model-output text corruption (literal,
+// undecoded "—"/"–" JSON-unicode-escape leaks — 6 raw ASCII characters, never decoded
+// to the real em/en dash they were meant to be — plus, on 2 terms, a real stray control character
+// or newline that consumed adjacent letters/words) that the adversarial verifier passed as clean
+// (it judges factual support, not text integrity) and auto-publish shipped with zero human review.
+// A text-integrity gate now blocks this class going forward (auto-publish-glossary.js,
+// hasTextCorruption, this same audit) — this is the one-time backfill for the 7 rows that already
+// landed corrupted.
+//
+// Every replacement below was derived by reading the RAW stored bytes (character codes, not
+// printed/escaped text — printed-text inspection was actively misleading during this
+// investigation) and is grounded in either (a) the term's own supported_by_quote, already
+// verified against the real source excerpt, or (b) for the 5 terms whose only defect is the
+// undecoded-escape leak, a purely mechanical decode with no reconstruction judgment at all.
+// Findable substrings are written using real JS escapes (\n, \f) so the FIND string matches the
+// actual corrupted bytes exactly — never typed as visually-similar characters, which is exactly
+// the class of error that created this corruption in the first place.
+export const GLOSSARY_CORRUPTED_TEXT_FIXES = [
+  {
+    termId: 'f614d958-fb73-41a2-b206-f005d8954baa', // Small Business Act
+    replacements: [
+      [
+        'concern" \not operated and not dominant in its field \\u2014',
+        'concern" (one which is independently owned and operated and which is not dominant in its field of operation)—',
+      ],
+    ],
+  },
+  {
+    termId: 'fc3f8e5b-21ee-4726-8f47-9e0083b958cb', // title 31, United States Code
+    replacements: [
+      ['money \\,, meic., formally', 'money — that is, formally'],
+      [/\\u2014/g, '—'],
+    ],
+  },
+  {
+    termId: 'cc352876-40af-42ca-a4f7-138eac95d825', // Social Security Act
+    replacements: [
+      ['eligibility \for example', 'eligibility, for example,'],
+    ],
+  },
+  {
+    termId: 'f67b01ff-ac86-494a-9116-a26dc2212cf7', // Federal Reserve Act
+    replacements: [
+      [/\\u2014/g, '—'],
+    ],
+  },
+  {
+    termId: '99128a06-9e4f-4555-9d12-36ebf3a5accc', // Depository Institution Management Interlocks Act
+    replacements: [
+      [/\\u2014/g, '—'],
+    ],
+  },
+  {
+    termId: 'ff0bc473-250f-4687-85cf-951c36ed805f', // Revised Statutes of the United States (financial subsidiary)
+    replacements: [
+      [/\\u2014/g, '—'],
+    ],
+  },
+  {
+    termId: '5dc3a005-ed01-47e9-8f8f-3d948a2313d6', // Foreign Relations Authorization Act, FY1992-93
+    replacements: [
+      ['activities \for other means \ncluding', 'activities, or other means, including'],
+    ],
+  },
+];
+
+function applyGlossaryTextFixes(glossMd, replacements) {
+  let out = glossMd;
+  for (const [find, replace] of replacements) {
+    out = typeof find === 'string' ? out.split(find).join(replace) : out.replace(find, replace);
+  }
+  return out;
+}
+
+export async function runCorrectGlossaryCorruptedText(client, { dryRun = false } = {}) {
+  const failures = [];
+  const termIds = [];
+  const patches = [];
+
+  for (const entry of GLOSSARY_CORRUPTED_TEXT_FIXES) {
+    // eslint-disable-next-line no-await-in-loop -- sequential over 7 named rows, same
+    // small-backlog precedent as this file's other one-time corrections.
+    const { data: rows, error } = await client.from('glossary_terms').select('id,gloss_md').eq('id', entry.termId);
+    if (error) { failures.push({ termId: entry.termId, reason: 'glossary_terms_lookup_failed', error: String(error.message ?? error) }); continue; }
+    const row = (rows ?? [])[0];
+    if (!row) continue;
+    const newGlossMd = applyGlossaryTextFixes(row.gloss_md, entry.replacements);
+    if (newGlossMd === row.gloss_md) continue; // already corrected (or corrupted text not found)
+    termIds.push(entry.termId);
+    patches.push({ termId: entry.termId, newGlossMd });
+  }
+
+  if (dryRun || patches.length === 0) {
+    return { matched: patches.length, termIds, failures };
+  }
+
+  let matched = 0;
+  for (const { termId, newGlossMd } of patches) {
+    // eslint-disable-next-line no-await-in-loop
+    const { error: updErr } = await client.from('glossary_terms').update({ gloss_md: newGlossMd }).eq('id', termId);
+    if (updErr) { failures.push({ termId, reason: 'glossary_terms_update_failed', error: String(updErr.message ?? updErr) }); continue; }
+    // eslint-disable-next-line no-await-in-loop
+    const { error: noteErr } = await client.from('glossary_notes').insert({
+      term_id: termId,
+      action: 'edited',
+      note: 'Corrected 2026-08-03 (accuracy audit): repaired model-output text corruption (an '
+        + 'undecoded unicode-escape leak and/or a stray control character that consumed adjacent '
+        + 'text) that shipped under a clean adversarial verification, which checks factual support, '
+        + 'never text integrity. Replacement grounded in this term\'s own supported_by_quote.',
+    }).select().single();
+    if (noteErr) { failures.push({ termId, reason: 'glossary_notes_insert_failed', error: String(noteErr.message ?? noteErr) }); continue; }
+    matched += 1;
+  }
+
+  return { matched, termIds, failures };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1731,6 +1853,12 @@ export async function runCorrectData(client, {
   if (which === 'glossary-refuted-claims') {
     out.glossaryRefutedClaims = await runCorrectGlossaryRefutedClaims(client, { dryRun });
     failures.push(...out.glossaryRefutedClaims.failures);
+  }
+  // glossary-corrupted-text (2026-08-03) — a named content correction, excluded from 'all' for the
+  // same reason as glossary-refuted-claims.
+  if (which === 'glossary-corrupted-text') {
+    out.glossaryCorruptedText = await runCorrectGlossaryCorruptedText(client, { dryRun });
+    failures.push(...out.glossaryCorruptedText.failures);
   }
 
   out.failures = failures;

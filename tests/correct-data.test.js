@@ -32,6 +32,8 @@ import {
   FECA_TERM_ID,
   BBEDCA_TERM_ID,
   runCorrectGlossaryRefutedClaims,
+  GLOSSARY_CORRUPTED_TEXT_FIXES,
+  runCorrectGlossaryCorruptedText,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -481,6 +483,83 @@ test('runCorrectGlossaryRefutedClaims: a second run is a clean, honest no-op —
   assert.equal(second.matched, 0);
   assert.equal(second.failures.length, 0);
   assert.equal(client.tables.glossary_notes.length, 2, 'no duplicate note rows on a repeat run');
+});
+
+// ---- runCorrectGlossaryCorruptedText ----
+// FOUND LIVE (accuracy audit, 2026-08-03): 7 auto-published glosses carried model-output text
+// corruption (undecoded unicode-escape leaks, a stray control character/newline that consumed
+// adjacent text). Fixtures below use the REAL corrupted byte patterns (via actual JS escapes, the
+// same way GLOSSARY_CORRUPTED_TEXT_FIXES' own FIND strings are written) — reconstructed from the
+// live rows' actual character codes, not from visually-similar printed text (printed/escaped text
+// was actively misleading during this investigation).
+
+test('GLOSSARY_CORRUPTED_TEXT_FIXES: covers exactly the 7 real corrupted term ids', () => {
+  assert.equal(GLOSSARY_CORRUPTED_TEXT_FIXES.length, 7);
+});
+
+test('runCorrectGlossaryCorruptedText: dry-run finds all 7 corrupted rows without writing', async () => {
+  const client = makeFakeClient({
+    glossary_terms: [
+      { id: 'f614d958-fb73-41a2-b206-f005d8954baa', gloss_md: 'a "small business concern" \not operated and not dominant in its field \\u2014 and lets' },
+      { id: 'fc3f8e5b-21ee-4726-8f47-9e0083b958cb', gloss_md: 'federal money \\,, meic., formally dividing, funds \\u2014 and the President' },
+      { id: 'cc352876-40af-42ca-a4f7-138eac95d825', gloss_md: 'limit or bar eligibility \for example living' },
+      { id: 'f67b01ff-ac86-494a-9116-a26dc2212cf7', gloss_md: 'who can be chosen \\u2014 including limits' },
+      { id: '99128a06-9e4f-4555-9d12-36ebf3a5accc', gloss_md: 'throughout the chapter \\u2014 including "depository institution"' },
+      { id: 'ff0bc473-250f-4687-85cf-951c36ed805f', gloss_md: 'conditions for doing so \\u2014 including limits' },
+      { id: '5dc3a005-ed01-47e9-8f8f-3d948a2313d6', gloss_md: 'exchange activities \for other means \ncluding student' },
+    ],
+    glossary_notes: [],
+  });
+  const result = await runCorrectGlossaryCorruptedText(client, { dryRun: true });
+  assert.equal(result.matched, 7);
+  assert.equal(result.termIds.length, 7);
+  assert.deepEqual(result.failures, []);
+  assert.equal(client.tables.glossary_terms[0].gloss_md.includes('\\u2014'), true, 'dry-run must never write');
+});
+
+test('runCorrectGlossaryCorruptedText: live run repairs every corrupted term — no literal escape leaks, no stray control chars, and grounded replacement text', async () => {
+  const client = makeFakeClient({
+    glossary_terms: [
+      { id: 'f614d958-fb73-41a2-b206-f005d8954baa', gloss_md: 'a "small business concern" \not operated and not dominant in its field \\u2014 and lets' },
+      { id: 'fc3f8e5b-21ee-4726-8f47-9e0083b958cb', gloss_md: 'federal money \\,, meic., formally dividing, funds \\u2014 and the President' },
+      { id: 'cc352876-40af-42ca-a4f7-138eac95d825', gloss_md: 'limit or bar eligibility \for example living' },
+      { id: 'f67b01ff-ac86-494a-9116-a26dc2212cf7', gloss_md: 'who can be chosen \\u2014 including limits' },
+      { id: '99128a06-9e4f-4555-9d12-36ebf3a5accc', gloss_md: 'throughout the chapter \\u2014 including "depository institution"' },
+      { id: 'ff0bc473-250f-4687-85cf-951c36ed805f', gloss_md: 'conditions for doing so \\u2014 including limits' },
+      { id: '5dc3a005-ed01-47e9-8f8f-3d948a2313d6', gloss_md: 'exchange activities \for other means \ncluding student' },
+    ],
+    glossary_notes: [],
+  });
+  const live = await runCorrectGlossaryCorruptedText(client, { dryRun: false });
+  assert.equal(live.matched, 7);
+  for (const row of client.tables.glossary_terms) {
+    assert.equal(row.gloss_md.includes('\\u2014'), false, `${row.id} still has an undecoded escape leak`);
+    // eslint-disable-next-line no-control-regex
+    assert.equal(/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(row.gloss_md), false, `${row.id} still has a stray control character`);
+  }
+  assert.equal(
+    client.tables.glossary_terms.find((t) => t.id === 'f614d958-fb73-41a2-b206-f005d8954baa').gloss_md.includes('independently owned and operated'),
+    true,
+  );
+  assert.equal(
+    client.tables.glossary_terms.find((t) => t.id === 'cc352876-40af-42ca-a4f7-138eac95d825').gloss_md,
+    'limit or bar eligibility, for example, living',
+  );
+  assert.equal(client.tables.glossary_notes.length, 7);
+  assert.ok(client.tables.glossary_notes.every((n) => n.action === 'edited'));
+});
+
+test('runCorrectGlossaryCorruptedText: a second run is a clean, honest no-op', async () => {
+  const client = makeFakeClient({
+    glossary_terms: [
+      { id: 'f67b01ff-ac86-494a-9116-a26dc2212cf7', gloss_md: 'who can be chosen \\u2014 including limits' },
+    ],
+    glossary_notes: [],
+  });
+  await runCorrectGlossaryCorruptedText(client, { dryRun: false });
+  const second = await runCorrectGlossaryCorruptedText(client, { dryRun: false });
+  assert.equal(second.matched, 0);
+  assert.equal(client.tables.glossary_notes.length, 1);
 });
 
 // ---- parseArgs ----
