@@ -59,8 +59,13 @@ export function renderMetricDefinitions(container) {
 // it — anon_read_published, migrations 0001/0007 — this is belt-and-braces, matching convention,
 // not a new rule).
 // ============================================================================
+// voteCasts counts through public_vote_feed (migration 0023), not the raw vote_casts table —
+// senior engineering audit (2026-08-03, finding 13): the raw table includes casts belonging to
+// votes vote_duplicates has marked as superseded (LegiScan re-ingests of a bill the primary MO
+// source already carries), so this page's own accuracy count would otherwise double-count exactly
+// what the dedup feature exists to exclude.
 export const COUNT_SPECS = [
-  { key: 'voteCasts', label: 'Vote casts', path: 'vote_casts?select=id' },
+  { key: 'voteCasts', label: 'Vote casts', path: 'public_vote_feed?select=cast_id' },
   { key: 'bills', label: 'Bills', path: 'bills?select=id' },
   { key: 'legislators', label: 'Legislators', path: 'legislators?select=id' },
   { key: 'summaries', label: 'Published summaries', path: 'summaries?select=id&status=eq.published' },

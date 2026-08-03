@@ -1103,7 +1103,10 @@ test('createSiteServer: GET /geocode (the old query-string shape) is no longer r
 test('COUNT_SPECS: exactly the five live counts the brief names (vote casts, bills, legislators, published summaries, published glossary terms)', () => {
   assert.equal(COUNT_SPECS.length, 5);
   const byKey = Object.fromEntries(COUNT_SPECS.map((s) => [s.key, s]));
-  assert.equal(byKey.voteCasts.path, 'vote_casts?select=id');
+  // Senior engineering audit (2026-08-03, finding 13): counts through the dedup-aware
+  // public_vote_feed view (migration 0023), not the raw vote_casts table, so this page's own
+  // accuracy number never includes casts belonging to a vote vote_duplicates has superseded.
+  assert.equal(byKey.voteCasts.path, 'public_vote_feed?select=cast_id');
   assert.equal(byKey.voteCasts.label, 'Vote casts');
   assert.equal(byKey.bills.path, 'bills?select=id');
   assert.equal(byKey.bills.label, 'Bills');
@@ -1147,7 +1150,7 @@ test('renderMetricDefinitions: clears prior content before rendering', () => {
 test('loadCountsSection: fetches all five countOnly numbers via the SAME rest.js countOnly, renders them ready (three-stated)', async () => {
   _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
   const totals = {
-    vote_casts: 1462338, bills: 38252, legislators: 1607, summaries: 10, glossary_terms: 116,
+    public_vote_feed: 1462338, bills: 38252, legislators: 1607, summaries: 10, glossary_terms: 116,
   };
   _setFetch(async (url) => {
     const hit = Object.entries(totals).find(([table]) => url.includes(`/${table}?`));

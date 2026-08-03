@@ -2,7 +2,10 @@ import {
   getClient, openRun, closeRun, selectAll,
 } from '../lib/db.js';
 import { parsePositiveIntegerFlag } from '../lib/errors.js';
-import { journalPdfBasename } from './ingest-mo-senate.js';
+import { journalPdfBasename } from '../lib/pdf-basename.js';
+import {
+  MO_STATUS_WORD_MAP, MO_STATUS_MAPPED_CODES, MO_STATUS_UNMAPPED_CODE, MO_STATUS_PROGRESS_ONLY_CODES, mapMoStatusCode,
+} from '../lib/mo-status-codes.js';
 import {
   PRIMARY_SOURCE_KEY_PREFIXES,
   sameCalendarDate,
@@ -112,43 +115,15 @@ export function parseArgs(argv) {
 // Correction A — mo-status: numeric LegiScan status codes -> their printed words
 // ============================================================================================
 
-// MO_STATUS_WORD_MAP — SOURCED, not invented: LegiScan API User Manual, page 42
-// (tests/fixtures/research/legiscan/LegiScan_API_User_Manual.pdf), "Status / Progress" table.
-// LegiScan encodes bill status as an integer and prints NO word anywhere in the dataset itself —
-// decoding it against the source's own published codebook is exactly the same class of operation
-// as VOTE_ID_MAP (legiscan-votes.js, 1->yea): decoding a documented lookup, never editorializing.
-//
-// Deliberately excludes 0 and 7-12 (see MO_STATUS_UNMAPPED_CODE / MO_STATUS_PROGRESS_ONLY_CODES
-// below) — those two are NOT eligible to ever be written to bills.status by this module.
-export const MO_STATUS_WORD_MAP = {
-  1: 'Introduced',
-  2: 'Engrossed',
-  3: 'Enrolled',
-  4: 'Passed',
-  5: 'Vetoed',
-  6: 'Failed',
+// MO_STATUS_WORD_MAP/MO_STATUS_MAPPED_CODES/MO_STATUS_UNMAPPED_CODE/MO_STATUS_PROGRESS_ONLY_CODES/
+// mapMoStatusCode moved to src/lib/mo-status-codes.js (senior engineering audit, 2026-08-03,
+// finding 16 — dissolves a genuine 3-node import cycle this file was part of), imported above and
+// re-exported here so every existing importer of THIS file (tests/correct-data.test.js, and any
+// future one) keeps working unchanged — this file is still the natural place to import MO status
+// vocabulary from for anything that already imports correct-data.js's own corrections.
+export {
+  MO_STATUS_WORD_MAP, MO_STATUS_MAPPED_CODES, MO_STATUS_UNMAPPED_CODE, MO_STATUS_PROGRESS_ONLY_CODES, mapMoStatusCode,
 };
-
-export const MO_STATUS_MAPPED_CODES = Object.keys(MO_STATUS_WORD_MAP).map(Number);
-
-// MO_STATUS_UNMAPPED_CODE — 0 = "N/A (pre-filed / pre-introduction)" per the manual. No honest
-// single word exists for it (the live site already omits a status word for these bills) — left
-// untouched by design, only ever COUNTED (leftUntouchedZero), never written.
-export const MO_STATUS_UNMAPPED_CODE = 0;
-
-// MO_STATUS_PROGRESS_ONLY_CODES — 7-12 (Override/Chaptered/Refer/Report Pass/Report DNP/Draft) are
-// documented by the manual as "Progress array only" — NOT a bill's overall status. If any of these
-// somehow appear in bills.status, that is itself a data anomaly worth surfacing
-// (unexpectedMappedCode) — but this module never guesses a word for a code the manual says isn't a
-// status; those rows are left untouched too.
-export const MO_STATUS_PROGRESS_ONLY_CODES = [7, 8, 9, 10, 11, 12];
-
-// mapMoStatusCode — the same lookup every writer of bills.status (ingest-legiscan.js,
-// backfill-mo-bill-meta.js) should route through going forward, per the brief's "fix the writer
-// too" requirement — one exported constant/function, not a second copy of this table anywhere.
-export function mapMoStatusCode(code) {
-  return MO_STATUS_WORD_MAP[code] ?? null;
-}
 
 // correctOneStatusCode — corrects ONE numeric code across `bills`. The `.eq('status', code)` on
 // the update itself is the ENTIRE safety guard (brief, verbatim) — additive-safe by construction:
@@ -1412,11 +1387,18 @@ export async function runCorrectVoteDuplicates(client, {
   const failures = [];
   let remainingBudget = limit ?? Infinity;
 
-  const { data: legiscanVotes, error: lvErr } = await client
-    .from('votes').select('id,bill_id,chamber,vote_date,source_key').like('source_key', 'legiscan-%');
+  // Senior engineering audit (2026-08-03, finding 1): this scan used a bare .select() against
+  // `votes`, which PostgREST caps at 1000 rows server-side. At the time of the fix there were
+  // 8,221 legiscan-sourced votes — the scan structurally never saw the other 88%, so it reported
+  // false completeness (matched:0 read as "nothing to dedupe" when 63 real pairs sat beyond row
+  // 1000). Routed through selectAll like every other multi-row scan in this file (see :1155,
+  // :1255) so this can't silently truncate again.
+  const { data: legiscanVotes, error: lvErr } = await selectAll(client, 'votes', 'id,bill_id,chamber,vote_date,source_key', {
+    filter: (q) => q.like('source_key', 'legiscan-%'),
+  });
   if (lvErr) return { matched: 0, alreadyMarked: 0, unparseable: 0, failures: [{ reason: 'legiscan_votes_lookup_failed', error: String(lvErr.message ?? lvErr) }] };
 
-  const { data: existingPairs, error: vdErr } = await client.from('vote_duplicates').select('superseded_vote_id');
+  const { data: existingPairs, error: vdErr } = await selectAll(client, 'vote_duplicates', 'superseded_vote_id');
   if (vdErr) return { matched: 0, alreadyMarked: 0, unparseable: 0, failures: [{ reason: 'vote_duplicates_lookup_failed', error: String(vdErr.message ?? vdErr) }] };
   const alreadyMarkedIds = new Set((existingPairs ?? []).map((r) => r.superseded_vote_id));
 

@@ -139,8 +139,14 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
           matched = [...matched].sort((a, b) => (a[orderCol] > b[orderCol] ? 1 : -1) * (orderAsc ? 1 : -1));
         }
         let out = matched;
+        // Senior engineering audit (2026-08-03, finding 1): mirrors the REAL PostgREST endpoint's
+        // hard 1000-row cap on any single response (src/lib/db.js's selectAll header comment) —
+        // a bare .select() with no explicit .range() previously came back unbounded here, which
+        // let runCorrectVoteDuplicates's truncation bug pass every existing test. Only changes
+        // behavior once a seeded table exceeds 1000 matched rows; no existing test does.
         if (rangeVal) out = out.slice(rangeVal[0], rangeVal[1] + 1);
-        else if (limitVal != null) out = out.slice(0, limitVal);
+        else if (limitVal != null) out = out.slice(0, Math.min(limitVal, 1000));
+        else out = out.slice(0, 1000);
         if (selectOpts.head) result = { data: null, error: null, count: matched.length };
         else if (selectOpts.count === 'exact') result = { data: out.map((r) => ({ ...r })), error: null, count: matched.length };
         else result = { data: out.map((r) => ({ ...r })), error: null };
@@ -305,6 +311,39 @@ test('runCorrectVoteDuplicates: an unparseable LegiScan source_key is counted, n
   const result = await runCorrectVoteDuplicates(client, { dryRun: true });
   assert.equal(result.unparseable, 1);
   assert.equal(result.matched, 0);
+});
+
+// Senior engineering audit (2026-08-03, finding 1, LIVE): the legiscan-votes scan below used a bare
+// .select() — PostgREST caps any single response at 1000 rows regardless of table size, so with
+// 8,221 real legiscan votes live the scan only ever saw the first 1000 and reported false
+// completeness (matched:0 read as "nothing to dedupe" when 63 real pairs sat past row 1000,
+// contradicting the CHATLOG's own recorded "not a bug" conclusion). Seeds 1,200 independently
+// matchable pairs — one more than the server cap — so this fails against the old bare .select() and
+// passes only once the scan is routed through selectAll's pagination.
+test('runCorrectVoteDuplicates: sees every match past the 1000-row PostgREST cap, not just the first page', async () => {
+  const PAIR_COUNT = 1200;
+  const votes = [];
+  const vote_casts = [];
+  for (let i = 0; i < PAIR_COUNT; i += 1) {
+    const n = String(i).padStart(4, '0');
+    const billId = `bill-mo-${n}`;
+    const legiscanId = `v-legiscan-${n}`;
+    const primaryId = `v-primary-${n}`;
+    votes.push(
+      { id: legiscanId, bill_id: billId, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12T00:00:00Z', source_key: `legiscan-1530-rollcall-${n}` },
+      { id: primaryId, bill_id: billId, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12T00:00:00Z', source_key: `mo-house-xml-2018-hb${n}-vote1` },
+    );
+    vote_casts.push(
+      { id: `c-${n}-lyea`, vote_id: legiscanId, legislator_id: 'l1', position: 'yea' },
+      { id: `c-${n}-lnay`, vote_id: legiscanId, legislator_id: 'l2', position: 'nay' },
+      { id: `c-${n}-pyea`, vote_id: primaryId, legislator_id: 'l1', position: 'yea' },
+      { id: `c-${n}-pnay`, vote_id: primaryId, legislator_id: 'l2', position: 'nay' },
+    );
+  }
+  const client = makeFakeClient({ votes, vote_casts });
+  const result = await runCorrectVoteDuplicates(client, { dryRun: true });
+  assert.equal(result.matched, PAIR_COUNT, 'every pair beyond row 1000 must still be found, not just the first server page');
+  assert.deepEqual(result.failures, []);
 });
 
 // ---- runCorrectMoHouseChamber ----
