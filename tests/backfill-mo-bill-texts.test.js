@@ -1034,7 +1034,9 @@ test('runBackfillMoBillTexts: real cache dir end-to-end file decode — every on
     loadTextVersionIndexFn: async () => new Set(),
     loadPassageBillIdsFn: async () => new Set(),
   });
-  assert.equal(report.counts.datasetsRead, 31);
+  // Not hardcoded to a fixed file count — LegiScan datasets refresh weekly and this real cache dir
+  // grows over time (32 as of 2026-08-03, up from 31 at task-writing time).
+  assert.equal(report.counts.datasetsRead, listCachedDatasetFiles(REAL_CACHE_DIR).length);
   assert.equal(report.counts.datasetsMissing, 0);
   assert.ok(report.counts.billsSeen > 0);
   assert.equal(report.counts.billUnmatched, report.counts.billsSeen, 'empty session index: every bill goes unmatched, nothing deeper is ever attempted');

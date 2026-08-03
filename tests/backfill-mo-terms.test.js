@@ -55,14 +55,17 @@ test('parseArgs rejects unknown flags', () => {
 // ---- readDatasetEnvelopeMeta (cheap metadata read — no zip decode) ----
 
 test('readDatasetEnvelopeMeta: real cached envelope — session_id/year_start/session_title/dataset_date read straight off the top-level envelope fields, no ZIP decode needed', () => {
+  // LegiScan datasets refresh weekly, so more than one 2239 (2026 Regular Session) file can be
+  // cached at once as an older fetch is superseded — pick the newest by dataset_date (same
+  // tie-break resolveLatestMoDatasetFile itself uses) rather than assuming exactly one exists.
   const files = listCachedDatasetFiles(REAL_CACHE_DIR).filter((f) => f.includes('2239-'));
-  assert.equal(files.length, 1, 'the 2026 Regular Session dataset (2239) must be cached');
-  const meta = readDatasetEnvelopeMeta(files[0]);
-  assert.equal(meta.ok, true);
-  assert.equal(meta.sessionId, 2239);
-  assert.equal(meta.yearStart, 2026);
-  assert.equal(meta.sessionTitle, '2026 Regular Session');
-  assert.equal(meta.datasetDate, '2026-07-26');
+  assert.ok(files.length >= 1, 'the 2026 Regular Session dataset (2239) must be cached');
+  const metas = files.map((f) => readDatasetEnvelopeMeta(f)).filter((m) => m.ok);
+  const latest = metas.sort((a, b) => (a.datasetDate < b.datasetDate ? 1 : -1))[0];
+  assert.equal(latest.sessionId, 2239);
+  assert.equal(latest.yearStart, 2026);
+  assert.equal(latest.sessionTitle, '2026 Regular Session');
+  assert.equal(latest.datasetDate, '2026-08-02');
 });
 
 test('readDatasetEnvelopeMeta: a nonexistent file path is honestly reported ok:false, never throws', () => {
@@ -90,9 +93,12 @@ test('readDatasetEnvelopeMeta: an envelope missing session_id or year_start is h
 
 // ---- resolveLatestMoDatasetFile (mechanical pick: highest year_start among cached datasets) ----
 
-test('resolveLatestMoDatasetFile: the real 31-file cache — 2239 (2026 Regular Session, year_start 2026) is the mechanical winner', () => {
+test('resolveLatestMoDatasetFile: the real cache — 2239 (2026 Regular Session, year_start 2026) is the mechanical winner', () => {
   const { best, filesConsidered, skippedUnreadable } = resolveLatestMoDatasetFile(REAL_CACHE_DIR);
-  assert.equal(filesConsidered, 31);
+  // Not hardcoded to a fixed file count — LegiScan datasets refresh weekly and this real cache dir
+  // grows over time (32 as of 2026-08-03, up from 31 at task-writing time); assert it matches the
+  // actual directory instead of a stale snapshot.
+  assert.equal(filesConsidered, listCachedDatasetFiles(REAL_CACHE_DIR).length);
   assert.equal(skippedUnreadable, 0);
   assert.equal(best.sessionId, 2239);
   assert.equal(best.yearStart, 2026);

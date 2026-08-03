@@ -96,13 +96,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | all`);
   }
   out.which = which;
   return out;
@@ -1461,6 +1461,54 @@ export async function runCorrectVoteDuplicates(client, {
 }
 
 // ============================================================================================
+// Correction — mo-house-chamber: House-bill action history includes real Senate floor actions
+// ============================================================================================
+//
+// FOUND LIVE (accuracy audit, 2026-08-03): buildMoVoteRows (src/adapters/mo-house-xml.js) used to
+// stamp chamber:'house' unconditionally on every roll call in a House bill's own action history —
+// but that history includes real Senate actions once a bill crosses over (amendments, third
+// reading), each still printing the acting chamber as a trailing "(H)"/"(S)" marker on its own
+// motion text. Fixed at the source (motionChamber, mo-house-xml.js) so future ingest gets this
+// right; this is the one-time backfill for rows that already landed mislabeled. Same in-place
+// single-column UPDATE-by-primary-key risk class as mo-status/party-normalize/
+// legiscan-source-split (no deletes, no FK redirects) — joins 'all' alongside them.
+const MO_HOUSE_SENATE_MARKER_PATTERN = /\(S\)\s*$/;
+
+export async function runCorrectMoHouseChamber(client, {
+  dryRun = false, runId = null,
+} = {}) {
+  const { data: rows, error } = await client
+    .from('votes').select('id,question,chamber')
+    .like('source_key', 'mo-house-xml-%')
+    .order('id', { ascending: true });
+  if (error) return { matched: 0, ids: [], failures: [{ reason: 'scope_query_failed', error: String(error.message ?? error) }] };
+
+  const mislabeled = (rows ?? []).filter((r) => (
+    MO_HOUSE_SENATE_MARKER_PATTERN.test(String(r.question ?? '')) && r.chamber !== 'senate'
+  ));
+  const ids = mislabeled.map((r) => r.id);
+
+  if (dryRun) {
+    return { matched: mislabeled.length, ids, failures: [] };
+  }
+
+  const failures = [];
+  let matched = 0;
+  for (const row of mislabeled) {
+    // eslint-disable-next-line no-await-in-loop -- sequential over a handful of rows, same
+    // small-backlog precedent as this file's other one-time corrections.
+    const { error: updErr } = await client
+      .from('votes').update({ chamber: 'senate', run_id: runId }).eq('id', row.id);
+    if (updErr) { failures.push({ voteId: row.id, reason: 'update_failed', error: String(updErr.message ?? updErr) }); continue; }
+    matched += 1;
+  }
+
+  return {
+    matched, ids, failures,
+  };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1498,6 +1546,12 @@ export async function runCorrectData(client, {
   if (which === 'vote-duplicates' || which === 'all') {
     out.voteDuplicates = await runCorrectVoteDuplicates(client, { dryRun, limit, runId });
     failures.push(...out.voteDuplicates.failures);
+  }
+  // mo-house-chamber (2026-08-03) — same in-place single-column UPDATE-by-primary-key risk class
+  // as the corrections above (no deletes, no FK redirects), so it joins 'all' alongside them.
+  if (which === 'mo-house-chamber' || which === 'all') {
+    out.moHouseChamber = await runCorrectMoHouseChamber(client, { dryRun, runId });
+    failures.push(...out.moHouseChamber.failures);
   }
   // Deliberately EXCLUDED from 'all' (brief, explicit): bill/session merge + FK redirect + guarded
   // deletes is higher-stakes than A/B's in-place rewrites — an operator must name this one, never

@@ -25,6 +25,7 @@ import {
   LEGISCAN_TEXTS_ERROR_MARKERS,
   runCorrectLegiscanSourceSplit,
   runCorrectVoteDuplicates,
+  runCorrectMoHouseChamber,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -290,6 +291,48 @@ test('runCorrectVoteDuplicates: an unparseable LegiScan source_key is counted, n
   const result = await runCorrectVoteDuplicates(client, { dryRun: true });
   assert.equal(result.unparseable, 1);
   assert.equal(result.matched, 0);
+});
+
+// ---- runCorrectMoHouseChamber ----
+// FOUND LIVE (accuracy audit, 2026-08-03): buildMoVoteRows (src/adapters/mo-house-xml.js) used to
+// stamp chamber:'house' on every roll call in a House bill's own action history, including real
+// Senate floor actions embedded in it (their motion text ends in the literal "(S)" marker). Fixed
+// at the source going forward; this is the one-time backfill for the rows that already landed
+// mislabeled.
+
+test('runCorrectMoHouseChamber: dry-run finds a mo-house-xml row whose question ends "(S)" but is stamped chamber=house, without writing', async () => {
+  const client = makeFakeClient({
+    votes: [
+      { id: 'v-mislabeled', source_key: 'mo-house-xml-HB1644-4', question: 'Third Read and Passed with Amendments (S)', chamber: 'house', result: '23-8' },
+      { id: 'v-correct-house', source_key: 'mo-house-xml-HB1644-1', question: 'Reported Do Pass (H)', chamber: 'house', result: '6-3' },
+      { id: 'v-already-senate', source_key: 'mo-house-xml-HB1740-5', question: 'Third Read and Passed (S)', chamber: 'senate', result: '32-0' },
+      { id: 'v-final-passage', source_key: 'mo-house-xml-HB1696-6', question: 'Truly Agreed To and Finally Passed', chamber: 'house', result: '139-3' },
+      { id: 'v-not-mo-house', source_key: 'legiscan-2239-rollcall-1', question: 'Senate: Third Reading', chamber: 'senate', result: '29-0' },
+    ],
+  });
+  const result = await runCorrectMoHouseChamber(client, { dryRun: true });
+  assert.equal(result.matched, 1);
+  assert.deepEqual(result.ids, ['v-mislabeled']);
+  assert.deepEqual(result.failures, []);
+  assert.equal(client.tables.votes.find((v) => v.id === 'v-mislabeled').chamber, 'house', 'dry-run must never write');
+});
+
+test('runCorrectMoHouseChamber: live run corrects exactly the rows dry-run reported, to chamber=senate', async () => {
+  const client = makeFakeClient({
+    votes: [
+      { id: 'v-mislabeled-1', source_key: 'mo-house-xml-HB1644-4', question: 'Third Read and Passed with Amendments (S)', chamber: 'house', result: '23-8' },
+      { id: 'v-mislabeled-2', source_key: 'mo-house-xml-HB1740-5', question: 'Third Read and Passed (S)', chamber: 'house', result: '32-0' },
+      { id: 'v-correct-house', source_key: 'mo-house-xml-HB1644-1', question: 'Reported Do Pass (H)', chamber: 'house', result: '6-3' },
+    ],
+  });
+  const dry = await runCorrectMoHouseChamber(client, { dryRun: true });
+  const live = await runCorrectMoHouseChamber(client, { dryRun: false, runId: 'run-1' });
+  assert.equal(live.matched, dry.matched);
+  assert.equal(live.matched, 2);
+  assert.equal(client.tables.votes.find((v) => v.id === 'v-mislabeled-1').chamber, 'senate');
+  assert.equal(client.tables.votes.find((v) => v.id === 'v-mislabeled-2').chamber, 'senate');
+  assert.equal(client.tables.votes.find((v) => v.id === 'v-mislabeled-1').run_id, 'run-1');
+  assert.equal(client.tables.votes.find((v) => v.id === 'v-correct-house').chamber, 'house', 'must never touch a correctly-labeled row');
 });
 
 // ---- parseArgs ----

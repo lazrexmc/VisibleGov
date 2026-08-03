@@ -244,6 +244,20 @@ test('buildMoVoteRows produces source_key mo-house-xml-<identifier>-<ordinal> an
   assert.equal(rows[1].source_url, 'https://x/034.008.pdf');
 });
 
+test('buildMoVoteRows derives chamber from the motion text\'s trailing (H)/(S) marker instead of hardcoding house — a House bill\'s action history includes Senate actions', () => {
+  const rollcalls = [
+    { date: '2026-01-22', motion: 'Reported Do Pass (H)', yes: 6, no: 3, present: 0, pdf_url: null },
+    { date: '2026-05-05', motion: 'Third Read and Passed with Amendments (S)', yes: 23, no: 8, present: 0, pdf_url: null },
+    { date: '2026-06-01', motion: 'Truly Agreed To and Finally Passed', yes: 144, no: 2, present: 0, pdf_url: null },
+  ];
+  const rows = buildMoVoteRows('HB 1800', rollcalls);
+  assert.equal(rows[0].chamber, 'house');
+  assert.equal(rows[1].chamber, 'senate');
+  // No trailing (H)/(S) marker at all (e.g. final-passage actions) keeps the prior default —
+  // confirmed against live data: both real no-marker rows are genuinely House-sized tallies.
+  assert.equal(rows[2].chamber, 'house');
+});
+
 // ---- driver CLI arg parsing ----
 
 test('parseMoHouseArgs: defaults', () => {

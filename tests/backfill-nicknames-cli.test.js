@@ -45,9 +45,12 @@ test('parseArgs rejects unknown flags', () => {
 
 // ---- listCachedDatasetFiles ----
 
-test('listCachedDatasetFiles: the real repo cache dir has exactly the 31 cached dataset ZIPs this task is scoped to', () => {
+test('listCachedDatasetFiles: the real repo cache dir has exactly the 32 cached dataset ZIPs this task is scoped to', () => {
+  // Bumped 31 -> 32 (2026-08-03): LegiScan datasets refresh weekly, so this real cache dir grows
+  // over time (a fresh 2239/2026-Regular-Session dataset landed 2026-08-02) — this snapshot needs
+  // periodic bumps, same as every other "real cache dir" count in this test suite.
   const files = listCachedDatasetFiles(REAL_CACHE_DIR);
-  assert.equal(files.length, 31);
+  assert.equal(files.length, 32);
   assert.ok(files.every((f) => f.endsWith('.json')));
   assert.ok(files.every((f) => f.startsWith(`${REAL_CACHE_DIR}/`)));
 });
@@ -410,8 +413,10 @@ test('runBackfillNicknames: zero cache files found (cache dir missing/empty) -> 
 test('runBackfillNicknames: real cache dir end-to-end file decode — peopleSeen/withNickname are computed from the actual 31 cached archives, zero API queries, zero writes (no legislators row ever matches this fake, empty roster)', async () => {
   const client = makeFakeClient({ legislatorRows: [] });
   const report = await runBackfillNicknames(client, { dryRun: false, cacheDir: REAL_CACHE_DIR });
-  assert.equal(report.cacheFilesFound, 31);
-  assert.equal(report.counts.cacheMissing, 0, 'every one of the 31 real cache files decodes cleanly');
+  // Not hardcoded to a fixed file count — LegiScan datasets refresh weekly and this real cache dir
+  // grows over time (32 as of 2026-08-03, up from 31 at task-writing time).
+  assert.equal(report.cacheFilesFound, listCachedDatasetFiles(REAL_CACHE_DIR).length);
+  assert.equal(report.counts.cacheMissing, 0, 'every real cache file decodes cleanly');
   assert.ok(report.counts.peopleSeen > 0);
   assert.ok(report.counts.withNickname > 0, 'the real dataset ZIPs really do contain nickname-bearing records (e.g. Onder)');
   assert.equal(report.counts.patched, 0, 'empty fake legislators roster: nothing to match, so nothing written');

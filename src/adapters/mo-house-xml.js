@@ -254,11 +254,25 @@ export function parseMoBillXml(xmlString) {
 // documented". No pass/fail judgment is computed from the tallies or from the Action's
 // Description text (e.g. "...Passed...") even though that word is visually suggestive; only the
 // literal printed numbers go into `result`.
+// motionChamber — a House bill's own action history includes Senate actions once it crosses over
+// (amendments, third reading, etc.), each one still printing the acting chamber as a trailing
+// "(H)"/"(S)" marker on the motion text itself (verified against all 102 live mo-house-xml rows:
+// 97 "(H)", 3 "(S)", 2 unmarked "Truly Agreed To and Finally Passed" final-passage rows whose
+// tallies are genuinely House-sized). FOUND LIVE (accuracy audit, 2026-08-03): buildMoVoteRows
+// used to stamp chamber:'house' unconditionally, mislabeling 3 real Senate floor votes as House —
+// breaking their question/tally display AND permanently disabling cross-source matching/dedup for
+// those 3 rows, since chamber is a match key in crossCheckAgainstPrimarySource and
+// correct-data.js's own vote-duplicate backfill. No marker at all keeps the prior default (house),
+// which live data confirms is correct for the two final-passage rows.
+function motionChamber(motion) {
+  return /\(S\)\s*$/.test(String(motion ?? '').trim()) ? 'senate' : 'house';
+}
+
 export function buildMoVoteRows(billIdentifier, rollcalls) {
   const key = String(billIdentifier).replace(/\s+/g, '');
   return rollcalls.map((rc, i) => ({
     source_key: `mo-house-xml-${key}-${i + 1}`,
-    chamber: 'house',
+    chamber: motionChamber(rc.motion),
     vote_date: rc.date,
     question: rc.motion,
     result: `${rc.yes}-${rc.no}`,
