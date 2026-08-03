@@ -1,0 +1,26 @@
+-- 0024 (draft — Lance applies). Lock down legiscan_datasets to anon (accuracy audit, 2026-08-03,
+-- docs/audits/2026-08-03-comprehensive-accuracy-audit.md — Lance's decision, 2026-08-03: "lock it
+-- down").
+--
+-- 0010_legiscan_identity_and_ledger.sql:61-63 granted anon SELECT on legiscan_datasets, reasoning
+-- it was "harmless operational metadata (hash + timestamp), same shape as ingestion_runs (which IS
+-- anon-readable, powers the freshness footer) - mirrored here." That reasoning is stale:
+-- ingestion_runs was itself locked down from anon read a few migrations later (0003:21, reaffirmed
+-- 0016:7-10 — "ingestion_runs internals are not public") for the exact same reason this table is
+-- being locked down now. legiscan_datasets never followed.
+--
+-- What was public until this migration: legiscan_session_id, dataset_hash, local_cache_path,
+-- fetched_at, run_id, for all 31+ rows. dataset_hash + fetched_at is a live record of this
+-- project's LegiScan API fetch cadence; local_cache_path leaks internal build-tooling directory
+-- layout (.superpowers/artifacts/legiscan-datasets/...) — neither is operational-freshness data a
+-- civic-transparency site reader needs, and legiscan_datasets is the table that enforces the
+-- binding-terms compare-before-download gate (0010:31-34), making its exposure worth a deliberate
+-- decision rather than an inherited default. Zero known consumers: nothing in site/ reads this
+-- table (grep confirms), and probe-public-surface.js never asserted it was reachable.
+--
+-- RLS is already enabled on this table (0010:59) — only the policy is dropped. No anon-facing
+-- replacement policy is created: this table becomes service-role-only, matching
+-- vote_reconciliation_flags' own posture on the very same migration that first created both
+-- tables (0010:64-66, "internal QA ledger, deliberately NOT anon-readable").
+
+drop policy if exists anon_read on legiscan_datasets;
