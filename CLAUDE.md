@@ -18,7 +18,9 @@ progress — see `TODO.md` NOW).** The repo holds the ingestion CLIs and adapter
 public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0026 all applied — the
 newest three, 0023/0025/0026, all landed and verified live 2026-08-03; 0025's column-scoping had
 one real fallout, a `site/js/bill-page.js` query missing an explicit `select=`, fixed same pass —
-see TODO.md), and fixture-backed tests (`tests/`, 2,259 green). **Live numbers: run `npm run
+see TODO.md), and fixture-backed tests (`tests/`, 2,300+ green — run `node --test` for the exact
+current count; a senior engineering audit, 2026-08-03, flagged exact test-count citations in docs
+as needless churn — prefer magnitude language like this one). **Live numbers: run `npm run
 status`** — any count typed into a doc goes stale within the hour.
 
 **If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —

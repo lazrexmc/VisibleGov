@@ -47,14 +47,53 @@ zero violations found. Full trail: `docs/audits/2026-08-03-comprehensive-accurac
   through to the actual bill. Not deployed yet — the Cloudflare Pages deploy is being actively
   spec'd now that the owner considers the backend locked in; see `TODO.md`'s Cloudflare Pages entry
   for the live gameplan.
-- Every model-calling run is mechanically gated on explicit per-run owner approval with cost
-  stated. See `TODO.md` and `CHATLOG.md` for the live trail.
+- **Standing policy: every model-calling run is mechanically gated on explicit per-run owner
+  approval with cost stated** — currently under Lance's own explicit, active suspension (2026-08-03,
+  "temporarily remove the usage and credit usage restrictions... until I reinstate them"; the rule
+  text stays in place in `CLAUDE.md` so reinstating it is a one-line revert, not a rewrite). Treat
+  the suspension as still in effect until Lance says otherwise. See `TODO.md` and `CHATLOG.md` for
+  the live trail.
 
 ## The one non-negotiable
 
 This only works if it's mechanically neutral: same treatment regardless of party, everything
 traceable to the actual bill text and the actual recorded vote, no editorializing in a summary.
 See `PLAYBOOK_DELTA.md` §2.
+
+## Runbook
+
+*(Added 2026-08-03, senior engineering audit finding 18: no single canonical setup/runbook existed
+— the migration-apply procedure was scattered across 4+ docs, and `scripts/serve-site.js` wasn't
+referenced anywhere in `package.json` or here.)*
+
+**Prerequisites:** Node >=22 (`engines` in `package.json`). Copy the real `SUPABASE_URL` /
+`SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (plus any source API keys — Congress.gov,
+LegiScan, Anthropic — that a given CLI needs) into a repo-root `.env` file; every script that
+touches the network or the DB is invoked as `node --env-file=.env <path>` (see the `scripts` block
+in `package.json` for the ones with an `npm run` shortcut already wired up).
+
+**Run the tests:** `npm test` (equivalently `node --test`) — the whole suite, zero live network/DB
+calls anywhere in it. Gate any commit on the extracted `ℹ fail N` line, never the process's exit
+status (`PLAYBOOK_DELTA.md` lesson 14).
+
+**Run the site locally:** `node scripts/serve-site.js` — a zero-dependency static server (port
+8990) mirroring Cloudflare Pages' own `site/_redirects` rewrites and geocode Function passthrough,
+so local dev behaves the same as production. Never used in production itself; Cloudflare Pages
+serves `site/` directly from the repo.
+
+**Check live data state:** `npm run status` (`scripts/data-status.js`) prints the current real
+counts and per-source freshness — the only source of truth for "what's true right now"; see
+`docs/DATA_INVENTORY.md` for what each number *means*.
+
+**Apply a database migration (the ONE canonical description — every other doc that mentions this
+procedure should point here, not restate it):** migrations in `supabase/migrations/*.sql` are
+**draft-then-apply**: an agent writes and commits the `.sql` file, but only Lance ever runs it,
+pasted directly into the Supabase project's SQL Editor. There is no CLI/local Supabase setup in
+this repo and no automated apply step. After Lance confirms a migration ran, verify it landed
+correctly with a live, read-only check — `node --env-file=.env scripts/probe-public-surface.js`
+covers the public read-surface shape/grants; a targeted REST call or `data-status.js` covers
+anything else. Never assume "drafted" means "applied," and never assume a migration file's
+committed text is still what's live — always confirm.
 
 ## Docs
 

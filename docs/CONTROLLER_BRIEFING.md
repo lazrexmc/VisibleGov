@@ -1,4 +1,18 @@
 # VisibleGov — Controller Catch-Up Briefing
+
+> **⚠️ Migration-applied-state claims in this document are NOT authoritative — added 2026-08-03,
+> senior engineering audit, finding 19.** This is a dated, sequentially-refreshed narrative (see the
+> "Refresh pass" paragraphs below) — every claim of the form "migration NNNN drafted, NOT applied"
+> or "confirmed live" was true only as of the pass that wrote it, and the file already contains
+> several such claims that are now stale (0023/0025 were both applied and verified live 2026-08-03,
+> after the last refresh pass below was written; migration 0026 doesn't appear anywhere in this file
+> at all). **Never trust this document for current migration-applied state.** The authoritative
+> sources are `TODO.md`'s NOW section (kept current as work happens) and a live check — run
+> `node --env-file=.env scripts/probe-public-surface.js` or query the database directly. Everything
+> else in this document (historical narrative, design rationale, the "why" behind past decisions)
+> remains a reliable record of what happened and when — only forward-looking "is X applied right
+> now" claims rot.
+
 *Compiled 2026-07-31 from 105 SDD ledgers, 5 specs, 9 plans, 4 research docs, 21 migrations, the 925-line CHATLOG, PLAYBOOK_DELTA (17 lessons), TODO.md, DATA_INVENTORY.md, and live code verification.*
 
 *Refresh pass 2026-08-02: sections 3 and 5 rewritten below to reflect what actually happened to*
