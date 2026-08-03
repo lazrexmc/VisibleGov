@@ -386,6 +386,7 @@ test('GET /api/queue returns verified:"unverified" (200, not 500) when summary_v
     assert.deepEqual(await res.json(), [{
       id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z',
       bill: { identifier: 'HR 1', title: 'A Bill' }, verified: 'unverified',
+      issue_count: null, missing_provisions: [],
     }]);
   }, client);
 });
@@ -448,6 +449,7 @@ test('GET /api/queue: a later completeness-kind row never wins over the support 
     assert.deepEqual(await res.json(), [{
       id: 's1', status: 'draft', created_at: '2026-01-01T00:00:00Z',
       bill: { identifier: 'HR 1', title: 'A Bill' }, verified: 'clean',
+      issue_count: 0, missing_provisions: [],
     }]);
   }, client);
 });
@@ -580,6 +582,155 @@ test('describeMissingProvisions: multiple missing provisions are all returned, i
     { section: 'SEC. 2.', provision: 'Does Y.' },
     { section: 'SEC. 3.', provision: 'Does Z.' },
   ]);
+});
+
+// ---- severity-sorted review queue (2026-08-03): issue_count sorting + missing_provisions ----
+
+test('GET /api/queue: sorts ascending by issue_count — fewest issues first', () => {
+  const client = fakeClient({
+    summaries: {
+      data: [
+        { id: 's-three', status: 'draft', created_at: '2026-01-01T00:00:00Z', bills: { identifier: 'HR 3', title: 'Three issues' } },
+        { id: 's-zero', status: 'draft', created_at: '2026-01-02T00:00:00Z', bills: { identifier: 'HR 0', title: 'Clean' } },
+        { id: 's-one', status: 'draft', created_at: '2026-01-03T00:00:00Z', bills: { identifier: 'HR 1', title: 'One issue' } },
+      ],
+      error: null,
+    },
+    summary_verifications: {
+      data: [
+        { summary_id: 's-zero', overall: 'clean', model: 'm', created_at: '2026-01-02T00:00:00Z', verdicts: [{ bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q' }] },
+        {
+          summary_id: 's-three',
+          overall: 'flagged',
+          model: 'm',
+          created_at: '2026-01-01T00:00:00Z',
+          verdicts: [
+            { bullet_index: 0, section: 'Sec. 1', supported: false, reason: 'x', evidence_quote: 'q' },
+            { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'x', evidence_quote: 'q' },
+            { bullet_index: 2, section: 'Sec. 3', supported: false, reason: 'x', evidence_quote: 'q' },
+          ],
+        },
+        {
+          summary_id: 's-one',
+          overall: 'flagged',
+          model: 'm',
+          created_at: '2026-01-03T00:00:00Z',
+          verdicts: [{ bullet_index: 0, section: 'Sec. 1', supported: false, reason: 'x', evidence_quote: 'q' }],
+        },
+      ],
+      error: null,
+    },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/queue`);
+    const body = await res.json();
+    assert.deepEqual(body.map((r) => r.id), ['s-zero', 's-one', 's-three']);
+    assert.deepEqual(body.map((r) => r.issue_count), [0, 1, 3]);
+  }, client);
+});
+
+test('GET /api/queue: an unverified item (no verification row at all) sorts LAST, issue_count null', () => {
+  const client = fakeClient({
+    summaries: {
+      data: [
+        { id: 's-unverified', status: 'draft', created_at: '2026-01-01T00:00:00Z', bills: { identifier: 'HR 9', title: 'Unverified' } },
+        { id: 's-one', status: 'draft', created_at: '2026-01-02T00:00:00Z', bills: { identifier: 'HR 1', title: 'One issue' } },
+      ],
+      error: null,
+    },
+    summary_verifications: {
+      data: [
+        {
+          summary_id: 's-one',
+          overall: 'flagged',
+          model: 'm',
+          created_at: '2026-01-02T00:00:00Z',
+          verdicts: [{ bullet_index: 0, section: 'Sec. 1', supported: false, reason: 'x', evidence_quote: 'q' }],
+        },
+      ],
+      error: null,
+    },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/queue`);
+    const body = await res.json();
+    assert.deepEqual(body.map((r) => r.id), ['s-one', 's-unverified']);
+    assert.equal(body[1].issue_count, null);
+  }, client);
+});
+
+test('GET /api/queue: ties (equal issue_count) preserve the existing created_at order', () => {
+  const client = fakeClient({
+    summaries: {
+      data: [
+        { id: 's-earlier', status: 'draft', created_at: '2026-01-01T00:00:00Z', bills: { identifier: 'HR 1', title: 'Earlier' } },
+        { id: 's-later', status: 'draft', created_at: '2026-01-02T00:00:00Z', bills: { identifier: 'HR 2', title: 'Later' } },
+      ],
+      error: null,
+    },
+    summary_verifications: {
+      data: [
+        { summary_id: 's-earlier', overall: 'clean', model: 'm', created_at: '2026-01-01T00:00:00Z', verdicts: [] },
+        { summary_id: 's-later', overall: 'clean', model: 'm', created_at: '2026-01-02T00:00:00Z', verdicts: [] },
+      ],
+      error: null,
+    },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/queue`);
+    const body = await res.json();
+    assert.deepEqual(body.map((r) => r.id), ['s-earlier', 's-later']);
+  }, client);
+});
+
+test('GET /api/item/:id: an incomplete completeness row -> missing_provisions names the correct section/provision', () => {
+  const client = fakeClient({
+    summaries: {
+      data: {
+        id: 'sum1', bill_id: 'b1', status: 'draft', body_md: '- x (Sec 1)', model: 'claude-opus-5',
+        prompt_version: 'v1', bill_text_hash: 'h1', created_at: '2026-01-01T00:00:00Z', published_at: null,
+      },
+      error: null,
+    },
+    bills: { data: { identifier: 'HR 1', title: 'A Bill', canonical_url: 'https://example.test/hr1' }, error: null },
+    bill_texts: { data: [], error: null },
+    votes: { data: [], error: null },
+    summary_verifications: {
+      data: [
+        { ...SUPPORT_ROW, summary_id: 'sum1' },
+        { ...INCOMPLETE_COMPLETENESS_ROW, summary_id: 'sum1' },
+      ],
+      error: null,
+    },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/item/sum1`);
+    const body = await res.json();
+    assert.deepEqual(body.missing_provisions, [{ section: 'SEC. 2.', provision: 'Does Y.' }]);
+    assert.equal(body.completeness_verification.overall, 'incomplete');
+  }, client);
+});
+
+test('GET /api/item/:id: a complete (nothing missing) or absent completeness row -> missing_provisions is [], not omitted', () => {
+  const client = fakeClient({
+    summaries: {
+      data: {
+        id: 'sum1', bill_id: 'b1', status: 'draft', body_md: '- x (Sec 1)', model: 'claude-opus-5',
+        prompt_version: 'v1', bill_text_hash: 'h1', created_at: '2026-01-01T00:00:00Z', published_at: null,
+      },
+      error: null,
+    },
+    bills: { data: { identifier: 'HR 1', title: 'A Bill', canonical_url: 'https://example.test/hr1' }, error: null },
+    bill_texts: { data: [], error: null },
+    votes: { data: [], error: null },
+    summary_verifications: { data: [{ ...SUPPORT_ROW, summary_id: 'sum1' }], error: null },
+  });
+  return withServer(async (base) => {
+    const res = await fetch(`${base}/api/item/sum1`);
+    const body = await res.json();
+    assert.deepEqual(body.missing_provisions, []);
+    assert.equal(body.completeness_verification, null);
+  }, client);
 });
 
 // ---- fix: approved summaries must stay in the review queue until published (real-use gap:

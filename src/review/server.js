@@ -389,27 +389,49 @@ async function handleQueue(client, res) {
     // filter, never .in() over the whole queue's ids (25 summaries fit today; the glossary tab
     // proved the pattern breaks past ~200 ids).
     const idSet = new Set((data ?? []).map((row) => row.id));
-    let latestVerification = new Map();
+    let latestSupport = new Map();
+    let latestCompleteness = new Map();
     if (idSet.size > 0) {
       // Final-review finding 1 (CRITICAL): was a bare unbounded .select() — past Supabase's
       // 1000-row-per-request cap, "latest verification" was computed over an arbitrary subset, so
       // a newer flagged verification could be invisible to this queue. Routed through selectAll
       // (src/lib/db.js), the one shared pagination helper every full-table-ish select now uses.
       const verResult = await selectAll(client, 'summary_verifications', 'summary_id,overall,verdicts,created_at');
+      const rows = resolveVerificationRows(verResult).filter((r) => idSet.has(r.summary_id));
       // isSupportShapedVerification (see its own comment): completeness rows share this table and
       // must never reach latestVerificationBySummary/verificationBadge, which are written for the
       // support axis's verdict shape only.
-      const rows = resolveVerificationRows(verResult).filter((r) => idSet.has(r.summary_id) && isSupportShapedVerification(r));
-      latestVerification = latestVerificationBySummary(rows);
+      latestSupport = latestVerificationBySummary(rows.filter(isSupportShapedVerification));
+      // Severity-sorted review queue (2026-08-03): completeness rows share this same table/query —
+      // one read already covers both kinds, no second DB round-trip needed.
+      latestCompleteness = latestVerificationBySummary(rows.filter(isCompletenessShapedVerification));
     }
 
-    sendJson(res, 200, (data ?? []).map((row) => ({
-      id: row.id,
-      status: row.status,
-      created_at: row.created_at,
-      bill: row.bills ? { identifier: row.bills.identifier, title: row.bills.title } : null,
-      verified: verificationBadge(latestVerification.get(row.id) ?? null).state,
-    })));
+    const items = (data ?? []).map((row) => {
+      const support = latestSupport.get(row.id) ?? null;
+      const completeness = latestCompleteness.get(row.id) ?? null;
+      return {
+        id: row.id,
+        status: row.status,
+        created_at: row.created_at,
+        bill: row.bills ? { identifier: row.bills.identifier, title: row.bills.title } : null,
+        verified: verificationBadge(support).state,
+        issue_count: computeIssueCount(support, completeness),
+        missing_provisions: describeMissingProvisions(completeness),
+      };
+    });
+
+    // Severity-sorted review queue (2026-08-03): ascending by issue_count, null (unverified) LAST —
+    // an unverified item needs a full check, not a quick fix, so surfacing it first would contradict
+    // this feature's own purpose. A stable sort preserves the existing created_at tie-break.
+    items.sort((a, b) => {
+      if (a.issue_count === b.issue_count) return 0;
+      if (a.issue_count === null) return 1;
+      if (b.issue_count === null) return -1;
+      return a.issue_count - b.issue_count;
+    });
+
+    sendJson(res, 200, items);
   } catch (err) {
     sendServerError(res, 'queue', err);
   }
@@ -459,11 +481,15 @@ async function handleItem(client, res, id) {
       .select('overall,verdicts,model,created_at')
       .eq('summary_id', id)
       .order('created_at', { ascending: false });
-    // isSupportShapedVerification: same shape-not-schema discrimination as handleQueue above — see
-    // that function's comment. Rows are already newest-first, so the first support-shaped one is
-    // the latest support verification.
-    const verRows = resolveVerificationRows(verResult).filter(isSupportShapedVerification);
-    const verification = verRows[0] ?? null;
+    const allVerRows = resolveVerificationRows(verResult);
+    // isSupportShapedVerification/isCompletenessShapedVerification: same shape-not-schema
+    // discrimination as handleQueue above. Rows are already newest-first, so the first match of
+    // each shape is that kind's latest verification.
+    const verification = allVerRows.find(isSupportShapedVerification) ?? null;
+    // Severity-sorted review queue (2026-08-03): this data has existed in summary_verifications
+    // since the completeness axis shipped but was never reachable from this endpoint before —
+    // isSupportShapedVerification's own filter discarded it outright.
+    const completenessVerification = allVerRows.find(isCompletenessShapedVerification) ?? null;
 
     sendJson(res, 200, {
       summary: {
@@ -474,6 +500,8 @@ async function handleItem(client, res, id) {
       text: text ? text.content : null,
       vote,
       verification,
+      completeness_verification: completenessVerification,
+      missing_provisions: describeMissingProvisions(completenessVerification),
     });
   } catch (err) {
     sendServerError(res, 'item', err);
