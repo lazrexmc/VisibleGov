@@ -1327,3 +1327,49 @@ the `buildCitationToggle` UI in `bill-page.js` mirroring the glossary quote-togg
 to today's plain span for any bullet with no matching citation, and matching CSS. 2192 → 2205 tests,
 0 fail, gated on the extracted `ℹ fail` line at every commit. **Nothing left but Lance's own step:**
 apply the migration, run the probe script to confirm it live, done.
+
+## 2026-08-03 — "0021 has ran in supabase"; then: review the folder and decide what's next
+
+Migration confirmed live — probe script green (220 rows, 0 shape/gating violations), a live spot
+check via the anon key showed real verbatim quotes flowing through with only the three intended
+fields (no `reason`, no `supported`). Bullet-citation-exposure closed for real, not just "code
+complete."
+
+Lance: "review the folder, the chatlog, the context and playbook and determine what should be
+next." Fresh live check (`npm run status`, `scripts/scheduled-ingest.js`'s own due-ness constants)
+rather than trusting memory: the `legiscan` source that looked "stuck" in yesterday's report turned
+out not to be — its due interval is a deliberate 24h (datasets refresh weekly; LEGISCAN_MIN_INTERVAL_MS),
+so 17 hours since the last failure was well inside normal, not a stall; the roll_call_id fix from
+2026-08-02 will take effect on its own next tick with no intervention needed. Everything else open
+turned out to be either Lance's own judgment (identity flags, 98 summaries, 31 glossary terms) or
+dormant technical debt (TODO-31 MO House cross-era trap, TODO-32 `summarize.js`'s uncapped
+`.select()` — both filed into `TODO.md` for the first time, verified still open by direct code
+read, not assumed). One genuinely un-filed accuracy defect surfaced and confirmed by grep: the
+"primary-source row wins for display" dedup ruling was decided but never built — 106+ roll calls
+duplicated across adapters, inflating vote-aggregate percentages on live pages.
+
+Lance chose to build the severity-sorted review view (offered twice before, now approved) over
+fixing the dedup defect. Investigated `src/review/server.js` before designing anything: the
+summaries queue was a bare `<select>` in `created_at` order with no severity signal at all, and —
+more importantly — completeness data (which provision is missing) was **completely unreachable**
+from this server, even after opening an item; `isSupportShapedVerification`'s own filter discarded
+every completeness row outright. Two clarifying questions settled the shape (show the count
+directly, enhance the existing dropdown rather than rebuild it as a table) before writing the spec.
+
+Spec written, self-reviewed — caught and fixed my own wrong claim mid-review that no HTTP-level
+test harness existed for this server; `tests/review-logic.test.js` already has exactly the right
+one (`withServer`/`fakeClient`, existing `SUPPORT_ROW`/`COMPLETENESS_ROW` fixtures) and the plan was
+rewritten to use it instead of proposing a weaker pure-function-only test story. Lance: "Move
+forward with the project and complete it from spec to implementation" — spec → plan → all three
+tasks executed inline, TDD throughout (2205 → 2221 tests). Two pre-existing exact-`deepEqual` tests
+needed their expected shape updated for the new additive fields (`issue_count`,
+`missing_provisions`) — not a regression, just what adding fields to a strictly-asserted response
+does.
+
+Manual smoke test caught a real process-hygiene issue before it could mislead anyone: a stale
+review-server process from earlier in the session was still holding port 8991, so the first
+Playwright/curl checks against "the new code" were actually hitting old code and showed
+`issue_count` missing entirely. Killed the stale PID, restarted clean, re-verified against the real
+live 98-item queue via Playwright: sort order correct (0 issues first, 6 last), single-issue items
+correctly name their missing provision inline, item detail view matches the queue's own data. No
+schema change — live the moment the code shipped, no migration, no handoff step for Lance at all.

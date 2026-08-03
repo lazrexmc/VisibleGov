@@ -80,8 +80,15 @@
     unverified). Ran the missing axis via the $0 subagent path, mechanically re-derived (never
     trusting subagent self-report): **8 auto-published outright**, 7 joined the queue with a named,
     specific missing-provision reason. Full trail: CHATLOG 2026-08-02 "the review queue backfill".
-    All 98 remaining need Lance's read or a re-author — a severity-sorted review view (single-issue
-    flags first) was offered but not yet built; Lance's call whether to build it.
+    **Severity-sorted review queue — SHIPPED 2026-08-03.** `npm run review`'s summaries queue now
+    sorts single-issue items first (a citation-lookup-sized task) and shows each item's issue count
+    plus, for a completeness-incomplete item, the actual missing provision — data that existed since
+    the completeness axis shipped but was never reachable from this server before. Spec:
+    `docs/superpowers/specs/2026-08-03-severity-sorted-review-queue-design.md`; plan:
+    `docs/superpowers/plans/2026-08-03-severity-sorted-review-queue.md`. No schema change, live the
+    moment the code landed. Verified live via Playwright against the real 98-item queue: sort order
+    correct (0 → 6 issues), single-issue labels name the right provision, item detail matches the
+    queue. Suite 2221/2221 green.
   - **49 open vote-reconciliation flags (2026-08-02, up from 9)** — grew during the TODO-25
     session-merge live run, which surfaced 29 real cross-source discrepancies (Sen. Fitzwater's
     yea vote present in every LegiScan roll call, absent from every Senate-journal-sourced one — one
