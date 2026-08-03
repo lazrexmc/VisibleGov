@@ -24,7 +24,15 @@
   migration `0023_vote_duplicates_rls_and_view_drift.sql` drafted (enables RLS on `vote_duplicates`
   for any future rebuild + corrects the committed 0022 file's view definitions to match what's
   actually live) — **awaiting Lance's apply**, same draft-then-apply pattern as every migration.
-  **Two items left, deliberately not resolved by an agent:**
+  **Items deliberately left for Lance, not resolved by an agent (✅ = since closed):**
+  - **MO House per-legislator vote coverage — a site-content decision, not a deploy blocker.**
+    Sharper than "some data is thin": ~162 of ~163 MO House members show ZERO MO House votes on
+    their own profile page, forever, with no caveat — while the one fixture legislator
+    (Matthiesen) looks fully tracked on the exact same roll calls. Root cause: `persistRoster`
+    (`ingest-mo-house.js`) seeds exactly one real legislator row against a roster the roll-call-PDF
+    parser resolves against. Ship visibly as-is, or add an explicit completeness caveat to
+    `person-page.js`'s MO House vote section first? Explicitly out of scope for the Cloudflare
+    deploy spec (Lance's own scoping call, 2026-08-03) — a real, still-open decision on its own.
   - **SB 914 adjudication** (`vote_reconciliation_flags` id `214a2be0`) — checked the ALREADY-
     CACHED LegiScan dataset directly (zero new API calls): **Sen. Mike Moon and Sen. Steven Roberts
     are entirely absent from LegiScan's own roll-call vote data for this roll call** — not counted
@@ -212,50 +220,87 @@
     and fixed before commit: `CONTROLLER_BRIEFING.md` claimed PLAYBOOK_DELTA was "still 22 lessons,
     unchanged since 08-02," actually 24 (Lessons 23-24 landed the same day). Everything else in both
     diffs held up under direct re-verification.
-  - **Cloudflare Pages — gameplan refreshed 2026-08-03** (6-angle workflow review + direct live
-    verification; still deferred, Lance's own call when to actually flip it). Replaces the thin
-    2026-07-30 note below in full.
-    **Confirmed ready:** `site/` is current with everything shipped since Plan 3 (0021 bullet
-    citations, 0022 vote-dedup views, 0023/0024 RLS) — no stale code, no genuine TODO/stub found.
-    RLS genuinely scopes anon to published rows (live-verified). No secrets/PII anywhere in `site/`.
-    `_headers`/`_redirects` syntax valid. `geocode.js` uses the current Pages Functions export
-    shape. Zero build step, zero env vars needed. **Domain already decided** (2026-07-28, CHATLOG):
-    `.pages.dev` first, then `visiblegov.helpingpeoplehelpingpeople.com` later via the Pages
-    project's Custom domains screen (not manual DNS). **Migration 0023's view-fix half is confirmed
-    functionally live already** — re-ran the planner-cost discrimination technique the accuracy
-    audit used (`public_votes` anon-planned count = 52, not `votes`' full 10,355; matches the known
-    owner-bypass control `public_freshness`, not the RLS-denied control `ingestion_runs`) — 0023 is
-    a documentation/reproducibility fix for the committed file, not a functional blocker.
-    **Concrete Cloudflare Pages config:** repo `lazrexmc/VisibleGov`, production branch `main`,
-    build command empty, root directory `site`, build output directory = default (same as root),
-    Functions auto-detected (no toggle), zero environment variables needed.
-    **One thing to fix before deploy (genuinely new finding, not in the accuracy audit):**
-    `summaries` and `glossary_terms` are RLS-scoped row-level only, no column restriction — a bare
-    `select=*` from anon returns internal pipeline columns (`model`, `prompt_version`, `run_id`,
-    `bill_text_hash`/`source_hash`, `needs_mapping`) on every published row. Same class of exposure
-    migration 0019 already fixed elsewhere (stripped `prompt_version` from
-    `public_verification_notes`) — never applied to these two base tables. Cheap fix (a column-
-    scoped view or a `REVOKE`+explicit grant), worth doing before traffic makes it easier to find.
-    **Decisions that are Lance's alone:**
-    - **MO House per-legislator vote coverage.** Sharper than "some data is thin": ~162 of ~163 MO
-      House members show ZERO MO House votes on their own profile page, forever, with no caveat —
-      while the one fixture legislator (Matthiesen) looks fully tracked on the exact same roll
-      calls. Root cause: `persistRoster` seeds exactly one real legislator row. Ship visibly as-is,
-      or add an explicit completeness caveat first?
-    - **`/geocode` header parity — the old open question is now answered, not open.** Cloudflare
-      Pages Functions do NOT inherit `_headers` (confirmed via Cloudflare's own docs); `geocode.js`
-      returns a bare `Response.json` with no explicit headers, so in production `/geocode` will
-      carry no CSP/security headers at all. `scripts/serve-site.js` currently masks this by
-      applying headers uniformly in local dev — local dev overstates what prod will do here. Low
-      real risk (JSON API, not HTML) — decide whether `geocode.js` should set its own headers
-      before or after first deploy.
-    - **Missing `site/404.html`** — decide if Cloudflare's default error page is acceptable for a
-      mistyped bill/legislator/person id.
-    **Testing gap found:** no full real-browser (Playwright) walkthrough has ever happened across
-    the actual public pages (index/bill/person/legislator/trust) or the geocode flow — only one
-    narrow, single-fix-scoped Playwright run exists in this project's history (TODO-28, the vote-
-    duplicate display fix). Recommended before or immediately after first deploy.
-    **Original 2026-07-30 gameplan, superseded above but preserved for the exact settings:** connect
+  - **Cloudflare Pages — spec brainstorming IN PROGRESS as of 2026-08-03 (Lance AFK, resume here).**
+    Supersedes every earlier gameplan note below (kept, in order, for history — do not re-read them
+    as current). Using `superpowers:brainstorming`; NOT yet at "write the spec doc" — sections
+    presented and approved so far, two small open sub-decisions, two sections not yet presented.
+    **Live product claim independently verified first** (2026-08-03, real browser via
+    `scripts/serve-site.js` + Playwright, live production data, zero console errors/warnings): a
+    real visitor CAN browse the directory, click into a US Senate/US House/MO Senate/MO House
+    legislator, see their real recorded votes, click a bill from one of those votes, and land on
+    that bill's page showing the real roll-call tally. Full loop confirmed end-to-end, not just
+    code-reviewed — this was also the first-ever full walkthrough of the actual public site (closes
+    the testing gap the gameplan review flagged). One non-bug found along the way: `/person/<id>`
+    is for legislators merged across sources, `/legislator/<id>` is for standalone ones — mixing
+    them up looks like a dead page but every real link on the site already gets this right.
+    **Scope agreed:** this spec covers ONLY the two small pre-deploy fixes below + the actual
+    Cloudflare Pages connection + verification. Explicitly OUT: migration `0025` (drafted
+    separately, see below — independent of this spec, not blocking it), the MO House vote-coverage
+    caveat (a site-content decision, not deploy mechanics — still open, still Lance's call, tracked
+    on its own further down this list, not part of this spec).
+    **Section 1 (scope/sequencing) — approved.** Order: (1) fix `geocode.js` headers, (2) build
+    `site/404.html`, (3) connect Cloudflare Pages, (4) post-deploy verification.
+    **The two small fixes — both decided, fold into the implementation plan:**
+    - `geocode.js` will get its own explicit security headers (currently returns a bare
+      `Response.json` with none — Cloudflare Pages Functions do NOT inherit `_headers`, confirmed
+      via Cloudflare's own docs, so production `/geocode` responses carry zero CSP/security headers
+      today). Real design nuance already resolved: Pages Functions can't read the filesystem at
+      runtime the way `scripts/serve-site.js` does (that script live-parses `site/_headers`), so
+      `geocode.js` needs its header VALUES some other way — plan is a small shared constants module
+      both `geocode.js` (static import, bundled at deploy) and ideally a test can reference, to
+      avoid a silent third hand-copied source of truth alongside `_headers` and `serve-site.js`'s
+      own parser. Not yet built — this is the plan, section 2 of the design hasn't been formally
+      presented/approved yet.
+    - `site/404.html` will be built — a minimal static page, same header/nav shell, plain "page not
+      found" message, link back to the directory. Not yet built.
+    **Section 3 (connecting Cloudflare Pages) — presented in depth, not yet fully approved: two
+    sub-decisions still open, needed before this section is done:**
+    - **3a.** Does Lance already have a Cloudflare account with `helpingpeoplehelpingpeople.com` on
+      it, or is this a fresh account? (Affects whether GitHub authorization is a first-time flow —
+      doesn't block anything else.)
+    - **3d.** Cloudflare Pages auto-builds a public preview deployment for every branch/PR by
+      default. Since `site/config.js` hardcodes the real production anon key (not swapped per
+      environment), every preview is a fully live copy of the real site with real data — not a
+      security hole (RLS is still the actual wall), but worth a deliberate yes/no: leave default
+      preview-on-every-branch behavior, or restrict preview builds to specific branches only?
+    **Concrete settings already confirmed for section 3c (the actual project-creation values):**
+    project name → determines the default `<name>.pages.dev` URL, pick deliberately (e.g.
+    `visiblegov`); production branch `main`; **framework preset: None** (a framework preset injects
+    an assumed build command that would need clearing); build command empty; build output directory
+    `site`; root directory `site`; Functions auto-detected, no toggle; zero environment variables
+    needed. First deploy fires automatically the moment the project is created (not a separate
+    step). Custom-domain attachment is documented as a later, separate phase, not executed as part
+    of this plan — domain sequencing was already decided 2026-07-28 (CHATLOG): `.pages.dev` first,
+    `visiblegov.helpingpeoplehelpingpeople.com` later via the Custom Domains screen.
+    **Sections not yet presented:** section 2 (the two fixes' actual implementation detail),
+    section 4 (post-deploy verification checklist — a first draft already exists from the gameplan
+    review, below, but hasn't gone through this design conversation yet).
+    **Next step when Lance is back:** answer 3a/3d, then continue the brainstorming conversation
+    (sections 2 and 4) to a full design, write `docs/superpowers/specs/2026-08-03-cloudflare-pages-
+    deploy-design.md`, self-review, get his sign-off, then `superpowers:writing-plans`.
+    ---
+    **Migration `0025` drafted 2026-08-03 (independent of the spec above, ready whenever applied):**
+    column-scopes anon access to `summaries`/`glossary_terms` (RLS already correctly restricts anon
+    to published ROWS; nothing ever restricted COLUMNS — a bare `select=*` returned internal
+    pipeline metadata: `model`/`prompt_version`/`bill_text_hash`/`run_id` on `summaries`, similar
+    plus `source_hash`/`needs_mapping` on `glossary_terms`). Column-level `GRANT`, not a view
+    rename — site/js already queries these table names directly in three files; a rename would
+    require updating and re-testing all three for no added benefit. `model` deliberately stays
+    public on `summaries` (bill-page.js displays it as attribution, not an internal id). No
+    site-code changes needed. Draft-then-apply, awaiting Lance's apply.
+    ---
+    **Prior gameplan review, 2026-08-03 (6-angle workflow + direct live verification) — findings
+    folded into the current status above, kept here for the supporting detail:** `site/` confirmed
+    current with everything shipped since Plan 3 (0021/0022/0023/0024) — no stale code, no genuine
+    TODO/stub found. RLS genuinely scopes anon to published rows (live-verified pre-audit). No
+    secrets/PII anywhere in `site/`. `_headers`/`_redirects` syntax valid. Zero build step, zero
+    env vars needed pre-0025. Migration 0023's view-fix half confirmed functionally live already
+    (re-ran the planner-cost discrimination technique the accuracy audit used — `public_votes`
+    anon-planned count 52, not `votes`' full 10,355; matches the owner-bypass control, not the
+    RLS-denied one) — 0023 is a documentation/reproducibility fix for the committed file, not a
+    functional blocker.
+    ---
+    **Original 2026-07-30 gameplan, fully superseded, preserved only for history:** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
     (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:
     `/geocode` responds, `_redirects` rewrites survive a hard refresh, CSP headers present.
