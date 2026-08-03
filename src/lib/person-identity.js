@@ -466,8 +466,39 @@ function rowSeatStatus(evidenceA, evidenceB) {
   return sawAmbiguous ? 'ambiguous' : 'compatible';
 }
 
+// PER_PERSON_SOURCE_KEY_COLUMNS — the subset of source-key columns that are genuinely per-PERSON
+// identifiers (a permanent id issued once per real individual, never reused), as distinct from
+// mo_house_id/mo_senate_id, which are per-SEAT — a district's seat number legitimately gets reused
+// by a DIFFERENT person across eras, so a seat-id mismatch says nothing about whether two rows are
+// the same person and must never be treated as a contradiction here.
+//
+// FOUND LIVE (accuracy audit, 2026-08-03): Tommie Pierson Sr. (legiscan_people_id 15900) and
+// Tommie Pierson Jr. (legiscan_people_id 18826) — father and son, identical printed name, same
+// dateless seat, cleanly non-overlapping vote-year footprints (a real seat-succession pattern) —
+// auto-merged into one person because nothing checked whether their OWN per-person source ids
+// actually agreed. Independently verified: LegiScan people_ids are permanent across chamber
+// switches and district renumbering (e.g. Burlison 7516 spans House 2015-16 + Senate 2019-22;
+// Webber 7655 spans House 2015-16 + Senate 2025-26), so two DIFFERENT non-null values for the same
+// per-person column is strong, concrete evidence of two different real people — exactly the kind
+// of "a recorded fact beats a name match" signal seatEvidencePairStatus already applies to a seat
+// contradiction, just never applied to the rows' own source ids.
+const PER_PERSON_SOURCE_KEY_COLUMNS = ['bioguide_id', 'openstates_id', 'legiscan_people_id'];
+
+function sourceKeyPairStatus(rowA, rowB) {
+  for (const col of PER_PERSON_SOURCE_KEY_COLUMNS) {
+    const a = rowA[col];
+    const b = rowB[col];
+    if (a != null && b != null && String(a) !== String(b)) return 'contradiction';
+  }
+  return 'no-evidence';
+}
+
 // finalPairStatus — fix round 2's unconditional gate, the ONE place a full-name-variant match is
 // required. Returns 'contradiction' | 'no-pair' | 'ambiguous' | 'compatible'.
+//   - two DIFFERENT non-null values for the same per-person source-key column (bioguide_id/
+//     openstates_id/legiscan_people_id) -> 'contradiction', UNCONDITIONALLY and checked FIRST —
+//     the strongest available fact, ahead of even seat evidence (accuracy audit, 2026-08-03 —
+//     the Pierson Sr./Jr. wrong-merge fix).
 //   - seat evidence hard-contradicts -> 'contradiction', UNCONDITIONALLY (a recorded, concrete
 //     fact beats a name match too — two different concrete seats can't be reconciled just because
 //     the names happen to agree).
@@ -494,6 +525,7 @@ function rowSeatStatus(evidenceA, evidenceB) {
 // against an ALREADY-LINKED row, exactly the same call shape clusterLegislators' own internal
 // pairStatus(i,j) already uses. No logic here changes for this export; only its visibility widens.
 export function finalPairStatus(rowA, rowB) {
+  if (sourceKeyPairStatus(rowA, rowB) === 'contradiction') return 'contradiction';
   const seat = rowSeatStatus(rowA.evidence, rowB.evidence);
   if (seat === 'contradiction') return 'contradiction';
   const namesMatch = rowNameVariantMatch(rowA, rowB);

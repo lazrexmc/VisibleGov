@@ -867,7 +867,11 @@ test('clusterLegislators CRITICAL fix (final wave): the SAME suffix mismatch pri
     id,
     full_name: fullName,
     surname: null,
-    bioguide_id: `bg-${id}`,
+    // bioguide_id: null on both (matching this test's own non-comma-form sibling above) — isolates
+    // the suffix/comma-form parsing this test is actually about; a per-row-unique placeholder here
+    // would instead trip the DIFFERENT same-source-key contradiction guard (accuracy audit,
+    // 2026-08-03), which is real, correct, and even stronger evidence, but is a different test.
+    bioguide_id: null,
     openstates_id: null,
     mo_house_id: null,
     mo_senate_id: null,
@@ -1331,18 +1335,22 @@ test('writeIdentityFlag: a 23505 race on insert (app-level check missed a concur
 // connect to and land as two singletons — a COMPLETELY different, wrong shape from the one
 // asserted below.
 test('runLink FINDING 9: a persisted nickname flowing through the REAL loadLegislators SELECT produces internal_no_name_variant end-to-end — proves nickname wiring is actually exercised, not merely assumed', async () => {
+  // legiscan_people_id: null on all four (not a distinct placeholder per row) — this test is about
+  // nickname-driven name matching in isolation; a per-row-unique id here would instead trip the
+  // DIFFERENT same-source-key contradiction guard (accuracy audit, 2026-08-03), a real check but
+  // not what this test is proving.
   const legislatorRows = [
     {
-      id: 'leg-hub1', full_name: 'Robert Jones', nickname: 'Bob', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 1, person_id: null,
+      id: 'leg-hub1', full_name: 'Robert Jones', nickname: 'Bob', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
     {
-      id: 'leg-hub2', full_name: 'Robert Jones', nickname: 'Rob', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 2, person_id: null,
+      id: 'leg-hub2', full_name: 'Robert Jones', nickname: 'Rob', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
     {
-      id: 'leg-barebob', full_name: 'Bob Jones', nickname: null, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 3, person_id: null,
+      id: 'leg-barebob', full_name: 'Bob Jones', nickname: null, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
     {
-      id: 'leg-barerob', full_name: 'Rob Jones', nickname: null, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 4, person_id: null,
+      id: 'leg-barerob', full_name: 'Rob Jones', nickname: null, surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
   ];
   const client = makeFakeClient({ legislatorRows });
@@ -1432,12 +1440,15 @@ test('applyKeepSeparateRulings: downgrades ONLY the conflicting cluster, leaves 
 // compatible (a same-full-name, dateless pair — the exact accepted-residual shape that WOULD
 // auto-cluster on its own) — this must flag, never auto-write, with Lance's own ruling cited.
 test('runLink ITEM 2: a keep-separated pair that later becomes name+evidence compatible -> flagged (never auto-written), Lance\'s ruling cited verbatim in the flag evidence', async () => {
+  // legiscan_people_id: null on both (not distinct placeholders) — this test is about the
+  // keep-separate ruling downgrading an otherwise-compatible pair, isolated from the DIFFERENT
+  // same-source-key contradiction guard (accuracy audit, 2026-08-03).
   const legislatorRows = [
     {
-      id: 'leg-jones-x', full_name: 'Robert Jones', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 501, person_id: null,
+      id: 'leg-jones-x', full_name: 'Robert Jones', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
     {
-      id: 'leg-jones-y', full_name: 'Robert Jones', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 502, person_id: null,
+      id: 'leg-jones-y', full_name: 'Robert Jones', surname: 'Jones', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
   ];
   const identityFlagsRows = [{
@@ -1624,7 +1635,7 @@ test('groupAlreadyLinkedByPerson: tolerant of empty/undefined input, defensively
 test('buildAttachCandidates: THE WORKED EXAMPLE — an Onder-shaped fifth row (unlinked, evidence-free "Robert Onder") qualifies to attach into the already-linked four-Onder person, matched via the bioguide+legiscan members (given+family "robert"+"onder"); the mo_senate/openstates "Bob Onder" members neither block nor contribute (different given name -> "no-pair", not "contradiction")', () => {
   const members = alreadyLinkedOnderMembers('person-onder-1');
   const fifthRow = {
-    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null, evidence: [],
   };
   const candidates = buildAttachCandidates([fifthRow], members, new Map());
   assert.equal(candidates.length, 1);
@@ -1670,7 +1681,7 @@ test('buildAttachCandidates: no surname-key overlap at all -> no candidates (the
 test('buildAttachCandidates: a keep-separate ruling against ANY member of the person vetoes attaching to that person entirely — final-wave item 2\'s own binding, extended to gate this new path', () => {
   const members = alreadyLinkedOnderMembers('person-onder-1');
   const fifthRow = {
-    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null, evidence: [],
   };
   // Sanity check the premise: WITHOUT the ruling, this pair qualifies (proven above already, but
   // re-asserted here so the ruling's effect is visibly a DELTA, not just an empty-by-coincidence result).
@@ -1703,7 +1714,7 @@ test('buildAttachCandidates: a singleton can qualify against MULTIPLE different 
     id: 'leg-onder-other', full_name: 'Robert Onder', surname: 'Onder', person_id: 'person-onder-2', evidence: [],
   }];
   const fifthRow = {
-    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null, evidence: [],
   };
   const candidates = buildAttachCandidates([fifthRow], [...onderMembers, ...otherOnder], new Map());
   assert.deepEqual(candidates.map((c) => c.personId).sort(), ['person-onder-1', 'person-onder-2']);
@@ -1713,7 +1724,7 @@ test('buildAttachCandidates: a singleton can qualify against MULTIPLE different 
 
 test('buildAttachFlags: groups candidates by person, one flag per person, evidence reuses buildMemberEvidence shape + matchedMembers, existingPerson carries the real display_name', () => {
   const fifthRow = {
-    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null, evidence: [],
   };
   const rowsById = new Map([['leg-onder-fifth', fifthRow]]);
   const attachCandidates = [{
@@ -1759,7 +1770,7 @@ test('runLink Task 4: an Onder-shaped fifth row arrives unlinked alongside the a
   const legislatorRows = [
     ...alreadyLinkedOnderMembers('person-onder-1'),
     {
-      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
   ].map(({ evidence: _e, ...r }) => r);
   const termRows = [{
@@ -1784,7 +1795,7 @@ test('runLink Task 4: LIVE mode writes the attach_candidate flag to identity_fla
   const legislatorRows = [
     ...alreadyLinkedOnderMembers('person-onder-1'),
     {
-      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
   ].map(({ evidence: _e, ...r }) => r);
   const termRows = [{
@@ -1809,7 +1820,7 @@ test('runLink Task 4: a PRIOR keep-separate ruling between the fifth row and an 
   const legislatorRows = [
     ...alreadyLinkedOnderMembers('person-onder-1'),
     {
-      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
   ].map(({ evidence: _e, ...r }) => r);
   const identityFlagsRows = [{
@@ -1862,6 +1873,67 @@ test('finalPairStatus sanity check: the real Bayh shape (same dateless Indiana S
     full_name: 'Evan Bayh', evidence: [{ source: 'terms', jurisdiction_id: 'us-congress', chamber: 'senate', district: 'IN', start_date: null, end_date: null }],
   };
   assert.equal(finalPairStatus(evan, birch), 'ambiguous');
+});
+
+// ---- same-source-key contradiction (accuracy audit, 2026-08-03): Tommie Pierson Sr.
+// (legiscan_people_id 15900) and Tommie Pierson Jr. (legiscan_people_id 18826) — father and son,
+// same printed name, same seat, non-overlapping vote-year footprints — auto-merged into one person
+// because nothing checked whether their OWN per-person source ids actually agreed. A recorded,
+// concrete fact (two DIFFERENT non-null values for the same per-person source column) must beat a
+// name match, same as a seat contradiction already does. ----
+
+test('finalPairStatus: two DIFFERENT non-null legiscan_people_id values is a hard contradiction, even with a matching name and the same dateless seat (the real Pierson shape)', () => {
+  const sr = {
+    full_name: 'Tommie Pierson', legiscan_people_id: 15900,
+    evidence: [{ source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '66', start_date: null, end_date: null }],
+  };
+  const jr = {
+    full_name: 'Tommie Pierson', legiscan_people_id: 18826,
+    evidence: [{ source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '66', start_date: null, end_date: null }],
+  };
+  assert.equal(finalPairStatus(sr, jr), 'contradiction');
+});
+
+test('finalPairStatus: same-source-key contradiction fires for bioguide_id and openstates_id too, not just legiscan_people_id', () => {
+  const a1 = { full_name: 'Jane Smith', bioguide_id: 'S000001', evidence: [] };
+  const a2 = { full_name: 'Jane Smith', bioguide_id: 'S000002', evidence: [] };
+  assert.equal(finalPairStatus(a1, a2), 'contradiction');
+  const b1 = { full_name: 'Jane Smith', openstates_id: 'os-1', evidence: [] };
+  const b2 = { full_name: 'Jane Smith', openstates_id: 'os-2', evidence: [] };
+  assert.equal(finalPairStatus(b1, b2), 'contradiction');
+});
+
+test('finalPairStatus: a shared (equal) source-key value is not a contradiction — two rows genuinely carrying the same id are unaffected', () => {
+  const a = {
+    full_name: 'Bob Onder', legiscan_people_id: 16351,
+    evidence: [{ source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null }],
+  };
+  const b = {
+    full_name: 'Bob Onder', legiscan_people_id: 16351,
+    evidence: [{ source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null }],
+  };
+  assert.equal(finalPairStatus(a, b), 'compatible');
+});
+
+test('finalPairStatus: a mismatched PER-SEAT id (mo_house_id/mo_senate_id) is NOT a contradiction — a seat number legitimately gets reused by different people across eras', () => {
+  const a = {
+    full_name: 'Ann Example', mo_house_id: '107',
+    evidence: [{ source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '107', start_date: '2015-01-01', end_date: '2017-01-01' }],
+  };
+  const b = {
+    full_name: 'Ann Example', mo_house_id: '999',
+    evidence: [{ source: 'terms', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '107', start_date: '2015-01-01', end_date: '2017-01-01' }],
+  };
+  assert.equal(finalPairStatus(a, b), 'compatible');
+});
+
+test('finalPairStatus: one row missing a source-key value entirely (null/undefined) is never treated as a contradiction — only two genuinely differing non-null values are', () => {
+  const a = { full_name: 'Jane Smith', legiscan_people_id: 15900, evidence: [] };
+  const b = { full_name: 'Jane Smith', evidence: [] };
+  // No comparable seat evidence on either side, but the names match exactly — 'compatible' (same
+  // as if legiscan_people_id weren't present at all), proving a missing id on one side never gets
+  // treated as a mismatch.
+  assert.equal(finalPairStatus(a, b), 'compatible');
 });
 
 test('buildAttachCandidates: FIX ROUND 1 CRITICAL 3 — the DYNASTY ATTACH TRAP (real Bayh shape, execution-proven live once already) — a fresh "Evan Bayh" singleton at the SAME dateless Indiana Senate seat as the already-linked "Birch Bayh" person is NEVER suggested, with ZERO keep-separate ruling on file — proving the block is structural (compatible-only), not dependent on Lance having already ruled on THIS brand-new row id', () => {
@@ -2063,7 +2135,7 @@ test('applyAttachCrossCheck: MICRO-ROUND regression — a single-person match st
 
 test('buildAttachFlags: MICRO-ROUND — every flag also carries existingPersons as a 1-element array matching existingPerson (schema uniformity with applyAttachCrossCheck, for the server\'s own validation to check membership the same way regardless of origin)', () => {
   const fifthRow = {
-    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null, evidence: [],
   };
   const rowsById = new Map([['leg-onder-fifth', fifthRow]]);
   const attachCandidates = [{
@@ -2286,7 +2358,7 @@ test('runLink FINAL REVIEW FINDING 2: the existing singleton-suppression scenari
   const legislatorRows = [
     ...alreadyLinkedOnderMembers('person-onder-1'),
     {
-      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null,
+      id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null,
     },
     {
       id: 'leg-onder-sixth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: '101', mo_senate_id: null, legiscan_people_id: null, person_id: null,
@@ -2333,7 +2405,7 @@ test('runLink FINAL REVIEW FINDING 2: the existing singleton-suppression scenari
 
 test('buildAttachFlags: R2-1 — every singleton-origin attach flag is stamped origin "singleton", the marker the review server needs to know these candidates were NEVER paired with each other', () => {
   const fifthRow = {
-    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: 99999, person_id: null, evidence: [],
+    id: 'leg-onder-fifth', full_name: 'Robert Onder', surname: 'Onder', bioguide_id: null, openstates_id: null, mo_house_id: null, mo_senate_id: null, legiscan_people_id: null, person_id: null, evidence: [],
   };
   const flags = buildAttachFlags(
     [{ legislatorId: 'leg-onder-fifth', personId: 'person-onder-1', matchedMembers: [] }],
