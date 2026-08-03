@@ -1428,3 +1428,78 @@ assumed rather than what was actually built. 2192 → 2235 tests (43 new), 0 fai
 on the extracted `ℹ fail` line at every commit. Migration 0022 is draft-then-apply, same as every
 schema change in this repo — Lance applies, runs the probe, runs the backfill, refreshes the
 aggregates twice (before and after the backfill).
+
+## 2026-08-03 (continued) — 0022 errors live, doc-refresh verification, legiscan bug root-caused
+
+Lance ran migration 0022 and it errored: `42809: "public_position_totals" is not a view. HINT: Use
+DROP MATERIALIZED VIEW to remove a materialized view`. Then, mid-turn: "I'm going afk, make the
+needed corrections and provide me with the updated sql's to run."
+
+Root cause: two stray `drop view if exists ... cascade;` lines (for `public_position_totals` and
+`public_party_alignment`) right before the correct `drop materialized view if exists ... cascade;`
+line — both objects are materialized views (created by migration 0018), and Postgres's `DROP VIEW`
+refuses that even with `IF EXISTS` since the object exists but is the wrong kind.
+`public_party_position_totals` never had this bug — it only ever had the single correct line, which
+is why the error stopped exactly where it did (first bad statement, first matview, alphabetically
+first in the file). Fixed by deleting both stray lines; the `drop materialized view` lines already
+present one line below each did not need to change. Before handing back the corrected file,
+queried the live database directly (Supabase REST, service-role key) to confirm the failed run
+rolled back cleanly as a single transaction: `vote_duplicates` and `public_votes` don't exist
+(404), `public_vote_feed` and all three matviews are sitting untouched at their pre-0022
+definitions. Nothing partial — the corrected file (committed `1858195`) is safe to run as-is, no
+cleanup needed first.
+
+While Lance was away, two background agents (dispatched earlier for "update all documentation... "
+had finished refreshing `docs/DATA_INVENTORY.md`/`docs/CONTROLLER_BRIEFING.md` and
+`docs/ARTIFACTS.md`/`docs/SCHEDULED_INGESTION.md`, but neither diff had been personally reviewed
+yet — this project's own "never trust a subagent self-report" rule. Ultracode is on this session
+("optimize for the most exhaustive, correct answer... use the Workflow tool on every substantive
+task"), so both verifications plus a from-scratch investigation into an open legiscan production
+bug ran as one 8-agent Workflow: two independent reviewers re-verified each doc diff against live
+ground truth (re-running `data-status.js`, `probe-public-surface.js`, `node --test`, raw Supabase
+REST queries, and the scheduler's own logs rather than trusting the diffs' prose); in parallel,
+three independent investigators attacked the legiscan bug from different angles (live-data
+forensics, static code-path audit, git-history audit), blind to each other; a synthesis agent
+reconciled their reports into one root cause; a fix agent verified it; an adversarial reviewer
+independently re-checked everything before a SHIP verdict.
+
+**Doc verification result: one real, concrete error caught.** `CONTROLLER_BRIEFING.md`'s
+2026-08-03 refresh-pass note claimed PLAYBOOK_DELTA was "still 22 lessons, unchanged since the
+2026-08-02 pass, checked directly" — false. Live `grep '^## Lesson'` plus the unnumbered §7 items
+gives 24: Lessons 23-24 landed the *same day* as this refresh pass via a sibling commit (`ebb07a3`,
+the vote-dedup work's own doc pass), directly contradicting a claim explicitly labeled as
+independently verified. Corrected before commit. Everything else in both diffs (funnel counts,
+matview row counts, migration list, SDD ledger count, file sizes, the API-spend-suspension note,
+the legiscan-failure description itself) held up exactly against direct live re-verification — no
+other fabrications, no placeholders.
+
+**Legiscan bug: root-caused, and it turned out to already be fixed.** The production failure
+(`vote_reconciliation_flags_dedup_key` duplicate-key violation, run `d56bf115`,
+2026-08-02T07:30:03Z) was a real application bug, not the scheduler doing its job — an earlier
+same-day assurance in conversation that legiscan was "just waiting out its 24h interval, no action
+needed" was incomplete, and that gap is what triggered this investigation rather than trusting the
+earlier reassurance. Triangulated root cause: a type-blind `roll_call_id` comparison (JS string vs.
+number) in `findExistingReconciliationFlag` (`src/adapters/legiscan-votes.js`) let a pre-existing
+string-typed flag row slip past the in-memory idempotency pre-check; the INSERT proceeded and hit
+the database's own type-tolerant unique index (`(discrepancy->>'roll_call_id')::integer`), which
+the JS-level check didn't mirror. This is a recurrence of PLAYBOOK_DELTA Lesson 21 surfacing in a
+spot the original fix didn't cover, not a new bug class. The fix agent found the fix had *already*
+landed on `main` same-day, ~3 hours after the crash (commit `b1adbfa`) — reverted just the
+`Number()` coercion, reran `tests/legiscan-votes.test.js`, watched it genuinely fail (`2 !== 1`,
+the exact bug), restored it, watched it pass again; no new commit needed. The adversarial reviewer
+independently re-derived the same mechanism from the raw code and the DB migration, re-ran the
+red/green check itself, queried live production directly and confirmed the fix holds against all
+29 currently-live string-typed rows in `vote_reconciliation_flags`, confirmed `writeReconciliationFlag`
+is the only insert path into that table (no bypass), and reproduced the full suite (2235/2235)
+twice. Verdict: **SHIP**, high confidence for the next scheduled retry (~2026-08-03T07:30Z). Two
+non-blocking follow-ups surfaced and were deliberately left untouched pending a separate decision:
+an `ORDER BY`-less candidate query at `legiscan-votes.js:628-634` (latent nondeterminism, unrelated
+to this bug), and disagreement between two investigators on which specific row supplied the
+colliding string-typed partner in the actual crash (doesn't affect the fix's correctness — it's
+structural/symmetric — but the attribution itself is an open loose thread, not asserted as solved).
+
+All four doc files committed together (`c2ab5a5`) after the correction. `TODO.md` NOW and this
+entry record both fixes. Nothing here required Lance's input or unblocks anything new for him
+beyond what was already pending (apply 0022, the corrected SQL already in hand) — this was closing
+out a loop this session itself had left open (the doc diffs, and an inaccurate reassurance about
+legiscan given earlier the same day).

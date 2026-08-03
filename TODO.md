@@ -125,6 +125,35 @@
     `node scripts/probe-public-surface.js`, run `npm run refresh:aggregates`, run
     `node --env-file=.env src/cli/correct-data.js vote-duplicates --dry-run` then live, run
     `npm run refresh:aggregates` again. Full sequence in the plan's own "Handoff to Lance" section.
+    **Migration 0022 SQL bug found+fixed 2026-08-03:** Lance's first live run errored (`42809:
+    "public_position_totals" is not a view`) — two stray `drop view if exists ... cascade;` lines
+    tried to drop objects that are actually materialized views (Postgres's `DROP VIEW` refuses that
+    even with `IF EXISTS`). Fixed (commit `1858195`) by removing both stray lines, keeping the
+    correct `drop materialized view` lines already present on the next line down. Confirmed live via
+    REST probe that the failed attempt rolled back cleanly as one transaction — nothing partial,
+    nothing to clean up. The corrected file is what's in the repo now; safe to run as-is.
+  - **`legiscan` production bug — root-caused and confirmed already fixed, 2026-08-03.** A live
+    ingestion run failed (`vote_reconciliation_flags_dedup_key` duplicate-key violation, run
+    `d56bf115`, 2026-08-02T07:30:03Z) — a real application bug, not just the 24h retry interval
+    doing its job (an earlier same-day claim in conversation that it was "just waiting it out" was
+    incomplete). Investigated via three independent blind angles (live-data forensics, code-path
+    audit, git-history audit) then adversarially reviewed. Confirmed: already fixed on `main`
+    (commit `b1adbfa`, same day, ~3h after the failure) — a recurrence of PLAYBOOK_DELTA Lesson 21
+    (a `roll_call_id` JS string-vs-number type mismatch let a pre-existing flag row slip past the
+    in-memory idempotency check in `findExistingReconciliationFlag`). Verdict: SHIP, high confidence
+    for the next scheduled retry (~2026-08-03T07:30Z). Two non-blocking follow-ups noted, not acted
+    on: an `ORDER BY`-less candidate query at `legiscan-votes.js:628-634` (latent nondeterminism,
+    unrelated to this bug) and an unresolved "which exact row supplied the colliding partner"
+    question (doesn't affect the fix's correctness — it's structural/symmetric). Full writeup in
+    `docs/CONTROLLER_BRIEFING.md`'s 2026-08-03 addendum.
+  - **Documentation refresh pass — complete 2026-08-03.** `README.md`, `CLAUDE.md`,
+    `PLAYBOOK_DELTA.md` (Lessons 23-24 added), `docs/DATA_INVENTORY.md`, `docs/CONTROLLER_BRIEFING.md`,
+    `docs/ARTIFACTS.md`, `docs/SCHEDULED_INGESTION.md`, and three memory files all refreshed. The two
+    background doc-refresh diffs were independently re-verified against live reality before being
+    trusted (this project's own "never trust a self-report" discipline) — one real error was caught
+    and fixed before commit: `CONTROLLER_BRIEFING.md` claimed PLAYBOOK_DELTA was "still 22 lessons,
+    unchanged since 08-02," actually 24 (Lessons 23-24 landed the same day). Everything else in both
+    diffs held up under direct re-verification.
   - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
     (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:
