@@ -24,6 +24,7 @@ import {
   classifyLegiscanSourceRow,
   LEGISCAN_TEXTS_ERROR_MARKERS,
   runCorrectLegiscanSourceSplit,
+  runCorrectVoteDuplicates,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -59,6 +60,8 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     // 'all' test (none of which seed it) still works as a harmless no-op, not an undefined-table
     // crash.
     ingestion_runs: [],
+    // vote-duplicates (2026-08-03) — same reasoning as ingestion_runs above.
+    vote_duplicates: [],
     ...seed,
   };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
@@ -206,6 +209,88 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     },
   };
 }
+
+// ---- vote-duplicates (2026-08-03): the never-built "primary-source row wins for display" ruling,
+// backfilled for the existing cross-adapter duplicate backlog. Reuses
+// crossCheckAgainstPrimarySource directly (not a parallel reimplementation) — see that function's
+// own tests (tests/legiscan-votes.test.js) for its matching/disambiguation behavior; these tests
+// only prove the dry-run/live orchestration and idempotency around it. ----
+
+const MO_BILL_ID = 'bill-mo-1';
+
+function seedVoteDuplicateFixture({ withMismatch = false } = {}) {
+  const legiscanVote = {
+    id: 'v-legiscan-1', bill_id: MO_BILL_ID, jurisdiction_id: 'mo-legislature', chamber: 'house',
+    vote_date: '2018-09-12T00:00:00Z', source_key: 'legiscan-1530-rollcall-774312',
+  };
+  const primaryVote = {
+    id: 'v-primary-1', bill_id: MO_BILL_ID, jurisdiction_id: 'mo-legislature', chamber: 'house',
+    vote_date: '2018-09-12T00:00:00Z', source_key: 'mo-house-xml-2018-hb3-vote1',
+  };
+  const legiscanCasts = [
+    { id: 'c1', vote_id: 'v-legiscan-1', legislator_id: 'l1', position: 'yea' },
+    { id: 'c2', vote_id: 'v-legiscan-1', legislator_id: 'l2', position: withMismatch ? 'yea' : 'nay' },
+  ];
+  const primaryCasts = [
+    { id: 'c3', vote_id: 'v-primary-1', legislator_id: 'l1', position: 'yea' },
+    { id: 'c4', vote_id: 'v-primary-1', legislator_id: 'l2', position: 'nay' },
+  ];
+  return {
+    votes: [legiscanVote, primaryVote],
+    vote_casts: [...legiscanCasts, ...primaryCasts],
+  };
+}
+
+test('runCorrectVoteDuplicates: dry-run finds a genuine clean match and reports it without writing', async () => {
+  const client = makeFakeClient(seedVoteDuplicateFixture());
+  const result = await runCorrectVoteDuplicates(client, { dryRun: true });
+  assert.equal(result.matched, 1);
+  assert.equal(result.alreadyMarked, 0);
+  assert.deepEqual(result.failures, []);
+  assert.equal(client.tables.vote_duplicates.length, 0, 'dry-run must never write');
+});
+
+test('runCorrectVoteDuplicates: live run writes the exact pair dry-run reported', async () => {
+  const client = makeFakeClient(seedVoteDuplicateFixture());
+  const dry = await runCorrectVoteDuplicates(client, { dryRun: true });
+  const live = await runCorrectVoteDuplicates(client, { dryRun: false, runId: 'run-1' });
+  assert.equal(live.matched, dry.matched);
+  const inserted = client.tables.vote_duplicates;
+  assert.equal(inserted.length, 1);
+  assert.equal(inserted[0].canonical_vote_id, 'v-primary-1');
+  assert.equal(inserted[0].superseded_vote_id, 'v-legiscan-1');
+});
+
+test('runCorrectVoteDuplicates: a pair already marked in vote_duplicates is not re-counted or re-written', async () => {
+  const client = makeFakeClient({
+    ...seedVoteDuplicateFixture(),
+    vote_duplicates: [{
+      id: 'vd-1', canonical_vote_id: 'v-primary-1', superseded_vote_id: 'v-legiscan-1', reason: 'existing', created_at: 'test-time',
+    }],
+  });
+  const result = await runCorrectVoteDuplicates(client, { dryRun: true });
+  assert.equal(result.matched, 0);
+  assert.equal(result.alreadyMarked, 1);
+});
+
+test('runCorrectVoteDuplicates: a genuine tally mismatch is never marked as a duplicate', async () => {
+  const client = makeFakeClient(seedVoteDuplicateFixture({ withMismatch: true }));
+  const result = await runCorrectVoteDuplicates(client, { dryRun: true });
+  assert.equal(result.matched, 0);
+  assert.equal(client.tables.vote_duplicates.length, 0);
+});
+
+test('runCorrectVoteDuplicates: an unparseable LegiScan source_key is counted, never guessed', async () => {
+  const client = makeFakeClient({
+    votes: [
+      { id: 'v-bad', bill_id: MO_BILL_ID, jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12T00:00:00Z', source_key: 'legiscan-not-a-real-shape' },
+    ],
+    vote_casts: [],
+  });
+  const result = await runCorrectVoteDuplicates(client, { dryRun: true });
+  assert.equal(result.unparseable, 1);
+  assert.equal(result.matched, 0);
+});
 
 // ---- parseArgs ----
 

@@ -96,13 +96,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | all`);
   }
   out.which = which;
   return out;
@@ -1311,6 +1311,156 @@ export async function runCorrectLegiscanSourceSplit(client, {
 }
 
 // ============================================================================================
+// Correction: vote-duplicates — the never-built "primary-source row wins for display" ruling
+// (docs/superpowers/specs/2026-08-03-vote-duplicate-dedup-design.md). Pure inserts into
+// vote_duplicates, never a rewrite of votes/vote_casts — lower risk than mo-status/party-normalize
+// (in-place UPDATEs), so this joins 'all' below, same as those.
+//
+// Deliberately does NOT call crossCheckAgainstPrimarySource (correct-data.js's own tested
+// architectural boundary — see the "never IMPORTS or CALLS crossCheckAgainstPrimarySource" test —
+// that function is the live PRE-STORE gate and writes vote_reconciliation_flags as a side effect,
+// which this backfill has no business triggering against already-published data). Same convention
+// findPrimaryDuplicate (this file's own 1969-sentinel-date correction, above) already established:
+// reuse the PURE comparison primitives (PRIMARY_SOURCE_KEY_PREFIXES, sameCalendarDate,
+// summarizePrimaryCastPositions, compareTalliesForCrossCheck — all already imported), reimplement
+// the orchestration locally.
+// ============================================================================================
+
+function buildVoteDuplicateTupleKey(billId, chamber, isoDate) {
+  const day = String(isoDate ?? '').slice(0, 10);
+  return `${billId}::${chamber}::${day}`;
+}
+
+async function castTalliesFor(client, voteId) {
+  const { data: castRows, error } = await client.from('vote_casts').select('position').eq('vote_id', voteId);
+  if (error) return { tallies: null, error };
+  // compareTalliesForCrossCheck needs all four buckets — yea/nay for the HARD comparison,
+  // not_voting/absent for the SOFT one (a yea/nay-only object leaves those two `undefined`, which
+  // the soft-bucket sum then silently turns into NaN, producing a spurious mismatch on every
+  // genuinely clean row — found live via this task's own test run).
+  const bucket = (position) => (castRows ?? []).filter((c) => c.position === position).length;
+  return {
+    tallies: {
+      yea: bucket('yea'), nay: bucket('nay'), not_voting: bucket('not_voting'), absent: bucket('absent'),
+    },
+    error: null,
+  };
+}
+
+// findCleanPrimaryMatch — the local reimplementation of crossCheckAgainstPrimarySource's own
+// matching (bill + chamber + jurisdiction + same-calendar-day, PRIMARY_SOURCE_KEY_PREFIXES) and
+// tally-unique disambiguation for the same-day-multiple-candidates case (the real HB3 5-roll-call
+// pattern) — same correspondence key, same disambiguation signal (exact yea/nay agreement), just
+// without crossCheckAgainstPrimarySource's own side-effecting flag writes. Returns
+// {matched: boolean, primaryVoteId, error}. Only ever reports matched:true when the tallies
+// genuinely, cleanly agree (compareTalliesForCrossCheck finds zero hard AND zero soft mismatches) —
+// a mismatch here is simply left unmarked (not this correction's job to flag it; that's what the
+// live ingest path's own reconciliation-flag writing already does).
+async function findCleanPrimaryMatch(client, billId, chamber, isoDate, legiscanTallies) {
+  const { data: candidateRows, error } = await client
+    .from('votes').select('id,vote_date,chamber,source_key')
+    .eq('bill_id', billId).eq('jurisdiction_id', 'mo-legislature').eq('chamber', chamber);
+  if (error) return { matched: false, primaryVoteId: null, error };
+
+  const candidates = (candidateRows ?? []).filter((row) => (
+    PRIMARY_SOURCE_KEY_PREFIXES.some((prefix) => String(row.source_key ?? '').startsWith(prefix))
+    && sameCalendarDate(row.vote_date, isoDate)
+  ));
+  if (candidates.length === 0) return { matched: false, primaryVoteId: null, error: null };
+
+  let selected = candidates[0];
+  if (candidates.length > 1) {
+    // Same-day multi-candidate disambiguation (the real HB3 pattern) — tally-unique selection: the
+    // one candidate whose (yea, nay) exactly agrees with LegiScan's own. Zero or more than one such
+    // candidate is genuinely ambiguous — never guessed, left unmarked.
+    const withTallies = [];
+    for (const c of candidates) {
+      // eslint-disable-next-line no-await-in-loop -- a handful of same-day candidates at most, same
+      // bound crossCheckAgainstPrimarySource's own comment documents for this exact query.
+      const { data: castRows, error: castErr } = await client.from('vote_casts').select('position').eq('vote_id', c.id);
+      if (castErr) return { matched: false, primaryVoteId: null, error: castErr };
+      withTallies.push({ candidate: c, counts: summarizePrimaryCastPositions(castRows ?? []) });
+    }
+    const tallyMatches = withTallies.filter(({ counts }) => (
+      counts.yea === legiscanTallies.tallies.yea && counts.nay === legiscanTallies.tallies.nay
+    ));
+    if (tallyMatches.length !== 1) return { matched: false, primaryVoteId: null, error: null };
+    selected = tallyMatches[0].candidate;
+  }
+
+  // summarizePrimaryCastPositions (not castTalliesFor's own {yea,nay,not_voting,absent} bucketing,
+  // which is shaped for the LEGISCAN side) — compareTalliesForCrossCheck's soft-bucket comparison
+  // expects the PRIMARY side's counts in ITS OWN {yea,nay,present,absent,not_voting,other} shape.
+  // Using the wrong shape here produces a silent NaN in the soft-bucket sum (found live via this
+  // task's own test run) — every genuinely clean row then reads as a mismatch.
+  const { data: primaryCastRows, error: castErr } = await client.from('vote_casts').select('position').eq('vote_id', selected.id);
+  if (castErr) return { matched: false, primaryVoteId: null, error: castErr };
+  const primaryCounts = summarizePrimaryCastPositions(primaryCastRows ?? []);
+  const totalPrimaryCasts = (primaryCastRows ?? []).length;
+  const primaryAggregate = parsePrimaryResultAggregate(selected.result);
+  if (!isPrimaryCastDataComparable(primaryAggregate, totalPrimaryCasts)) {
+    return { matched: false, primaryVoteId: null, error: null };
+  }
+  const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, primaryCounts);
+  if (hardMismatches.length > 0 || softMismatches.length > 0) return { matched: false, primaryVoteId: null, error: null };
+  return { matched: true, primaryVoteId: selected.id, error: null };
+}
+
+export async function runCorrectVoteDuplicates(client, {
+  dryRun = false, limit = null, runId = null,
+} = {}) {
+  const failures = [];
+  let remainingBudget = limit ?? Infinity;
+
+  const { data: legiscanVotes, error: lvErr } = await client
+    .from('votes').select('id,bill_id,chamber,vote_date,source_key').like('source_key', 'legiscan-%');
+  if (lvErr) return { matched: 0, alreadyMarked: 0, unparseable: 0, failures: [{ reason: 'legiscan_votes_lookup_failed', error: String(lvErr.message ?? lvErr) }] };
+
+  const { data: existingPairs, error: vdErr } = await client.from('vote_duplicates').select('superseded_vote_id');
+  if (vdErr) return { matched: 0, alreadyMarked: 0, unparseable: 0, failures: [{ reason: 'vote_duplicates_lookup_failed', error: String(vdErr.message ?? vdErr) }] };
+  const alreadyMarkedIds = new Set((existingPairs ?? []).map((r) => r.superseded_vote_id));
+
+  let matched = 0;
+  let alreadyMarked = 0;
+  let unparseable = 0;
+
+  for (const v of legiscanVotes ?? []) {
+    if (alreadyMarkedIds.has(v.id)) { alreadyMarked += 1; continue; }
+    if (!Number.isFinite(remainingBudget) || remainingBudget > 0) {
+      const parsed = parseLegiscanRollCallSourceKey(v.source_key);
+      if (!parsed) { unparseable += 1; continue; }
+
+      // eslint-disable-next-line no-await-in-loop
+      const { tallies, error: castErr } = await castTalliesFor(client, v.id);
+      if (castErr) { failures.push({ voteId: v.id, reason: 'casts_lookup_failed', error: String(castErr.message ?? castErr) }); continue; }
+
+      const legiscanTallies = {
+        chamber: v.chamber, date: String(v.vote_date).slice(0, 10), tallies, rollCallId: parsed.rollCallId, runId,
+      };
+
+      // eslint-disable-next-line no-await-in-loop
+      const result = await findCleanPrimaryMatch(client, v.bill_id, v.chamber, v.vote_date, legiscanTallies);
+      if (result.error) { failures.push({ voteId: v.id, reason: 'primary_match_lookup_failed', error: String(result.error.message ?? result.error) }); continue; }
+      if (result.matched && result.primaryVoteId) {
+        matched += 1;
+        if (!dryRun) {
+          // eslint-disable-next-line no-await-in-loop
+          const { error: insErr } = await client.from('vote_duplicates').insert({
+            canonical_vote_id: result.primaryVoteId, superseded_vote_id: v.id, reason: 'legiscan-vs-primary-source clean match, backfill 2026-08-03',
+          }).select().single();
+          if (insErr) { failures.push({ voteId: v.id, reason: 'vote_duplicates_insert_failed', error: String(insErr.message ?? insErr) }); continue; }
+        }
+        if (Number.isFinite(remainingBudget)) remainingBudget -= 1;
+      }
+    }
+  }
+
+  return {
+    matched, alreadyMarked, unparseable, failures,
+  };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1341,6 +1491,13 @@ export async function runCorrectData(client, {
   if (which === 'legiscan-source-split' || which === 'all') {
     out.legiscanSourceSplit = await runCorrectLegiscanSourceSplit(client, { dryRun, limit, runId });
     failures.push(...out.legiscanSourceSplit.failures);
+  }
+  // vote-duplicates (2026-08-03) — same in-place-additive risk class as party-normalize/
+  // legiscan-source-split above (pure inserts, no rewrites of votes/vote_casts at all — lower risk
+  // than either), so it joins 'all' alongside them.
+  if (which === 'vote-duplicates' || which === 'all') {
+    out.voteDuplicates = await runCorrectVoteDuplicates(client, { dryRun, limit, runId });
+    failures.push(...out.voteDuplicates.failures);
   }
   // Deliberately EXCLUDED from 'all' (brief, explicit): bill/session merge + FK redirect + guarded
   // deletes is higher-stakes than A/B's in-place rewrites — an operator must name this one, never
