@@ -94,17 +94,37 @@
     yea vote present in every LegiScan roll call, absent from every Senate-journal-sourced one — one
     root cause, not 29 separate mysteries) rather than hiding them. Source discrepancies held out of
     the clean record by design; not a backlog to auto-clear.
-  - **Bullet-citation exposure — CODE COMPLETE 2026-08-02, migration not yet applied.** Exposes
-    `verifier.js`'s existing `evidence_quote` per `what_it_does` bullet on the public bill page
-    (click-to-expand, mirrors the glossary quote pattern) so `trust.html`'s existing receipt claim
-    becomes true for bill summaries too. Spec:
-    `docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md`; plan:
-    `docs/superpowers/plans/2026-08-02-bullet-citation-exposure.md`. Suite 2205/2205 green. **Only
-    remaining step is Lance's:** apply `supabase/migrations/0021_bullet_citations.sql` (Supabase
-    SQL editor, same as every prior migration), then run `node scripts/probe-public-surface.js`
-    to confirm the new `citations` column is present and correctly gated/shaped against the live
-    DB. No code changes needed after that — the JS already reads the column defensively (falls
-    back to today's plain span if it's absent, null, or malformed).
+  - **Bullet-citation exposure — SHIPPED AND LIVE 2026-08-03.** Migration 0021 applied by Lance;
+    `node scripts/probe-public-surface.js` confirmed the `citations` column present and correctly
+    gated/shaped against 220 real live rows, 0 violations; a live anon-key spot-check showed real
+    verbatim quotes flowing through with only the three intended fields. `trust.html`'s receipt
+    claim ("the exact quoted excerpt it came from") is now true for bill summaries, not just
+    glossary terms. Fully closed, nothing left.
+  - **Cross-adapter vote duplicate dedup — CODE COMPLETE 2026-08-03, migration not yet applied.**
+    Implements CONTROLLER RULING 3 (decided 2026-07-29, never built): "the primary-source
+    (journal/PDF) row wins for display whenever both exist for the same real floor vote." Both
+    LegiScan and MO's own primary-source adapters (`mo-house-xml`, `mo-senate-web`) can legitimately
+    each write their own `votes` row for the same real vote — nothing deduped this before, so every
+    duplicated vote was counted TWICE in the vote-aggregate matview percentages, not just shown
+    twice in a list. Non-destructive (mirrors the `persons`/`person_links` precedent — a new
+    `vote_duplicates` grouping table, neither row ever deleted or rewritten), detection reuses the
+    existing `crossCheckAgainstPrimarySource` matching logic, wired into live LegiScan ingest going
+    forward plus a one-time backfill correction (`correct-data.js vote-duplicates`) for the existing
+    backlog. Spec: `docs/superpowers/specs/2026-08-03-vote-duplicate-dedup-design.md`; plan:
+    `docs/superpowers/plans/2026-08-03-vote-duplicate-dedup.md`. Suite 2192 → 2235 (43 new tests),
+    0 fail. **Two things found live during implementation, both fixed and both worth knowing about:**
+    (1) `crossCheckAgainstPrimarySource` has a THIRD clean-match branch beyond the two the original
+    design found (a plain singleton/singleton match with no `reason` string at all) — a
+    `reason`-based gate silently missed it; fixed by gating on `matched` instead, which every
+    clean-match branch sets. (2) `correct-data.js` has its own tested rule that it must NEVER call
+    `crossCheckAgainstPrimarySource` directly (that function writes reconciliation flags as a side
+    effect, which a backfill against already-published data has no business triggering) — the
+    backfill correction reimplements the matching locally using only the pure comparison helpers,
+    mirroring this file's own existing 1969-sentinel-date correction's established pattern.
+    **Remaining steps, all Lance's:** apply `supabase/migrations/0022_vote_duplicates.sql`, run
+    `node scripts/probe-public-surface.js`, run `npm run refresh:aggregates`, run
+    `node --env-file=.env src/cli/correct-data.js vote-duplicates --dry-run` then live, run
+    `npm run refresh:aggregates` again. Full sequence in the plan's own "Handoff to Lance" section.
   - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
     (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:

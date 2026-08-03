@@ -1373,3 +1373,58 @@ Playwright/curl checks against "the new code" were actually hitting old code and
 live 98-item queue via Playwright: sort order correct (0 issues first, 6 last), single-issue items
 correctly name their missing provision inline, item detail view matches the queue's own data. No
 schema change — live the moment the code shipped, no migration, no handoff step for Lance at all.
+
+## 2026-08-03 (continued) — "0021 has ran in supabase"; the dedup defect, from spec to implementation
+
+Migration 0021 confirmed live: probe green (220 rows, 0 violations), a live anon-key spot-check
+showed real verbatim quotes flowing through with only the three intended fields. Bullet-citation
+exposure fully closed.
+
+Lance: "review the folder... determine what should be next." Fresh check (not memory): git HEAD
+unchanged since last review, live data healthy, `legiscan`'s apparent stall was confirmed to be
+inside its own deliberate 24h retry interval, not a real problem. The one un-filed accuracy gap
+from the prior review — the display-time dedup ruling, decided 2026-07-29, never built — was still
+sitting there. Lance chose to fix it.
+
+Research before design (a dedicated agent, since this touches SQL schema, live ingest code, and a
+carefully-reviewed cross-check function): the `votes` table carries no direct source/adapter
+column, only an unenforced `source_key` prefix convention; the ~100+ duplicate-group figure from
+the last review turned out to be an unpreserved estimate, not a documented fact — flagged rather
+than restated as certain. More importantly: the vote-aggregate matviews join `votes`/`vote_casts`
+with zero source discrimination, so a duplicated real vote is counted TWICE in every percentage —
+not just shown twice in a list, an actual accuracy defect in the numbers themselves. Lance: fix
+both the display and the aggregates, not just one.
+
+Design mirrors this codebase's own non-destructive precedent (`persons`/`person_links`, migration
+0012) rather than the one sanctioned delete (`retractLegiscanVoteIfStored`, scoped to genuine
+LegiScan-vs-primary CONTRADICTIONS, a different case entirely): a new `vote_duplicates` grouping
+table, neither row ever touched, detection reusing `crossCheckAgainstPrimarySource`'s existing
+matching logic rather than a hand-rolled second comparison.
+
+Two real bugs found live, caught by TDD rather than assumed away:
+
+1. **A third clean-match branch, missed by grep.** The original design found `crossCheck.reason ===
+   'tally_unique_match'` via a literal string search — but `crossCheckAgainstPrimarySource` has a
+   THIRD `matched: true` return site (the plain singleton/singleton clean match, the most common
+   case in practice) that has never set a `reason` at all. A reason-string gate silently skipped it
+   entirely. Caught by a real ingest-level test against real fixture data (roll call 774411, HB3
+   senate) — the LegiScan vote stored correctly but zero `vote_duplicates` rows appeared. Fixed by
+   gating on `matched` (set on every clean branch) instead of `reason`, and by adding a direct unit
+   test for this specific branch so it can never silently regress again.
+2. **`correct-data.js` has its own tested architectural boundary this design initially violated.**
+   An existing test asserts, unconditionally, that this file never imports or calls
+   `crossCheckAgainstPrimarySource` — that function is a live pre-store gate that writes
+   `vote_reconciliation_flags` as a side effect, which a backfill against already-published data has
+   no business triggering. This file's own existing 1969-sentinel-date correction already
+   established the correct pattern for exactly this situation (reuse the pure comparison
+   primitives, reimplement the orchestration locally) — the backfill correction was redesigned to
+   match it. Found two further shape bugs while rebuilding: `compareTalliesForCrossCheck`'s
+   LegiScan-side tallies need all four cast buckets or the soft-comparison silently produces `NaN`;
+   its primary-side tallies need `summarizePrimaryCastPositions`'s own distinct field shape, not the
+   same four buckets as the LegiScan side.
+
+Plan document corrected in place after each finding — not left describing what was originally
+assumed rather than what was actually built. 2192 → 2235 tests (43 new), 0 fail throughout, gated
+on the extracted `ℹ fail` line at every commit. Migration 0022 is draft-then-apply, same as every
+schema change in this repo — Lance applies, runs the probe, runs the backfill, refreshes the
+aggregates twice (before and after the backfill).
