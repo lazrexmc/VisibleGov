@@ -1807,3 +1807,35 @@ Every migration this session (`0022`–`0026`) stays draft-then-apply — nothin
 an agent; `0022`, `0024` are confirmed live because Lance ran them himself. Full suite 2259/2259
 throughout. Six commits this pass (four docs, one CHATLOG gap-fill, one TODO/CHATLOG update for
 this entry), each pushed as it landed.
+
+## 2026-08-03 (continued) — "all have been ran in supabase": 0023/0025/0026 verified, one real regression caught and fixed
+
+Lance: "So I need to run 0026, then 0023, then 0025, then 0022 then 0024?" — corrected: only
+`0026`/`0023`/`0025` needed running; `0022`/`0024` were already live from earlier tonight. He ran
+all three ("all have been ran in supabase"). Verified each directly, same discipline as every
+migration this session:
+
+- **`0026`** (aggregate-refresh timeout fix): ran `npm run refresh:aggregates` for real — completed
+  clean in ~19s, `mode: "refreshed"`, no timeout. The outage (11 straight failures since 05:00 UTC)
+  is over; charts are current again.
+- **`0023`** (vote_duplicates RLS + view fix): re-ran the planner-cost discrimination check —
+  `public_votes` anon-planned count 52, matching the owner-bypass control, not the deny-shape one;
+  `vote_duplicates` anon read returns `200 []`. Clean.
+- **`0025`** (column-scoping `summaries`/`glossary_terms`): the internal-column blocks worked
+  correctly, but **a real regression turned up**: `bill-page.js`'s actual summary-fetch query has
+  no explicit `select=` (defaults to all columns), and Postgres denies a bare `select=*` outright
+  when a role only holds column-level grants — it does not silently narrow to what's granted. That
+  query started 401ing in production the instant `0025` landed. Caught immediately by checking
+  every real `site/js/` query site directly against the anon key rather than assuming the migration
+  alone told the whole story (four other query sites already had explicit `select=` and were fine
+  — this was the one gap). Fixed same pass (`site/js/bill-page.js`, commit `9884b18`): added the
+  explicit `select=` naming exactly what `0025` grants. Confirmed twice — direct anon REST calls
+  against all 5 real query shapes, and a real Playwright browser load of an actual bill page
+  (summary rendered correctly, zero console errors).
+
+Worth naming plainly: this is exactly the failure mode the whole "never trust a self-report"
+discipline exists to catch, just one level deeper than usual — the MIGRATION itself worked exactly
+as designed, and a narrower verification (just checking the grants, the way the earlier workflow
+did) would have called it done. Checking it against what the site *actually does*, live, in a real
+browser, is what caught it. `TODO.md`/`CLAUDE.md` updated to reflect all three migrations applied
+and verified, fallout fixed. Full suite 2259/2259 throughout.

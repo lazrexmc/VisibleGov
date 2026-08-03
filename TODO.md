@@ -6,23 +6,22 @@
 
 ## NOW
 
-- [ ] **🔴 URGENT — apply migration `0026` ASAP: the scheduler's aggregate-refresh has been failing
-  on every attempt since 2026-08-03T05:00:12Z.** Found during the 2026-08-03 evening doc-refresh
-  pass (not by anyone watching it — nothing was watching it, that's the point). Migration 0022
-  (applied earlier today) silently dropped a `statement_timeout` fix migration 0018a had applied
-  via a separate `ALTER FUNCTION` — Postgres resets function-level config on `CREATE OR REPLACE
-  FUNCTION` unless the new definition re-declares it, and 0022's "body unchanged" comment didn't
-  account for 0018a's separate, later config patch. Result: `refresh_vote_aggregates()` has hit an
-  8-12s statement timeout on all 11 scheduler-triggered attempts since 05:00 UTC (10× after
-  `mo-house-xml`, 1× after `legiscan`) — the public profile/party-alignment charts
-  (`public_position_totals`/`public_party_alignment`/`public_party_position_totals`) stopped
-  auto-updating and are now 14+ hours stale as of discovery, growing every 15-30 min until this
-  lands. **Not data loss** — the underlying vote data is fine, this is purely staleness on three
-  derived matviews, and it self-heals the moment the migration runs (next tick that writes new
-  rows will refresh cleanly). Fix: `supabase/migrations/0026_fix_refresh_aggregates_timeout_
-  regression.sql` — one function redefinition, folds `statement_timeout` directly into the
-  function's own `set` clause this time so a future `CREATE OR REPLACE` can't silently drop it
-  again. Draft-then-apply, same SQL-editor pattern as every other migration tonight.
+- [x] ✅ **Migrations `0023`, `0025`, `0026` applied and verified live 2026-08-03 (Lance: "all have
+  been ran in supabase").** `0026` (aggregate-refresh timeout fix) confirmed by actually running
+  `npm run refresh:aggregates` — completed clean in ~19s (`mode: "refreshed"`), no timeout;
+  outage over, charts current again. `0023` confirmed via live planner-cost check (`public_votes`
+  anon-planned count 52, matches the owner-bypass control, not the deny-shape one) plus a direct
+  `vote_duplicates` anon read (`200 []`). `0025` (column-scoping) mostly confirmed clean —
+  **except it broke a real site query in production**, caught immediately by re-verifying every
+  actual `site/js/` call site live rather than assuming the migration alone was the whole story:
+  `bill-page.js`'s summary fetch had no explicit `select=` (defaulted to all columns), and Postgres
+  denies a bare `select=*` outright when a role only holds column-level grants — it does not
+  silently narrow to the granted columns. That query started 401ing the instant `0025` landed.
+  **Fixed same pass** (`site/js/bill-page.js`, commit `9884b18`): added the explicit `select=`
+  listing exactly the columns `0025` grants. Confirmed via direct anon REST calls against all 5
+  real `summaries`/`glossary_terms` query sites in `site/js/`, AND a real Playwright browser load
+  of an actual bill page (summary rendered correctly, zero console errors). Every other query site
+  already had an explicit `select=` and needed no change.
 - [ ] **Comprehensive accuracy audit, 2026-08-03 — all 4 criticals fixed live, 2 items left for
   Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
   **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus

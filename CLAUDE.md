@@ -15,11 +15,11 @@ accountable with real information instead of spin.
 4 critical findings fixed and verified live; public site built, merged, and independently verified
 in a real browser against live data; the Cloudflare Pages deploy is now actively being spec'd (in
 progress — see `TODO.md` NOW).** The repo holds the ingestion CLIs and adapters (`src/`), the
-public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0022 and 0024 applied; 0023
-drafted (its fix is confirmed functionally live already — see TODO.md — the file itself just
-hasn't been formally run) and 0025 drafted, both awaiting Lance's apply), and fixture-backed tests
-(`tests/`, 2,259 green). **Live numbers: run `npm run status`** — any count typed into a doc goes
-stale within the hour.
+public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0026 all applied — the
+newest three, 0023/0025/0026, all landed and verified live 2026-08-03; 0025's column-scoping had
+one real fallout, a `site/js/bill-page.js` query missing an explicit `select=`, fixed same pass —
+see TODO.md), and fixture-backed tests (`tests/`, 2,259 green). **Live numbers: run `npm run
+status`** — any count typed into a doc goes stale within the hour.
 
 **If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
 25 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open —
