@@ -96,13 +96,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | all`);
   }
   out.which = which;
   return out;
@@ -1509,6 +1509,73 @@ export async function runCorrectMoHouseChamber(client, {
 }
 
 // ============================================================================================
+// Correction — pierson-split: Tommie Pierson Sr./Jr. wrong merge (accuracy audit, 2026-08-03)
+// ============================================================================================
+//
+// FOUND LIVE: person 16b22ae8 auto-linked two legislator rows LegiScan's own data distinguishes
+// as different real people — father and son, legiscan_people_id 15900 (Sr., no suffix, HD-066
+// 2013-era) vs 18826 (Jr., suffix "Jr.", HD-066 2017+ era), clean non-overlapping 2015-16/2017-20
+// vote-year footprints (a seat-succession pattern, not one person), linked with empty seat
+// evidence — exactly the "unacceptable error class" this project's own identity-merge design
+// exists to prevent. Non-destructive, mirroring 0012_identity_merge.sql's own design ("a wrong
+// link is one UPDATE to undo") and the earlier live Bayh correction (same shape): delete the
+// person_links rows, null legislators.person_id on both, delete the now-empty person row. Neither
+// legislator row nor any vote_casts/terms row it owns is ever touched beyond person_id itself —
+// every real recorded vote stays exactly where it was, just no longer pooled under one composite
+// identity. A future link-persons.js run will re-cluster each row on its own; the same-source-key
+// contradiction guard (person-identity.js, this same audit) now permanently prevents them from
+// merging back together.
+//
+// Named, one-time correction (not a general "split any wrong merge" tool) — same precedent as
+// CANONICAL_MO_2026_SESSION_IDENTIFIER/DUPLICATE_MO_2026_SESSION_IDENTIFIER above. Deliberately
+// EXCLUDED from 'all': deleting a person row is a higher-stakes shape than any in-place UPDATE
+// correction in this file, so an operator must name it explicitly, same as mo-2026-session-merge.
+export const PIERSON_WRONG_PERSON_ID = '16b22ae8-1c6a-44a1-8236-dbd13a62eed8';
+export const PIERSON_LEGISLATOR_IDS = [
+  'f3cc4102-0562-4a55-a25f-a16d9bb27e26', // Sr. — legiscan_people_id 15900
+  '1e6a3144-4f53-4daf-995a-bba8a1e08c90', // Jr. — legiscan_people_id 18826
+];
+
+export async function runCorrectPiersonSplit(client, { dryRun = false } = {}) {
+  const { data: linkRows, error: linkErr } = await client
+    .from('person_links').select('id,person_id,legislator_id').in('legislator_id', PIERSON_LEGISLATOR_IDS);
+  if (linkErr) return { matched: 0, legislatorIds: [], failures: [{ reason: 'person_links_lookup_failed', error: String(linkErr.message ?? linkErr) }] };
+
+  const rows = (linkRows ?? []).filter((r) => r.person_id === PIERSON_WRONG_PERSON_ID);
+  if (rows.length === 0) {
+    return {
+      matched: 0, legislatorIds: [], alreadySplit: true, failures: [],
+    };
+  }
+  const legislatorIds = rows.map((r) => r.legislator_id);
+
+  if (dryRun) {
+    return {
+      matched: rows.length, legislatorIds, willDeletePerson: PIERSON_WRONG_PERSON_ID, failures: [],
+    };
+  }
+
+  const { error: delLinksErr } = await client.from('person_links').delete().in('legislator_id', PIERSON_LEGISLATOR_IDS);
+  if (delLinksErr) {
+    return { matched: 0, legislatorIds: [], personDeleted: false, failures: [{ reason: 'person_links_delete_failed', error: String(delLinksErr.message ?? delLinksErr) }] };
+  }
+
+  const { error: updErr } = await client.from('legislators').update({ person_id: null }).in('id', PIERSON_LEGISLATOR_IDS);
+  if (updErr) {
+    return { matched: rows.length, legislatorIds, personDeleted: false, failures: [{ reason: 'legislators_update_failed', error: String(updErr.message ?? updErr) }] };
+  }
+
+  const { error: delPersonErr } = await client.from('persons').delete().eq('id', PIERSON_WRONG_PERSON_ID);
+  if (delPersonErr) {
+    return { matched: rows.length, legislatorIds, personDeleted: false, failures: [{ reason: 'person_delete_failed', error: String(delPersonErr.message ?? delPersonErr) }] };
+  }
+
+  return {
+    matched: rows.length, legislatorIds, personDeleted: true, failures: [],
+  };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1567,6 +1634,12 @@ export async function runCorrectData(client, {
   if (which === 'mo-2026-vote-reconcile') {
     out.mo2026VoteReconcile = await runReconcileMo2026VotesStandalone(client, { dryRun, limit, runId });
     failures.push(...out.mo2026VoteReconcile.failures);
+  }
+  // pierson-split (2026-08-03) — deletes a person row; higher-stakes than any in-place UPDATE
+  // above, so deliberately excluded from 'all', same as mo-2026-session-merge.
+  if (which === 'pierson-split') {
+    out.piersonSplit = await runCorrectPiersonSplit(client, { dryRun });
+    failures.push(...out.piersonSplit.failures);
   }
 
   out.failures = failures;

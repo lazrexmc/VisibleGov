@@ -26,6 +26,9 @@ import {
   runCorrectLegiscanSourceSplit,
   runCorrectVoteDuplicates,
   runCorrectMoHouseChamber,
+  PIERSON_WRONG_PERSON_ID,
+  PIERSON_LEGISLATOR_IDS,
+  runCorrectPiersonSplit,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -63,6 +66,9 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     ingestion_runs: [],
     // vote-duplicates (2026-08-03) — same reasoning as ingestion_runs above.
     vote_duplicates: [],
+    // pierson-split (accuracy audit, 2026-08-03) — same reasoning as ingestion_runs above.
+    persons: [],
+    person_links: [],
     ...seed,
   };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
@@ -333,6 +339,82 @@ test('runCorrectMoHouseChamber: live run corrects exactly the rows dry-run repor
   assert.equal(client.tables.votes.find((v) => v.id === 'v-mislabeled-2').chamber, 'senate');
   assert.equal(client.tables.votes.find((v) => v.id === 'v-mislabeled-1').run_id, 'run-1');
   assert.equal(client.tables.votes.find((v) => v.id === 'v-correct-house').chamber, 'house', 'must never touch a correctly-labeled row');
+});
+
+// ---- runCorrectPiersonSplit ----
+// FOUND LIVE (accuracy audit, 2026-08-03): Tommie Pierson Sr. and Jr. — father and son, distinct
+// LegiScan ids, clean non-overlapping vote-year footprints — auto-merged into one person with
+// empty seat evidence. Non-destructive: mirrors 0012_identity_merge.sql's own design ("a wrong
+// link is one UPDATE to undo") — delete the person_links rows, null legislators.person_id on
+// both, delete the now-empty person row. Neither legislator row nor any vote_casts/terms row is
+// ever touched beyond person_id itself.
+
+function seedPiersonFixture() {
+  return {
+    legislators: [
+      { id: PIERSON_LEGISLATOR_IDS[0], full_name: 'Tommie Pierson', legiscan_people_id: 15900, person_id: PIERSON_WRONG_PERSON_ID },
+      { id: PIERSON_LEGISLATOR_IDS[1], full_name: 'Tommie Pierson', legiscan_people_id: 18826, person_id: PIERSON_WRONG_PERSON_ID },
+    ],
+    persons: [{ id: PIERSON_WRONG_PERSON_ID, display_name: 'Tommie Pierson', display_name_source: 'legiscan' }],
+    person_links: [
+      { id: 'pl-1', person_id: PIERSON_WRONG_PERSON_ID, legislator_id: PIERSON_LEGISLATOR_IDS[0], evidence: {}, decided_by: 'auto' },
+      { id: 'pl-2', person_id: PIERSON_WRONG_PERSON_ID, legislator_id: PIERSON_LEGISLATOR_IDS[1], evidence: {}, decided_by: 'auto' },
+    ],
+  };
+}
+
+test('runCorrectPiersonSplit: dry-run reports the exact rows it would touch, without writing', async () => {
+  const client = makeFakeClient(seedPiersonFixture());
+  const result = await runCorrectPiersonSplit(client, { dryRun: true });
+  assert.equal(result.matched, 2);
+  assert.deepEqual(result.legislatorIds.slice().sort(), [...PIERSON_LEGISLATOR_IDS].sort());
+  assert.deepEqual(result.failures, []);
+  assert.equal(client.tables.persons.length, 1, 'dry-run must never write');
+  assert.equal(client.tables.person_links.length, 2, 'dry-run must never write');
+});
+
+test('runCorrectPiersonSplit: live run deletes both person_links rows, nulls person_id on both legislators, and deletes the now-empty person row', async () => {
+  const client = makeFakeClient(seedPiersonFixture());
+  const dry = await runCorrectPiersonSplit(client, { dryRun: true });
+  const live = await runCorrectPiersonSplit(client, { dryRun: false });
+  assert.equal(live.matched, dry.matched);
+  assert.equal(live.personDeleted, true);
+  assert.deepEqual(client.tables.person_links, []);
+  assert.deepEqual(client.tables.persons, []);
+  for (const id of PIERSON_LEGISLATOR_IDS) {
+    assert.equal(client.tables.legislators.find((l) => l.id === id).person_id, null);
+  }
+});
+
+test('runCorrectPiersonSplit: a second run after the split is a clean, honest no-op — never re-deletes or errors', async () => {
+  const client = makeFakeClient(seedPiersonFixture());
+  await runCorrectPiersonSplit(client, { dryRun: false });
+  const second = await runCorrectPiersonSplit(client, { dryRun: false });
+  assert.equal(second.matched, 0);
+  assert.equal(second.alreadySplit, true);
+  assert.deepEqual(second.failures, []);
+});
+
+test('runCorrectPiersonSplit: never touches an unrelated person/legislator row', async () => {
+  const client = makeFakeClient({
+    ...seedPiersonFixture(),
+    legislators: [
+      ...seedPiersonFixture().legislators,
+      { id: 'leg-unrelated', full_name: 'Someone Else', person_id: 'person-unrelated' },
+    ],
+    persons: [
+      ...seedPiersonFixture().persons,
+      { id: 'person-unrelated', display_name: 'Someone Else', display_name_source: 'legiscan' },
+    ],
+    person_links: [
+      ...seedPiersonFixture().person_links,
+      { id: 'pl-unrelated', person_id: 'person-unrelated', legislator_id: 'leg-unrelated', evidence: {}, decided_by: 'auto' },
+    ],
+  });
+  await runCorrectPiersonSplit(client, { dryRun: false });
+  assert.equal(client.tables.persons.find((p) => p.id === 'person-unrelated') != null, true);
+  assert.equal(client.tables.legislators.find((l) => l.id === 'leg-unrelated').person_id, 'person-unrelated');
+  assert.equal(client.tables.person_links.find((l) => l.id === 'pl-unrelated') != null, true);
 });
 
 // ---- parseArgs ----
