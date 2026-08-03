@@ -278,8 +278,28 @@ git commit -m "feat: draft migration - vote_duplicates table + exclusion in publ
 - Test: `tests/legiscan-votes.test.js`
 
 **Interfaces:**
-- Produces: on a `reason: 'tally_unique_match'` result only, the returned object also carries `primaryVoteId: <uuid>` — the matched primary-source `votes.id`. Every other branch's return shape is unchanged (no `primaryVoteId` key at all — not `null`, simply absent, so a consumer can reliably check `'primaryVoteId' in result`).
-- Consumes: nothing new — `primaryVote.id` (single-candidate path) and `selectedCandidate.id` (multi-candidate tally-unique path) are already in scope at both return sites.
+- Produces: on EVERY branch where `matched: true` (there are three, not two — see the correction
+  note immediately below), the returned object also carries `primaryVoteId: <uuid>` — the matched
+  primary-source `votes.id`. Every non-matched branch's return shape is unchanged (no
+  `primaryVoteId` key at all — not `null`, simply absent, so a consumer can reliably check
+  `'primaryVoteId' in result`).
+- Consumes: nothing new — `primaryVote.id` is already in scope at two of the three return sites, `selectedCandidate.id` at the third.
+
+**Correction found live, during Task 3's own test run (kept here so this plan reflects what was
+actually built, not the original — incomplete — assumption):** `crossCheckAgainstPrimarySource` has
+**three** `matched: true` return sites, not two. The original spec/plan only found the two that also
+set `reason: 'tally_unique_match'` (found via grep for that literal string). A third, earlier branch
+— the plain singleton/singleton clean match (one primary candidate, no same-day LegiScan siblings,
+tallies simply agree) — also returns `matched: true` but has never set `reason` at all, and a
+real ingest-level test run against actual fixture data (roll call 774411, HB3 senate) proved this
+branch is reachable and was silently skipped by a `reason`-string-based gate. Fix: add
+`primaryVoteId` to this third branch too (`legiscan-votes.js`, the `hardMismatches.length === 0 &&
+softMismatches.length === 0` check inside the `candidates.length === 1` branch's FIRST comparable-
+data check, before the tally-unique-selection logic further down) — WITHOUT adding a `reason` there,
+since `ingestLegiscanRollCalls`'s own `crossCheckFlags.tally_unique_match` counter already relies on
+`reason` being absent from this specific branch to keep its own existing meaning (disambiguation-
+resolved matches only) intact. Task 3's consumer gate uses `crossCheck.matched`, never
+`crossCheck.reason`, for exactly this reason.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -483,9 +503,13 @@ existing vote insert and `voteSel.id` lookup (currently ending at line 613) and 
 ```javascript
     // Severity/dedup follow-up (2026-08-03): a clean primary-source correspondence marks the
     // duplicate additively — both rows stay stored, forever, fully traceable (vote_duplicates,
-    // migration 0022). insertIfAbsent on superseded_vote_id (its own unique constraint) makes this
-    // safe to re-run: an already-marked pair is a harmless no-op, never a duplicate-key error.
-    if (crossCheck.reason === 'tally_unique_match' && crossCheck.primaryVoteId) {
+    // migration 0022). Gated on `matched` (set on EVERY clean-match branch in
+    // crossCheckAgainstPrimarySource, including the plain singleton/singleton one that carries no
+    // `reason` at all) — never on `reason`, which only distinguishes HOW disambiguation happened
+    // and is not set on every clean-match branch. insertIfAbsent on superseded_vote_id (its own
+    // unique constraint) makes this safe to re-run: an already-marked pair is a harmless no-op,
+    // never a duplicate-key error.
+    if (crossCheck.matched && crossCheck.primaryVoteId) {
       // eslint-disable-next-line no-await-in-loop
       await insertIfAbsent(client, 'vote_duplicates', [{
         canonical_vote_id: crossCheck.primaryVoteId,
@@ -702,7 +726,9 @@ export async function runCorrectVoteDuplicates(client, {
 
       // eslint-disable-next-line no-await-in-loop
       const crossCheck = await crossCheckAgainstPrimarySource(client, v.bill_id, legiscanTallies, siblingTallies);
-      if (crossCheck.reason === 'tally_unique_match' && crossCheck.primaryVoteId) {
+      // Gated on `matched`, never `reason` — see Task 2's correction note and Task 3's own gate for
+      // why: one of the three clean-match branches never sets `reason` at all.
+      if (crossCheck.matched && crossCheck.primaryVoteId) {
         matched += 1;
         if (!dryRun) {
           // eslint-disable-next-line no-await-in-loop
