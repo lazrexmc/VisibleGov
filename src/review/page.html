@@ -105,6 +105,7 @@
   <section class="pane pane-draft">
     <div id="vote-strip" class="vote-strip">No vote on file.</div>
     <div id="verification-strip" class="verify-strip verify-unverified"></div>
+    <div id="missing-provisions"></div>
     <div id="draft-rendered"></div>
     <label for="draft-edit">Edit draft (Markdown)</label>
     <textarea id="draft-edit" rows="12"></textarea>
@@ -292,6 +293,46 @@
     }
   }
 
+  // renderMissingProvisions(missing) — severity-sorted review queue (2026-08-03). This data has
+  // existed since the completeness axis shipped but was never rendered by this server before.
+  // Renders nothing (not an empty heading) when there's nothing missing — same "don't show empty
+  // sections" convention renderVerification already follows for the flagged-bullets list above.
+  // Provision/section text is model output and MUST be rendered via textContent, never innerHTML,
+  // same rule renderVerification's own comment states for verifier-provided strings.
+  function renderMissingProvisions(missing) {
+    var container = document.getElementById('missing-provisions');
+    container.textContent = '';
+    if (!missing || missing.length === 0) return;
+
+    var heading = document.createElement('div');
+    heading.className = 'verify-label';
+    heading.textContent = 'Missing provisions';
+    container.appendChild(heading);
+
+    var list = document.createElement('ul');
+    list.className = 'verify-flags';
+    for (var i = 0; i < missing.length; i++) {
+      var li = document.createElement('li');
+      li.textContent = missing[i].section + ': ' + missing[i].provision;
+      list.appendChild(li);
+    }
+    container.appendChild(list);
+  }
+
+  // describeIssueCount(item) -> a short label suffix. Severity-sorted review queue (2026-08-03): a
+  // single-issue item names the ONE thing wrong (a citation-lookup-sized task — knowing what it is
+  // is most of the fix); a multi-issue item just gives the count (naming three things in one
+  // dropdown line is unreadable — open the item for detail).
+  function describeIssueCount(item) {
+    if (item.issue_count === null || item.issue_count === undefined) return 'unverified';
+    if (item.issue_count === 0) return 'clean';
+    if (item.issue_count === 1) {
+      var missing = item.missing_provisions && item.missing_provisions[0];
+      return missing ? '1 issue: missing "' + missing.section + '"' : '1 issue';
+    }
+    return item.issue_count + ' issues';
+  }
+
   async function loadQueue() {
     const select = document.getElementById('queue');
     let items = [];
@@ -310,7 +351,7 @@
       return;
     }
     for (const it of items) {
-      const label = '[' + it.status + '] ' + (it.bill ? it.bill.identifier : '?') + ' — ' + (it.bill && it.bill.title ? it.bill.title : '');
+      const label = '[' + it.status + '] ' + (it.bill ? it.bill.identifier : '?') + ' — ' + (it.bill && it.bill.title ? it.bill.title : '') + ' (' + describeIssueCount(it) + ')';
       select.appendChild(new Option(label, it.id));
     }
     if (!currentId || !items.some((it) => it.id === currentId)) currentId = items[0].id;
@@ -334,6 +375,7 @@
       lastLoadedBodyMd = data.summary.body_md || '';
       currentSummaryStatus = data.summary.status;
       renderVerification(data.verification || null);
+      renderMissingProvisions(data.missing_provisions || []);
       updateActionButtons(data.summary.status);
 
       const vs = document.getElementById('vote-strip');
