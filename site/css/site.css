@@ -355,6 +355,27 @@ main#app.bill-not-found section:not(#bill-identity) {
   border-left: 2px solid var(--muted);
 }
 
+/* Bullet-citation-exposure design (2026-08-02) — same treatment as .gloss-term/.gloss-quote above,
+   deliberately: both are "click to see the receipt behind this claim" affordances, so they should
+   look and behave the same way. A bullet with no citation on file keeps the old plain, unstyled
+   .bill-summary-bullet-section span — this rule only applies to the interactive variant. */
+.bill-citation-toggle {
+  cursor: pointer;
+  border-bottom: 1px dotted var(--link);
+}
+
+.bill-citation-toggle:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.bill-citation-quote {
+  color: var(--muted);
+  margin: 0.35rem 0;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--muted);
+}
+
 /* Task 10 — the trust page (site/trust.html / site/js/trust-page.js). Functional only, same
    minimal-polish level as every other page's first pass. */
 
