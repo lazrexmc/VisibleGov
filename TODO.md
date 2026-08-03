@@ -22,28 +22,68 @@
   real `summaries`/`glossary_terms` query sites in `site/js/`, AND a real Playwright browser load
   of an actual bill page (summary rendered correctly, zero console errors). Every other query site
   already had an explicit `select=` and needed no change.
-- [ ] 🔴 **Senior engineering audit, 2026-08-03 — 21/21 findings confirmed (0 refuted), 1 is a LIVE
-  data-integrity defect, none fixed yet.** Full report:
-  `docs/audits/2026-08-03-senior-engineering-audit.md`. Different lens than the accuracy audit below
-  — architecture, operational resilience, DB/migration hygiene, testing quality, security
-  architecture, code quality, scalability, and a fresh adversarial re-review of everything shipped
-  tonight (migrations 0022-0026 + all corrections). 33 agents, every critical/important finding
-  independently re-verified by a second agent trying to refute it — nothing survived refutation.
-  **Top priority — a shipped remediation is silently defeated right now:** `runCorrectVoteDuplicates`
-  (`correct-data.js:1415`) uses a bare `.select()` against 8,221 legiscan votes; PostgREST caps it at
-  1,000, so the scan only ever sees 12% of its target and `vote_duplicates` has stayed empty. Verifier
-  found 63 real duplicate pairs beyond row 1,000 (all 2018 MO Senate) — ~2,100 double-counted casts
-  currently live in public aggregates, and this **refutes the CHATLOG's recorded conclusion** that the
-  backfill's `matched:0` was "not a bug." Fix = route through `selectAll`, re-run the backfill,
-  refresh aggregates. **Everything else found fails the same way — silently:** no alerting exists
-  anywhere in the project (a dead scheduler or a revoked key both read as healthy forever); the 0026
-  outage fix is enforced only by a comment, not a guard; migration 0022 still contains both
-  already-superseded definitions and a partial re-paste of it would silently revert 0023/0026; a
-  genuine 3-node import cycle in `src/cli` (empirically demonstrated to crash under the right entry
-  point); the two MO ingest CLIs carry parallel-drifting copies of ToU-compliance code (the production
-  scheduler already depends on cross-copy identity that isn't enforced). Zero criticals; security and
-  supply-chain came back clean. Full prioritized list and a "one week" fix-order plan in the report.
-  **Not yet started — awaiting Lance's direction on scope/order.**
+- [x] ✅ **Senior engineering audit, 2026-08-03 — 21/21 findings confirmed (0 refuted); 19 of 21
+  fixed live same-day (the 2 demoted to minor by the audit's own verifier were deliberately deferred
+  — see the audit doc's own "next real change to that file" framing).** Full report:
+  `docs/audits/2026-08-03-senior-engineering-audit.md`. Fixed in 8 commits, full suite green
+  throughout (2,290/2,290, `ℹ fail 0` at every step):
+  1. ✅ **The live data defect** — `runCorrectVoteDuplicates`'s bare `.select()` (truncated at 1,000
+     of 8,221 legiscan votes) routed through `selectAll`; regression test seeds 1,200 pairs and
+     fails against the old code. **Live correction run: 59/59 matched** (26 written by an earlier
+     attempt that hit a client-side timeout mid-run, 33 more by the completed run — fully additive/
+     idempotent, verified via a direct REST count: `vote_duplicates` now has exactly 59 rows).
+     `trust-page.js`'s own cast count switched to `public_vote_feed` (was reading raw `vote_casts`,
+     which would have kept including exactly what this fix now excludes).
+  2. ✅ Scheduler ops resilience: optional dead-man's-switch ping (`HEALTHCHECK_PING_URL`, inert
+     until Lance sets it), `aggregatesAttempted`/`aggregatesHealthy` split (the old field only ever
+     meant "attempted," and all 13 real 0026-outage ticks logged `healthy:true` throughout),
+     `refresh-aggregates.js` now writes a durable `ingestion_runs` row (existing freshness surface
+     catches staleness for free), new `all-lookups-failed` scheduler mode (a revoked key was
+     mechanically reproduced to degrade into an indefinite healthy-looking "nothing-due" state).
+  3. ✅ `probe-public-surface.js` extended for 0024/0025 (column-denial + real site-query replay,
+     ran live — all pass); a migration-text test dynamically pins whichever migration currently
+     redefines `refresh_vote_aggregates()` to still fold `statement_timeout` into its own
+     declaration, so a future redefinition can't silently drop it again unnoticed.
+  4. ✅ Ingest-boundary hardening: unguarded XML root access in `us-congress.js`/`us-senate.js`
+     (200-status non-roll-call bodies used to crash the whole run) now fails loud with a typed
+     guard; `http.js`'s body-read step (not just the connection) now wraps into `SourceFetchError`;
+     `mo-house-xml.js`'s `parseMoBillList` no longer silently returns `[]` on a malformed
+     BillList.XML; `ingest-mo-house.js` gets the same roll-call-PDF quarantine pattern for
+     bill-detail parses (a single permanently-bad bill used to wedge the entire 1,946-bill backlog
+     behind it forever).
+  5. ✅ `SUPERSEDED-BY` headers on migrations 0016/0018/0018a/0019/0020/0022 — every dead-but-present
+     view/function definition now names what replaced it, right at the block someone would copy
+     from.
+  6. ✅ Static, offline site-query/grant contract test (parses 0025's own GRANT list, scans every
+     real `site/js/` query — proven to fail against the exact pre-fix `bill-page.js` shape); the 4
+     backfill test files that read the real, gitignored, weekly-mutating `legiscan-datasets` cache
+     now skip honestly on a fresh clone (verified: hiding the real cache produces exactly 12 clean
+     skips, matching the audit's own citation, restoring it goes back to 0 skips/all real) instead
+     of failing confusingly; a hardcoded `datasetDate` pin (a live time-bomb) floored instead.
+  7. ✅ Docs: README runbook section (prerequisites, tests, local dev server, the one canonical
+     migration-apply description); the API-spend-approval sentence now states the active suspension
+     explicitly; `CLAUDE.md`'s exact test count switched to magnitude language; `CONTROLLER_BRIEFING.md`
+     gets a top-of-file banner — migration-applied-state claims anywhere in that dated, sequentially-
+     refreshed doc are not authoritative, several were already stale (0023/0025 both landed after its
+     last refresh pass; 0026 isn't in it at all).
+  8. ✅ Architecture: the genuine 3-node `src/cli` import cycle (`ingest-legiscan.js` →
+     `correct-data.js` → `ingest-mo-senate.js` → back) dissolved by promoting `mapMoStatusCode`
+     (+ vocabulary) and `journalPdfBasename` to `src/lib`; the byte-identical ToU-cooldown trio and
+     JSON-cache mechanism duplicated across `ingest-mo-house.js`/`ingest-mo-senate.js` extracted to
+     `src/lib` too — `scripts/scheduled-ingest.js` now imports the cooldown trio from `src/lib`
+     directly instead of from a 1,322-line CLI file (it had been depending on the senate copy for
+     ALL FIVE registry sources' due-ness, undeclared).
+  **Deliberately deferred (both demoted to minor by the audit's own adversarial verifier):**
+  `handleIdentityDecision`'s 378-line/71-branch size (exhaustively test-pinned already; extract on
+  the next real change to that file) and the README policy-sentence/count issue (fixed above
+  anyway, folded into item 7).
+  **One follow-up still open:** the manual `npm run refresh:aggregates` call hit a client-side
+  "upstream request timeout" / "lock timeout" across several retry attempts post-fix (distinct from
+  the DB-side 600s `statement_timeout` migration 0026 already fixed — this looks like a shorter
+  gateway-level HTTP timeout, not yet root-caused). The underlying data fix is verified correct and
+  live regardless (direct REST count confirms `vote_duplicates` = 59 rows); the matviews will pick
+  it up on the next scheduler tick that writes rows (automatic, no action needed) or the next manual
+  `npm run refresh:aggregates` retry.
 - [ ] **Comprehensive accuracy audit, 2026-08-03 — all 4 criticals fixed live, 2 items left for
   Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
   **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus

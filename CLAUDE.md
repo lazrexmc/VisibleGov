@@ -11,14 +11,15 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
-**Status (2026-08-03): backend live and accurate — an 8-domain accuracy audit ran end-to-end, all
-4 critical findings fixed and verified live; public site built, merged, and independently verified
-in a real browser against live data; the Cloudflare Pages deploy is now actively being spec'd (in
-progress — see `TODO.md` NOW).** The repo holds the ingestion CLIs and adapters (`src/`), the
-public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0026 all applied — the
-newest three, 0023/0025/0026, all landed and verified live 2026-08-03; 0025's column-scoping had
-one real fallout, a `site/js/bill-page.js` query missing an explicit `select=`, fixed same pass —
-see TODO.md), and fixture-backed tests (`tests/`, 2,300+ green — run `node --test` for the exact
+**Status (2026-08-03): backend live and accurate — two independent audits ran end-to-end this same
+day (an 8-domain accuracy audit, then a senior-engineering-lens audit), 4 + 19 findings fixed and
+verified live respectively; public site built, merged, and independently verified in a real browser
+against live data; the Cloudflare Pages deploy is now actively being spec'd (in progress — see
+`TODO.md` NOW).** The repo holds the ingestion CLIs and adapters (`src/`), the public site
+(`site/`), schema migrations (`supabase/migrations/`, 0001-0026 all applied — the newest three,
+0023/0025/0026, all landed and verified live 2026-08-03; 0025's column-scoping had one real
+fallout, a `site/js/bill-page.js` query missing an explicit `select=`, fixed same pass — see
+TODO.md), and fixture-backed tests (`tests/`, 2,300+ green — run `node --test` for the exact
 current count; a senior engineering audit, 2026-08-03, flagged exact test-count citations in docs
 as needless churn — prefer magnitude language like this one). **Live numbers: run `npm run
 status`** — any count typed into a doc goes stale within the hour.
@@ -26,16 +27,20 @@ status`** — any count typed into a doc goes stale within the hour.
 **If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
 25 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open —
 currently mid-brainstorm on the Cloudflare deploy spec, resume point documented there), `docs/
-CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history), then the most
-recent `CHATLOG.md` entries (why things are the way they are).
+CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its own
+staleness banner as of 2026-08-03, defer to `TODO.md`/live checks for migration-applied state),
+then the most recent `CHATLOG.md` entries (why things are the way they are).
 
 **Known, disclosed limitation, not an open defect in the fix itself:** the cross-adapter
-vote-duplicate dedup (migration 0022) is applied and live, but its backfill correctly yields ~0
-matches for MO House specifically — a separate, deeper gap (the MO House roll-call-PDF pipeline
-resolves casts against a roster containing exactly one real legislator, a leftover test fixture)
-leaves most MO House per-legislator vote data structurally incomplete. Real, honestly rendered by
-the site (no fabricated "did not vote" claim), still open — see `TODO.md` NOW, "MO House
-per-legislator vote coverage."
+vote-duplicate dedup (migration 0022) is applied and live; its backfill was itself found and fixed
+2026-08-03 (a bare `.select()` had silently truncated the scan to 12% of its target — see
+`docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries 59 real
+matched pairs, all 2018 MO Senate. It still correctly yields ~0 matches for MO House specifically —
+a separate, deeper gap (the MO House roll-call-PDF pipeline resolves casts against a roster
+containing exactly one real legislator, a leftover test fixture) leaves most MO House
+per-legislator vote data structurally incomplete. Real, honestly rendered by the site (no
+fabricated "did not vote" claim), still open — see `TODO.md` NOW, "MO House per-legislator vote
+coverage."
 
 **Two standing rules that are easy to violate without noticing:**
 - **Cloudflare deploy is a MILESTONE, not a task** (Lance, 2026-07-31): *"I'm only interested in

@@ -1883,3 +1883,87 @@ copies of ToU-compliance machinery, and the production scheduler already depends
 identity between them that nothing enforces. Full prioritized list, "if I had one week" order, and
 appendix of minor/informational items in the report. `TODO.md` NOW updated with the summary and
 top-priority item; nothing implemented yet — awaiting Lance's direction on scope/order.
+
+
+---
+
+## 2026-08-03 (continued) — "Make the needed fixes"
+
+**Lance:** "Make the needed fixes"
+
+All 19 actionable findings from the senior engineering audit fixed live, in 8 commits
+(`c7ea394`..`529bdde`), full suite green throughout (2,290/2,290, `ℹ fail 0` at every checkpoint —
+gated on the extracted count, never process exit status, per the standing rule). The 2 findings the
+audit's own verifier demoted to minor were deliberately deferred, not silently dropped.
+
+**The live data defect came first.** `runCorrectVoteDuplicates`'s bare `.select()` fixed via
+`selectAll`; regression test seeds 1,200 pairs (one past the server cap) and was verified to fail
+against the pre-fix code before confirming green. Ran the correction dry-run first (59 matched,
+where it previously reported 0), then live — an early foreground attempt hit a 590s shell timeout
+mid-run and had already written 26 rows by then; re-ran in the background and it correctly resumed,
+finding the remaining 33 (26 + 33 = 59, matching the dry-run exactly — additive, idempotent, no
+duplicate or partial writes, verified via a direct REST count against `vote_duplicates`). This also
+refutes the earlier CHATLOG entry that called the backfill's `matched:0` "not a bug" — it wasn't a
+bug in the backfill's matching logic, but the SCAN feeding it was silently blind to 88% of its own
+target population the whole time.
+
+**Then the rest, roughly in the audit's own "if I had one week" order:** scheduler alerting
+(opt-in dead-man's-switch ping) + honest `aggregatesHealthy` field + a durable `ingestion_runs` row
+for every refresh + a new `all-lookups-failed` mode (mechanically reproduced a revoked service-role
+key degrading to an indefinite healthy-looking "nothing-due" state); `probe-public-surface.js`
+extended for 0024/0025 and run live against production (all new checks pass); a migration-text test
+that dynamically tracks whichever migration currently redefines `refresh_vote_aggregates()`, not
+pinned to 0026 by filename; unguarded-XML-root crashes fixed in both federal adapters (ported the
+guard `parseSenateRollCall` already had); `http.js` body-reads now wrapped in the same typed-error
+contract the connection itself already had; `mo-house-xml.js`'s `parseMoBillList` no longer
+silently returns `[]` on a malformed response; `ingest-mo-house.js` gets the same roll-call-PDF
+quarantine pattern for bill-detail parses (a single bad bill used to wedge the whole 1,946-bill
+backlog forever); `SUPERSEDED-BY` headers on the five migrations with dead-but-present definitions;
+a static offline site-query/grant contract test (verified it fails against the exact pre-fix
+`bill-page.js` shape); the 4 backfill test files that depend on the real, gitignored
+`legiscan-datasets` cache now skip honestly on a fresh clone — verified both directions by actually
+hiding the real cache dir (12 clean skips, matching the audit's own citation exactly) and restoring
+it (0 skips, all real); a live `datasetDate` time-bomb floored instead of pinned; README runbook
+section (this repo never had one — `serve-site.js` wasn't referenced anywhere); the API-spend
+policy sentence now states the active suspension explicitly instead of contradicting `CLAUDE.md`;
+`CONTROLLER_BRIEFING.md` gets a top-of-file staleness banner rather than a doomed attempt to hunt
+down every scattered stale migration-state claim in a doc that will just go stale again.
+
+**Last: the two architecture findings, done most carefully, last, after everything else was green.**
+Dissolved the genuine 3-node `src/cli` import cycle (`ingest-legiscan.js` → `correct-data.js` →
+`ingest-mo-senate.js` → back) by promoting `mapMoStatusCode`+vocabulary and `journalPdfBasename` to
+`src/lib` — confirmed the cycle's two target edges are actually gone via direct grep, not just
+"tests still pass," and added a guard test asserting `src/lib` never imports from `src/cli` plus
+reference-identity checks so the promoted functions can't quietly grow a second copy. Then extracted
+the byte-identical ToU-cooldown trio and JSON-cache mechanism duplicated across
+`ingest-mo-house.js`/`ingest-mo-senate.js` — the verifier's own finding that the production
+scheduler depended on the *senate* copy for *all five* registry sources' due-ness (not just senate)
+made this the more urgent of the two extractions, not just tidiness; `scheduled-ingest.js` now
+imports the trio from `src/lib` directly. Made two real mistakes while doing this and caught both
+before committing: twice wrote `export { x } from '../lib/...'` in a file that also uses `x`
+internally, which doesn't create a local binding (a re-export, not an import) — caught immediately
+by the module failing to load, fixed by adding a real `import` alongside the re-export.
+
+**Made an early process mistake worth naming:** in the mo-house-xml quarantine tests, one new test
+deliberately exercises `runMoHouse`'s real `partial`-status path, which sets the actual
+`process.exitCode` — since Node's test runner runs a whole file in one process, that tainted the
+file's own reported exit code even though every individual assertion passed, surfacing as an
+unexplained whole-file failure with zero diagnostic. Root-caused by bisecting with
+`--test-name-pattern` down to the one test, then recognizing the pattern; fixed by
+saving/restoring `process.exitCode` around that one test. Worth remembering: any test that exercises
+a CLI's real failure-reporting path (not just a mocked/injected one) needs this guard if the CLI sets
+`process.exitCode` directly rather than throwing.
+
+**One follow-up left open, not a regression:** manually running `npm run refresh:aggregates` after
+the live correction hit "upstream request timeout" / "lock timeout" across several retries — a
+different (shorter, HTTP/gateway-level) timeout than the 600s DB-side `statement_timeout` migration
+0026 already fixed, not yet root-caused. The underlying fix itself is separately verified correct
+and live (a direct REST count confirms `vote_duplicates` has exactly 59 rows, matching the
+dry-run's own prediction) — the matviews will pick this up automatically on the next scheduler tick
+that writes rows, or the next manual retry, whichever comes first.
+
+`TODO.md` NOW updated with the full fix list per finding. This session made no attempt to reinstate
+the suspended per-run API-spend approval policy (still Lance's own call, per his 2026-08-03 note)
+and made zero live Claude/LLM API calls — every fix in this pass was mechanical code/test/doc work
+plus one live, tested, dry-run-then-live data correction, the same pattern already established for
+every other correction this session.
