@@ -63,6 +63,124 @@
 *second independent report) — doesn't affect the fix's correctness since it's structural/symmetric,*
 *but flagged here as an open intellectual loose thread rather than asserted as solved.*
 
+*Refresh pass 2026-08-03 (continued) — a SECOND pass, later the same day, after Lance went AFK on a*
+*broad documentation-refresh instruction. Sections 1, 3 and 5 rewritten again below. Every number in*
+*this note was independently re-derived this pass via direct Supabase REST queries with the*
+*service-role key (`HEAD` + `Prefer: count=exact`, or a live command), not copied from CHATLOG/TODO*
+*prose, though cross-checked against both — this project's own "never trust a self-report" discipline*
+*applied to the session summary that prompted this pass, not just to code.*
+
+**The comprehensive 8-domain accuracy audit (`docs/audits/2026-08-03-comprehensive-accuracy-audit.md`)
+ran; its own summary line and re-grepped `###` headers agree: 4 critical + 12 important = 16
+findings. All 4 criticals are fixed and independently confirmed live this pass, not assumed from the
+audit doc's own text:**
+1. SB 914 (`vote_reconciliation_flags` id `214a2be0-7e14-4941-a024-31d1e9223b05`) — root-caused
+(LegiScan's own roll-call data omits Sens. Moon and Roberts entirely — its own `total` field says 32
+of 34 real members), correctly left for Lance to adjudicate rather than auto-resolved. Queried this
+exact row live: still `resolved: false`.
+2. FECA/BBEDCA glossary corrections (`correct-data.js glossary-refuted-claims`) — live.
+3. All 7 corrupted glossary terms repaired (`correct-data.js glossary-corrupted-text`); a
+`hasTextCorruption` gate now blocks this class in `auto-publish-glossary.js` going forward.
+4. Tommie Pierson Sr./Jr. split back into two unlinked rows (`correct-data.js pierson-split`) —
+confirmed live by direct query: both `Tommie Pierson` legislator rows exist (`1e6a3144…` /
+`f3cc4102…`) with zero `person_links` rows referencing either. This is the change that moves
+`persons` **37 → 36** and `person_links` **76 → 74** (both re-verified live this pass — see counts
+below). `docs/DATA_INVENTORY.md` was independently re-verified and corrected to 36/74 in a parallel
+pass the same day (confirmed by file mtime and by direct query — do not assume it's still stale on
+this point without checking fresh). A `finalPairStatus` same-source-key
+contradiction guard (`person-identity.js`) now prevents this exact class of wrong merge permanently.
+Also fixed, both live: `buildMoVoteRows`'s chamber-hardcoding bug (`mo-house-xml.js`) + 3 live
+mislabeled Senate votes corrected (`correct-data.js mo-house-chamber`).
+
+**Migrations: 26 files now** (`ls supabase/migrations/`: 0001-0025 numbered + 0018a), up from 23 at
+the earlier 08-03 pass. Applied-vs-drafted, each re-confirmed live this pass individually:
+- **0022 (vote duplicates) — now CONFIRMED APPLIED AND LIVE**, upgraded from the earlier-today
+pass's "drafted, confirmed NOT applied." `node --env-file=.env scripts/probe-public-surface.js` now
+PASSES its `public_votes` check (was failing "migration 0022 not applied yet" at the last pass);
+`votes` and `public_votes` report the identical live count (10,043) for both the anon key and the
+service-role key. **`vote_duplicates` itself currently holds exactly 0 rows** (confirmed via both
+keys) — matches TODO.md's own report that the backfill found zero clean matches, a documented,
+reasoned zero (MO's own `vote_casts` lacks enough per-legislator rows on the one traced candidate
+pair to pass `isPrimaryCastDataComparable`), not a bug. Worth stating plainly: **the dedup mechanism
+is live and wired correctly end-to-end, but is currently excluding nothing from any public surface,
+because nothing has been marked yet.**
+- **0023 (vote_duplicates RLS + view-drift fix) — confirmed still drafted, NOT applied.** Its claim
+— that live production already runs `public_vote_feed`/`public_votes` as owner-bypass rather than the
+committed file's `security_invoker = true`, per the audit's own "planner-cost discrimination"
+technique — **I attempted to independently reproduce this same class of check this pass and could
+NOT get a signal that actually discriminates the two hypotheses.** `Prefer: count=planned`
+(PostgREST's EXPLAIN-based estimate) against `public_votes`/`public_vote_feed` returned
+byte-identical numbers for the anon key and the service-role key (52 and 7,334) — but both are
+almost exactly 0.5% of the relevant base table's own planned count (`votes` 10,355, `vote_casts`
+1,466,707), which is Postgres's documented default selectivity constant for an anti-join/`IS NULL`
+pattern absent real correlation statistics — a value the planner would produce identically regardless
+of role or RLS visibility. So this replication is inconclusive, not confirmatory, and I'm recording
+that as a real gap in my own re-verification rather than rubber-stamping the earlier claim. What IS
+certain, independent of the invoker/bypass question entirely: since `vote_duplicates` holds 0 rows
+right now, there is nothing for the exclusion to hide from anon either way — the practical stakes of
+resolving which posture is actually live are zero until a real duplicate gets marked. A genuine
+functional test (mark one row as service-role, query as anon, unmark) would settle it conclusively;
+this pass's read-only mandate excludes it.
+- **0024 (lock down `legiscan_datasets` from anon) — confirmed applied and live**, matches the
+earlier pass: anon key gets `200 []` (0 of 31 rows) this pass too, service-role gets all 31 intact.
+- **0025 (column-scope anon on `summaries`/`glossary_terms`) — confirmed drafted, NOT applied.**
+Direct anon query this pass: `summaries?select=*` still returns `model`, `prompt_version`,
+`bill_text_hash`, `run_id`; `glossary_terms?select=*` still returns `source_hash`, `needs_mapping`,
+`prompt_version`, `run_id` alongside the public-facing columns — exactly the leak 0025 is drafted to
+close.
+
+**The MO House per-legislator vote-coverage gap — independently confirmed at the row level this
+pass, not just directionally.** Direct query: `legislators?mo_house_id=not.is.null` returns exactly
+**one** row (Mark Matthiesen, `mo_house_id='107'`). Direct query joining `vote_casts` to `votes`
+where `source_key ilike 'mo-house-xml%'`: **18 casts total in the entire database, all 18 belonging
+to that same one legislator id** — zero belong to anyone else. `terms` rows for
+`chamber='house', jurisdiction_id='mo-legislature'` number 159 (in line with the ~163 MO House seats
+TODO.md cites). This is starker than "162 of ~163 show zero" — closer to "every single MO House vote
+cast on record belongs to one fixture row." Explicitly out of scope for the Cloudflare deploy spec
+(Lance's own scoping call, 2026-08-03); still open, still a site-content decision for Lance (ship
+visibly as-is, or add an explicit completeness caveat to `person-page.js`'s MO House section first).
+
+**Live-reverified counts this pass (direct Supabase REST, service-role key, unless noted):**
+- Test suite: **2,259/2,259 green**, 0 fail (`node --test` from repo root, up from 2,235).
+- Migrations: **26 files** (was 23) — status of each new one above.
+- PLAYBOOK_DELTA: **25 lessons** (was 24). `grep '^## Lesson'` alone finds only 12 (Lessons 14-25,
+the only ones with an individual `## Lesson N` heading) — Lessons 1-13 are numbered list items
+inside §7 with no heading of their own, so quoting that grep count as "the lesson count" without this
+context (as an earlier pass's phrasing risked) undercounts by 13. Total is 13 + 12 = **25**. Lesson
+25 ("The Bash tool strips a layer of backslash-escaping before Node ever sees a `-e` command") is
+new since the earlier 08-03 pass, landed live during today's glossary-corruption diagnosis.
+- CHATLOG.md: **1,750 lines** (was 1,430).
+- `persons`: **36** (was 37 — the Pierson split). `person_links`: **74** (was 76). `legislators`:
+1,607 (unchanged). `identity_flags`: 16 total, **4 open** (`resolved=false`, unchanged).
+- `vote_reconciliation_flags`: **61 open** (was 49), 0 resolved — all still genuinely open. The
+12-row increase since 08-02 is not independently attributed in this pass (plausible source: the
+mo-house-chamber census or ongoing legiscan/mo-senate-web ingestion; worth a dedicated look if this
+exact number matters for a future claim, not chased further here).
+- `glossary_terms`: 2,219 total — **116 published**, 2,072 `needs_mapping`, 31 draft-mappable. Exact
+match to the earlier 08-03 pass and to `npm run status` — unchanged.
+- `summaries`: 213 total — **115 published**, 98 draft. Exact match to the earlier 08-03 pass —
+unchanged.
+- `bills` 38,254 / `votes` 10,043 / `vote_casts` 1,466,733 — all match `npm run status` exactly.
+
+**Priority framing correction — the single most important status change in this document this pass:**
+the Cloudflare Pages deploy spec is now the **active top-level thread**, not "deferred." Lance said
+"it sure feels like we've locked the backend down," the comprehensive audit ran, all 4 criticals came
+back fixed, and the same day moved straight into `superpowers:brainstorming` for the deploy spec.
+**Status: IN PROGRESS, not complete** — confirmed against TODO.md's own NOW-section prose and
+directly against the filesystem: scope agreed (deploy mechanics only; explicitly excludes migration
+0025 and the MO House caveat), Section 1 (scope/sequencing) approved, two small pre-deploy fixes
+decided (fix `geocode.js` security headers, build `site/404.html`) but **confirmed NOT yet built**
+(`site/404.html` does not exist on disk; `site/functions/geocode.js` still returns bare
+`Response.json(...)` calls with no headers option anywhere in the file), Section 3 (connecting
+Cloudflare Pages) presented in depth with two open sub-questions (3a: fresh vs. existing Cloudflare
+account; 3d: whether to restrict preview-deployment builds, since `site/config.js` hardcodes the real
+production anon key so every preview branch is a live copy of the real site), Sections 2 and 4 not
+yet presented. **Separately notable, and not part of the spec's own scope:** the core product claim
+(browse → legislator → real votes → real bill → real roll-call tally) was verified end-to-end in a
+real Playwright browser against live production data for the first time ever, zero console errors —
+the strongest evidence yet that "backend locked in" is a reasonable read of the current state, and
+the reason the priority reordering below is warranted rather than premature.
+
 ---
 
 ## 1. Standing rules I must not violate
@@ -78,10 +196,12 @@ All volume work runs the $0 subagent path (`summary-queue.js record`). ~$6 credi
 
 **Found this pass (2026-08-03), and materially changes the operating picture above:** `CLAUDE.md` itself was edited (commit 1886e88, "docs: suspend the per-run API-approval policy per Lance's instruction (2026-08-03), until reinstated") to add: *"TEMPORARILY SUSPENDED (Lance, 2026-08-03): 'temporarily remove the usage and credit usage restrictions from the rules and settings until I reinstate them.' Per-run approval + cost statement is NOT required for live API calls while this is in effect. This is a suspension, not a repeal... Treat this as still in effect until Lance says otherwise; do not assume it has lapsed just because time has passed or the session has changed."* Checked live: no reinstatement commit exists in git history after 1886e88, so as of this refresh pass the suspension is **still in effect**. This does NOT retroactively make the mechanical `*_RUN_APPROVED` env gates optional to respect — those still physically block the client construction unless the env var is set — it means Lance is not requiring a per-run cost conversation before you set that env var. `memory/no-api-spend-hold.md` (referenced above) was NOT updated by this doc's own refresh scope (it lives outside `docs/`) and may now read as stale to a fresh session relying on memory alone — verify against `CLAUDE.md` directly, not against that memory file, until it's reconciled.
 
-**Cloudflare deploy is a MILESTONE, not a task.**
+**Re-checked 2026-08-03 (continued pass): still no reinstatement commit** (`git log --oneline --all` after `1886e88` shows none) — the suspension remains in effect. Nothing changed here since the earlier 08-03 pass; re-verified, not assumed.
+
+**Cloudflare deploy is a MILESTONE, not a task — and Lance himself has now judged the backend ready to start it.**
 > "I'm only interested in starting the cloudflare portion once the entire backend is locked in and accurate, otherwise I'm troubleshooting two systems back and forth and each change takes 3 steps instead of 1." (CHATLOG.md:794)
 
-Do not propose deploying until he says the backend feels solid. **TRAP:** the site is built, merged to main, and `site/config.js` already holds the real URL + anon key — it *looks* ready, which is exactly when an agent proposes it.
+Do not propose deploying until he says the backend feels solid. **TRAP:** the site is built, merged to main, and `site/config.js` already holds the real URL + anon key — it *looks* ready, which is exactly when an agent proposes it. **Found this pass (2026-08-03, continued):** that gate has now actually been cleared by Lance's own words, not an agent's judgment call — "It sure feels like we've locked the backend down and could potentially move to the cloudflare," followed by the comprehensive audit (all 4 criticals fixed, verified above) and the same-day start of `superpowers:brainstorming` for the deploy spec. The TRAP framing above is preserved as-is (an agent should still never *propose* it unprompted), but the milestone itself is no longer hypothetical — it is the active thread. See the updated §5 for the current spec status (in progress, not complete).
 
 **Facts-only is the product's soul.**
 > "There should be no editorial summaries here, people put their emotions into their summaries, we are only looking for facts. Bills proposed, votes made, votes missed, etc." (CHATLOG.md:267)
@@ -185,6 +305,14 @@ whose `public_votes` check reports "migration 0022 not applied yet." This is the
 important status change in this document this pass — read item 5's rewritten text below in full
 before touching anything vote-aggregate-related.
 
+**Status as of 2026-08-03 (continued): item 5 is now CLOSED too — migration 0022 was applied by**
+**Lance and re-confirmed live this pass.** `probe-public-surface.js`'s `public_votes` check now
+PASSES; `vote_duplicates` holds 0 rows (the backfill found zero clean matches, a reasoned zero, not a
+bug — see the top-of-file note for detail). **Two NEW items replace it below (6 and 7):** item 6
+covers the 2026-08-03 comprehensive accuracy audit's 4 criticals (all fixed, all independently
+re-verified live this pass); item 7 covers the MO House per-legislator vote-coverage gap the audit
+surfaced but did not fix (genuinely still open, Lance's own site-content call).
+
 1. ~~MO 2026 session split across two rows, actively growing~~ **CLOSED.** The 2026-08-01 live run
    merged 34 duplicate bills into their canonical twins, redirected 31 votes, and deleted the
    duplicate session — independently re-verified against the live DB afterward: 0 duplicate bills,
@@ -220,9 +348,18 @@ before touching anything vote-aggregate-related.
    `vote_id` in place (never touched, never a duplicate, gets honest wording instead of a bare
    all-zero line). Display-only fix in `site/js/bill-page.js` — no data was touched. Verified live
    via dev server + Playwright. (TODO 28)
-5. **Display-time dedup was RULED BINDING — CODE COMPLETE 2026-08-03, migration 0022 NOT YET
-   APPLIED. The data defect it fixes is still fully live.** Status as of the 2026-08-02 pass was
-   "genuinely still open, nothing built." That changed 2026-08-03: spec
+5. ~~Display-time dedup~~ **CLOSED 2026-08-03 (continued pass).** Migration 0022 applied by Lance
+   and independently re-confirmed live this pass: `probe-public-surface.js`'s `public_votes` check
+   passes; `votes` and `public_votes` report the identical count (10,043) for both the anon key and
+   the service-role key. **The backfill correction found zero clean matches** (dry-run and live both)
+   — traced to one real candidate pair (LegiScan roll call 1673444 vs. `mo-house-xml-HB1623-3`):
+   MO's own `vote_casts` has only 1 individual position stored for that vote despite the printed
+   "103-48" aggregate, so `isPrimaryCastDataComparable` correctly declines to certify a match it can't
+   verify. This is a reasoned, documented zero, not a bug — but it means **the mechanism is live and
+   wired correctly end-to-end while currently excluding nothing from any public surface,** because
+   nothing has qualified yet. Text below (originally written when 0022 was still a draft) is kept for
+   the build history; read the top-of-file 2026-08-03 (continued) note for the live-reconfirmation
+   detail. RULED BINDING, spec
    (`docs/superpowers/specs/2026-08-03-vote-duplicate-dedup-design.md`) → plan
    (`docs/superpowers/plans/2026-08-03-vote-duplicate-dedup.md`) → implementation, TDD throughout,
    43 new tests (2192→2235, 0 fail). **What's built:** a non-destructive `vote_duplicates` grouping
@@ -242,23 +379,68 @@ before touching anything vote-aggregate-related.
    as a live-ingest side effect, which a backfill against already-published data has no business
    triggering) — the backfill was redesigned to reimplement the matching locally with only the pure
    comparison primitives, mirroring this file's own existing 1969-sentinel-date correction.
-   **Independently confirmed live this pass (not just "commit says code complete"):**
-   `node --env-file=.env scripts/probe-public-surface.js`'s own `public_votes` check reports
-   "migration 0022 not applied yet" — so as of this refresh, the underlying defect (every
-   cross-adapter duplicate vote double-counted in all three public matviews' percentages, not just
-   shown twice in a list) is **still 100% live in production**, unchanged from the 2026-08-02
-   framing. **Remaining steps, all Lance's, in order** (full detail in the plan's own "Handoff to
-   Lance" section): (1) apply `supabase/migrations/0022_vote_duplicates.sql` in the Supabase SQL
-   editor; (2) run `node scripts/probe-public-surface.js` to confirm `public_votes` is reachable and
-   shaped correctly; (3) run `npm run refresh:aggregates`; (4) run
+   **[Historical, at time of writing 2026-08-03 morning] Independently confirmed live this pass (not
+   just "commit says code complete"):** `node --env-file=.env scripts/probe-public-surface.js`'s own
+   `public_votes` check reports "migration 0022 not applied yet" — so as of this refresh, the
+   underlying defect (every cross-adapter duplicate vote double-counted in all three public matviews'
+   percentages, not just shown twice in a list) is **still 100% live in production**, unchanged from
+   the 2026-08-02 framing. **Remaining steps, all Lance's, in order** (full detail in the plan's own
+   "Handoff to Lance" section): (1) apply `supabase/migrations/0022_vote_duplicates.sql` in the
+   Supabase SQL editor; (2) run `node scripts/probe-public-surface.js` to confirm `public_votes` is
+   reachable and shaped correctly; (3) run `npm run refresh:aggregates`; (4) run
    `node --env-file=.env src/cli/correct-data.js vote-duplicates --dry-run` to see the real count,
    then without `--dry-run` to apply it live; (5) run `npm run refresh:aggregates` again; (6)
    spot-check the actual exclusion directly in the SQL editor (`select * from vote_duplicates limit
    5`, confirm the superseded id doesn't appear in `public_votes`/`public_vote_feed`), then
-   spot-check a real bill page and a legislator's vote-aggregate chart in a browser. **This is now
-   the #1 item in §5's "what actually matters next" list — see there.** (No TODO number in TODO.md
-   as a discrete backlog item — it's tracked in TODO.md's own NOW section prose instead, under
-   "Cross-adapter vote duplicate dedup.")
+   spot-check a real bill page and a legislator's vote-aggregate chart in a browser.
+
+   **[Current, 2026-08-03 continued pass] All six steps above are DONE.** Lance ran them the same
+   day (hit and fixed one real SQL bug along the way, see below); re-verified independently this
+   pass: `probe-public-surface.js` passes, `vote_duplicates` holds exactly 0 rows (the backfill's own
+   correct, reasoned zero — see the item header above), `votes`/`public_votes` counts match for both
+   anon and service-role keys. `npm run refresh:aggregates` hit a PostgREST statement timeout
+   (~8s, the RPC does three `REFRESH MATERIALIZED VIEW CONCURRENTLY` passes over 1.46M+ rows in one
+   call) — worked around by running `select refresh_vote_aggregates();` directly in the SQL editor,
+   which succeeded (matview counts confirmed unchanged: 11,466 / 3,042 / 198, as expected with zero
+   duplicates marked). **A real SQL bug in the migration file was found and fixed the same day:**
+   Lance's first live run errored (`42809: "public_position_totals" is not a view`) — two stray `drop
+   view if exists ... cascade;` lines tried to drop objects that are actually materialized views
+   (`DROP VIEW` refuses that even with `IF EXISTS`); fixed (commit `1858195`) by removing both stray
+   lines. Confirmed the failed first attempt rolled back cleanly as one transaction, nothing partial
+   to clean up; the corrected file is what's in the repo now. This item is no longer in §5's "what
+   actually matters next" list — superseded by items 6/7 below and the Cloudflare thread, see §5.
+   (No TODO number in TODO.md as a discrete backlog item — tracked in TODO.md's own NOW section prose
+   instead, under "Cross-adapter vote duplicate dedup.")
+
+**NEW-A.** *(Not numbered 6 — §3's numbering is one continuous sequence across all three*
+*subsections below, already at 12 by "Public-surface leaks"; using letters here rather than*
+*renumbering everything downstream.)* **The 2026-08-03 comprehensive accuracy audit's 4 criticals —
+CLOSED, all independently re-verified live this pass.** Full detail in the top-of-file 2026-08-03
+(continued) note; summary: (a) SB 914 tally contradiction root-caused, deliberately left for Lance to
+adjudicate — confirmed still `resolved: false` live, not silently resolved; (b) FECA/BBEDCA glossary
+corrections live; (c) all 7 corrupted glossary terms repaired, a text-integrity gate now blocks the
+class; (d) Tommie Pierson Sr./Jr. split back into two unlinked rows, confirmed live (`persons`
+37→36, `person_links` 76→74), a same-source-key contradiction guard now blocks the class
+permanently. Also fixed as part of the same pass: `buildMoVoteRows`'s MO House chamber-hardcoding bug
++ 3 live mislabeled Senate votes corrected. `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`
+is the full 16-finding report (4 critical + 12 important); the 12 important findings are NOT all
+closed — 0023/0025 (migrations, drafted not applied) and the MO House gap (NEW-B below) are three of
+them, still open by design, Lance's own calls.
+
+**NEW-B. MO House per-legislator vote-coverage gap — found by the same audit, deliberately NOT
+fixed, genuinely still open.** Independently confirmed at the row level this pass (not just
+directionally): exactly **one** `legislators` row has `mo_house_id` set (Mark Matthiesen, `'107'`)
+out of 159 MO House `terms` rows; **all 18** `mo-house-xml`-sourced `vote_casts` in the entire
+database belong to that one legislator — zero belong to anyone else. Root cause: `persistRoster`
+(`ingest-mo-house.js`) seeds exactly one real legislator row against a roster the roll-call-PDF
+parser resolves votes against — every other MO House member's own profile page shows zero MO House
+votes, forever, with no caveat, while the one fixture legislator looks fully tracked on the same
+roll calls. Related to but distinct from item 6 below ("MO House cross-era misattribution trap" —
+that's about a future multi-era backfill risk; this is about the CURRENT single-era roster already
+resolving almost everyone's votes to nobody). **Explicitly out of scope for the Cloudflare deploy
+spec** (Lance's own scoping call, 2026-08-03) — a real, still-open decision on its own: ship visibly
+as-is, or add an explicit completeness caveat to `person-page.js`'s MO House vote section first. Not
+an agent's call to make silently either way.
 
 **TODO 29 (hygiene) was also re-verified 2026-08-02, no action needed** — empty `districts` table
 and zero `image_url`/`contact` rows are both confirmed by design, not decay.
@@ -266,8 +448,11 @@ and zero `image_url`/`contact` rows are both confirmed by design, not decay.
 Items 1-4 above were all draft-then-apply corrections governed by PLAYBOOK lesson 17 (extract the
 mapping from the source, put the `.eq()` guard on the UPDATE not in a JS pre-filter, establish
 reversibility before approval) — all four ran live and were independently re-verified against the
-database, not just the CLI's own report. Item 5 is still visible on the site and still sits inside
-Lance's "locked in **and accurate**" gate.
+database, not just the CLI's own report. **Item 5 is now CLOSED too (2026-08-03 continued pass, see
+above) — for the first time in this document's history, items 1-5 are ALL closed.** The backend's
+one remaining "genuinely blocking" gap is NEW-B (MO House vote coverage) above, which is deliberately
+scoped OUT of the Cloudflare deploy spec rather than blocking it — Lance's own call, not a silent
+descope.
 
 ### Live landmines not tracked in TODO.md at all
 
@@ -335,19 +520,34 @@ Re-checked again 2026-08-03: migrations 0021 and 0022 (the only two new migratio
 touch neither `legiscan_datasets` nor `public_reconciliation_flags` — both items below are
 unaffected and still open.**
 
-11. **`legiscan_datasets` is anon-readable including `local_cache_path`** — a filesystem path on
-    Lance's machine, on the public API. `0010_legiscan_identity_and_ledger.sql:63`'s `anon_read`
-    policy is unchanged. The 0010 comment justified two columns ("hash + timestamp"); the policy
-    exposes four. The rationale it mirrored (`ingestion_runs` is anon-readable) was itself later
-    revoked by 0016.
-12. **`public_reconciliation_flags` publishes the whole free-form `discrepancy` jsonb.**
-    `0016_public_read_surface.sql:60-63` is unchanged: `select vote_id, source_a, source_b,
-    discrepancy, resolved, created_at ... grant select on public_reconciliation_flags to anon,
-    authenticated`. The column list is supposed to be the wall, but one exposed column is an
+**2026-08-03 (continued) update: item 11 is now CLOSED. Item 12 is still open, unchanged, but two
+new drafted migrations (0023, 0025) touch adjacent ground — see each item below.**
+
+11. ~~`legiscan_datasets` is anon-readable including `local_cache_path`~~ **CLOSED 2026-08-03.**
+    Migration 0024 (dropped the `anon_read` policy) applied by Lance and independently re-confirmed
+    live this pass: anon key gets `200 []` (0 of 31 rows), service-role key still sees all 31 rows
+    intact — RLS default-deny now matches `vote_reconciliation_flags`'s posture, no data touched,
+    only public reachability. `0010_legiscan_identity_and_ledger.sql:63`'s original `anon_read`
+    policy language is now historical, not live.
+12. **`public_reconciliation_flags` publishes the whole free-form `discrepancy` jsonb — STILL OPEN,
+    unchanged.** `0016_public_read_surface.sql:60-63` is unchanged: `select vote_id, source_a,
+    source_b, discrepancy, resolved, created_at ... grant select on public_reconciliation_flags to
+    anon, authenticated`. The column list is supposed to be the wall, but one exposed column is an
     unstructured bag — any future writer adding a diagnostic field publishes it with no code change
-    and no review signal. Now covers more ground than at compile time: open reconciliation flags
-    grew from 9 to 49 during TODO-25's fix (see "Accepted residuals" below) — more real rows now
-    flow through this same unreviewed public column.
+    and no review signal. **Re-verified live this pass: open reconciliation flags are now 61** (was
+    49 at compile of the earlier 08-03 note, 9 at doc-compile time) — more real rows flow through
+    this same unreviewed public column than ever. Note: the audit's own adversarial re-verification
+    (`docs/audits/2026-08-03-comprehensive-accuracy-audit.md`, "Refuted" section) downgraded the
+    severity of this exact finding — every fact in the jsonb payload is already derivable from other
+    anon-readable tables, so it's not a NEW leak, just an unreviewed one; kept open here as "still
+    real, still worth a column allowlist someday," not escalated.
+    **Separately, migration 0025 (drafted, not applied — see the top-of-file 2026-08-03 (continued)
+    note) closes a DIFFERENT, newly-found leak in the same family:** bare `select=*` on `summaries`/
+    `glossary_terms` currently returns internal pipeline columns (`model`/`prompt_version`/
+    `bill_text_hash`/`run_id` on summaries; those plus `source_hash`/`needs_mapping` on
+    glossary_terms) — confirmed still leaking live this pass via direct anon query. Not the same
+    table as this item, listed here because it's the same class of defect (column list isn't the
+    wall) and not yet its own numbered item in this list.
 
 ### Accepted residuals — do NOT "fix" or re-litigate these
 
@@ -356,7 +556,7 @@ unaffected and still open.**
 - **275 MO House 2024 roll calls refused** (`0000-00-00`) — they arrive later via house.mo.gov with real dates. **36 MO bills deliberately show status `0`** — LegiScan's codebook has no word for it. **21 bills refused by the 400k gate + 1 image-only PDF** — "nothing was ever truncated." **11 MO Senate journal days quarantined.** **444 roll calls have no bill** (nominations, cloture). **MO 2010-2014 has bills, zero votes** — a source gap (`rollCallsPlanned = 0`). **Federal history is 119th-Congress-only.** **OpenStates MO events carry no per-voter casts** (upstream).
 - **Trust-layer residuals deferred to prompt v3:** `evidence_quote` content is unconstrained — a fabricated quote is storable as a public receipt; the sonnet verifier is the declared trust boundary. That acceptance must be restated if the verification model ever changes. **Materially higher-stakes as of 2026-08-03 than when this was first accepted:** migration 0021 (bullet-citation exposure) now RENDERS this exact field publicly on every bill page (`citations` on `public_verification_notes`, confirmed live, 220 rows, 0 shape/gating violations) — this residual used to describe an unconstrained field sitting unused in the database; it now describes an unconstrained field a visitor can actually read and trust as a "receipt." Not re-litigating the acceptance (that's Lance's call, not this pass's), just flagging that its consequence changed.
 - **Glossary: 2,103 of 2,219 terms are bare stubs** (was 731 of 847 at the point this residual was first accepted, before the summary-volume growth that mints a term row per new citation — re-verified live 2026-08-03, matches DATA_INVENTORY exactly), 2,072 blocked on an unresolvable citation — a human mapping decision, not review backlog and not API spend. Real content = 116 entries, unchanged.
-- **`quarantine:true` in the legiscan reconciler is unreachable from real evidence** — correspondence proof requires tally agreement, hard contradiction requires disagreement; they can't coexist. Cross-source disagreements are **permanently human-review flags by design.** The open vote-reconciliation flag count grew from 9 (compile time) to **49** (live-verified via `node --env-file=.env scripts/data-status.js`, 2026-08-02, **re-verified live 2026-08-03, exact match, still 49 open / 0 resolved, still 45 distinct roll calls — no new flags surfaced in the intervening day**) — 29 of the 08-02 increase is the Fitzwater undercount class TODO-25's session-merge fix surfaced (see §3 item 1), not new decay. They will not self-clear; that's not a backlog to automate.
+- **`quarantine:true` in the legiscan reconciler is unreachable from real evidence** — correspondence proof requires tally agreement, hard contradiction requires disagreement; they can't coexist. Cross-source disagreements are **permanently human-review flags by design.** The open vote-reconciliation flag count grew from 9 (compile time) to **49** (live-verified via `node --env-file=.env scripts/data-status.js`, 2026-08-02, re-verified live 2026-08-03 morning, exact match, still 49 open / 0 resolved, still 45 distinct roll calls) — 29 of the 08-02 increase is the Fitzwater undercount class TODO-25's session-merge fix surfaced (see §3 item 1), not new decay. **Re-verified live again 2026-08-03 (continued pass): now 61 open, 0 resolved** (direct query: `resolved=eq.false` and the unfiltered total both return 61 — every open flag is still genuinely unresolved, none silently closed). The 12-row increase since the same-morning 49 is not independently attributed in this pass — plausible sources include the mo-house-chamber correction census or ongoing legiscan/mo-senate-web ingestion ticks; worth a dedicated look if this exact number matters for a future claim. They will not self-clear; that's not a backlog to automate.
 - **Retraction is this codebase's ONE sanctioned delete** (FK order, `legiscan-` prefix-guarded). Any other row-deleting code is a violation.
 
 DATA_INVENTORY has a section literally titled *"Numbers that look alarming but are fine"* to stop recurring panic. Read it before flagging a count as a defect.
@@ -390,6 +590,8 @@ DATA_INVENTORY has a section literally titled *"Numbers that look alarming but a
 | **"draft" means "flagged"** | No such status. `status` lives on `summaries`; clean/flagged is a VERDICT on `summary_verifications`. Of 35 drafts: ~20 adverse, ~14 clean-unpublished, 1 unverified. **Zero published summaries carry an adverse verdict — the gate held.** (Glossary is a deliberate asymmetry: 8 of 116 published terms carry a flagged verdict because they were hand-adjudicated.) |
 | **`run_id` tells you which run created a row** | It's the **last** run that wrote it. Grouping bills by `run_id` today attributes 37,662 to a status-patch run. |
 | **Lance's "Upcoming bills" scope was descoped** | It was never recorded as deferred anywhere. His words: *"we also need to see items that are in the works that are upcoming that may come to vote soon"* (CHATLOG:75). Only the recorded-vote leg of the trigger was built; there's no upcoming page and `bill_actions` covers 113 of ~38,266 bills (0.3%), so there's no signal to trigger on. This is a **scope question for Lance**, not a silent fix. Same for static pre-rendering (moved to "Not in v1"). |
+| *(Appended 2026-08-03, continued pass — this table itself is historical-record/append-only, existing rows above left untouched per this doc's own convention.)* **Row above: "legiscan_datasets: harmless metadata... the policy exposes 4 columns including `local_cache_path`. Both comments now mislead."** | **The exposure half is now fixed, the "comments mislead" half is not.** Migration 0024 dropped the `anon_read` policy (applied by Lance, re-confirmed live this pass: anon key gets `200 []`, 0 of 31 rows). The *data* is no longer publicly reachable. The *comment* in `0010_legiscan_identity_and_ledger.sql` itself was never edited to say so — a fresh reader of that file's own header still sees the original since-superseded rationale. Worth a doc-comment fix someday; not a live defect anymore. |
+| **"37 legislators identified" / "37 merge CLUSTERS"** (row above) | **The cluster count itself moved.** The 2026-08-03 audit's Pierson-split correction (critical #1) undid one wrong merge: `persons` is now **36** (was 37), `person_links` **74** (was 76) — both re-verified live this pass by direct query (two `Tommie Pierson` legislator rows, zero `person_links` referencing either). The row's underlying POINT ("persons is not a roster, three different numbers all mean something different") is unaffected — only the specific historical count of 37 is now stale. `docs/DATA_INVENTORY.md` was corrected to 36/74 in a parallel pass the same day. |
 
 ---
 
@@ -404,73 +606,84 @@ DATA_INVENTORY has a section literally titled *"Numbers that look alarming but a
 *apply sequence. This pass also closes out the "severity-sorted review view... his call whether it's*
 *worth building" line from 08-02 — he said yes, and it shipped the same day.*
 
-**Where it stands.** Backend is live and broadly trustworthy, with one known, currently-open,
-real accuracy defect in its public vote-aggregate percentages (item 1 below) — the site is built and
-merged but **not deployed by design**. Suite: **2,235/2,235 green** (live-verified 2026-08-03,
-`node --test` from repo root, up from 2,192 at the 08-02 pass), tree clean, migrations 0001-0020
-(+0018a) applied **plus 0021 (applied and confirmed live) — 0022 drafted, confirmed NOT applied**
-(`node --env-file=.env scripts/probe-public-surface.js`'s `public_votes` check). Summary waves:
-wave 1 (2026-07-31, 40 bills: 26 published/12 flagged/2 shape failures, both recovered) → wave 2
-(2026-08-01, 60 bills: 31 published/29 flagged) → a review-queue backfill (2026-08-02, 15 of the
-106 stale-verdict drafts re-checked: 8 auto-published, 7 flagged with a named specific gap). Live
-totals (`npm run status`, re-verified 2026-08-03, exact match to 08-02): **115 summaries published,
-98 still draft/flagged** awaiting Lance's read — every bill/summary-funnel number in
-DATA_INVENTORY.md came back byte-for-byte identical to 08-02 this pass. Identity merge sits at 37
-clusters, 4 open flags awaiting Lance (unchanged, re-verified). Glossary has 116 real entries (of
-2,219 total, re-verified live) and a never-run billed E2E (unchanged — still blocked on the spend
-hold, though see §1: that hold is itself temporarily suspended as of 2026-08-03). **New since 08-02:
-every published summary bullet now carries a live, clickable, exact-quote citation** (migration
-0021, confirmed live — 220 rows, 0 violations) — `trust.html`'s receipt claim is no longer aspirational
-for bill summaries. **Also new: the severity-sorted review queue shipped** (no migration, live
-2026-08-03) — the 98-item queue now sorts single-issue items first and names the missing provision
-per item.
+*Rewritten again 2026-08-03 (continued) — a SECOND pass, later the same day. This version's own #1*
+*priority from a few hours earlier ("apply migration 0022") is now closed — Lance ran the whole*
+*handoff sequence that same day, independently re-confirmed live below. The comprehensive accuracy*
+*audit ran in between and all 4 criticals it found are fixed and verified live. The single biggest*
+*framing change this pass: the Cloudflare Pages deploy spec is now the active top-level thread, not a*
+*deferred milestone waiting on backend work — Lance's own words ("it sure feels like we've locked the*
+*backend down"), confirmed against live data rather than taken as an agent's judgment call. Reordered*
+*accordingly below.*
 
-**What actually matters next, in order (revised 2026-08-03):**
+**Where it stands.** Backend is live and broadly trustworthy — **for the first time in this**
+**document's history, every item in §3's "genuinely blocking" list is closed** (original items 1-5,
+plus the new audit's 4 criticals, all independently re-verified live this pass). Real gaps remain
+(see the numbered list below), but none of them are "a public number is being computed wrong"
+anymore — mostly they're "coverage is thinner than it looks" or "a column leaks internal metadata," a
+materially different risk class than what this document was tracking as recently as this morning.
+The site is built and merged, **still not deployed, but the deploy spec is now actively being
+written**, not paused behind a backend-readiness gate — see item 1 below. Suite: **2,259/2,259
+green** (live-verified this pass, `node --test` from repo root, up from 2,235 this morning).
+Migrations: **26 files** — 0001-0021 plus **0022 and 0024 applied and confirmed live**, **0023 and
+0025 drafted, confirmed NOT yet applied** (§3 and the top-of-file note have the detail on what each
+one does and why leaving them drafted is currently safe). Summary waves unchanged since this
+morning: **115 published, 98 draft** (re-verified live, exact match). Identity merge: **36 clusters**
+(was 37 — the Pierson-split correction), **74 person_links** (was 76; `DATA_INVENTORY.md` has not
+been updated to reflect this yet, per the top-of-file note), 4 open flags awaiting Lance (unchanged).
+Glossary: 116 real entries of 2,219 total (unchanged), still no billed E2E run (the spend hold itself
+is suspended per §1, but nobody has actually run it). Reconciliation flags: **61 open** (was 49 this
+morning), 0 resolved — see §3's "Accepted residuals" for why this isn't decay.
 
-1. **Apply migration 0022 and run its handoff sequence (§3 item 5) — NEW #1, supersedes 08-02's
-   "display-time dedup, nothing built."** The fix is code complete; the defect it fixes (every
-   cross-adapter duplicate vote double-counted in `public_position_totals` / `public_party_alignment`
-   / `public_party_position_totals`'s percentages) is confirmed still 100% live. Six steps, all
-   Lance's, all spelled out in `docs/superpowers/plans/2026-08-03-vote-duplicate-dedup.md`'s own
-   "Handoff to Lance" section: apply the migration → probe → refresh aggregates → dry-run the
-   backfill → apply it live → refresh aggregates again → spot-check in the SQL editor and a browser.
-   This is the one item in this whole document where "the code is done" and "the public numbers are
-   still wrong" are simultaneously true — say so plainly to whoever reads this next, don't let
-   "code complete" get misread as "fixed."
-2. **The remaining open landmines (§3 items 6, 7, 9, 11, 12)** — re-verified still open 2026-08-02;
-   NOT independently re-read this pass (see the §3 landmines-section note) but nothing in the commits
-   since 08-02 touches any of the files involved: the MO House cross-era `unique` trap (TODO 31 — put
-   it there before anyone proposes a House multi-era backfill), `summarize.js`'s still-truncating bare
-   `.select()`s (TODO 32 — dodged twice by routing around the CLI, still armed), no in-app unlink
-   route (still controller-executed raw SQL only), and the two RLS over-exposures
-   (`legiscan_datasets.local_cache_path`, `public_reconciliation_flags.discrepancy` — the latter still
-   49 rows, re-confirmed unchanged since 08-02, no growth this pass). Item 8 (the ungated
-   `summarize.js`/`verify.js` spend risk) is CLOSED as of 2026-07-31 — no longer on this list.
-3. **Lance's 4 identity flags** (Brown ×3, Moore ×2, Johnson ×2, Menendez informational) —
-   structurally his decision, not an agent's. Unchanged, re-verified live 2026-08-03.
-4. **98 unpublished summaries** — all now genuinely judgment-requiring (the 15 that needed zero
-   judgment were cleared 2026-08-02). Lance was explicit he can't hand-process 106: *"I cannot
-   process 106 summaries, I don't have the time or knowledge."* **The severity-sorted review view
-   was offered, Lance said yes, and it SHIPPED 2026-08-03** (no migration, live the moment the code
-   landed — spec: `docs/superpowers/specs/2026-08-03-severity-sorted-review-queue-design.md`) — the
-   98-item queue now surfaces single-issue items first with the specific missing provision named
-   inline, which is meant to make Lance's own review pass materially faster. Still his 98 to work
-   through, but the tooling gap that made "I don't have the time" harder than it needed to be is now
-   closed.
-5. **49 open reconciliation flags** (up from 9 at compile time) — expected fallout of TODO-25's fix
-   surfacing a real Fitzwater-undercount discrepancy class, not new decay. Re-verified live
-   2026-08-03: still exactly 49 open / 0 resolved / 45 distinct roll calls — no growth since 08-02.
-   Will not self-clear.
-6. **Two scope questions to surface, not solve:** "Upcoming bills" and static pre-rendering. Both
+**What actually matters next, in order (revised 2026-08-03, continued):**
+
+1. **The Cloudflare Pages deploy spec — NEW #1, the active top-level thread, not a "someday
+   milestone."** Lance judged the backend ready, the comprehensive audit confirmed it (4/4 criticals
+   fixed, verified above), and the same day he moved into `superpowers:brainstorming` for the deploy
+   spec itself. **Status: IN PROGRESS, not complete** — confirmed against TODO.md's NOW section and
+   directly against the filesystem this pass. Scope agreed (deploy mechanics only — explicitly
+   excludes migration 0025 and the MO House caveat, item 2 below). Section 1 (scope/sequencing)
+   approved. Two small pre-deploy fixes decided but **confirmed not yet built this pass**:
+   `geocode.js` security headers (still bare `Response.json(...)` calls, no headers option anywhere in
+   the file) and `site/404.html` (does not exist on disk). Section 3 (connecting Cloudflare Pages)
+   presented in depth with two open sub-questions still needing Lance's answer: **3a** (fresh vs.
+   existing Cloudflare account) and **3d** (whether to restrict Cloudflare's default per-branch
+   preview deployments, since `site/config.js` hardcodes the real production anon key — every preview
+   is a live copy of the real site; not a security hole, RLS is still the actual wall, but worth a
+   deliberate answer rather than a default). Sections 2 (the two fixes' implementation detail) and 4
+   (post-deploy verification checklist) not yet presented. **Next step when Lance is back:** answer
+   3a/3d, finish sections 2 and 4 in the brainstorming conversation, write the spec doc, self-review,
+   get sign-off, then `superpowers:writing-plans`. Full detail: TODO.md's NOW section, "Cloudflare
+   Pages" entry.
+2. **MO House per-legislator vote-coverage gap (§3 item NEW-B)** — the audit found it, Lance
+   explicitly scoped it OUT of the Cloudflare spec (a site-content decision, not deploy mechanics),
+   and it's independently confirmed stark this pass: every one of the 18 `mo-house-xml` vote_casts in
+   the entire database belongs to the same single fixture legislator row (Mark Matthiesen). Real,
+   still open, still his call: ship visibly as-is, or add an explicit completeness caveat to the MO
+   House vote section on `person-page.js` first.
+3. **The remaining open landmines (§3 items 6, 7, 9, 12; item 11 is now CLOSED via migration 0024)**
+   — items 6, 7, 9 were NOT independently re-read this pass (nothing in today's commits touches
+   `ingest-mo-house.js`'s roster logic, `summarize.js`'s candidate picker, or `person-identity.js`'s
+   unlink route); carried forward as still open on that basis, not fresh-verified. Item 12
+   (`public_reconciliation_flags.discrepancy` jsonb) re-confirmed still open, now covering 61 rows
+   (was 49 this morning). Migration 0025 (drafted, not applied) will close the adjacent `summaries`/
+   `glossary_terms` internal-column leak once Lance applies it — confirmed still leaking live this
+   pass.
+4. **Lance's 4 identity flags** (Brown ×3, Moore ×2, Johnson ×2, Menendez informational) —
+   structurally his decision, not an agent's. Unchanged, re-verified live this pass.
+5. **98 unpublished summaries** — unchanged since this morning. The severity-sorted review queue
+   (shipped 2026-08-03) sorts single-issue items first and names the missing provision inline,
+   meant to make Lance's own pass through them materially faster. Still his 98 to work through.
+6. **61 open reconciliation flags** (was 49 this morning, 9 at compile time) — the +12 since this
+   morning is not independently attributed in this pass (plausible sources noted in §3's "Accepted
+   residuals"); not confirmed as new decay, but the exact cause is a genuine open question worth a
+   look if this number matters for a future claim.
+7. **Two scope questions to surface, not solve:** "Upcoming bills" and static pre-rendering. Both
    were Lance's founding decisions that later work quietly narrowed without a recorded call.
    Unchanged from the original compile.
-7. **The API-spend-approval hold is temporarily suspended (§1) — worth knowing before the next model
-   call, either direction.** Lance's 2026-08-03 instruction removed the per-run cost-approval
-   conversation requirement; the mechanical `*_RUN_APPROVED` env gates still physically exist and
-   still need to be set. Don't assume this has lapsed just because the session changed — check
-   `CLAUDE.md` directly (git history has no reinstatement commit as of this pass), and don't assume
-   it means "spend freely, no need to ever mention cost" either — it removes a procedural gate, not
-   Lance's underlying interest in knowing what's being spent.
+8. **The API-spend-approval hold is still suspended (§1)** — re-checked this pass (`git log` after
+   `1886e88` still shows no reinstatement commit). Worth knowing before the next model call, either
+   direction — it removes a procedural gate, not Lance's underlying interest in knowing what's being
+   spent.
 
 **Number discipline** (Lance: *"review the documentation... and clarify what we have then document it so we don't get confused again"*): `npm run status` is the **only** source of truth for numbers; `docs/DATA_INVENTORY.md` is the source of truth for structure and meaning. Never hardcode bills / votes / vote_casts counts into a doc. CLAUDE.md's fresh-session read-first list omits both of these — the two artifacts created specifically to stop that confusion.
 

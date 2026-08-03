@@ -31,6 +31,28 @@ to keep an eye on it now that it's running.
 > 2026-08-02T07:30:03Z) — **not a scheduler problem**; see item 4 under "How to verify it is alive"
 > below for the full worked check (24h cooldown not yet elapsed, confirmed against both the code
 > and the scheduler's own due-ness log).
+>
+> **Re-verified again 2026-08-03, later the same day (~18:23 UTC) — scheduler still alive, one new
+> regression found (unrelated to legiscan).** `legiscan`'s retry **did fire and succeeded**: queried
+> `ingestion_runs` directly for its latest row — `started_at 2026-08-03T07:45:03Z`, `finished_at
+> 07:52:14Z` (~7m11s, comfortably inside the 75-minute budget), `status: succeeded`,
+> `datasetGate.reason: "hash_changed"` (a real new dataset fetch, not a cheap same-hash skip), 3,146
+> bills / 70,465 casts / 604 votes written, `parseFailures: 0`, `unresolvedCasts.count: 0`, no
+> `vote_reconciliation_flags_dedup_key` error anywhere in `detail` — confirms the same-day fix noted
+> above held on its very next real-world retry. `npm run schedule:ingest -- --dry-run` at check time
+> also showed a healthy registry (all five sources resolvable, `legiscan.remainingMs` counting down
+> from the 07:45 run, nothing stuck), and today's log (`2026-08-03.log`) had 75 entries by check
+> time, still the same alternating tick pattern. **But a second, separate issue turned up while
+> checking — see the new dated item 5 under "How to verify it is alive" below: the aggregate-refresh
+> step (step 4 above) has been silently failing since ~05:00 UTC today, unrelated to legiscan or the
+> scheduler's own core mechanism.** This is exactly the kind of thing signal 2 in that section warns
+> about ("if the log looks healthy but freshness doesn't move, something downstream is wrong") — the
+> scheduler itself is fine; a function this doc's step 4 depends on is not.
+>
+> **Bottom line as of the 2026-08-03 ~18:23 UTC check: the scheduler itself is healthy and running
+> on cadence; its aggregate-refresh step is currently broken (silently, since ~05:00 UTC that day)
+> and needs a Lance-applied SQL fix — see item 5 under "How to verify it is alive" for the full
+> evidence and likely root cause.**
 
 ## What it does
 
@@ -275,6 +297,64 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    multi-agent investigation + adversarial review, verdict SHIP, high confidence for the
    `~2026-08-03T07:30Z` retry. See `docs/CONTROLLER_BRIEFING.md`'s 2026-08-03 addendum for the full
    writeup.)
+5. **Found live (2026-08-03, ~18:23 UTC), fix drafted same pass — step 4's own aggregate refresh
+   had been silently failing since migration 0022 was applied, unrelated to legiscan or anything
+   else in this document.** Found by reading `aggregatesResult.parsed.mode` out of every tick in
+   `.superpowers/artifacts/scheduler-logs/2026-08-01.log` through `-03.log` directly: 66 (Aug 1)
+   and 78 (Aug 2) `live`-mode ticks total, of which only **14 (Aug 1) and 19 (Aug 2) actually
+   attempted a refresh** (most `live` ticks just check whether one is warranted and skip it) — 0
+   failures across those real 33 attempts, then **11 consecutive failures**, every one since
+   `2026-08-03T05:00:12Z` (10x after `mo-house-xml`, 1x after `legiscan`), all with the identical
+   Postgres error `canceling statement due to statement timeout` (57014) and all failing in ~8-12
+   seconds from tick start — the **last successful automated refresh was `2026-08-03T04:00:25Z`**,
+   over 14 hours stale at discovery. Root cause traced exactly: migration `0018a_refresh_timeout.sql`
+   fixed this same symptom on 2026-07-30 via a separate `alter function ... set statement_timeout =
+   '600s'`; migration 0022 (applied 2026-08-03) later ran `create or replace function
+   refresh_vote_aggregates()` to add the vote-duplicate exclusion join — Postgres's own documented
+   behavior is that `CREATE OR REPLACE FUNCTION` resets any configuration a prior, separate `ALTER
+   FUNCTION` had set, unless the new definition re-declares it. 0022's own comment ("UNCHANGED")
+   was accurate about the function BODY but didn't account for 0018a's separate, later
+   configuration patch. **Fix drafted same pass: `supabase/migrations/0026_fix_refresh_aggregates_
+   timeout_regression.sql`** — this time `statement_timeout` is folded directly into the function's
+   own `set` clause (not a separate `ALTER FUNCTION`), so it survives any future `CREATE OR REPLACE`
+   that copies this file's header. **Draft-then-apply, awaiting Lance — until it lands, this keeps
+   failing every tick that would otherwise refresh.** Note first: `aggregatesRefreshed: true` in a
+   log entry means the scheduler decided a refresh was warranted
+   (`run.outcome.wroteRows`, i.e. the source actually wrote new rows) — it is **not** proof the
+   refresh succeeded; the nested `aggregatesResult.parsed.mode` is the real outcome, and reading
+   only the outer flag would misreport 11 straight failures as healthy.
+   **Likely root cause** (circumstantial but exact on every observable): `0018a_refresh_timeout.sql`
+   set a function-level override — `alter function refresh_vote_aggregates() set statement_timeout
+   = '600s'` — specifically because the PostgREST role's own default (~8s) is too short for a
+   `REFRESH MATERIALIZED VIEW CONCURRENTLY` pass over 1.46M+ `vote_casts` rows (that file's own
+   comment documents the original ~8s failures this was built to fix). `0022_vote_duplicates.sql`
+   later re-declares the same function (`create or replace function refresh_vote_aggregates() ...
+   set search_path = public, pg_temp as $$ ... $$`, needed only because the function's dependent
+   matviews had to be dropped/recreated first) **without** re-declaring `statement_timeout` in that
+   same statement. `CREATE OR REPLACE FUNCTION` replaces a function's entire declared config, not
+   just its body — a setting from an earlier, separate `ALTER FUNCTION` is silently dropped unless
+   the replacing statement redeclares it. This fits every observed fact: the failure onset lines up
+   with 0022 being applied, and each of the 11 failures took ~8-12s — the ~8s PostgREST default
+   reasserting itself, not a genuine 600s budget actually expiring (which would take up to ten
+   minutes to fail, not eight seconds). `CHATLOG.md`/`TODO.md` already recorded two of these same
+   `57014` failures right when Lance first applied 0022 (worked around once via a direct SQL-editor
+   call, bypassing PostgREST) — neither doc connected that to the *scheduler's own* automated calls
+   going on to fail the same way on every subsequent tick since; that connection is the new finding
+   from this check.
+   **Practical effect, ongoing:** the three public vote-aggregate matviews (`public_position_totals`,
+   `public_party_alignment`, `public_party_position_totals` — the profile and party-alignment charts)
+   have not been refreshed by any automated process since `2026-08-03T04:00:25Z`. Any `mo-house-xml`/
+   `legiscan` votes ingested since then are sitting correctly in the base tables but are not yet
+   reflected on public chart pages — the exact "profile charts silently drift behind the vote lists"
+   outcome step 4 above exists to prevent, currently happening. **Not fixed here** (this check is
+   read-only against the database, no writes) — the fix is a follow-up migration (or a one-off
+   `alter function refresh_vote_aggregates() set statement_timeout = '600s';` re-run directly in the
+   SQL editor, the same PostgREST-bypassing move already used once) that restores the override,
+   ideally folded directly into the function's own next `create or replace` statement (e.g. `...
+   set search_path = public, pg_temp set statement_timeout = '600s' as $$ ... $$`) so a future
+   migration touching this function cannot silently drop it again the same way. Needs a `TODO.md`
+   entry and Lance's own apply step (draft-then-apply, same as every other migration here) — flagged,
+   not actioned, by this pass.
 
 Manual checks any time, safe to run for real (read-only, zero writes, zero external fetches):
 

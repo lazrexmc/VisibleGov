@@ -1,6 +1,6 @@
 # Cached artifacts — what's on disk, what it costs to lose
 
-`.superpowers/artifacts/` holds ~959 MB of cached source payloads. It is **gitignored and lives on
+`.superpowers/artifacts/` holds ~969 MB of cached source payloads. It is **gitignored and lives on
 one local disk**. This file exists so that if it is ever lost, the next person knows exactly what
 they're rebuilding, what it costs, and what rules bind the rebuild.
 
@@ -11,11 +11,12 @@ just expensive or rule-bound to re-fetch.
 | Cache | Size | Files | Replaceable? |
 |---|---|---|---|
 | `legiscan-texts/` | 859 MB | 3,177 | ⚠️ **Costly + rule-bound** — see below |
-| `legiscan-datasets/` | 85 MB | 31 | ⚠️ Rule-bound (suspension-level) |
+| `legiscan-datasets/` | 94 MB | 32 | ⚠️ Rule-bound (suspension-level) |
 | `congress-legislators/` | 15 MB | 2 | ✅ Free — public CC0 download |
 | `mo-senate-journals/` | 93 KB | 81 | ✅ Free, but slow (30-min ToU) |
-| `mo-bills/`, `mo-bill-list/`, `mo-rollcalls/` | 762 KB | 144 | ✅ Free, but slow (30-min ToU) |
+| `mo-bills/`, `mo-bill-list/`, `mo-rollcalls/` | 771 KB | 153 | ✅ Free, but slow (30-min ToU) — mo-rollcalls' rebuild ceiling is capped by a roster gap, not by cost; see note below |
 | `mo-senate-journal-index/`, `mo-senate-roster/` | 44 KB | 4 | ✅ Free |
+| `scheduler-logs/` | ~700 KB | 3 | ✅ Free, but not a source cache — see note below |
 
 ---
 
@@ -38,7 +39,7 @@ would not be a *deliberate* violation, but it is exactly the outcome the rule ex
 first — a bill whose text is already stored needs nothing. If a rebuild is genuinely required, run
 with `--limit` in small batches and watch `queries_used` in `ingestion_runs`.
 
-## ⚠️ `legiscan-datasets/` — 31 weekly session ZIPs (85 MB)
+## ⚠️ `legiscan-datasets/` — 32 weekly session ZIPs (94 MB)
 
 Every MO session 2010–2026. These drive the bill/roll-call/person ingestion and the bill-text
 planner (`state_link` and `doc_id` both come from here).
@@ -48,7 +49,9 @@ download — failure to do so will result in suspended access."* The stored hash
 `legiscan_datasets` table, not in these files — so a rebuild must compare against the DB, exactly as
 `src/cli/ingest-legiscan.js` already does. Do not shortcut this.
 
-Rebuild cost: ~31 `getDataset` queries plus a `getDatasetList`, gated by the hash check.
+Rebuild cost: ~32 `getDataset` queries plus a `getDatasetList`, gated by the hash check. (A new
+session dataset landed 2026-08-02, growing this cache from 31 files to 32 — the count is live, not
+a typo carried from an earlier version of this doc.)
 
 ## ✅ `congress-legislators/` — the CC0 real-dates dataset (15 MB)
 
@@ -69,6 +72,27 @@ Note: `mo-senate-journals/*.failed.json` files carry the quarantine state (a day
 `public_freshness` reports — the data isn't wrong, but the "N days pending human review" number the
 trust page shows would restart from zero until those days fail again.
 
+Note on `mo-rollcalls/`: despite the name, this is **not** a cache of raw PDF bytes — it holds JSON
+artifacts of already-extracted, already-reconciled roll-call casts, kept on disk by
+`persistRollCallCasts` / `replayArtifacts` (`src/cli/ingest-mo-house.js`) whenever a roll call's
+casts can't be fully resolved against the legislator roster, plus (same convention as
+`mo-senate-journals`) `*.failed.json` quarantine markers for a PDF that fails parsing
+`ROLLCALL_MAX_FAILED_ATTEMPTS` (3) times. Losing a file here loses replay-queue state, never
+committed `vote_casts` rows (those are already in Supabase) — but rebuilding it (re-fetch the PDF,
+30-min ToU, re-extract) does **not** buy back more data than before: the 2026-08-03 accuracy audit
+found the real bottleneck is structural, not a cache problem. `persistRoster` seeds exactly one real
+legislator (a leftover test fixture) against which every roll-call PDF resolves, so ~162 of ~163 MO
+House members permanently show zero MO House votes regardless of how many times this cache is
+rebuilt — directly visible in the one artifact on disk here as of this writing (157 of ~163 casts
+still unresolved on last replay). Still open, deliberately left for Lance's call — see `TODO.md` NOW
+("MO House per-legislator vote coverage").
+
+Note on `scheduler-logs/`: also lives under `.superpowers/artifacts/` but isn't a source cache in
+the sense the rest of this file describes — it's the background scheduler's own daily tick log
+(gitignored, one entry per invocation), not a rate-limited or ToU-bound fetch. Nothing here is
+rule-bound to preserve; losing it only loses the tick-history evidence trail. See
+`docs/SCHEDULED_INGESTION.md` for what it records and why.
+
 ---
 
 ## What is genuinely irreplaceable (and therefore IS in git)
@@ -79,7 +103,9 @@ trust page shows would restart from zero until those days fail again.
   2026-07-31**, additions since have kept landing in the same commits as the work they document.
 - `CHATLOG.md`, `TODO.md`, `PLAYBOOK_DELTA.md`, `README.md`, `CLAUDE.md` — the decision trail.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` — the approved designs.
-- `supabase/migrations/` — the schema, 0001–0022 (plus the out-of-sequence `0018a_refresh_timeout.sql`).
+- `supabase/migrations/` — the schema, 0001–0025 (plus the out-of-sequence `0018a_refresh_timeout.sql`).
+  Not all are applied to the live DB yet — file presence in git tracks the design, not deploy state;
+  `TODO.md` NOW is the source of truth for which migrations are actually live.
 - `tests/fixtures/` — captured real payloads (incl. the LegiScan API manual PDF the status codebook
   was extracted from, and the congress-legislators excerpts).
 
