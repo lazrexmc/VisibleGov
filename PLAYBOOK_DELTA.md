@@ -394,3 +394,50 @@ that way because there's nothing to drift out of sync with. This is the same "ne
 self-report, always re-derive mechanically" discipline this project already applies to verifier
 output (`assessVerdicts`/`assessCompleteness`) — the same discipline applies to status flags with
 more than one writer, not just to model output.
+
+## Lesson 23 — Grepping a function's branches for a marker string proves the branches that HAVE the marker, not the branches that don't (2026-08-03)
+
+Extended `crossCheckAgainstPrimarySource` (a carefully-reviewed, multi-branch cross-source matcher)
+to report a new field on every "clean match" outcome, so a caller downstream could act on it. Found
+the branches to fix by `grep`-ing the file for the literal string `reason: 'tally_unique_match'` —
+two hits, both fixed, both unit-tested, both green. Wired the caller to gate on that same string.
+Live end-to-end test (real fixture data, not a fake) showed a genuine clean match producing zero
+effect: a THIRD `matched: true` branch existed — the plainest, most common case (a single candidate,
+no same-day siblings, tallies simply agree) — that had never been given a `reason` string at all,
+because it predates the two disambiguation branches that later needed one. The grep found every
+branch that already said the marker; it structurally cannot find a branch that doesn't say anything.
+The bug was invisible to code review of the two "found" branches (both were correctly fixed) and
+invisible to their own unit tests (both passed) — it only surfaced because a downstream integration
+test exercised the untouched third branch and asserted on the field being present, not merely on
+the two branches the design session had already located.
+
+**Rule: when a task is "find every branch that does X" inside an existing function, grepping for a
+string that CURRENT instances of X happen to share is not a census — it only enumerates branches
+that already conform to today's convention. A branch that does X differently (or that predates the
+convention) is invisible to that grep by construction.** The reliable version of "find every branch"
+is structural, not textual: read the function's actual control flow (every `return` in scope), or —
+cheaper and more honest about the risk — write a test that exercises the SIGNAL the caller actually
+needs (here: "does every clean-match return carry the new field") against real/representative input
+per branch, not a test that merely confirms the branches you already found behave as expected. A
+green test suite for the branches you found says nothing about the branches you didn't.
+
+## Lesson 24 — An existing test can encode an architectural boundary a new feature's design missed (2026-08-03)
+
+Designed a new correction (`correct-data.js`'s `runCorrectVoteDuplicates`) to reuse an existing,
+carefully-built cross-source matcher (`crossCheckAgainstPrimarySource`) directly, on the reasonable-
+sounding principle "reuse, don't reinvent." Wrote the code, wired it in, and only then hit a
+pre-existing test — unrelated to this feature, written for a different correction (TODO-25's session
+merge) months earlier — that asserts, unconditionally, `correct-data.js` must never import or call
+that function at all, because it is a live pre-store gate with its own side-effecting writes
+(reconciliation flags) that a backfill against already-published data has no business triggering.
+The new correction's own author had no reason to know that assertion existed until the test failed.
+
+**Rule: before reusing a function across a module boundary, check whether the CALLING module already
+has a test asserting it never does that — not just whether the function itself looks reusable.** A
+codebase's own test suite can carry architectural rules that never made it into a comment or a doc
+(this one only lived in one test's own docstring). The fix, once found, was itself a reusable pattern
+already established elsewhere in the same file for the same reason (reuse the PURE comparison
+primitives the gated function is built from; reimplement only the thin orchestration around them) —
+worth checking for a sibling implementation solving the identical problem before assuming a
+fresh design is needed. A full-suite run before considering a design "done" is what caught this; it
+would not have been caught by testing the new correction in isolation.

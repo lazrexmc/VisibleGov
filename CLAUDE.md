@@ -11,15 +11,22 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
-**Status (2026-08-02): backend live and accurate; public site built + merged, deploy deferred.**
+**Status (2026-08-03): backend live and accurate; public site built + merged, deploy deferred.**
 See `TODO.md` NOW for the current state and the only open operator decisions. The repo holds the
 ingestion CLIs and adapters (`src/`), the public site (`site/`), schema migrations
-(`supabase/migrations/`, 0001-0020 all applied), and fixture-backed tests (`tests/`, ~2,192 green).
-**Live numbers: run `npm run status`** — any count typed into a doc goes stale within the hour.
+(`supabase/migrations/`, 0001-0021 applied, 0022 drafted awaiting apply), and fixture-backed tests
+(`tests/`, ~2,235 green). **Live numbers: run `npm run status`** — any count typed into a doc goes
+stale within the hour.
 
 **If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
-17 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open),
-then the most recent `CHATLOG.md` entries (why things are the way they are).
+22 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open),
+`docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history), then the
+most recent `CHATLOG.md` entries (why things are the way they are).
+
+**One open accuracy defect, still live as of this writing:** cross-adapter vote duplicates (the
+same real floor vote stored once by LegiScan and once by an MO primary-source adapter) are
+double-counted in the vote-aggregate matview percentages until Lance applies migration 0022 —
+code is complete and tested, see `TODO.md` NOW for the exact apply sequence.
 
 **Two standing rules that are easy to violate without noticing:**
 - **Cloudflare deploy is a MILESTONE, not a task** (Lance, 2026-07-31): *"I'm only interested in

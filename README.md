@@ -5,8 +5,10 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-02): back end live and accurate; public site built and merged, deploy deliberately
-deferred until the backend is locked in.**
+**Status (2026-08-03): back end live and accurate; public site built and merged, deploy deliberately
+deferred until the backend is locked in.** One open accuracy item: cross-adapter vote duplicates
+are double-counted in the vote-aggregate percentages until a drafted-but-unapplied migration lands
+(code complete, tested; see `TODO.md`).
 > **Live numbers: run `npm run status`.** An ingestion cron writes every 30 minutes, so any count
 > typed into a document is stale within the hour — that staleness is exactly what made the project's
 > own data state confusing. `docs/DATA_INVENTORY.md` explains what each number *means* and how they
@@ -50,5 +52,10 @@ See `PLAYBOOK_DELTA.md` §2.
 - `PLAYBOOK_DELTA.md` - lessons inherited from prior projects, read before building anything.
 - `TODO.md` - backlog: current state, build queue, and raw idea inbox.
 - `CHATLOG.md` - decision trail, kept from day one.
+- `docs/CONTROLLER_BRIEFING.md` - deep catch-up doc for a fresh session, compiled from the full
+  project history (SDD ledgers, specs, plans, research docs, live code) - the fastest way to get
+  oriented beyond what CLAUDE.md/TODO.md/CHATLOG.md alone give you.
+- `docs/DATA_INVENTORY.md` - what each live number *means* and how the tables relate; `npm run
+  status` is the only source of truth for what they *are*.
 - `supabase/migrations/` - canonical schema + RLS migrations.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` - specs and plans for each build slice.
