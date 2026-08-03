@@ -4,4 +4,11 @@
 -- refresh of three matviews over 1.46M vote_casts legitimately needs longer. A function-level
 -- setting overrides the role timeout for this function's execution only; nothing else changes.
 -- (The CONCURRENTLY-in-function concern from review did NOT fire — the function executes.)
+-- SUPERSEDED-BY 0026: this ALTER's effect was silently reset when 0022 later redefined
+-- refresh_vote_aggregates() via CREATE OR REPLACE FUNCTION — a separate ALTER FUNCTION's config
+-- does not survive a later CREATE OR REPLACE of the same function. That caused a real ~14-hour
+-- production outage before anyone noticed. 0026 restores the timeout, folded directly into the
+-- function's own declaration this time so it can't be dropped silently again. This ALTER remains
+-- historically correct for the database state it was applied to, but is no longer the mechanism in
+-- effect — do not treat its presence as proof the timeout is still set on the current function body.
 alter function refresh_vote_aggregates() set statement_timeout = '600s';

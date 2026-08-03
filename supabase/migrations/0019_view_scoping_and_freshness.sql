@@ -19,6 +19,8 @@
 -- ran), never rendered by the bill page's receipt line, and publishing it tells the world nothing
 -- about whether a claim is supported. Smallest public surface that still serves the receipt.
 -- ---------------------------------------------------------------------------
+-- SUPERSEDED-BY 0021 (via an intermediate redefinition in 0020): 0021 is the current, correct
+-- definition. This version is dead schema history.
 drop view if exists public_verification_notes;
 create view public_verification_notes as
 select sv.summary_id, sv.model, sv.overall, sv.created_at

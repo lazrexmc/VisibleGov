@@ -49,6 +49,8 @@ alter table summary_verifications add constraint summary_verifications_overall_c
 -- used to have at most one — see this task's report for what that means for
 -- src/review/server.js/site/js/bill-page.js callers that assumed exactly one row.
 -- ---------------------------------------------------------------------------
+-- SUPERSEDED-BY 0021: 0021 is the current, correct definition. This version is dead schema
+-- history.
 drop view if exists public_verification_notes;
 create view public_verification_notes as
 select sv.summary_id, sv.kind, sv.model, sv.overall, sv.created_at

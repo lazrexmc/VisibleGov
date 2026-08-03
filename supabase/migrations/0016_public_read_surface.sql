@@ -15,6 +15,12 @@ alter table terms add column state text;
 
 -- 3) The vote feed: one paged query serves a profile's vote list, newest first, without
 -- PostgREST embedded-ordering tricks. Bases are all anon-readable; invoker semantics apply.
+-- SUPERSEDED-BY 0023 (via an intermediate redefinition in 0022): once vote_duplicates (0022)
+-- joined a locked table into this view, its own security_invoker=true became structurally inert
+-- for anon (an invoker view under anon's RLS on a locked table sees zero rows in that join). 0023
+-- is the current, correct definition (owner-bypass, no security_invoker) — this version is dead
+-- schema history. Senior engineering audit (2026-08-03, finding 12): copying THIS block forward
+-- into a future migration would silently reintroduce the inertness bug.
 create view public_vote_feed with (security_invoker = true) as
 select
   vc.id            as cast_id,
@@ -39,6 +45,8 @@ grant select on public_vote_feed to anon, authenticated;
 -- 4) Freshness: latest run per source + the quarantined-day COUNT only (never the detail
 -- payload). Owner-bypass over the now-locked ingestion_runs; the column list is the wall.
 -- Supersedes ingestion_freshness (created in 0003); one public freshness surface, not two.
+-- SUPERSEDED-BY 0019: 0019 redefines this view (same owner-bypass posture, different column
+-- scoping) and is the current, correct definition. This version is dead schema history.
 drop view if exists ingestion_freshness;
 create view public_freshness as
 select distinct on (source)
@@ -51,6 +59,8 @@ order by source, started_at desc nulls last;
 grant select on public_freshness to anon, authenticated;
 
 -- 5) Verification notes: exactly what the bill page's receipt renders, nothing more.
+-- SUPERSEDED-BY 0021 (via intermediate redefinitions in 0019 and 0020): 0021 is the current,
+-- correct definition. This version is dead schema history.
 create view public_verification_notes as
 select summary_id, model, prompt_version, overall, created_at
 from summary_verifications;

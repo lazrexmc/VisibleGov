@@ -13,6 +13,16 @@
 -- sanctioned delete (retractLegiscanVoteIfStored, src/cli/ingest-legiscan.js) — that function is
 -- scoped to genuine LegiScan-vs-primary CONTRADICTIONS and throws if called on anything else; this
 -- table is for legitimately AGREEING duplicates, a different case, never conflated.
+--
+-- SUPERSEDED-BY notice (senior engineering audit, 2026-08-03, finding 12): two definitions in
+-- THIS file are no longer current — public_vote_feed/public_votes below (superseded by 0023) and
+-- refresh_vote_aggregates() below (superseded by 0026, after 0022 silently dropped 0018a's
+-- statement_timeout setting and caused a real ~14-hour production outage). Each superseded block
+-- carries its own inline note. Applying this file's CREATE TABLE section again is safe (no `if not
+-- exists`, so a re-run fails loudly and rolls back rather than reapplying anything) — the real
+-- hazard is copying an individual section out of this file into a NEW migration, which would
+-- silently reintroduce either bug with no error at all. Always check a block's own inline note
+-- (and 0023/0026 directly) before reusing anything from this file.
 
 create table vote_duplicates (
   id                 uuid primary key default gen_random_uuid(),
@@ -27,6 +37,10 @@ create table vote_duplicates (
 
 -- public_vote_feed (0016_public_read_surface.sql): add the exclusion. Everything else about this
 -- view is UNCHANGED from 0016's own definition.
+-- SUPERSEDED-BY 0023: joining the newly-locked vote_duplicates table into an invoker view makes
+-- security_invoker=true structurally inert for anon (the join sees zero vote_duplicates rows under
+-- anon's own RLS, so the exclusion below can never fire). 0023 is the current, correct definition
+-- (owner-bypass, no security_invoker). Do not copy this block forward.
 drop view if exists public_vote_feed;
 create view public_vote_feed with (security_invoker = true) as
 select
@@ -56,6 +70,8 @@ grant select on public_vote_feed to anon, authenticated;
 -- bill-page.js's own VOTES_SELECT already asks for, plus the same exclusion. votes' own existing
 -- direct anon grant is left untouched (known residual, spec §4 — out of scope to audit every other
 -- consumer of that grant here).
+-- SUPERSEDED-BY 0023: same security_invoker inertness issue as public_vote_feed above. 0023 is the
+-- current, correct definition. Do not copy this block forward.
 create view public_votes with (security_invoker = true) as
 select
   v.id, v.bill_id, v.jurisdiction_id, v.chamber, v.vote_date, v.question, v.result,
@@ -195,6 +211,13 @@ grant select on public_party_position_totals to anon, authenticated;
 
 -- refresh_vote_aggregates (0018): UNCHANGED — recreated here only because CREATE OR REPLACE FUNCTION
 -- must follow its dependent matviews being recreated above, not because its own body changed.
+-- THIS "UNCHANGED" CLAIM WAS THE BUG: 0018a had separately ALTERed this function to add
+-- `set statement_timeout = '600s'`, and CREATE OR REPLACE FUNCTION does not carry forward config a
+-- prior ALTER FUNCTION set — recreating it here silently dropped that timeout and caused a real
+-- ~14-hour production outage (refreshes failing on the default timeout, public charts stale) before
+-- anyone noticed. SUPERSEDED-BY 0026, which folds the SET clause directly into this function's own
+-- declaration so a future CREATE OR REPLACE can't drop it silently again. Do not copy this block
+-- forward without checking whether the target function has any separate ALTER FUNCTION on it first.
 create or replace function refresh_vote_aggregates()
 returns void
 language sql

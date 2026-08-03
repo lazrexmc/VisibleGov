@@ -65,6 +65,9 @@
 -- that earlier draft's plain view would otherwise fail with "public_position_totals is not a
 -- materialized view" — this makes re-applying genuinely safe against either prior shape, not just
 -- against a from-scratch database.
+-- SUPERSEDED-BY 0022: 0022 drops and recreates all three matviews on this page (the join needed to
+-- exclude vote_duplicates rows changes their bodies). 0022's versions are current; these are dead
+-- schema history.
 drop view if exists public_position_totals cascade;
 drop materialized view if exists public_position_totals cascade;
 create materialized view public_position_totals as
@@ -252,6 +255,16 @@ grant select on public_party_position_totals to anon, authenticated;
 -- aggregates.js; the ingest/backfill CLIs' batch loops call it at batch end (script's own header
 -- comment) so the aggregates never drift far behind the underlying vote_casts/votes/legislators
 -- data.
+-- SUPERSEDED-BY 0026 (via an intermediate redefinition in 0022): 0018a separately ALTERed this
+-- function to add `set statement_timeout = '600s'` — but 0022's CREATE OR REPLACE FUNCTION below
+-- silently reset that config (Postgres config set via a separate ALTER FUNCTION does not survive a
+-- later CREATE OR REPLACE of the same function), causing a real ~14-hour production outage
+-- (refreshes failing on the default timeout, public charts serving stale data) before anyone
+-- noticed. 0026 is the current, correct definition — the SET clause is folded directly into the
+-- function's own declaration this time so a future CREATE OR REPLACE can't drop it silently again.
+-- Senior engineering audit (2026-08-03, finding 12): copying THIS block forward is the exact
+-- mechanism that caused that outage — never copy a function body without also checking for a
+-- separate ALTER FUNCTION on the same object.
 create or replace function refresh_vote_aggregates()
 returns void
 language sql
