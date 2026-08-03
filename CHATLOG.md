@@ -1598,3 +1598,85 @@ direction.
 Both `TODO.md` and this audit report are the durable record; the full raw per-domain findings
 (every verdict's complete reasoning, all minor/informational items) are preserved in the workflow
 output file, referenced from the report, not duplicated into either doc.
+
+## 2026-08-03 (continued) — "make the corrections": all 4 audit criticals fixed live
+
+Lance: "make the corrections." Worked through the audit's findings systematically, each one TDD
+(red test first, fix, green, commit) before touching production, dry-run then live for every data
+correction — same discipline as every other correction this session.
+
+**Code fixes (root causes, all tested and committed):**
+- `buildMoVoteRows` (`mo-house-xml.js`) hardcoded `chamber:'house'` on every roll call in a House
+  bill's own action history — but that history includes real Senate actions once a bill crosses
+  over, each still printing the acting chamber as a trailing "(H)"/"(S)" marker on its own motion
+  text. Now derives chamber from that marker. A full live census found a THIRD mislabeled vote
+  (`HB1740-5`) the audit's own sample of 2 hadn't caught — `mo-house-chamber` backfill corrected
+  all 3 live.
+- `hasTextCorruption` + a `corruptedText` bucket added to `auto-publish-glossary.js`'s
+  `planAutoPublish` — catches control characters and raw backslashes (ordinary English prose never
+  contains one) mechanically, without a model call. Does not catch semantic corruption (a dropped
+  word reading as fluent prose) — that class needs the term regenerated, not a gate.
+- `finalPairStatus` (`person-identity.js`) now checks for two DIFFERENT non-null values on the same
+  per-person source-key column (`bioguide_id`/`openstates_id`/`legiscan_people_id`) FIRST, ahead of
+  even seat evidence — a recorded fact beats a name match, same principle a seat contradiction
+  already got, just never applied to source ids themselves. Deliberately excludes
+  `mo_house_id`/`mo_senate_id` (per-SEAT, legitimately reused by different people across eras).
+  Fixing this exposed 4 pre-existing test fixtures (Onder worked-example, a Duncan Jr./Sr. suffix
+  test, a nickname test, a keep-separate-ruling test) that gave same-cluster rows distinct-but-
+  meaningless placeholder ids for the same column — nulled them out to isolate what each test
+  actually proves, matching their own sibling tests' convention.
+- Deferred: capturing LegiScan's own printed suffix field at ingest. Lower marginal value now that
+  the source-key guard above already prevents the exact Pierson scenario (which was caused by
+  differing `legiscan_people_id`, not a missing suffix) — noted, not silently dropped.
+
+**Data corrections (all `correct-data.js`, all dry-run verified against live before running live):**
+- `pierson-split` — deleted the erroneous `person_links` rows, nulled `person_id` on both
+  legislator rows, deleted the now-empty person row. Neither legislator row nor any vote_casts/
+  terms row was touched beyond `person_id` itself. Excluded from `all` (deleting a person row is
+  higher-stakes than any in-place UPDATE in this file) — same precedent as `mo-2026-session-merge`.
+- `glossary-refuted-claims` — FECA and BBEDCA edited to remove exactly the phrase each term's own
+  adversarial verification refuted, grounded in the verifier's own evidence quotes. Discovered
+  along the way: the review server's own `TRANSITIONS` state machine has NO entry for `'published'`
+  at all — there is no in-app way to edit already-published content, at all, for any reason. This
+  direct patch is the only way to correct it, mirroring what the 'edit' action would have written
+  (gloss_md patch + a `glossary_notes` 'edited' row).
+- `glossary-corrupted-text` — repaired all 7 corrupted terms. Getting here took a real detour:
+  investigating the corruption via `node -e` one-liners through the Bash tool gave actively wrong
+  readings, because **the Bash tool strips one layer of backslash-escaping before Node ever sees
+  the command** — a `\\u2014` typed in a shell one-liner arrives at Node as `—`, which a
+  double-quoted JS string then decodes as a real em-dash, silently masking the actual corruption
+  every time. Switched to writing real `.mjs` script files instead of inline `-e` one-liners, which
+  don't have this problem, and re-diagnosed all 7 from raw character codes rather than printed/
+  escaped text. Worth remembering: **never diagnose byte-level string corruption via Bash `-e`
+  one-liners; write a script file.** Every replacement is grounded either in the term's own
+  `supported_by_quote` (2 terms with real word-level damage) or a purely mechanical undecoded-
+  unicode-escape fix (5 terms) — verified byte-clean afterward (0/7 remaining control chars or
+  escape leaks).
+- `mo-house-chamber` — the 3 mislabeled votes found by the chamber-fix census, corrected live.
+
+**Migration drafted, not applied (Lance's own step):**
+- `0023_vote_duplicates_rls_and_view_drift.sql` — one line (`enable row level security` on
+  `vote_duplicates`, the only table in the schema missing it) plus recreating `public_vote_feed`/
+  `public_votes` without `security_invoker = true` to match what the audit's own adversarial
+  verifier proved is ALREADY live (owner-bypass, functioning correctly) — the committed 0022 file
+  doesn't match what Lance actually ran; re-applying it verbatim to a fresh database would recreate
+  a real (if not currently live) inertness bug. No-op against current production; closes the gap
+  for any future rebuild or staging copy.
+
+**SB 914 — root-caused, left for Lance to adjudicate.** Checked the ALREADY-CACHED LegiScan
+dataset directly (zero new API calls, zero LegiScan budget spent): decoded the real roll call ZIP
+and found Sen. Mike Moon and Sen. Steven Roberts are **entirely absent** from LegiScan's own vote
+data for this roll call — not counted yea/nay/absent, just missing (LegiScan's own `total` field
+says 32, the real Senate has 34 members). The MO Senate journal's 28-1 (with Moon's recorded NAY)
+is therefore the more complete record; LegiScan's "29-0" is an artifact of an incomplete 32-of-34
+tally, not genuine unanimity. Did not mark the reconciliation flag resolved myself — attributing a
+specific senator's public vote record is exactly the kind of call this project keeps as Lance's,
+never an agent's to make silently, even with strong evidence in hand.
+
+**`legiscan_datasets` anon-read policy — presented as a decision, not fixed.** The audit explicitly
+framed this as "worth Lance's attention" given the project's suspension-level LegiScan posture, not
+a default-fix item — left it exactly as framed, in `TODO.md`.
+
+Full suite 2255 → 2259 (all correction-CLI tests), 0 fail throughout, gated on the extracted `ℹ
+fail` line at every commit, same as every other change this session. All 5 code-fix commits + 1
+migration-draft commit pushed individually as they landed, not batched at the end.

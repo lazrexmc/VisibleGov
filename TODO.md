@@ -6,35 +6,41 @@
 
 ## NOW
 
-- [ ] **NEW TOP PRIORITY — comprehensive accuracy audit findings, 2026-08-03.** Full report:
-  `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`. 28-agent workflow (Fable 5, max effort,
-  every critical/important finding independently adversarially re-verified before being trusted).
-  **4 CRITICAL (fix before "locked in" means anything):**
-  1. SB 914: LegiScan says 29-0, MO Senate journal says 28-1 (Sen. Moon's NAY) — flagged
-     (`vote_reconciliation_flags` id `214a2be0`) but unresolved, both rows still counted, and the
-     0022 backfill can never fix disagreeing pairs by design. Needs a human adjudication.
-  2. Two published glossary terms (FECA `51ebf49a`, BBEDCA `ffd0475e`) still say exactly what
-     their own verification refuted — an accidental re-publish after an intended edit was never
-     saved. Edit or unpublish.
-  3. Seven auto-published glossary terms contain corrupted text (garbled `—` sequences, form-feed
-     chars, dropped words) — worst case drops "independently owned and" from a statutory
-     definition. Shipped under a clean-verification badge since the verifier checks facts, not
-     text integrity. Regenerate the 7; add a text-integrity gate.
-  4. Tommie Pierson Sr. and Jr. (father and son, distinct LegiScan `legiscan_people_id`s 15900/
-     18826, non-overlapping 2015-16/2017-20 vote footprints) auto-merged into one person
-     (`16b22ae8`) with empty seat evidence — exactly the Menendez-shaped risk class, not caught
-     this time. Split via the Bayh-correction SQL runbook precedent.
-  **12 IMPORTANT** (full detail in the report): MO House cast-completeness gap is structural, not
-  temporary (0 of 92 votes comparable — one-legislator test-fixture roster never replaced with a
-  real one, 2,198 parsed casts unrecoverably dropped, 2 Senate votes mislabeled chamber='house');
-  reconciliation-flag queue has more going on than the documented Fitzwater-only story; two
-  systemic gaps that enabled the Pierson merge; `vote_duplicates` RLS not in the migration file
-  (live has it, out-of-band, undocumented); `legiscan_datasets` fully anon-readable on a stale
-  rationale; repo migration 0022 doesn't match what's actually live.
-  **Verdict on the one non-negotiable:** political neutrality and facts-only are genuinely clean —
-  zero violations found. All defects are mechanical accidents, none partisan. Traceability has
-  real, fixable breaches (the 4 criticals above) — until fixed, "everything traceable to the
-  actual text and the actual recorded vote" isn't fully true yet.
+- [ ] **Comprehensive accuracy audit, 2026-08-03 — all 4 criticals fixed live, 2 items left for
+  Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
+  **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus
+  their root-cause code fixes:**
+  1. ~~SB 914 tally contradiction~~ — root-caused, not yet adjudicated (see below — needs Lance).
+  2. ✅ FECA/BBEDCA glossary terms no longer say what their own verification refuted
+     (`correct-data.js glossary-refuted-claims`, live).
+  3. ✅ All 7 corrupted glossary terms repaired, verified byte-clean (`correct-data.js
+     glossary-corrupted-text`, live); a text-integrity gate now blocks this class going forward
+     (`auto-publish-glossary.js`'s `hasTextCorruption`).
+  4. ✅ Tommie Pierson Sr./Jr. split back into two unlinked legislator rows (`correct-data.js
+     pierson-split`, live) — a same-source-key contradiction guard (`person-identity.js`'s
+     `finalPairStatus`) now permanently prevents this class of wrong merge.
+  **Also fixed (important findings, root causes):** `buildMoVoteRows` chamber-hardcoding bug fixed
+  + the 3 live mislabeled Senate votes corrected (`correct-data.js mo-house-chamber`, live);
+  migration `0023_vote_duplicates_rls_and_view_drift.sql` drafted (enables RLS on `vote_duplicates`
+  for any future rebuild + corrects the committed 0022 file's view definitions to match what's
+  actually live) — **awaiting Lance's apply**, same draft-then-apply pattern as every migration.
+  **Two items left, deliberately not resolved by an agent:**
+  - **SB 914 adjudication** (`vote_reconciliation_flags` id `214a2be0`) — checked the ALREADY-
+    CACHED LegiScan dataset directly (zero new API calls): **Sen. Mike Moon and Sen. Steven Roberts
+    are entirely absent from LegiScan's own roll-call vote data for this roll call** — not counted
+    as yea/nay/absent, just missing (LegiScan's own total field says 32, not the Senate's real 34).
+    The MO Senate journal (primary source, 28-1, Moon's NAY) is the more complete record; LegiScan's
+    "29-0" reflects an incomplete 32-of-34 tally, not genuine unanimity. Strong evidence, but
+    attributing a specific senator's public vote record is Lance's call, not an agent's to make
+    silently — needs his adjudication of the flag.
+  - **`legiscan_datasets` fully anon-readable on a stale rationale** — 31 rows of internal
+    operational ledger (LegiScan dataset hashes, fetch timestamps, local cache paths), zero
+    consumers, the table it was said to mirror (`ingestion_runs`) was locked down 7 migrations
+    later. Given this project's suspension-level LegiScan posture, whether to drop the anon policy
+    is a deliberate decision, not a default fix — Lance's call.
+  **Verdict on the one non-negotiable:** political neutrality and facts-only were genuinely clean —
+  zero violations found across the dedicated audit domain. Every defect found and fixed was a
+  mechanical accident, none partisan.
   **Also from this audit:** two verification subagents materialized the live Supabase service-role
   key in plaintext (one bash command, one scratchpad file) — the harness auto-flagged both, the
   on-disk file was found and deleted immediately. Never touched the repo/git. Lance's call whether
