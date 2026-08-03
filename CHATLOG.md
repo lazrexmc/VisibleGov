@@ -1680,3 +1680,71 @@ a default-fix item — left it exactly as framed, in `TODO.md`.
 Full suite 2255 → 2259 (all correction-CLI tests), 0 fail throughout, gated on the extracted `ℹ
 fail` line at every commit, same as every other change this session. All 5 code-fix commits + 1
 migration-draft commit pushed individually as they landed, not batched at the end.
+
+## 2026-08-03 (continued) — "it sure feels like we've locked the backend down"; Playwright proves it; Cloudflare deploy spec begins
+
+Lance: "It sure feels like we've locked the backend down and could potentially move to the
+cloudflare. Was that last audit a full deep dive audit?" Answered honestly: yes, genuinely deep
+(28 agents, adversarial re-verification, real findings), but with real limits worth knowing before
+a deploy call — no external-source re-verification (by design, LegiScan budget), some domains
+sampled not censused, and one thing the audit found but did NOT fix: the MO House
+per-legislator-vote completeness gap, currently invisible only because nothing's live yet.
+
+**"Review the gameplan for the front end cloudflare... towards speccing and implementing."** Ran a
+6-angle workflow (site currency vs. everything shipped since Plan 3, a fresh live security/RLS
+pass, actual Cloudflare Pages mechanics, which open backend items are actually visible on a live
+page, testing posture, whether the original site design docs still hold up) — genuinely useful:
+confirmed `site/` is current and RLS holds, resolved the old "does `_headers` cover Function
+responses" open question (no — confirmed via Cloudflare's own docs), confirmed the domain sequence
+was already decided (2026-07-28: `.pages.dev` first), and surfaced one real new pre-deploy gap
+(`summaries`/`glossary_terms` leaking internal columns via bare `select=*`) plus sharpened the MO
+House finding (not just thin data — ~162 of ~163 House members show zero votes forever with no
+caveat, next to one fixture legislator who looks fully tracked). Resolved live myself: whether
+migration 0023's view fix was actually live (yes — re-ran the accuracy audit's own planner-cost
+discrimination technique, confirmed owner-bypass, matches the known-good control).
+
+**"I'd like to ensure that the basic idea is actually accurate. Can people select a politician...
+and see their votes and what bill they voted on?"** Answered this the right way — not by reading
+code, by actually doing it. Started `scripts/serve-site.js`, drove a real Playwright browser
+against live production data: US Senate (Mark Kelly, 876 votes paginated), US House (Jeff Crank),
+MO Senate (Brian Williams, a merged identity), MO House (Dan Stacy) — all four confirmed with real
+bill numbers and real yea/nay positions. Then the more representative test: opened the actual
+directory (1,569 real links), clicked one, landed on a real profile, clicked a bill from a real
+vote, landed on that bill's page showing the real roll-call tally (214-208). Zero console errors
+or warnings across the whole session. This was also the first time this project's public site has
+ever been walked end-to-end in a real browser — closes a gap the gameplan review had just flagged.
+One own mistake caught and corrected along the way: `/person/<id>` is for cross-source-merged
+legislators, `/legislator/<id>` is for standalone ones — used the wrong one on my first try and hit
+"No such profile," which was my error, not a site bug (every real link on the site already gets
+this right).
+
+**"Let's start on that process, you go first."** Invoked `superpowers:brainstorming` for the
+Cloudflare Pages deploy spec, leading with the scope assessment rather than a cold question (I'd
+already done the exploration via the gameplan review): the ask is really four separable threads —
+deploy mechanics, one small column-exposure fix, three product/design decisions, and a testing
+checklist. Lance chose the narrow scope (deploy mechanics only) — the column-exposure fix became
+its own quick correction (migration `0025`, drafted and pushed, no site-code changes needed — a
+column-level `GRANT` was cleanest since site/js already queries `summaries`/`glossary_terms` by
+name directly in three files; a view-rename would've needed updating and re-testing all three for
+no benefit). The MO House caveat fell out of scope entirely by his own choice (site-content, not
+deploy mechanics — now tracked as its own open TODO item). Two design decisions resolved directly
+in the brainstorming conversation: fix `geocode.js`'s missing security headers now (not later —
+Cloudflare Functions don't inherit `_headers`, so production `/geocode` responses currently carry
+none at all), and build a simple `site/404.html` now.
+
+Presented Section 1 (scope/sequencing) — approved. Presented Section 3 (connecting Cloudflare
+Pages) at Lance's own request for more depth than "connect the cloudflare" — walked the real
+wizard sequence (account prerequisite, scoped GitHub authorization, the exact project-creation
+values, framework preset **None** specifically flagged since a preset injects an assumed build
+command, first-deploy-is-automatic, custom domain deferred) and surfaced one thing worth a
+deliberate call rather than a default: Cloudflare Pages auto-builds a public preview for every
+branch/PR, and since `site/config.js` hardcodes the real production anon key, every preview is a
+fully live copy of the real site — not a security hole (RLS is still the wall), but worth deciding
+on purpose. Two sub-questions (3a: fresh or existing Cloudflare account; 3d: restrict preview
+builds or leave default) are open when Lance gets back. Sections 2 (the two fixes' implementation
+detail) and 4 (post-deploy verification checklist) haven't been presented yet.
+
+Lance then went AFK with a broad documentation-refresh instruction — this entry and the TODO.md
+Cloudflare section rewrite are that pass's foreground half; the deeper docs (CONTROLLER_BRIEFING,
+DATA_INVENTORY) are next, followed by an independent verification pass before calling any of it
+done, per this project's own standing "never trust a self-report" discipline.
