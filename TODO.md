@@ -100,8 +100,32 @@
     verbatim quotes flowing through with only the three intended fields. `trust.html`'s receipt
     claim ("the exact quoted excerpt it came from") is now true for bill summaries, not just
     glossary terms. Fully closed, nothing left.
-  - **Cross-adapter vote duplicate dedup — CODE COMPLETE 2026-08-03, migration not yet applied.**
-    Implements CONTROLLER RULING 3 (decided 2026-07-29, never built): "the primary-source
+  - **Cross-adapter vote duplicate dedup — SHIPPED AND APPLIED LIVE 2026-08-03.** Migration applied
+    by Lance in the SQL editor. `npm run refresh:aggregates` hit a PostgREST statement timeout
+    (~8s, consistent across two attempts) — the RPC does three `REFRESH MATERIALIZED VIEW
+    CONCURRENTLY` passes over 1.46M+ `vote_casts` rows in one call, longer than the REST API's
+    timeout allows. Worked around by running `select refresh_vote_aggregates();` directly in the
+    SQL editor (bypasses PostgREST, same as the migration itself) — succeeded, matview counts
+    confirmed unchanged (11,466 / 3,042 / 198, as expected with zero duplicates marked yet).
+    **The backfill correction found ZERO clean matches (dry-run and live both), and this is
+    correct, not a bug** — traced one real candidate pair (LegiScan roll call 1673444 vs.
+    `mo-house-xml-HB1623-3`, same bill/chamber/date, LegiScan tally 103-48) through the actual
+    matching code: MO's own `vote_casts` table has only 1 individual legislator position stored
+    for that vote despite the "103-48" printed aggregate, so `isPrimaryCastDataComparable`
+    correctly declines to certify a match it can't verify. Checked more broadly: 0 of 92 sampled
+    primary-source votes with a parseable aggregate result had enough `vote_casts` rows to pass
+    this same check. **This is a larger-scale version of an already-documented condition**
+    (`docs/DATA_INVENTORY.md`'s "169 roll calls with zero individual casts," MO House rows "with
+    individual casts arriving later on the same row") — the real scope of "not caught up yet" is
+    much bigger than the documented 169/74 figures suggested, but it predates tonight's work and
+    isn't a defect in it. Practical effect: the feature is live and correctly wired end-to-end
+    (both the live-ingest write path and the backfill), it just has ~0 real-world yield right now
+    given the current state of `mo-house-xml`'s per-legislator cast data — it will pick up real
+    duplicates automatically once/if that data catches up on a given vote. **Separate, bigger
+    question worth its own look, not chased further tonight:** is `mo-house-xml`'s roll-call-PDF
+    cast-parsing pipeline (`ingest-mo-house.js`) actually keeping up, or effectively stalled for
+    most votes? That's a distinct investigation from vote-duplicate dedup.
+  - Implements CONTROLLER RULING 3 (decided 2026-07-29, never built): "the primary-source
     (journal/PDF) row wins for display whenever both exist for the same real floor vote." Both
     LegiScan and MO's own primary-source adapters (`mo-house-xml`, `mo-senate-web`) can legitimately
     each write their own `votes` row for the same real vote — nothing deduped this before, so every
@@ -121,10 +145,6 @@
     effect, which a backfill against already-published data has no business triggering) — the
     backfill correction reimplements the matching locally using only the pure comparison helpers,
     mirroring this file's own existing 1969-sentinel-date correction's established pattern.
-    **Remaining steps, all Lance's:** apply `supabase/migrations/0022_vote_duplicates.sql`, run
-    `node scripts/probe-public-surface.js`, run `npm run refresh:aggregates`, run
-    `node --env-file=.env src/cli/correct-data.js vote-duplicates --dry-run` then live, run
-    `npm run refresh:aggregates` again. Full sequence in the plan's own "Handoff to Lance" section.
     **Migration 0022 SQL bug found+fixed 2026-08-03:** Lance's first live run errored (`42809:
     "public_position_totals" is not a view`) — two stray `drop view if exists ... cascade;` lines
     tried to drop objects that are actually materialized views (Postgres's `DROP VIEW` refuses that
