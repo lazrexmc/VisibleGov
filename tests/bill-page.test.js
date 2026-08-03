@@ -865,3 +865,126 @@ test('loadSummarySection: a summary with ONLY a support row on file (every summa
   assert.notEqual(note, null);
   assert.equal(note.textContent, 'Summary by claude-opus-5, adversarially verified clean by claude-sonnet-5 on 2026-07-15.');
 });
+
+// ============================================================================
+// Bullet citation toggle — bullet-citation-exposure design (2026-08-02). The `citations` column on
+// public_verification_notes is new (migration 0021, draft-then-apply); these tests reproduce both
+// the "citation available" and "no citation available" cases, matching this file's own convention
+// of DOM-wiring regression tests at the fetch -> select -> render level, not just pure-function
+// tests.
+// ============================================================================
+
+test('loadSummarySection: a bullet WITH a matching citation renders an accessible toggle that reveals the exact quote on click', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/summaries?')) {
+      return okResponse([{
+        id: 'sum-cited', bill_id: 'bill-cited', model: 'claude-opus-5', body_md: '**What it does:**\n- Does X. (Sec. 1)\n- Does Y. (Sec. 2)',
+      }]);
+    }
+    if (u.includes('/public_verification_notes?')) {
+      return okResponse([
+        {
+          summary_id: 'sum-cited',
+          kind: 'support',
+          overall: 'clean',
+          model: 'claude-sonnet-5',
+          created_at: '2026-07-15T18:22:00.000Z',
+          citations: [
+            { bullet_index: 0, section: 'Sec. 1', evidence_quote: 'The exact bill text for point X.' },
+          ],
+        },
+      ]);
+    }
+    if (u.includes('/summary_terms?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadSummarySection(container, { billId: 'bill-cited' });
+
+  const items = container.querySelectorAll('.bill-summary-bullets li');
+  assert.equal(items.length, 2);
+
+  // Bullet 0 has a citation: an accessible toggle, not the old plain span.
+  const toggle0 = items[0].querySelector('.bill-citation-toggle');
+  assert.notEqual(toggle0, null, 'bullet 0 should render an interactive citation toggle');
+  assert.equal(toggle0.getAttribute('role'), 'button');
+  assert.equal(toggle0.getAttribute('aria-expanded'), 'false');
+  assert.equal(toggle0.tabIndex, 0);
+  assert.match(toggle0.textContent, /Sec\. 1/);
+
+  const quote0 = items[0].querySelector('.bill-citation-quote');
+  assert.notEqual(quote0, null);
+  assert.equal(quote0.hidden, true, 'the quote is hidden until the toggle is activated');
+  assert.equal(quote0.textContent, 'The exact bill text for point X.');
+
+  toggle0.dispatchEvent(new dom.window.Event('click'));
+  assert.equal(quote0.hidden, false, 'clicking the toggle reveals the quote');
+  assert.equal(toggle0.getAttribute('aria-expanded'), 'true');
+
+  // Bullet 1 has NO matching citation (bullet_index 1 not present in the citations array): falls
+  // back to the old plain, non-interactive span — never a broken/empty toggle.
+  const toggle1 = items[1].querySelector('.bill-citation-toggle');
+  assert.equal(toggle1, null, 'bullet 1 has no citation — must not render a toggle at all');
+  const span1 = items[1].querySelector('.bill-summary-bullet-section');
+  assert.notEqual(span1, null);
+  assert.match(span1.textContent, /Sec\. 2/);
+});
+
+test('loadSummarySection: citations is null (flagged/no-citation summary) -> every bullet falls back to the plain, non-interactive section span', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/summaries?')) {
+      return okResponse([{
+        id: 'sum-no-cite', bill_id: 'bill-no-cite', model: 'claude-opus-5', body_md: '**What it does:**\n- Does X. (Sec. 1)',
+      }]);
+    }
+    if (u.includes('/public_verification_notes?')) {
+      return okResponse([
+        {
+          summary_id: 'sum-no-cite', kind: 'support', overall: 'clean', model: 'claude-sonnet-5', created_at: '2026-07-15T18:22:00.000Z', citations: null,
+        },
+      ]);
+    }
+    if (u.includes('/summary_terms?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadSummarySection(container, { billId: 'bill-no-cite' });
+
+  assert.equal(container.querySelector('.bill-citation-toggle'), null);
+  const span = container.querySelector('.bill-summary-bullet-section');
+  assert.notEqual(span, null);
+  assert.match(span.textContent, /Sec\. 1/);
+});
+
+test('loadSummarySection: a public_verification_notes row with no `citations` key at all (pre-0021 shape) -> falls back cleanly, same as null', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('/summaries?')) {
+      return okResponse([{
+        id: 'sum-pre-0021', bill_id: 'bill-pre-0021', model: 'claude-opus-5', body_md: '**What it does:**\n- Does X. (Sec. 1)',
+      }]);
+    }
+    if (u.includes('/public_verification_notes?')) {
+      return okResponse([
+        {
+          summary_id: 'sum-pre-0021', overall: 'clean', model: 'claude-sonnet-5', created_at: '2026-07-15T18:22:00.000Z',
+        },
+      ]);
+    }
+    if (u.includes('/summary_terms?')) return okResponse([]);
+    return okResponse([]);
+  });
+
+  const container = document.createElement('section');
+  await loadSummarySection(container, { billId: 'bill-pre-0021' });
+
+  assert.equal(container.querySelector('.bill-citation-toggle'), null);
+  assert.notEqual(container.querySelector('.bill-summary-bullet-section'), null);
+});

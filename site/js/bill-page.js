@@ -226,6 +226,39 @@ function personHref(legislator) {
     : `/legislator/${legislator?.id}/${slugify(displayName)}`;
 }
 
+// buildCitationToggle(sectionText, quoteText) -> {toggle, detail}. Bullet-citation-exposure design
+// (2026-08-02, docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md) — mirrors
+// glossary-inline.js's buildMarkedTerm/buildGlossDetail accessible-toggle shape (tabIndex, role=
+// button, aria-expanded, click + Enter/Space), not shared code with it, since the data and call
+// site differ (one citation per bullet, never a grouped array of rows). `toggle` keeps the same
+// text and class the old non-interactive span used, so it drops into the same spot; `detail` is a
+// hidden sibling <blockquote>, appended by the caller AFTER the bullet's inline content — never
+// nested inside it, same rule this file already documents for the glossary details it renders
+// alongside.
+function buildCitationToggle(sectionText, quoteText) {
+  const toggle = el('span', { class: 'bill-summary-bullet-section bill-citation-toggle' }, ` (${sectionText})`);
+  toggle.tabIndex = 0;
+  toggle.setAttribute('role', 'button');
+  toggle.setAttribute('aria-expanded', 'false');
+
+  const detail = el('blockquote', { class: 'bill-citation-quote' }, quoteText);
+  detail.hidden = true;
+
+  const flip = () => {
+    detail.hidden = !detail.hidden;
+    toggle.setAttribute('aria-expanded', String(!detail.hidden));
+  };
+  toggle.addEventListener('click', flip);
+  toggle.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      flip();
+    }
+  });
+
+  return { toggle, detail };
+}
+
 // Fix round 1, LOW-3 (task-9 review): the bill page's own noun ("No such bill," never person-
 // page.js's "No such profile" wording) — reuses sectionState's 'failed' visual/semantic weight
 // exactly like person-page.js's renderNotFound, but is NOT imported from person-page.js (that
@@ -462,6 +495,14 @@ function renderSummary(container, {
       for (const detail of details) container.appendChild(detail);
     }
     if (structured.bullets.length > 0) {
+      // Keyed strictly on bullet_index, never cross-checked against parsed section text — two live
+      // published summaries have small formatting differences between parseBullets' extraction and
+      // the verifier's own recorded section string (design spec §2); position is the reliable key.
+      const citationsByIndex = new Map(
+        (Array.isArray(note?.citations) ? note.citations : [])
+          .filter((c) => c && Number.isInteger(c.bullet_index))
+          .map((c) => [c.bullet_index, c]),
+      );
       const ul = el('ul', { class: 'bill-summary-bullets' });
       for (const bullet of structured.bullets) {
         const li = el('li', {});
@@ -470,7 +511,15 @@ function renderSummary(container, {
         // inline text and section citation — still never nested inside an inline element.
         const { inline, details } = renderMarkedText(bullet.point, glossaryTerms);
         li.appendChild(inline);
-        li.appendChild(el('span', { class: 'bill-summary-bullet-section' }, ` (${bullet.section})`));
+        const citation = citationsByIndex.get(bullet.index);
+        const hasQuote = citation && typeof citation.evidence_quote === 'string' && citation.evidence_quote.trim() !== '';
+        if (hasQuote) {
+          const { toggle, detail: citationDetail } = buildCitationToggle(bullet.section, citation.evidence_quote);
+          li.appendChild(toggle);
+          li.appendChild(citationDetail);
+        } else {
+          li.appendChild(el('span', { class: 'bill-summary-bullet-section' }, ` (${bullet.section})`));
+        }
         for (const detail of details) li.appendChild(detail);
         ul.appendChild(li);
       }
