@@ -1023,7 +1023,14 @@ test('runBackfillMoBillTexts: passagePriority breakdown is reported in BOTH dry-
 // FILE side of the pipeline against the actual 31 cached archives; mirrors backfill-mo-bill-meta-
 // cli.test.js's own precedent for the same real cache dir) ----
 
-test('runBackfillMoBillTexts: real cache dir end-to-end file decode — every one of the 31 real cached archives decodes cleanly, billsSeen > 0, zero API queries, zero fetches, zero writes (empty session index -> nothing resolves deeper)', async () => {
+// Senior engineering audit (2026-08-03, finding 15): both real-cache tests below depend on
+// .superpowers/artifacts/legiscan-datasets/, a gitignored, weekly-mutating local cache absent on a
+// fresh clone. Guarded to skip honestly there.
+test('runBackfillMoBillTexts: real cache dir end-to-end file decode — every one of the 31 real cached archives decodes cleanly, billsSeen > 0, zero API queries, zero fetches, zero writes (empty session index -> nothing resolves deeper)', async (t) => {
+  if (listCachedDatasetFiles(REAL_CACHE_DIR).length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const client = makeFakeWriteClient();
   const report = await runBackfillMoBillTexts(client, {
     dryRun: false,
@@ -1055,8 +1062,12 @@ test('runBackfillMoBillTexts: real cache dir end-to-end file decode — every on
 // text entries at all; 2,202 bills whose selected PDF entry points at one of two LegiScan-hosted
 // placeholder hosts — reflect.legiscan.com/Proxy.php x2,177, proxy2.legiscan.com/Proxy.php x25 —
 // neither is a real state document server).
-test('runBackfillMoBillTexts: real cache dir RECONCILIATION — billMatched EXACTLY equals alreadyHasVersion + skippedNonPdf + noTextEntry + skippedNonStateHost + toFetch.length over the full real 31-session corpus; noTextEntry pins the known 252; skippedNonStateHost is visible in --dry-run', async () => {
+test('runBackfillMoBillTexts: real cache dir RECONCILIATION — billMatched EXACTLY equals alreadyHasVersion + skippedNonPdf + noTextEntry + skippedNonStateHost + toFetch.length over the full real 31-session corpus; noTextEntry pins the known 252; skippedNonStateHost is visible in --dry-run', async (t) => {
   const files = listCachedDatasetFiles(REAL_CACHE_DIR);
+  if (files.length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const sessionIndex = new Map();
   const billIndex = new Map();
   let nextSessionRowId = 1;

@@ -13,6 +13,7 @@ import {
   resolveNicknamePatch,
   runBackfillNicknames,
 } from '../src/cli/backfill-nicknames.js';
+import { assertCacheManifestConsistent } from './support/real-legiscan-cache.js';
 
 // Nickname amendment (.superpowers/sdd/2026-07-29-identity-merge/progress.md, last entry):
 // migration 0013 (draft) adds legislators.nickname; this CLI backfills it from the 31 dataset ZIPs
@@ -43,13 +44,25 @@ test('parseArgs rejects unknown flags', () => {
   assert.throws(() => parseArgs(['--bogus']), /unknown flag/);
 });
 
+test('real legiscan-datasets cache manifest: if the cache exists at all, session 1608 must be in it', () => {
+  assertCacheManifestConsistent(['1608-']);
+});
+
 // ---- listCachedDatasetFiles ----
 
-test('listCachedDatasetFiles: the real repo cache dir has exactly the 32 cached dataset ZIPs this task is scoped to', () => {
+test('listCachedDatasetFiles: the real repo cache dir has exactly the 32 cached dataset ZIPs this task is scoped to', (t) => {
   // Bumped 31 -> 32 (2026-08-03): LegiScan datasets refresh weekly, so this real cache dir grows
   // over time (a fresh 2239/2026-Regular-Session dataset landed 2026-08-02) — this snapshot needs
   // periodic bumps, same as every other "real cache dir" count in this test suite.
+  //
+  // Senior engineering audit (2026-08-03, finding 15): guarded to skip honestly (not fail
+  // confusingly at 0 !== 32) on a fresh clone, where this gitignored, weekly-mutating cache is
+  // absent entirely.
   const files = listCachedDatasetFiles(REAL_CACHE_DIR);
+  if (files.length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   assert.equal(files.length, 32);
   assert.ok(files.every((f) => f.endsWith('.json')));
   assert.ok(files.every((f) => f.startsWith(`${REAL_CACHE_DIR}/`)));
@@ -138,8 +151,12 @@ test('extractNicknamePeople: real fixture — the live LegiScan Onder record (pe
 
 // ---- readCachedDatasetPeople ----
 
-test('readCachedDatasetPeople: real fixture — the actual cached session-1608 archive decodes to 189 people including the real Onder nickname record', async () => {
+test('readCachedDatasetPeople: real fixture — the actual cached session-1608 archive decodes to 189 people including the real Onder nickname record', async (t) => {
   const files = listCachedDatasetFiles(REAL_CACHE_DIR).filter((f) => f.includes('1608-'));
+  if (files.length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   assert.equal(files.length, 1, 'session 1608 (2018 2nd Special Session) is one of the 31 cached datasets');
   const decoded = await readCachedDatasetPeople(files[0]);
   assert.equal(decoded.ok, true);
@@ -410,7 +427,11 @@ test('runBackfillNicknames: zero cache files found (cache dir missing/empty) -> 
 // ---- real end-to-end file decode (no live DB — a fake client that never matches anything, just
 // proving the FILE side of the pipeline is correct against the actual 31 cached archives) ----
 
-test('runBackfillNicknames: real cache dir end-to-end file decode — peopleSeen/withNickname are computed from the actual 31 cached archives, zero API queries, zero writes (no legislators row ever matches this fake, empty roster)', async () => {
+test('runBackfillNicknames: real cache dir end-to-end file decode — peopleSeen/withNickname are computed from the actual 31 cached archives, zero API queries, zero writes (no legislators row ever matches this fake, empty roster)', async (t) => {
+  if (listCachedDatasetFiles(REAL_CACHE_DIR).length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const client = makeFakeClient({ legislatorRows: [] });
   const report = await runBackfillNicknames(client, { dryRun: false, cacheDir: REAL_CACHE_DIR });
   // Not hardcoded to a fixed file count — LegiScan datasets refresh weekly and this real cache dir

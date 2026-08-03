@@ -18,6 +18,7 @@ import {
 } from '../src/cli/backfill-mo-bill-meta.js';
 import { listCachedDatasetFiles } from '../src/cli/backfill-nicknames.js';
 import { normalizeBillIdentifier } from '../src/adapters/legiscan-dataset.js';
+import { findRealCachedDatasetFile, assertCacheManifestConsistent } from './support/real-legiscan-cache.js';
 
 // Task 2 of the profile-completeness plan
 // (.superpowers/sdd/2026-07-29-profile-completeness/task-2-brief.md): MO sponsors + bill-status
@@ -58,10 +59,19 @@ test('parseArgs rejects unknown flags', () => {
 
 // ---- readCachedDatasetBills ----
 
-test('readCachedDatasetBills: real fixture — the actual cached session-1608 archive (2018 2nd Special Session) decodes to exactly the 9 real bills, verified independently against the source ZIP', async () => {
-  const files = listCachedDatasetFiles(REAL_CACHE_DIR).filter((f) => f.includes('1608-'));
-  assert.equal(files.length, 1, 'session 1608 is one of the 31 cached datasets');
-  const decoded = await readCachedDatasetBills(files[0]);
+// Senior engineering audit (2026-08-03, finding 15): the two real-fixture tests below depend on
+// .superpowers/artifacts/legiscan-datasets/, a gitignored, weekly-mutating local cache absent on a
+// fresh clone. Guarded to skip honestly there rather than fail confusingly on
+// readCachedDatasetBills(undefined). This sanity test is the "gate": if the cache exists at all in
+// this environment, it must not be silently missing exactly what these two tests need.
+test('real legiscan-datasets cache manifest: if the cache exists at all, sessions 1608/1579 must be in it', () => {
+  assertCacheManifestConsistent(['1608-', '1579-']);
+});
+
+test('readCachedDatasetBills: real fixture — the actual cached session-1608 archive (2018 2nd Special Session) decodes to exactly the 9 real bills, verified independently against the source ZIP', async (t) => {
+  const filePath = findRealCachedDatasetFile('1608-');
+  if (!filePath) { t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)'); return; }
+  const decoded = await readCachedDatasetBills(filePath);
   assert.equal(decoded.ok, true);
   assert.equal(decoded.sessionId, 1608);
   assert.equal(decoded.bills.length, 9);
@@ -73,10 +83,10 @@ test('readCachedDatasetBills: real fixture — the actual cached session-1608 ar
   assert.equal(sb1.sponsors.length, 4, 'real SB1 fixture: 1 primary + 3 cosponsors');
 });
 
-test('readCachedDatasetBills: real fixture — session 1579 (2018 1st Special Session) decodes to exactly 18 real bills, all carrying a numeric status (never null in the real source)', async () => {
-  const files = listCachedDatasetFiles(REAL_CACHE_DIR).filter((f) => f.includes('1579-'));
-  assert.equal(files.length, 1);
-  const decoded = await readCachedDatasetBills(files[0]);
+test('readCachedDatasetBills: real fixture — session 1579 (2018 1st Special Session) decodes to exactly 18 real bills, all carrying a numeric status (never null in the real source)', async (t) => {
+  const filePath = findRealCachedDatasetFile('1579-');
+  if (!filePath) { t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)'); return; }
+  const decoded = await readCachedDatasetBills(filePath);
   assert.equal(decoded.ok, true);
   assert.equal(decoded.sessionId, 1579);
   assert.equal(decoded.bills.length, 18);
@@ -846,7 +856,11 @@ test('runBackfillMoBillMeta: pre-0015 tolerance does not apply in dry-run — dr
 // ---- real end-to-end file decode (no live DB — empty index maps, just proving the FILE side of
 // the pipeline is correct against the actual 31 cached archives) ----
 
-test('runBackfillMoBillMeta: real cache dir end-to-end file decode — billsSeen/sponsorsSeen are computed from the actual 31 cached archives, zero API queries, zero writes (empty session index -> nothing resolves deeper)', async () => {
+test('runBackfillMoBillMeta: real cache dir end-to-end file decode — billsSeen/sponsorsSeen are computed from the actual 31 cached archives, zero API queries, zero writes (empty session index -> nothing resolves deeper)', async (t) => {
+  if (listCachedDatasetFiles(REAL_CACHE_DIR).length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const client = makeFakeWriteClient();
   const report = await runBackfillMoBillMeta(client, {
     dryRun: false,

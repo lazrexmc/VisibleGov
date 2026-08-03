@@ -14,6 +14,7 @@ import {
   runBackfillMoTerms,
 } from '../src/cli/backfill-mo-terms.js';
 import { listCachedDatasetFiles, readCachedDatasetPeople } from '../src/cli/backfill-nicknames.js';
+import { assertCacheManifestConsistent } from './support/real-legiscan-cache.js';
 
 // Task 8b of the public-site plan (.superpowers/sdd/2026-07-30-public-site/task-8b-brief.md,
 // finding D1): mo-legislature terms are ~unpopulated (1 row live) because no driver has ever
@@ -54,18 +55,34 @@ test('parseArgs rejects unknown flags', () => {
 
 // ---- readDatasetEnvelopeMeta (cheap metadata read — no zip decode) ----
 
-test('readDatasetEnvelopeMeta: real cached envelope — session_id/year_start/session_title/dataset_date read straight off the top-level envelope fields, no ZIP decode needed', () => {
+// Senior engineering audit (2026-08-03, finding 15): .superpowers/artifacts/legiscan-datasets/ is
+// a gitignored, weekly-mutating local cache — absent entirely on a fresh clone (guarded below), and
+// its NEWEST 2239 dataset_date keeps moving forward as the cache refreshes even when it IS present
+// (a second, independent time-bomb this same test used to have: it pinned datasetDate to the exact
+// literal '2026-08-02', which broke the instant the cache next refreshed). Floored, not pinned: a
+// `>=` check against the date this was last verified still proves the sort-by-date/tie-break logic
+// works, without re-breaking on every future cache refresh.
+const DATASET_DATE_FLOOR = '2026-08-02'; // the date this test was last verified against a real cache
+
+test('real legiscan-datasets cache manifest: if the cache exists at all, session 2239 (2026 Regular) must be in it', () => {
+  assertCacheManifestConsistent(['2239-']);
+});
+
+test('readDatasetEnvelopeMeta: real cached envelope — session_id/year_start/session_title/dataset_date read straight off the top-level envelope fields, no ZIP decode needed', (t) => {
   // LegiScan datasets refresh weekly, so more than one 2239 (2026 Regular Session) file can be
   // cached at once as an older fetch is superseded — pick the newest by dataset_date (same
   // tie-break resolveLatestMoDatasetFile itself uses) rather than assuming exactly one exists.
   const files = listCachedDatasetFiles(REAL_CACHE_DIR).filter((f) => f.includes('2239-'));
-  assert.ok(files.length >= 1, 'the 2026 Regular Session dataset (2239) must be cached');
+  if (files.length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const metas = files.map((f) => readDatasetEnvelopeMeta(f)).filter((m) => m.ok);
   const latest = metas.sort((a, b) => (a.datasetDate < b.datasetDate ? 1 : -1))[0];
   assert.equal(latest.sessionId, 2239);
   assert.equal(latest.yearStart, 2026);
   assert.equal(latest.sessionTitle, '2026 Regular Session');
-  assert.equal(latest.datasetDate, '2026-08-02');
+  assert.ok(latest.datasetDate >= DATASET_DATE_FLOOR, `expected dataset_date >= ${DATASET_DATE_FLOOR} (ISO dates sort lexicographically), got ${latest.datasetDate}`);
 });
 
 test('readDatasetEnvelopeMeta: a nonexistent file path is honestly reported ok:false, never throws', () => {
@@ -93,7 +110,11 @@ test('readDatasetEnvelopeMeta: an envelope missing session_id or year_start is h
 
 // ---- resolveLatestMoDatasetFile (mechanical pick: highest year_start among cached datasets) ----
 
-test('resolveLatestMoDatasetFile: the real cache — 2239 (2026 Regular Session, year_start 2026) is the mechanical winner', () => {
+test('resolveLatestMoDatasetFile: the real cache — 2239 (2026 Regular Session, year_start 2026) is the mechanical winner', (t) => {
+  if (listCachedDatasetFiles(REAL_CACHE_DIR).length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const { best, filesConsidered, skippedUnreadable } = resolveLatestMoDatasetFile(REAL_CACHE_DIR);
   // Not hardcoded to a fixed file count — LegiScan datasets refresh weekly and this real cache dir
   // grows over time (32 as of 2026-08-03, up from 31 at task-writing time); assert it matches the
@@ -487,7 +508,11 @@ test('runBackfillMoTerms: the chosen dataset file cannot be decoded (corrupt cac
 
 // ---- real-fixture end-to-end smoke (real cache dir + real decode, fake DB layer only) ----
 
-test('runBackfillMoTerms: real cache dir end-to-end — resolves the real 2026 session, decodes real people, and only inserts for people with a legislator match', async () => {
+test('runBackfillMoTerms: real cache dir end-to-end — resolves the real 2026 session, decodes real people, and only inserts for people with a legislator match', async (t) => {
+  if (listCachedDatasetFiles(REAL_CACHE_DIR).length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const inserted = [];
   const report = await runBackfillMoTerms(null, {
     dryRun: false,
@@ -510,7 +535,11 @@ test('runBackfillMoTerms: real cache dir end-to-end — resolves the real 2026 s
 // reaches an insert call. This test closes that gap with one real person (Hardy Billington,
 // people_id 20696, real district 'HD-152' in the live 2026 cache) mapped to a fake legislator id,
 // verifying the FULL real-decode -> chamber/district-resolution -> insert path end to end.
-test('runBackfillMoTerms: real cache dir end-to-end — a real person WITH a legislator match inserts with the district correctly normalized from the source\'s own "HD-152" shape to bare digits "152"', async () => {
+test('runBackfillMoTerms: real cache dir end-to-end — a real person WITH a legislator match inserts with the district correctly normalized from the source\'s own "HD-152" shape to bare digits "152"', async (t) => {
+  if (listCachedDatasetFiles(REAL_CACHE_DIR).length === 0) {
+    t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
+    return;
+  }
   const inserted = [];
   const report = await runBackfillMoTerms(null, {
     dryRun: false,
