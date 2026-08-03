@@ -33,11 +33,10 @@
     "29-0" reflects an incomplete 32-of-34 tally, not genuine unanimity. Strong evidence, but
     attributing a specific senator's public vote record is Lance's call, not an agent's to make
     silently — needs his adjudication of the flag.
-  - **`legiscan_datasets` fully anon-readable on a stale rationale — Lance's decision (2026-08-03):
-    lock it down.** Migration `0024_lock_down_legiscan_datasets.sql` drafted — drops the `anon_read`
-    policy (RLS is already enabled; no replacement policy, becomes service-role-only, matching
-    `vote_reconciliation_flags`' posture from the same original migration). **Awaiting Lance's
-    apply**, same draft-then-apply pattern as every migration.
+  - ✅ **`legiscan_datasets` locked down — applied and verified live 2026-08-03.** Migration `0024`
+    (dropped the `anon_read` policy) ran clean. Verified with both keys: anon now gets `200 []`
+    (RLS default-deny, matching `vote_reconciliation_flags`' posture), service-role still sees all
+    31 rows intact — no data touched, only public reachability.
   **Verdict on the one non-negotiable:** political neutrality and facts-only were genuinely clean —
   zero violations found across the dedicated audit domain. Every defect found and fixed was a
   mechanical accident, none partisan.
