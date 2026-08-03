@@ -1503,3 +1503,35 @@ entry record both fixes. Nothing here required Lance's input or unblocks anythin
 beyond what was already pending (apply 0022, the corrected SQL already in hand) — this was closing
 out a loop this session itself had left open (the doc diffs, and an inaccurate reassurance about
 legiscan given earlier the same day).
+
+## 2026-08-03 (continued) — "0022 has been ran in supabase": migration fully applied, backfill = 0
+
+Lance applied 0022 in the SQL editor. Ran the rest of the documented handoff sequence:
+
+- `npm run refresh:aggregates` hit a PostgREST statement timeout (~8s, twice) — the RPC runs three
+  `REFRESH MATERIALIZED VIEW CONCURRENTLY` passes over 1.46M+ `vote_casts` rows in one call.
+  Worked around by having Lance run `select refresh_vote_aggregates();` directly in the SQL editor
+  (same bypass as the migration itself). Matview counts confirmed unchanged (11,466/3,042/198 —
+  expected, since nothing was marked duplicate yet).
+- `correct-data.js vote-duplicates --dry-run` returned `matched: 0`. Lance flagged the session was
+  circling ("you've been working yourself in circles over this for days now, focus") — fair; traced
+  ONE real candidate pair directly through the actual matching code instead of continuing to probe
+  broadly: LegiScan roll call `1673444` vs. `mo-house-xml-HB1623-3`, same bill/chamber/date, both
+  say "103-48" — but MO's own `vote_casts` table has exactly 1 individual legislator position
+  stored for that vote. `isPrimaryCastDataComparable` correctly refuses to certify a match it can't
+  verify. Checked the scope once, broadly: 0 of 92 sampled primary-source votes with a parseable
+  aggregate result had enough `vote_casts` rows to pass this same check. Conclusion reached in two
+  targeted queries, not a spiral: **not a bug** — a larger-scale version of `DATA_INVENTORY.md`'s
+  already-documented "169 roll calls with zero individual casts" / "casts arriving later" gap; the
+  real scope is bigger than that figure suggested, but it predates tonight and the matching code is
+  doing exactly what it was designed to do (never certify what it can't verify).
+- Ran it live: `matched: 0`, identical to the dry-run. Nothing written, so the second
+  `refresh:aggregates` pass the plan called for is a no-op — skipped, noted why.
+
+Feature is live and correctly wired end-to-end (migration applied, live-ingest write path armed,
+backfill run) — it just has ~0 real-world yield right now given `mo-house-xml`'s current
+per-legislator cast-data completeness. That completeness gap is a separate, bigger question
+(is `ingest-mo-house.js`'s roll-call-PDF cast parsing actually keeping up, or stalled for most
+votes?) — flagged in `TODO.md`, not chased further tonight. `TODO.md`'s vote-dedup entry
+consolidated into one current-state block; the stale "remaining steps, all Lance's" list removed
+now that all of it is done. Commit `2c35ce5`.
