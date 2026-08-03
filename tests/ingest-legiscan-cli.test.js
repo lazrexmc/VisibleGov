@@ -107,7 +107,7 @@ function makeQueryBuilder(getRows, opts = {}) {
 function makeFakeLegiscanClient(seed = {}) {
   const tables = {
     sessions: [], bills: [], legislators: [], terms: [], votes: [], vote_casts: [],
-    vote_reconciliation_flags: [], legiscan_datasets: [], ingestion_runs: [], ...seed,
+    vote_reconciliation_flags: [], legiscan_datasets: [], ingestion_runs: [], vote_duplicates: [], ...seed,
   };
   const counters = {};
   const writeLog = [];
@@ -1043,6 +1043,72 @@ test('runLegiscanIngest: IMPORTANT 5 fix — a hard tally mismatch against an ex
   assert.equal(tables.vote_reconciliation_flags.length, 1);
   assert.equal(tables.vote_reconciliation_flags[0].discrepancy.quarantine, false);
   assert.equal(tables.vote_reconciliation_flags[0].discrepancy.roll_call_id, 774411);
+});
+
+// ---- Vote-duplicate dedup (2026-08-03): a clean primary-source correspondence marks the
+// duplicate additively (vote_duplicates, migration 0022) — the never-built "primary-source row
+// wins for display" ruling, closed going forward at ingest time. ----
+
+test('runLegiscanIngest: a clean primary-source correspondence additively writes a vote_duplicates row (canonical=primary, superseded=the newly-stored LegiScan vote)', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-dedup-1', source: 'legiscan', status: 'running', detail: {} });
+
+  // Pass 1: no primary rows exist yet — resolve the real (fake) HB3 bill row id, same two-phase
+  // idempotent pattern the hard-mismatch test above uses.
+  await runLegiscanIngest(client, 'run-dedup-1', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const hb3BillRow = tables.bills.find((b) => b.identifier === 'HB 3');
+  assert.ok(hb3BillRow);
+
+  // Roll call 774411 (HB3, SENATE, 2018-09-14, real tallies yea=28/nay=1/absent=4 per
+  // legiscan-votes.test.js's own EXPECTED_TALLIES) is the SAME singleton/singleton roll call the
+  // hard-mismatch test above isolates, but seeded here with MATCHING tallies instead of doctored
+  // ones — a genuine clean correspondence, not a contradiction.
+  const primaryVoteId = 'primary-hb3-senate-clean';
+  tables.votes.push({
+    id: primaryVoteId, bill_id: hb3BillRow.id, jurisdiction_id: 'mo-legislature', chamber: 'senate', vote_date: '2018-09-14', source_key: 'mo-senate-web-2018-x-vote1',
+  });
+  for (let i = 0; i < 28; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'yea' });
+  for (let i = 0; i < 1; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'nay' });
+  for (let i = 0; i < 4; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'absent' });
+
+  // Reset whatever LegiScan itself wrote on pass 1 (same reset the hard-mismatch test performs),
+  // then re-run.
+  tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+  tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+
+  await runLegiscanIngest(client, 'run-dedup-1', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+
+  const legiscanVote774411 = tables.votes.find((v) => v.source_key === 'legiscan-1608-rollcall-774411');
+  assert.ok(legiscanVote774411, 'sanity: the LegiScan vote is stored (a clean match never withholds storage)');
+  assert.equal(tables.vote_duplicates.length, 1, 'exactly one duplicate pair — the clean match, and only that one');
+  assert.equal(tables.vote_duplicates[0].canonical_vote_id, primaryVoteId);
+  assert.equal(tables.vote_duplicates[0].superseded_vote_id, legiscanVote774411.id);
+});
+
+test('runLegiscanIngest: a re-run against an already-marked pair does not error or double-write', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-dedup-2', source: 'legiscan', status: 'running', detail: {} });
+  await runLegiscanIngest(client, 'run-dedup-2', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  const hb3BillRow = tables.bills.find((b) => b.identifier === 'HB 3');
+  const primaryVoteId = 'primary-hb3-senate-clean-2';
+  tables.votes.push({
+    id: primaryVoteId, bill_id: hb3BillRow.id, jurisdiction_id: 'mo-legislature', chamber: 'senate', vote_date: '2018-09-14', source_key: 'mo-senate-web-2018-x-vote1',
+  });
+  for (let i = 0; i < 28; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'yea' });
+  for (let i = 0; i < 1; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'nay' });
+  for (let i = 0; i < 4; i += 1) tables.vote_casts.push({ vote_id: primaryVoteId, position: 'absent' });
+  tables.votes.splice(0, tables.votes.length, ...tables.votes.filter((v) => v.id === primaryVoteId));
+  tables.vote_casts.splice(0, tables.vote_casts.length, ...tables.vote_casts.filter((c) => c.vote_id === primaryVoteId));
+
+  // First pass creates the pair.
+  await runLegiscanIngest(client, 'run-dedup-2', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  assert.equal(tables.vote_duplicates.length, 1);
+
+  // Second pass, same run shape — insertIfAbsent on superseded_vote_id must make this a no-op,
+  // never a duplicate-key error and never a second row.
+  tables.ingestion_runs.push({ id: 'run-dedup-3', source: 'legiscan', status: 'running', detail: {} });
+  await runLegiscanIngest(client, 'run-dedup-3', { datasetFile: `${FIXDIR}/mo-2018-dataset-1608.json`, session: null, limit: null });
+  assert.equal(tables.vote_duplicates.length, 1, 'no second row for the same already-marked pair');
 });
 
 // ---- CRITICAL 2 fix (final-review-findings.md): quarantine retraction — an ALREADY-STORED LegiScan

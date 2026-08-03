@@ -612,6 +612,23 @@ async function ingestLegiscanRollCalls(client, runId, {
       .eq('source_key', voteRow.source_key).single();
     if (voteSelErr) throw new Error(`ingest-legiscan: vote lookup failed for ${voteRow.source_key}: ${voteSelErr.message}`);
 
+    // Severity/dedup follow-up (2026-08-03): a clean primary-source correspondence marks the
+    // duplicate additively — both rows stay stored, forever, fully traceable (vote_duplicates,
+    // migration 0022). Gated on `matched` (set on EVERY clean-match branch in
+    // crossCheckAgainstPrimarySource, including the plain singleton/singleton one that carries no
+    // `reason` at all) — never on `reason`, which only distinguishes HOW disambiguation happened
+    // and is not set on every clean-match branch. insertIfAbsent on superseded_vote_id (its own
+    // unique constraint) makes this safe to re-run: an already-marked pair is a harmless no-op,
+    // never a duplicate-key error.
+    if (crossCheck.matched && crossCheck.primaryVoteId) {
+      // eslint-disable-next-line no-await-in-loop
+      await insertIfAbsent(client, 'vote_duplicates', [{
+        canonical_vote_id: crossCheck.primaryVoteId,
+        superseded_vote_id: voteSel.id,
+        reason: 'legiscan-vs-primary-source tally_unique_match at ingest',
+      }], 'superseded_vote_id');
+    }
+
     result.votes += 1;
     result.votesByChamber[legiscanTallies.chamber] = (result.votesByChamber[legiscanTallies.chamber] ?? 0) + 1;
 

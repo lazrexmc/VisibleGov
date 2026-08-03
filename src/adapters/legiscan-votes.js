@@ -693,8 +693,15 @@ export async function crossCheckAgainstPrimarySource(client, billId, legiscanTal
       const { hardMismatches, softMismatches } = compareTalliesForCrossCheck(legiscanTallies, hardCompareCounts);
 
       if (hardMismatches.length === 0 && softMismatches.length === 0) {
+        // Deliberately no `reason` here (unlike the two tally_unique_match branches below) — this
+        // is the plain singleton/singleton clean match, and ingestLegiscanRollCalls' own
+        // crossCheckFlags.tally_unique_match counter specifically tracks disambiguation-resolved
+        // matches, not this branch. Adding a reason string here would silently blur that existing,
+        // relied-upon distinction. `matched: true` (set on EVERY clean-match branch, this one
+        // included) is the correct, existing signal for "a clean primary-source correspondence was
+        // found" — dedup-marking callers gate on `matched`, never on `reason`.
         return {
-          checked: true, matched: true, flag: null, quarantine: false,
+          checked: true, matched: true, flag: null, quarantine: false, primaryVoteId: primaryVote.id,
         };
       }
 

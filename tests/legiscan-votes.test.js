@@ -1227,6 +1227,34 @@ test('crossCheckAgainstPrimarySource: siblingTallies defaulting to [] still take
   assert.deepEqual(flags[0].discrepancy.hard_mismatches, ['yea: legiscan 119 vs primary 115']);
 });
 
+// Vote-duplicate dedup (2026-08-03) — the singleton/singleton clean-match branch (Branch B's own
+// happy path) carries NO `reason` at all (found live, during Task 3's own test run: a
+// reason-string-based gate silently missed this branch entirely, since it's the ONE clean-match
+// return site that predates the tally_unique_match disambiguation branches and was never given a
+// reason string). `matched: true` is the correct, existing signal every clean-match branch sets —
+// this locks in that `primaryVoteId` is ALSO present here, not just on the two reason-carrying
+// branches already covered above.
+test('crossCheckAgainstPrimarySource: the plain singleton/singleton clean match (no siblings on either side, tallies genuinely agree) carries primaryVoteId even though it carries no `reason` at all', async () => {
+  const primaryVoteId = 'primary-vote-no-siblings-clean';
+  const { client, flags } = makeFakeVotesDb({
+    voteRows: [{
+      id: primaryVoteId, bill_id: 'bill-hb3', jurisdiction_id: 'mo-legislature', chamber: 'house', vote_date: '2018-09-12', source_key: 'mo-house-xml-HB3-1',
+    }],
+    castRows: [
+      ...castRowsOfPosition(primaryVoteId, 'yea', 119), // matches legiscanTallies774312 exactly
+      ...castRowsOfPosition(primaryVoteId, 'nay', 23),
+      ...castRowsOfPosition(primaryVoteId, 'absent', 14),
+    ],
+  });
+  const result = await crossCheckAgainstPrimarySource(client, 'bill-hb3', legiscanTallies774312); // no 4th arg — no siblings
+  assert.equal(result.matched, true);
+  assert.equal(result.quarantine, false);
+  assert.equal(result.flag, null);
+  assert.equal('reason' in result, false, 'this specific branch has never set reason — a dedup gate must not rely on it');
+  assert.equal(result.primaryVoteId, primaryVoteId);
+  assert.equal(flags.length, 0);
+});
+
 test('VOTE_TEXT_BY_ID: vote_id 3 accepts BOTH evidenced live forms ("NV") and the schema long form ("Not Voting")', () => {
   // First live sweep (2026-07-29): every real vote_id-3 cast printed "NV", not schema-mysql.sql's
   // "Not Voting" — 1,817 roll calls correctly refused by the strict-equality version of the check.
