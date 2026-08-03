@@ -6,6 +6,39 @@
 
 ## NOW
 
+- [ ] **NEW TOP PRIORITY — comprehensive accuracy audit findings, 2026-08-03.** Full report:
+  `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`. 28-agent workflow (Fable 5, max effort,
+  every critical/important finding independently adversarially re-verified before being trusted).
+  **4 CRITICAL (fix before "locked in" means anything):**
+  1. SB 914: LegiScan says 29-0, MO Senate journal says 28-1 (Sen. Moon's NAY) — flagged
+     (`vote_reconciliation_flags` id `214a2be0`) but unresolved, both rows still counted, and the
+     0022 backfill can never fix disagreeing pairs by design. Needs a human adjudication.
+  2. Two published glossary terms (FECA `51ebf49a`, BBEDCA `ffd0475e`) still say exactly what
+     their own verification refuted — an accidental re-publish after an intended edit was never
+     saved. Edit or unpublish.
+  3. Seven auto-published glossary terms contain corrupted text (garbled `—` sequences, form-feed
+     chars, dropped words) — worst case drops "independently owned and" from a statutory
+     definition. Shipped under a clean-verification badge since the verifier checks facts, not
+     text integrity. Regenerate the 7; add a text-integrity gate.
+  4. Tommie Pierson Sr. and Jr. (father and son, distinct LegiScan `legiscan_people_id`s 15900/
+     18826, non-overlapping 2015-16/2017-20 vote footprints) auto-merged into one person
+     (`16b22ae8`) with empty seat evidence — exactly the Menendez-shaped risk class, not caught
+     this time. Split via the Bayh-correction SQL runbook precedent.
+  **12 IMPORTANT** (full detail in the report): MO House cast-completeness gap is structural, not
+  temporary (0 of 92 votes comparable — one-legislator test-fixture roster never replaced with a
+  real one, 2,198 parsed casts unrecoverably dropped, 2 Senate votes mislabeled chamber='house');
+  reconciliation-flag queue has more going on than the documented Fitzwater-only story; two
+  systemic gaps that enabled the Pierson merge; `vote_duplicates` RLS not in the migration file
+  (live has it, out-of-band, undocumented); `legiscan_datasets` fully anon-readable on a stale
+  rationale; repo migration 0022 doesn't match what's actually live.
+  **Verdict on the one non-negotiable:** political neutrality and facts-only are genuinely clean —
+  zero violations found. All defects are mechanical accidents, none partisan. Traceability has
+  real, fixable breaches (the 4 criticals above) — until fixed, "everything traceable to the
+  actual text and the actual recorded vote" isn't fully true yet.
+  **Also from this audit:** two verification subagents materialized the live Supabase service-role
+  key in plaintext (one bash command, one scratchpad file) — the harness auto-flagged both, the
+  on-disk file was found and deleted immediately. Never touched the repo/git. Lance's call whether
+  to rotate the key as a precaution.
 - [x] ~~Lance reviews the MVP design draft~~ (approved as working draft 2026-07-27)
 - [x] ~~Execute Plan 1: foundation + ingestion (Onder slice)~~ — **COMPLETE 2026-07-27.** All
   10 tasks done + review-approved on branch `slice1-foundation-ingestion` (pushed): scaffold,

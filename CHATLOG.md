@@ -1535,3 +1535,66 @@ per-legislator cast-data completeness. That completeness gap is a separate, bigg
 votes?) — flagged in `TODO.md`, not chased further tonight. `TODO.md`'s vote-dedup entry
 consolidated into one current-state block; the stale "remaining steps, all Lance's" list removed
 now that all of it is done. Commit `2c35ce5`.
+
+## 2026-08-03 (continued) — comprehensive accuracy audit ("fable5 and ultracode+workflows")
+
+Lance: "Should we run a thorough audit utilizing fable5 and ultracode+workflows at this point to
+test accuracy?" — asked scope (targeted vs. comprehensive); he chose comprehensive, then went to
+bed asking for the full detail once complete.
+
+Ran a 28-agent Workflow: 8 independent domains (vote-tally internal consistency, MO House
+cast-completeness gap, reconciliation-flag legitimacy, summary facts-only/citation accuracy,
+glossary citation accuracy, identity-merge correctness, anon/RLS exposure, political neutrality —
+the one non-negotiable), each on Fable 5 at max effort, each blind to the others, read-only
+throughout, no external network calls to LegiScan/Congress.gov (suspension-level LegiScan budget
+protected), no LLM calls beyond the audit's own agents. Every critical/important finding then went
+to a second Fable-5 agent whose only job was to try to REFUTE it — genuinely adversarial, not a
+rubber stamp: 3 of the anon-exposure domain's findings were knocked down or downgraded by direct
+live measurement rather than accepted at face value.
+
+**Result: 16 confirmed (4 critical, 12 important), 3 refuted, 0 dropped.** Full report:
+`docs/audits/2026-08-03-comprehensive-accuracy-audit.md`; TODO.md NOW carries the action list.
+
+The 4 criticals, in one line each: (1) a real cross-source vote contradiction (LegiScan 29-0 vs.
+the MO Senate journal's 28-1 on SB 914) still counted twice in public aggregates, unfixable by the
+0022 backfill by design since it only marks *agreeing* pairs; (2) two published glossary terms
+still say exactly what their own adversarial verification refuted — an intended edit was recorded
+in the notes trail but never saved before re-publish; (3) seven auto-published glossary terms
+carry corrupted text (garbled characters, dropped words) because the verifier checks factual
+support, not text integrity, and nothing else in the pipeline checks either; (4) Tommie Pierson
+Sr. and Jr. — father and son, distinct LegiScan ids, clean non-overlapping vote-year footprints —
+auto-merged into one person with empty seat evidence, the exact Menendez-shaped risk class this
+project has a documented near-miss for, except this time nothing caught it.
+
+The 12 importants trace mostly to one deeper root cause surfaced tonight: the MO House roll-call
+roster the PDF-cast-parser resolves against contains exactly one legislator (a test fixture,
+`persistRoster` in `ingest-mo-house.js`, never replaced with a real per-district roster). Every
+PDF still parses completely and tally-reconciles, but only that one legislator's cast ever
+resolves and stores — the rest are dropped, most with no recovery path. This explains the
+0-of-92-comparable finding from earlier tonight at its root, produces a real (if small, ~4%)
+public-aggregate inflation for that one legislator, and turns out to also be the actual cause
+behind 16 of the 20 live-ingest reconciliation flags (measuring the roster gap, not a genuine
+cross-source disagreement). Also found: two Senate votes mislabeled `chamber='house'` (breaks
+cross-source matching for those two, permanently), two real anon-surface RLS/exposure gaps
+(`vote_duplicates` has no RLS statement in its migration file even though live has it applied
+out-of-band; `legiscan_datasets` is fully anon-readable on a stale rationale), and the committed
+migration 0022 no longer matches what's actually live in production.
+
+**Verdict on the one non-negotiable:** political neutrality and facts-only are genuinely clean —
+the dedicated domain found zero violations across 36 fully-read summaries spanning both parties
+plus a full charged-language sweep; every confirmed defect tonight is a mechanical accident, none
+partisan. Traceability has real, fixable breaches (the four criticals) — until fixed, the
+non-negotiable isn't fully true yet, even though nothing found was ever an editorial or partisan
+failure.
+
+**Incident, handled immediately:** two verification subagents materialized the live Supabase
+service-role secret key in plaintext during their work — one in a bash command, one written to a
+persistent scratchpad file (`verify-source-key-audit.mjs`). The harness's own security monitor
+flagged both automatically. Found and deleted the on-disk file within the same turn; it never
+touched the repo or git. Flagged to Lance as his own call whether to rotate the key — contained
+and local, but a real production secret was written to plaintext outside `.env` without his
+direction.
+
+Both `TODO.md` and this audit report are the durable record; the full raw per-domain findings
+(every verdict's complete reasoning, all minor/informational items) are preserved in the workflow
+output file, referenced from the report, not duplicated into either doc.
