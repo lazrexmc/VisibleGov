@@ -19,6 +19,18 @@ to keep an eye on it now that it's running.
 > cooldown clears, not the manual bash loop's old shape (which died with its session and produced
 > irregular gaps). The rest of this document, written before registration, still accurately
 > describes the script's behavior — read on for the mechanism, not just the history.
+>
+> **Re-verified 2026-08-03, one day later — still alive.** Same two signals, checked live again:
+> (1) today's UTC log (`.superpowers/artifacts/scheduler-logs/2026-08-03.log`) shows 22 `live` + 2
+> `nothing-due` entries by check time, most recent tick `2026-08-03T03:01:28Z` (~7 minutes old at
+> check time — well inside the "~20 minutes old means stopped" threshold below); (2) `ingestion_runs`
+> shows all four non-legiscan sources finishing within the prior ~70 minutes (`mo-house-xml`
+> 02:00:07, `mo-senate-web` 02:15:05, `us-congress` 02:45:13, `us-senate` 03:01:28), the same
+> alternating-tick/per-source-cooldown shape as the day before — not the dead-bash-loop's irregular
+> gaps. `legiscan` shows `status: failed` as of this check (last attempt started
+> 2026-08-02T07:30:03Z) — **not a scheduler problem**; see item 4 under "How to verify it is alive"
+> below for the full worked check (24h cooldown not yet elapsed, confirmed against both the code
+> and the scheduler's own due-ness log).
 
 ## What it does
 
@@ -237,6 +249,32 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    over time — 0 is normal (success, nothing due, already-running, or the rare transient
    `lock-record-failed`, which self-heals on the next tick); non-zero is a real error
    (e.g. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` missing) and is the one case worth investigating.
+4. **A `failed` status for one source (via `npm run status`'s freshness block) is not itself proof
+   of a stuck scheduler — check due-ness before assuming a problem.** Worked example, checked live
+   2026-08-03: `legiscan` showed `status: failed`, last attempt started `2026-08-02T07:30:03Z`,
+   failed 4m43s later (`finished_at` 07:34:46) on a real application error —
+   `detail.error: "Error: legiscan-votes: could not write vote_reconciliation_flags row: duplicate
+   key value violates unique constraint \"vote_reconciliation_flags_dedup_key\""`, `queries_used: 1`
+   — not a scheduler timeout or kill (no `scheduler_attempt`/`scheduler_kill` marker in `detail`).
+   At the check (2026-08-03, ~19h38m later), `LEGISCAN_MIN_INTERVAL_MS` — confirmed **24 hours** by
+   reading the actual constant in `scripts/scheduled-ingest.js`
+   (`LEGISCAN_MIN_INTERVAL_MS = envIntervalMs('LEGISCAN_MIN_INTERVAL_MS', ONE_DAY_MS, ONE_DAY_MS)`;
+   `.env` grepped, no override present) — had **not yet elapsed**, so the scheduler correctly had
+   not retried. Confirmed two independent ways: (a) elapsed time (19h38m) < 24h; (b) the
+   scheduler's own log ticks agree — `legiscan.remainingMs` read `17,101,752` then `16,201,520`
+   across two consecutive 15-minute ticks (`02:45:13Z` and `03:01:28Z`), counting down as expected,
+   never stuck at a fixed value. Next retry was correctly due ≈`2026-08-03T07:30Z`. **The actual
+   check, any time:** query `ingestion_runs` for that source's most recent `started_at`, compare
+   elapsed time against its registry interval above, or just read `remainingMs` for that source in
+   the latest scheduler log tick — only treat it as stuck if elapsed time exceeds the interval AND
+   the scheduler log still shows it being skipped or reported `resolvable: false`. (The underlying
+   application error is a separate defect — outside this document's scope, which covers the
+   scheduler's own mechanism, not individual CLI bugs. **Update, same day:** root-caused and
+   confirmed already fixed on `main` (commit `b1adbfa`, a type-blind `roll_call_id` comparison in
+   `findExistingReconciliationFlag` — recurrence of PLAYBOOK_DELTA Lesson 21) via an independent
+   multi-agent investigation + adversarial review, verdict SHIP, high confidence for the
+   `~2026-08-03T07:30Z` retry. See `docs/CONTROLLER_BRIEFING.md`'s 2026-08-03 addendum for the full
+   writeup.)
 
 Manual checks any time, safe to run for real (read-only, zero writes, zero external fetches):
 

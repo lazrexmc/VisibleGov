@@ -13,8 +13,8 @@ just expensive or rule-bound to re-fetch.
 | `legiscan-texts/` | 859 MB | 3,177 | ⚠️ **Costly + rule-bound** — see below |
 | `legiscan-datasets/` | 85 MB | 31 | ⚠️ Rule-bound (suspension-level) |
 | `congress-legislators/` | 15 MB | 2 | ✅ Free — public CC0 download |
-| `mo-senate-journals/` | 81 KB | 69 | ✅ Free, but slow (30-min ToU) |
-| `mo-bills/`, `mo-bill-list/`, `mo-rollcalls/` | ~720 KB | 115 | ✅ Free, but slow (30-min ToU) |
+| `mo-senate-journals/` | 93 KB | 81 | ✅ Free, but slow (30-min ToU) |
+| `mo-bills/`, `mo-bill-list/`, `mo-rollcalls/` | 762 KB | 144 | ✅ Free, but slow (30-min ToU) |
 | `mo-senate-journal-index/`, `mo-senate-roster/` | 44 KB | 4 | ✅ Free |
 
 ---
@@ -73,11 +73,13 @@ trust page shows would restart from zero until those days fail again.
 
 ## What is genuinely irreplaceable (and therefore IS in git)
 
-- `.superpowers/sdd/**/*.md` — 105 ledgers, briefs and reports: every ruling, review finding, fix
-  round and accepted residual, with the reasoning behind it. **Committed 2026-07-31.**
+- `.superpowers/sdd/**/*.md` — 128 ledgers, briefs and reports (grown from the 105 on hand at the
+  2026-07-31 commit; all still git-tracked, most recently as of 2026-08-02): every ruling, review
+  finding, fix round and accepted residual, with the reasoning behind it. **First committed
+  2026-07-31**, additions since have kept landing in the same commits as the work they document.
 - `CHATLOG.md`, `TODO.md`, `PLAYBOOK_DELTA.md`, `README.md`, `CLAUDE.md` — the decision trail.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` — the approved designs.
-- `supabase/migrations/` — the schema, 0001–0020.
+- `supabase/migrations/` — the schema, 0001–0022 (plus the out-of-sequence `0018a_refresh_timeout.sql`).
 - `tests/fixtures/` — captured real payloads (incl. the LegiScan API manual PDF the status codebook
   was extracted from, and the congress-legislators excerpts).
 
