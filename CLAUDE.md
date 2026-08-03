@@ -11,22 +11,29 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
-**Status (2026-08-03): backend live and accurate; public site built + merged, deploy deferred.**
-See `TODO.md` NOW for the current state and the only open operator decisions. The repo holds the
-ingestion CLIs and adapters (`src/`), the public site (`site/`), schema migrations
-(`supabase/migrations/`, 0001-0021 applied, 0022 drafted awaiting apply), and fixture-backed tests
-(`tests/`, ~2,235 green). **Live numbers: run `npm run status`** — any count typed into a doc goes
+**Status (2026-08-03): backend live and accurate — an 8-domain accuracy audit ran end-to-end, all
+4 critical findings fixed and verified live; public site built, merged, and independently verified
+in a real browser against live data; the Cloudflare Pages deploy is now actively being spec'd (in
+progress — see `TODO.md` NOW).** The repo holds the ingestion CLIs and adapters (`src/`), the
+public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0022 and 0024 applied; 0023
+drafted (its fix is confirmed functionally live already — see TODO.md — the file itself just
+hasn't been formally run) and 0025 drafted, both awaiting Lance's apply), and fixture-backed tests
+(`tests/`, 2,259 green). **Live numbers: run `npm run status`** — any count typed into a doc goes
 stale within the hour.
 
 **If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
-22 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open),
-`docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history), then the
-most recent `CHATLOG.md` entries (why things are the way they are).
+25 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open —
+currently mid-brainstorm on the Cloudflare deploy spec, resume point documented there), `docs/
+CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history), then the most
+recent `CHATLOG.md` entries (why things are the way they are).
 
-**One open accuracy defect, still live as of this writing:** cross-adapter vote duplicates (the
-same real floor vote stored once by LegiScan and once by an MO primary-source adapter) are
-double-counted in the vote-aggregate matview percentages until Lance applies migration 0022 —
-code is complete and tested, see `TODO.md` NOW for the exact apply sequence.
+**Known, disclosed limitation, not an open defect in the fix itself:** the cross-adapter
+vote-duplicate dedup (migration 0022) is applied and live, but its backfill correctly yields ~0
+matches for MO House specifically — a separate, deeper gap (the MO House roll-call-PDF pipeline
+resolves casts against a roster containing exactly one real legislator, a leftover test fixture)
+leaves most MO House per-legislator vote data structurally incomplete. Real, honestly rendered by
+the site (no fabricated "did not vote" claim), still open — see `TODO.md` NOW, "MO House
+per-legislator vote coverage."
 
 **Two standing rules that are easy to violate without noticing:**
 - **Cloudflare deploy is a MILESTONE, not a task** (Lance, 2026-07-31): *"I'm only interested in

@@ -5,10 +5,16 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-03): back end live and accurate; public site built and merged, deploy deliberately
-deferred until the backend is locked in.** One open accuracy item: cross-adapter vote duplicates
-are double-counted in the vote-aggregate percentages until a drafted-but-unapplied migration lands
-(code complete, tested; see `TODO.md`).
+**Status (2026-08-03): back end live and accurate; a comprehensive 8-domain accuracy audit ran, all
+4 critical findings fixed and verified live; the Cloudflare Pages deploy is now actively being
+spec'd (in progress, see `TODO.md`).** The cross-adapter vote-duplicate fix (migration 0022) is
+applied and live; its backfill correctly yields ~0 matches for MO House specifically, because a
+separate, deeper gap (a one-legislator test-fixture roster in the MO House roll-call-PDF pipeline)
+leaves most MO House per-legislator vote data structurally incomplete — a real, disclosed,
+still-open item, not a regression in the dedup fix itself. Political neutrality and facts-only,
+the project's one non-negotiable, came back genuinely clean under the audit's dedicated domain —
+zero violations found. Full trail: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md` and
+`TODO.md`'s NOW section.
 > **Live numbers: run `npm run status`.** An ingestion cron writes every 30 minutes, so any count
 > typed into a document is stale within the hour — that staleness is exactly what made the project's
 > own data state confusing. `docs/DATA_INVENTORY.md` explains what each number *means* and how they
@@ -35,8 +41,12 @@ are double-counted in the vote-aggregate percentages until a drafted-but-unappli
   eligible, but no longer thin in absolute terms.
 - **The public site is built and merged** (`site/`): directory with address lookup, legislator
   profiles with vote records and mechanical vote-aggregate charts, bill pages, and a trust page
-  whose prose was fact-checked against the code. Not deployed yet — by the owner's call, deploying
-  before the backend is locked means troubleshooting two intertwined systems at once.
+  whose prose was fact-checked against the code. Independently verified end-to-end in a real
+  browser against live data (2026-08-03): a visitor can browse the directory, open a legislator
+  from any of US Senate/US House/MO Senate/MO House, see their real recorded votes, and click
+  through to the actual bill. Not deployed yet — the Cloudflare Pages deploy is being actively
+  spec'd now that the owner considers the backend locked in; see `TODO.md`'s Cloudflare Pages entry
+  for the live gameplan.
 - Every model-calling run is mechanically gated on explicit per-run owner approval with cost
   stated. See `TODO.md` and `CHATLOG.md` for the live trail.
 
