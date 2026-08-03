@@ -216,6 +216,57 @@ export function isSupportShapedVerification(row) {
   return verdicts.every((v) => v && typeof v.supported === 'boolean');
 }
 
+// isCompletenessShapedVerification — the missing counterpart to isSupportShapedVerification above,
+// same shape-not-schema discrimination style (see that function's own comment for why: this file
+// must work whether or not migration 0020's `kind` column exists on the database it's talking to,
+// so rows are told apart by their own data shape, never by trusted metadata). A completeness row's
+// `verdicts` is {key_provisions, coverage} — an OBJECT, never an array (a support row's verdicts IS
+// an array). Severity-sorted review queue, 2026-08-03.
+export function isCompletenessShapedVerification(row) {
+  const verdicts = row?.verdicts;
+  if (!verdicts || Array.isArray(verdicts)) return false;
+  return Array.isArray(verdicts.coverage);
+}
+
+// computeIssueCount(supportVerification, completenessVerification) -> number | null. Severity-
+// sorted review queue, 2026-08-03: the whole point of this feature is surfacing "how much work does
+// this item need" so single-issue flags sort first. null (not 0) when NEITHER verification exists —
+// an honestly-unverified item needs a full check run, not a quick fix, and must sort AFTER every
+// numeric item, never before (never conflate "unranked" with "zero issues"). Otherwise: unsupported
+// bullet count (0 if no support row) + missing provision count (0 if no completeness row) — a
+// summary clean on one axis but flagged on the other must show the OTHER axis's real count, never a
+// false zero from only checking one side.
+export function computeIssueCount(supportVerification, completenessVerification) {
+  if (!supportVerification && !completenessVerification) return null;
+  const unsupported = supportVerification
+    ? (supportVerification.verdicts || []).filter((v) => !v.supported).length
+    : 0;
+  const missing = completenessVerification
+    ? (completenessVerification.verdicts?.coverage || []).filter((c) => !c.covered).length
+    : 0;
+  return unsupported + missing;
+}
+
+// describeMissingProvisions(completenessVerification) -> Array<{section, provision}>. Severity-
+// sorted review queue, 2026-08-03: this data has existed in summary_verifications since the
+// completeness axis shipped but was NEVER reachable from this review server before this feature —
+// isSupportShapedVerification's filter discarded every completeness row outright. Matched via
+// coverage's own provision_index, never by array position alone (mirrors assessCompleteness's own
+// indexing discipline in src/lib/verifier.js) — coverage entries are not guaranteed to arrive in
+// provision_index order.
+export function describeMissingProvisions(completenessVerification) {
+  if (!completenessVerification) return [];
+  const keyProvisions = completenessVerification.verdicts?.key_provisions || [];
+  const coverage = completenessVerification.verdicts?.coverage || [];
+  return coverage
+    .filter((c) => !c.covered)
+    .slice()
+    .sort((a, b) => a.provision_index - b.provision_index)
+    .map((c) => keyProvisions[c.provision_index])
+    .filter(Boolean)
+    .map((p) => ({ section: p.section, provision: p.provision }));
+}
+
 // Task 6, controller ruling #2: migration 0007's glossary_terms_published_complete CHECK (source_url
 // / source_hash / gloss_md all required once status='published') will reject a publish attempt on a
 // bare stub. That must be surfaced honestly, not pre-filtered away silently — but per this file's

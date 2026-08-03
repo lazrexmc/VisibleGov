@@ -8,6 +8,7 @@ import {
   verificationBadge, latestVerificationBySummary, resolveVerificationRows,
   validateGlossaryDecisionInput, glossVerificationBadge, latestVerificationByTerm,
   isPublishCompletenessViolation, isSupportShapedVerification,
+  isCompletenessShapedVerification, computeIssueCount, describeMissingProvisions,
   formatCandidateDistrict, formatCandidateEraSpan, findCandidateEvidence,
   buildLanceLinkEvidence, buildLanceAttachEvidence, appendResolution, validateIdentityDecisionInput,
   HOST, PORT,
@@ -473,6 +474,112 @@ test('GET /api/item/:id: the later completeness-kind row is skipped; the respons
     assert.ok(Array.isArray(body.verification.verdicts), 'verification.verdicts must be the support row\'s array, not the completeness row\'s {key_provisions,coverage} object');
     assert.equal(body.verification.verdicts[0].supported, true);
   }, client);
+});
+
+// ---- isCompletenessShapedVerification / computeIssueCount / describeMissingProvisions ----
+// (severity-sorted review queue, 2026-08-03)
+
+const INCOMPLETE_COMPLETENESS_ROW = {
+  summary_id: 's1',
+  overall: 'incomplete',
+  model: 'subagent:claude-sonnet-5',
+  created_at: '2026-01-01T00:00:01.000Z',
+  verdicts: {
+    key_provisions: [
+      { section: 'SEC. 1.', provision: 'Does X.' },
+      { section: 'SEC. 2.', provision: 'Does Y.' },
+    ],
+    coverage: [
+      { provision_index: 0, covered: true, bullet_index: 0, note: 'covered' },
+      { provision_index: 1, covered: false, bullet_index: null, note: 'missing' },
+    ],
+  },
+};
+
+const FLAGGED_SUPPORT_ROW = {
+  summary_id: 's1',
+  overall: 'flagged',
+  model: 'subagent:claude-sonnet-5',
+  created_at: '2026-01-01T00:00:00.000Z',
+  verdicts: [
+    { bullet_index: 0, section: 'Sec. 1', supported: false, reason: 'not found', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ],
+};
+
+test('isCompletenessShapedVerification: a real completeness row -> true', () => {
+  assert.equal(isCompletenessShapedVerification(COMPLETENESS_ROW), true);
+  assert.equal(isCompletenessShapedVerification(INCOMPLETE_COMPLETENESS_ROW), true);
+});
+
+test('isCompletenessShapedVerification: a real support row -> false (array verdicts)', () => {
+  assert.equal(isCompletenessShapedVerification(SUPPORT_ROW), false);
+  assert.equal(isCompletenessShapedVerification(FLAGGED_SUPPORT_ROW), false);
+});
+
+test('isCompletenessShapedVerification: malformed/absent -> false, never throws', () => {
+  assert.equal(isCompletenessShapedVerification(null), false);
+  assert.equal(isCompletenessShapedVerification(undefined), false);
+  assert.equal(isCompletenessShapedVerification({}), false);
+  assert.equal(isCompletenessShapedVerification({ verdicts: null }), false);
+  assert.equal(isCompletenessShapedVerification({ verdicts: 'not an object' }), false);
+});
+
+test('computeIssueCount: no verification at all -> null (unranked, not zero)', () => {
+  assert.equal(computeIssueCount(null, null), null);
+  assert.equal(computeIssueCount(undefined, undefined), null);
+});
+
+test('computeIssueCount: support-only with N unsupported -> N', () => {
+  assert.equal(computeIssueCount(FLAGGED_SUPPORT_ROW, null), 1);
+  assert.equal(computeIssueCount(SUPPORT_ROW, null), 0);
+});
+
+test('computeIssueCount: completeness-only with M missing -> M', () => {
+  assert.equal(computeIssueCount(null, INCOMPLETE_COMPLETENESS_ROW), 1);
+  assert.equal(computeIssueCount(null, COMPLETENESS_ROW), 0);
+});
+
+test('computeIssueCount: both present -> sum, including the case where one axis is clean (no false zero)', () => {
+  assert.equal(computeIssueCount(SUPPORT_ROW, INCOMPLETE_COMPLETENESS_ROW), 1, 'support clean (0) + completeness incomplete (1) = 1, not 0');
+  assert.equal(computeIssueCount(FLAGGED_SUPPORT_ROW, INCOMPLETE_COMPLETENESS_ROW), 2);
+  assert.equal(computeIssueCount(SUPPORT_ROW, COMPLETENESS_ROW), 0);
+});
+
+test('describeMissingProvisions: no completeness row -> []', () => {
+  assert.deepEqual(describeMissingProvisions(null), []);
+  assert.deepEqual(describeMissingProvisions(undefined), []);
+});
+
+test('describeMissingProvisions: a complete (nothing missing) row -> []', () => {
+  assert.deepEqual(describeMissingProvisions(COMPLETENESS_ROW), []);
+});
+
+test('describeMissingProvisions: an incomplete row -> the correct subset of key_provisions, matched by provision_index, not array position', () => {
+  const result = describeMissingProvisions(INCOMPLETE_COMPLETENESS_ROW);
+  assert.deepEqual(result, [{ section: 'SEC. 2.', provision: 'Does Y.' }]);
+});
+
+test('describeMissingProvisions: multiple missing provisions are all returned, in provision_index order', () => {
+  const row = {
+    ...INCOMPLETE_COMPLETENESS_ROW,
+    verdicts: {
+      key_provisions: [
+        { section: 'SEC. 1.', provision: 'Does X.' },
+        { section: 'SEC. 2.', provision: 'Does Y.' },
+        { section: 'SEC. 3.', provision: 'Does Z.' },
+      ],
+      coverage: [
+        { provision_index: 2, covered: false, bullet_index: null, note: 'missing' },
+        { provision_index: 0, covered: true, bullet_index: 0, note: 'covered' },
+        { provision_index: 1, covered: false, bullet_index: null, note: 'missing' },
+      ],
+    },
+  };
+  assert.deepEqual(describeMissingProvisions(row), [
+    { section: 'SEC. 2.', provision: 'Does Y.' },
+    { section: 'SEC. 3.', provision: 'Does Z.' },
+  ]);
 });
 
 // ---- fix: approved summaries must stay in the review queue until published (real-use gap:
