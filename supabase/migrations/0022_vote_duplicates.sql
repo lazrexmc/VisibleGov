@@ -70,7 +70,6 @@ grant select on public_votes to anon, authenticated;
 -- just a display list. Recreated in full (materialized views can't be ALTERed to add a join) —
 -- every other column/grouping/index/grant below is IDENTICAL to 0018's own definition, only the
 -- join chain changes.
-drop view if exists public_position_totals cascade;
 drop materialized view if exists public_position_totals cascade;
 create materialized view public_position_totals as
 select
@@ -97,7 +96,6 @@ create unique index public_position_totals_uq
   on public_position_totals (legislator_id, jurisdiction_id, chamber, year, position);
 grant select on public_position_totals to anon, authenticated;
 
-drop view if exists public_party_alignment cascade;
 drop materialized view if exists public_party_alignment cascade;
 create materialized view public_party_alignment as
 with caster_casts as (
