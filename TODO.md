@@ -212,11 +212,53 @@
     and fixed before commit: `CONTROLLER_BRIEFING.md` claimed PLAYBOOK_DELTA was "still 22 lessons,
     unchanged since 08-02," actually 24 (Lessons 23-24 landed the same day). Everything else in both
     diffs held up under direct re-verification.
-  - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
+  - **Cloudflare Pages — gameplan refreshed 2026-08-03** (6-angle workflow review + direct live
+    verification; still deferred, Lance's own call when to actually flip it). Replaces the thin
+    2026-07-30 note below in full.
+    **Confirmed ready:** `site/` is current with everything shipped since Plan 3 (0021 bullet
+    citations, 0022 vote-dedup views, 0023/0024 RLS) — no stale code, no genuine TODO/stub found.
+    RLS genuinely scopes anon to published rows (live-verified). No secrets/PII anywhere in `site/`.
+    `_headers`/`_redirects` syntax valid. `geocode.js` uses the current Pages Functions export
+    shape. Zero build step, zero env vars needed. **Domain already decided** (2026-07-28, CHATLOG):
+    `.pages.dev` first, then `visiblegov.helpingpeoplehelpingpeople.com` later via the Pages
+    project's Custom domains screen (not manual DNS). **Migration 0023's view-fix half is confirmed
+    functionally live already** — re-ran the planner-cost discrimination technique the accuracy
+    audit used (`public_votes` anon-planned count = 52, not `votes`' full 10,355; matches the known
+    owner-bypass control `public_freshness`, not the RLS-denied control `ingestion_runs`) — 0023 is
+    a documentation/reproducibility fix for the committed file, not a functional blocker.
+    **Concrete Cloudflare Pages config:** repo `lazrexmc/VisibleGov`, production branch `main`,
+    build command empty, root directory `site`, build output directory = default (same as root),
+    Functions auto-detected (no toggle), zero environment variables needed.
+    **One thing to fix before deploy (genuinely new finding, not in the accuracy audit):**
+    `summaries` and `glossary_terms` are RLS-scoped row-level only, no column restriction — a bare
+    `select=*` from anon returns internal pipeline columns (`model`, `prompt_version`, `run_id`,
+    `bill_text_hash`/`source_hash`, `needs_mapping`) on every published row. Same class of exposure
+    migration 0019 already fixed elsewhere (stripped `prompt_version` from
+    `public_verification_notes`) — never applied to these two base tables. Cheap fix (a column-
+    scoped view or a `REVOKE`+explicit grant), worth doing before traffic makes it easier to find.
+    **Decisions that are Lance's alone:**
+    - **MO House per-legislator vote coverage.** Sharper than "some data is thin": ~162 of ~163 MO
+      House members show ZERO MO House votes on their own profile page, forever, with no caveat —
+      while the one fixture legislator (Matthiesen) looks fully tracked on the exact same roll
+      calls. Root cause: `persistRoster` seeds exactly one real legislator row. Ship visibly as-is,
+      or add an explicit completeness caveat first?
+    - **`/geocode` header parity — the old open question is now answered, not open.** Cloudflare
+      Pages Functions do NOT inherit `_headers` (confirmed via Cloudflare's own docs); `geocode.js`
+      returns a bare `Response.json` with no explicit headers, so in production `/geocode` will
+      carry no CSP/security headers at all. `scripts/serve-site.js` currently masks this by
+      applying headers uniformly in local dev — local dev overstates what prod will do here. Low
+      real risk (JSON API, not HTML) — decide whether `geocode.js` should set its own headers
+      before or after first deploy.
+    - **Missing `site/404.html`** — decide if Cloudflare's default error page is acceptable for a
+      mistyped bill/legislator/person id.
+    **Testing gap found:** no full real-browser (Playwright) walkthrough has ever happened across
+    the actual public pages (index/bill/person/legislator/trust) or the geocode flow — only one
+    narrow, single-fix-scoped Playwright run exists in this project's history (TODO-28, the vote-
+    duplicate display fix). Recommended before or immediately after first deploy.
+    **Original 2026-07-30 gameplan, superseded above but preserved for the exact settings:** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
     (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:
-    `/geocode` responds, `_redirects` rewrites survive a hard refresh, CSP headers present (open
-    question: whether `_headers` covers Pages Function responses).
+    `/geocode` responds, `_redirects` rewrites survive a hard refresh, CSP headers present.
 
 ## 🛠 BUILD QUEUE
 
