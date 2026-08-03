@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs, planAutoPublish, autoPublishOne, PublishCompletenessError,
-  loadDraftTerms, loadLatestVerifications, loadLatestEditNotes,
+  loadDraftTerms, loadLatestVerifications, loadLatestEditNotes, hasTextCorruption,
 } from '../src/cli/auto-publish-glossary.js';
 
 // ---- parseArgs: same --dry-run shape as the other CLIs ----
@@ -83,11 +83,50 @@ test('planAutoPublish: mixed batch partitions exhaustively into eligible/needsMa
   assert.deepEqual(plan.eligible.map((e) => e.term.id), ['clean']);
 });
 
-test('planAutoPublish on an empty term list returns five empty buckets', () => {
+test('planAutoPublish on an empty term list returns six empty buckets', () => {
   const plan = planAutoPublish([], new Map());
   assert.deepEqual(plan, {
-    eligible: [], needsMapping: [], noGloss: [], flaggedOrUnverified: [], editedSinceVerification: [],
+    eligible: [], needsMapping: [], noGloss: [], flaggedOrUnverified: [], editedSinceVerification: [], corruptedText: [],
   });
+});
+
+// ---- hasTextCorruption / corruptedText bucket (accuracy audit, 2026-08-03 — found live: 7
+// auto-published glosses shipped with garbled output — control characters, raw backslash-escape
+// leaks, dropped words — because the adversarial verifier judges factual support, not text
+// integrity, and nothing else in the pipeline checked either. This gate catches what's mechanically
+// detectable (control chars, raw backslash leaks) — NOT semantic corruption like a dropped word,
+// which needs the actual text regenerated, not a gate. ----
+
+test('hasTextCorruption: a real published gloss (no control chars, no backslashes) is clean', () => {
+  assert.equal(hasTextCorruption('The Act sets rules for how federal candidates raise and spend money on elections.'), false);
+});
+
+test('hasTextCorruption: a control character (e.g. the real U+000C form-feed corruption found live) is caught', () => {
+  assert.equal(hasTextCorruption('bar eligibility or example living'), true);
+});
+
+test('hasTextCorruption: a raw backslash (the real \\u2014 JSON-escape-leak and "\\,, meic.," corruption found live) is caught — legitimate prose never contains one', () => {
+  assert.equal(hasTextCorruption('ot operated and not dominant in its field \\u2014 and lets'), true);
+  assert.equal(hasTextCorruption('federal money \\,, meic., formally dividing'), true);
+});
+
+test('hasTextCorruption: null/empty gloss_md is not itself a corruption finding (that is noGloss\'s own bucket)', () => {
+  assert.equal(hasTextCorruption(null), false);
+  assert.equal(hasTextCorruption(''), false);
+});
+
+test('planAutoPublish: a clean-verified, glossed row whose gloss_md is corrupted is excluded into its own bucket, never auto-published', () => {
+  const terms = [
+    { id: 'clean', needs_mapping: false, gloss_md: 'a fine sentence', status: 'draft' },
+    { id: 'corrupted', needs_mapping: false, gloss_md: 'bar eligibility or example', status: 'draft' },
+  ];
+  const map = new Map([
+    ['clean', { overall: 'clean', verdicts: [], model: 'claude-sonnet-5', created_at: '2026-01-01T00:00:00Z' }],
+    ['corrupted', { overall: 'clean', verdicts: [], model: 'claude-sonnet-5', created_at: '2026-01-01T00:00:00Z' }],
+  ]);
+  const plan = planAutoPublish(terms, map);
+  assert.deepEqual(plan.eligible.map((e) => e.term.id), ['clean']);
+  assert.deepEqual(plan.corruptedText.map((t) => t.id), ['corrupted']);
 });
 
 // ---- finding 3 (IMPORTANT): eligibility must be bound to the verified TEXT — a post-verification

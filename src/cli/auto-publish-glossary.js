@@ -38,6 +38,25 @@ export function parseArgs(argv) {
 
 // ---- pure parts ----
 
+// hasTextCorruption — FOUND LIVE (accuracy audit, 2026-08-03): 7 auto-published glosses shipped
+// with corrupted text (control characters, raw backslash-escape leaks such as a literal "—"
+// never decoded to an em-dash, a literal "\,," fragment) because the adversarial verifier judges
+// factual SUPPORT, never text INTEGRITY, and nothing else in this pipeline checked either. This
+// catches what's mechanically detectable without a model call — a control character, or any raw
+// backslash (ordinary English prose never contains one; the two real corruption patterns found
+// live both did). It does NOT catch semantic corruption like a dropped word (e.g. the live "Small
+// Business Act" term missing "independently owned and" from its own statutory definition) — that
+// class needs the term actually regenerated, not a gate, since the text reads as fluent prose with
+// nothing mechanically wrong.
+export function hasTextCorruption(text) {
+  if (!text) return false;
+  // eslint-disable-next-line no-control-regex -- the whole point is detecting control characters;
+  // \n/\r/\t are legitimate and excluded.
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text)) return true;
+  if (text.includes('\\')) return true;
+  return false;
+}
+
 // planAutoPublish: partitions every status='draft' glossary_terms row into eligible (auto-
 // publishable) and four honest, mutually-exclusive skip buckets — mirrors gloss.js's
 // planGlossing exhaustive-partition style. Eligibility never touches a flag, an unverified item,
@@ -59,6 +78,7 @@ export function planAutoPublish(terms, latestVerificationByTermMap, latestEditNo
   const noGloss = [];
   const flaggedOrUnverified = [];
   const editedSinceVerification = [];
+  const corruptedText = [];
   for (const t of terms) {
     if (t.needs_mapping) { needsMapping.push(t); continue; }
     if (!t.gloss_md) { noGloss.push(t); continue; }
@@ -70,10 +90,13 @@ export function planAutoPublish(terms, latestVerificationByTermMap, latestEditNo
       editedSinceVerification.push(t);
       continue;
     }
+    // Text-integrity gate (accuracy audit, 2026-08-03) — checked LAST, after every existing gate,
+    // so an already-excluded term is never double-counted here.
+    if (hasTextCorruption(t.gloss_md)) { corruptedText.push(t); continue; }
     eligible.push({ term: t, verification });
   }
   return {
-    eligible, needsMapping, noGloss, flaggedOrUnverified, editedSinceVerification,
+    eligible, needsMapping, noGloss, flaggedOrUnverified, editedSinceVerification, corruptedText,
   };
 }
 
@@ -233,7 +256,7 @@ async function main() {
   const { map: latestEditNote, tableMissing: notesMissing } =
     await loadLatestEditNotes(client, args.dryRun);
   const {
-    eligible, needsMapping, noGloss, flaggedOrUnverified, editedSinceVerification,
+    eligible, needsMapping, noGloss, flaggedOrUnverified, editedSinceVerification, corruptedText,
   } = planAutoPublish(terms, latestVerification, latestEditNote);
 
   if (args.dryRun) {
@@ -249,9 +272,13 @@ async function main() {
         // latest clean verification gets its own honest count, distinct from "never verified at
         // all" (flaggedOrUnverifiedSkipped) and from every other skip reason.
         editedSinceVerificationSkipped: editedSinceVerification.length,
+        // Text-integrity gate (2026-08-03): a term whose gloss_md carries a control character or a
+        // raw backslash never auto-publishes, honestly counted separately from every other skip.
+        corruptedTextSkipped: corruptedText.length,
       },
       eligible: eligible.map(({ term }) => ({ id: term.id, term: term.term })),
       editedSinceVerification: editedSinceVerification.map((t) => ({ id: t.id, term: t.term })),
+      corruptedText: corruptedText.map((t) => ({ id: t.id, term: t.term })),
     };
     if (termsMissing || verMissing || notesMissing) out.note = '(glossary_terms, glossary_verifications, or glossary_notes missing — migration 0007 not applied; treating as zero candidates)';
     console.log(JSON.stringify(out, null, 2));
@@ -276,7 +303,7 @@ async function main() {
     }
 
     const counts = {
-      eligible: eligible.length, published, failed: failed.length, editedSinceVerification: editedSinceVerification.length,
+      eligible: eligible.length, published, failed: failed.length, editedSinceVerification: editedSinceVerification.length, corruptedText: corruptedText.length,
     };
     const status = failed.length === 0 ? 'succeeded' : 'partial';
     const editedSinceVerificationDetail = editedSinceVerification.map((t) => ({ id: t.id, term: t.term }));
