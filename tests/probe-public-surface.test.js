@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkRequiredColumnsPresent, checkRowScoping, main } from '../scripts/probe-public-surface.js';
+import {
+  checkRequiredColumnsPresent, checkRowScoping, checkCitationsShape, main,
+} from '../scripts/probe-public-surface.js';
 
 // Completeness axis follow-up (2026-07-31): scripts/probe-public-surface.js used to assert
 // public_verification_notes' column set EXACTLY (4 named columns) — migration 0020 (draft-then-
@@ -86,6 +88,98 @@ test('checkRowScoping: empty notes -> ok trivially, zero leaks, zero distinct su
 test('checkRowScoping: null/undefined noteRows -> ok, never throws', () => {
   assert.deepEqual(checkRowScoping(null, ['s1']), { ok: true, leaked: [], distinctSummaries: 0 });
   assert.deepEqual(checkRowScoping(undefined, ['s1']), { ok: true, leaked: [], distinctSummaries: 0 });
+});
+
+// ---- checkCitationsShape — migration 0021 (draft-then-apply, may not be applied yet) ----
+
+test('checkCitationsShape: a completeness row has non-null citations -> violation', () => {
+  const rows = [
+    { summary_id: 's1', kind: 'completeness', overall: 'complete', citations: [{ bullet_index: 0, section: 'Sec. 1', evidence_quote: 'text' }] },
+  ];
+  const result = checkCitationsShape(rows);
+  assert.equal(result.ok, false);
+  assert.equal(result.violations.length, 1);
+  assert.equal(result.violations[0].summary_id, 's1');
+});
+
+test('checkCitationsShape: a completeness row with null citations -> ok', () => {
+  const rows = [{ summary_id: 's1', kind: 'completeness', overall: 'complete', citations: null }];
+  assert.deepEqual(checkCitationsShape(rows), { ok: true, violations: [] });
+});
+
+test('checkCitationsShape: a support row with overall=flagged has non-null citations -> violation (the exact leak the gate exists to prevent)', () => {
+  const rows = [
+    {
+      summary_id: 's-flagged',
+      kind: 'support',
+      overall: 'flagged',
+      citations: [{ bullet_index: 0, section: 'Sec. 1', evidence_quote: 'a refuting quote' }],
+    },
+  ];
+  const result = checkCitationsShape(rows);
+  assert.equal(result.ok, false);
+  assert.equal(result.violations[0].summary_id, 's-flagged');
+});
+
+test('checkCitationsShape: a support row with overall=flagged and null citations -> ok (the correct, gated shape)', () => {
+  const rows = [{ summary_id: 's-flagged', kind: 'support', overall: 'flagged', citations: null }];
+  assert.deepEqual(checkCitationsShape(rows), { ok: true, violations: [] });
+});
+
+test('checkCitationsShape: a clean support row with a well-shaped citations array -> ok', () => {
+  const rows = [
+    {
+      summary_id: 's-clean',
+      kind: 'support',
+      overall: 'clean',
+      citations: [
+        { bullet_index: 0, section: 'Sec. 1', evidence_quote: 'quote one' },
+        { bullet_index: 1, section: 'Sec. 2', evidence_quote: 'quote two' },
+      ],
+    },
+  ];
+  assert.deepEqual(checkCitationsShape(rows), { ok: true, violations: [] });
+});
+
+test('checkCitationsShape: a citation entry carrying `reason` or `supported` is a violation — those must never reach anon', () => {
+  const withReason = [
+    { summary_id: 's1', kind: 'support', overall: 'clean', citations: [{ bullet_index: 0, section: 'Sec. 1', evidence_quote: 'q', reason: 'because' }] },
+  ];
+  assert.equal(checkCitationsShape(withReason).ok, false);
+
+  const withSupported = [
+    { summary_id: 's2', kind: 'support', overall: 'clean', citations: [{ bullet_index: 0, section: 'Sec. 1', evidence_quote: 'q', supported: true }] },
+  ];
+  assert.equal(checkCitationsShape(withSupported).ok, false);
+});
+
+test('checkCitationsShape: a clean support row with null citations (e.g. zero verdicts) -> ok, not a violation', () => {
+  const rows = [{ summary_id: 's-empty', kind: 'support', overall: 'clean', citations: null }];
+  assert.deepEqual(checkCitationsShape(rows), { ok: true, violations: [] });
+});
+
+test('checkCitationsShape: rows with no `citations` key at all (pre-0021 DB) -> ok, never a violation — this check is additive, never fails a probe run before Lance applies the migration', () => {
+  const rows = [
+    { summary_id: 's1', kind: 'support', overall: 'clean' },
+    { summary_id: 's2', kind: 'completeness', overall: 'complete' },
+  ];
+  assert.deepEqual(checkCitationsShape(rows), { ok: true, violations: [] });
+});
+
+test('checkCitationsShape: empty/null/undefined noteRows -> ok, never throws', () => {
+  assert.deepEqual(checkCitationsShape([]), { ok: true, violations: [] });
+  assert.deepEqual(checkCitationsShape(null), { ok: true, violations: [] });
+  assert.deepEqual(checkCitationsShape(undefined), { ok: true, violations: [] });
+});
+
+test('checkCitationsShape: multiple violations across multiple rows are all reported, not just the first', () => {
+  const rows = [
+    { summary_id: 's1', kind: 'completeness', overall: 'complete', citations: [{ bullet_index: 0, section: 'x', evidence_quote: 'y' }] },
+    { summary_id: 's2', kind: 'support', overall: 'flagged', citations: [{ bullet_index: 0, section: 'x', evidence_quote: 'y' }] },
+  ];
+  const result = checkCitationsShape(rows);
+  assert.equal(result.ok, false);
+  assert.equal(result.violations.length, 2);
 });
 
 // ---- main(): env-var-missing branch, no network required (proves importing/exercising this

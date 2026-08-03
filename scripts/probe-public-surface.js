@@ -79,6 +79,50 @@ export function checkRowScoping(noteRows, publishedIds) {
   return { ok: leaked.length === 0, leaked, distinctSummaries };
 }
 
+// checkCitationsShape(noteRows) -> {ok, violations} — migration 0021 (draft-then-apply, may not be
+// applied yet) adds a computed `citations` column to public_verification_notes. Once present, its
+// content must satisfy three rules, independent of whether 0021 has landed yet: (1) a
+// completeness-kind row's citations is always null (its verdicts column holds an unrelated
+// {key_provisions, coverage} shape, nothing to extract); (2) a support-kind row whose overall isn't
+// 'clean' has citations null too — this is the exact gate the Fable 5 design review found missing;
+// a flagged row's evidence_quote can CONTRADICT its bullet, and this check catches it leaking
+// through as if it were a receipt; (3) a clean support row's citations, when non-null, is an array
+// of objects with EXACTLY bullet_index/section/evidence_quote keys — never `reason` (the verifier's
+// own commentary) or `supported` (redundant once gated, and the leak vector if handled carelessly).
+// Tolerates `citations` being entirely absent from a row (pre-0021 shape) — this check is additive,
+// never a replacement for checkRequiredColumnsPresent, and never fails a probe run against a
+// database that hasn't had 0021 applied yet. Pure — no I/O, never throws.
+const CITATION_ENTRY_KEYS = ['bullet_index', 'evidence_quote', 'section'];
+
+export function checkCitationsShape(noteRows) {
+  const rowsArr = Array.isArray(noteRows) ? noteRows : [];
+  const violations = [];
+  for (const row of rowsArr) {
+    if (!row || !('citations' in row)) continue; // pre-0021 row shape — nothing to check yet
+    const { kind, overall, citations } = row;
+    if (kind === 'completeness') {
+      if (citations !== null) violations.push({ summary_id: row.summary_id, reason: 'completeness row has non-null citations' });
+      continue;
+    }
+    if (kind === 'support' && overall !== 'clean') {
+      if (citations !== null) violations.push({ summary_id: row.summary_id, reason: `support row with overall=${overall} has non-null citations` });
+      continue;
+    }
+    if (citations === null || citations === undefined) continue; // no citations extracted (e.g. empty verdicts) — fine
+    if (!Array.isArray(citations)) {
+      violations.push({ summary_id: row.summary_id, reason: 'citations is not an array' });
+      continue;
+    }
+    for (const entry of citations) {
+      const keys = Object.keys(entry || {}).sort();
+      if (keys.join(',') !== CITATION_ENTRY_KEYS.join(',')) {
+        violations.push({ summary_id: row.summary_id, reason: `citation entry has unexpected keys: ${keys.join(',')}` });
+      }
+    }
+  }
+  return { ok: violations.length === 0, violations };
+}
+
 export async function main() {
   const url = process.env.SUPABASE_URL;
   const anon = process.env.SUPABASE_ANON_KEY;
@@ -177,6 +221,22 @@ export async function main() {
   } else {
     check('public_verification_notes row-scoping readable', false, `notes ${notes.status} / summaries ${published.status}`, state);
   }
+
+  // Migration 0021 (draft-then-apply) may or may not have landed yet — request the expanded shape
+  // and gracefully skip this check (not fail the probe) if the column doesn't exist.
+  const notesWithCitations = await allRows(url, H, 'public_verification_notes?select=summary_id,kind,overall,citations');
+  if (notesWithCitations.status === 200 && notesWithCitations.body) {
+    const { ok: citationsOk, violations } = checkCitationsShape(notesWithCitations.body);
+    check(
+      'public_verification_notes.citations is correctly gated and shaped (migration 0021)',
+      citationsOk,
+      violations.length ? `${violations.length} violation(s): ${violations.map((v) => `${v.summary_id} — ${v.reason}`).join('; ')}` : `${notesWithCitations.body.length} row(s) checked`,
+      state,
+    );
+  } else {
+    console.log('INFO  public_verification_notes.citations check skipped — migration 0021 not applied yet (or the request failed for another reason)');
+  }
+
   process.exitCode = state.failed ? 1 : 0;
 }
 
