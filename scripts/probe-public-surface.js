@@ -58,6 +58,20 @@ const REQUIRED_NOTES = ['summary_id', 'model', 'overall', 'created_at'];
 // bill-page.js's own VOTES_SELECT requests, now via public_votes instead of the raw votes table.
 const EXPECT_VOTES = ['id', 'bill_id', 'jurisdiction_id', 'chamber', 'vote_date', 'question', 'result', 'source_url', 'source_key'];
 
+// Senior engineering audit (2026-08-03, finding 6): 0024/0025 shipped with ZERO probe coverage —
+// this file was last committed BEFORE either migration existed. 0025's real production regression
+// (bill-page.js's summaries query 401ing the instant 0025 landed) was caught only because a human
+// happened to load the site afterward, not by anything mechanical. These constants and the checks
+// below close that gap: verbatim from migration 0025's own GRANT lists (never re-derived/guessed).
+const SUMMARIES_GRANTED_COLUMNS = ['id', 'bill_id', 'status', 'body_md', 'model', 'published_at', 'created_at'];
+const GLOSSARY_TERMS_GRANTED_COLUMNS = ['id', 'term', 'kind', 'citation', 'gloss_md', 'supported_by_quote', 'source_url', 'status'];
+// One deliberately-NOT-granted internal column per table (0025's own header comment names all of
+// them: summaries also withholds prompt_version/bill_text_hash/run_id; glossary_terms also
+// withholds prompt_version/source_hash/needs_mapping) — proves the column-level grant is actually
+// enforced, not just that the granted columns happen to work.
+const SUMMARIES_DENIED_COLUMN = 'run_id';
+const GLOSSARY_TERMS_DENIED_COLUMN = 'run_id';
+
 // checkRequiredColumnsPresent(gotColumns, requiredColumns) -> {ok, missing} — SUPERSET-tolerant:
 // every required column must be present, but extra columns (e.g. 0020's `kind`) are fine and never
 // fail the check. Pure — no I/O, never throws.
@@ -153,6 +167,10 @@ export async function main() {
   check('bill_texts locked to anon', locked.status !== 200 || (Array.isArray(locked.body) && locked.body.length === 0), `status ${locked.status}`, state);
   const runsLocked = await rows(url, H, 'ingestion_runs?select=id&limit=1');
   check('ingestion_runs locked to anon', runsLocked.status !== 200 || (Array.isArray(runsLocked.body) && runsLocked.body.length === 0), `status ${runsLocked.status}`, state);
+  // Migration 0024 (senior engineering audit, 2026-08-03, finding 6): same "locked to anon" shape
+  // as bill_texts/ingestion_runs above — legiscan_datasets carries no anon-facing use case at all.
+  const legiscanDatasetsLocked = await rows(url, H, 'legiscan_datasets?select=id&limit=1');
+  check('legiscan_datasets locked to anon (migration 0024)', legiscanDatasetsLocked.status !== 200 || (Array.isArray(legiscanDatasetsLocked.body) && legiscanDatasetsLocked.body.length === 0), `status ${legiscanDatasetsLocked.status}`, state);
   for (const v of ['public_vote_feed', 'public_freshness', 'public_verification_notes', 'public_reconciliation_flags']) {
     // eslint-disable-next-line no-await-in-loop
     const r = await rows(url, H, `${v}?limit=1`);
@@ -271,6 +289,69 @@ export async function main() {
   } else {
     console.log('INFO  public_votes check skipped — migration 0022 not applied yet (or the request failed for another reason)');
   }
+
+  // Migration 0025 column-scoping (senior engineering audit, 2026-08-03, finding 6): shipped with
+  // zero probe coverage — its real production regression (bill-page.js's summaries query 401ing
+  // the instant 0025 landed) was caught only by a human loading the site afterward. Two halves:
+  // (1) column-denial — an internal column withheld by the GRANT must actually be refused, not
+  // just absent from the site's own queries; (2) real query replay — the site's own exact query
+  // strings (not a re-derived approximation) must still succeed, which is the specific class of
+  // check that would have caught the bill-page.js regression before a human had to.
+  const summariesDenied = await rows(url, H, `summaries?select=id,${SUMMARIES_DENIED_COLUMN}&limit=1`);
+  check(
+    `summaries denies the ungranted column "${SUMMARIES_DENIED_COLUMN}" (migration 0025)`,
+    summariesDenied.status !== 200,
+    `status ${summariesDenied.status}`,
+    state,
+  );
+  const glossaryDenied = await rows(url, H, `glossary_terms?select=id,${GLOSSARY_TERMS_DENIED_COLUMN}&limit=1`);
+  check(
+    `glossary_terms denies the ungranted column "${GLOSSARY_TERMS_DENIED_COLUMN}" (migration 0025)`,
+    glossaryDenied.status !== 200,
+    `status ${glossaryDenied.status}`,
+    state,
+  );
+  const summariesGrantedProbe = await rows(url, H, `summaries?select=${SUMMARIES_GRANTED_COLUMNS.join(',')}&limit=1`);
+  check(
+    'summaries: every column migration 0025 actually grants is readable together in one request',
+    summariesGrantedProbe.status === 200,
+    `status ${summariesGrantedProbe.status}`,
+    state,
+  );
+  const glossaryGrantedProbe = await rows(url, H, `glossary_terms?select=${GLOSSARY_TERMS_GRANTED_COLUMNS.join(',')}&limit=1`);
+  check(
+    'glossary_terms: every column migration 0025 actually grants is readable together in one request',
+    glossaryGrantedProbe.status === 200,
+    `status ${glossaryGrantedProbe.status}`,
+    state,
+  );
+
+  // Real query replay — the LITERAL query shapes site/js/*.js issues today (bill-page.js,
+  // person-page.js, trust-page.js), not a re-derived approximation. Sourced against a real
+  // published bill_id / glossary_terms id found via an already-granted column, so this needs no
+  // hardcoded fixture id and stays correct as the underlying data changes.
+  const sampleBill = await rows(url, H, 'summaries?select=bill_id&status=eq.published&limit=1');
+  const sampleBillId = sampleBill.status === 200 ? sampleBill.body?.[0]?.bill_id : null;
+  if (sampleBillId) {
+    const billPageSummary = await rows(url, H, `summaries?bill_id=eq.${sampleBillId}&status=eq.published&select=id,bill_id,status,body_md,model,published_at,created_at&order=published_at.desc.nullslast,created_at.desc`);
+    check('bill-page.js\'s real summaries query string succeeds (migration 0025)', billPageSummary.status === 200, `status ${billPageSummary.status}`, state);
+    const personPageSummary = await rows(url, H, `summaries?bill_id=in.(${sampleBillId})&status=eq.published&select=bill_id,body_md,published_at&order=published_at.desc.nullslast,created_at.desc`);
+    check('person-page.js\'s real summaries query string succeeds (migration 0025)', personPageSummary.status === 200, `status ${personPageSummary.status}`, state);
+  } else {
+    console.log('INFO  bill-page.js/person-page.js real summaries query replay skipped — no published summary found to test against');
+  }
+  const sampleTerm = await rows(url, H, 'glossary_terms?select=id&status=eq.published&limit=1');
+  const sampleTermId = sampleTerm.status === 200 ? sampleTerm.body?.[0]?.id : null;
+  if (sampleTermId) {
+    const billPageGlossary = await rows(url, H, `glossary_terms?id=in.(${sampleTermId})&status=eq.published&select=id,term,kind,citation,gloss_md,supported_by_quote,source_url&order=citation.nullsfirst,id`);
+    check('bill-page.js\'s real glossary_terms query string succeeds (migration 0025)', billPageGlossary.status === 200, `status ${billPageGlossary.status}`, state);
+  } else {
+    console.log('INFO  bill-page.js real glossary_terms query replay skipped — no published glossary term found to test against');
+  }
+  const trustPageSummariesCount = await rows(url, H, 'summaries?select=id&status=eq.published&limit=3');
+  check('trust-page.js\'s real summaries count query string succeeds (migration 0025)', trustPageSummariesCount.status === 200, `status ${trustPageSummariesCount.status}`, state);
+  const trustPageGlossaryCount = await rows(url, H, 'glossary_terms?select=id&status=eq.published&limit=3');
+  check('trust-page.js\'s real glossary_terms count query string succeeds (migration 0025)', trustPageGlossaryCount.status === 200, `status ${trustPageGlossaryCount.status}`, state);
 
   process.exitCode = state.failed ? 1 : 0;
 }
