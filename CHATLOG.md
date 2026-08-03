@@ -1291,3 +1291,39 @@ a re-analysis), **0 malformed, 0 gate failures**. Verified post-write against th
 `status=published` with both `support:clean` and `completeness:complete` rows; 7 still `draft` with
 an honest `completeness:incomplete` row naming what's missing. Review queue: 106 → 98 real items
 left, all now the genuinely-judgment-requiring kind trust-model v3 was actually designed for.
+
+## 2026-08-02 (later still) — bullet citation exposure: designed, reviewed, built, migration awaits Lance
+
+Lance: *"I'd really like to create a system where humans are not presenting the information but
+also a system where the information is always accurate and humans can not refute it as stated."*
+Real tension surfaced immediately: quote-only display is maximally unrefutable but fights the
+project's actual mission (plain language for people who can't parse a bill's own prose). Lance's
+call: *"It is more important for people to be able to understand the bill."* Resolution: keep the
+paraphrase primary, put the exact quote one click away — the receipt `trust.html` already claims
+every published fact carries, but which the bill page never actually rendered for `what_it_does`
+bullets (only glossary terms had it). Checked before proposing anything: not built, not even on the
+internal staff review page — `evidence_quote` (verifier.js's own per-bullet field) sat in
+`summary_verifications` unused since the day the completeness axis shipped.
+
+Brainstormed to a written spec (`docs/superpowers/specs/2026-08-02-bullet-citation-exposure-
+design.md`), then Lance asked for a Fable 5 adversarial pass before proceeding — found two real
+holes in the first draft, not stylistic nits. (1) The safety claim "published implies clean" isn't
+mechanically true: the staff review server's manual publish button — the review queue's own only
+exit for ~100 flagged items — never checks verification at all, so gating public exposure on
+`status='published'` alone would let a manually-published flagged summary's *contradicting* quote
+render as if it supported the bullet. Fixed by gating the new `citations` column on
+`overall='clean'` directly, in the view itself. (2) Two live published summaries already have small
+formatting drift between `parseBullets`' extracted section text and the verifier's own recorded
+`section` string — confirms the lookup must key strictly on `bullet_index`, never cross-check
+section text. Logged as PLAYBOOK Lesson 22: gate on the actual invariant, never a status flag more
+than one writer can set.
+
+Lance: "make the implementation." Plan written (`docs/superpowers/plans/2026-08-02-bullet-citation-
+exposure.md`), executed inline, TDD throughout: migration 0021 (draft file only — never applied,
+per standing convention), a new `checkCitationsShape` pure validator in
+`scripts/probe-public-surface.js` encoding all three Fable-5-reviewed gating rules (11 new tests),
+the `buildCitationToggle` UI in `bill-page.js` mirroring the glossary quote-toggle pattern exactly
+(accessible: tabIndex, role=button, aria-expanded, click + Enter/Space) with a defensive fallback
+to today's plain span for any bullet with no matching citation, and matching CSS. 2192 → 2205 tests,
+0 fail, gated on the extracted `ℹ fail` line at every commit. **Nothing left but Lance's own step:**
+apply the migration, run the probe script to confirm it live, done.

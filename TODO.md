@@ -87,12 +87,17 @@
     yea vote present in every LegiScan roll call, absent from every Senate-journal-sourced one — one
     root cause, not 29 separate mysteries) rather than hiding them. Source discrepancies held out of
     the clean record by design; not a backlog to auto-clear.
-  - **Bullet-citation exposure — spec written and adversarially reviewed (Fable 5), not yet
-    implemented.** Exposes `verifier.js`'s existing `evidence_quote` per `what_it_does` bullet on
-    the public bill page (click-to-expand, mirrors the glossary quote pattern) so `trust.html`'s
-    existing receipt claim becomes true for bill summaries too. Spec:
-    `docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md`. Migration is
-    draft-then-apply, per standing convention — Lance applies when ready.
+  - **Bullet-citation exposure — CODE COMPLETE 2026-08-02, migration not yet applied.** Exposes
+    `verifier.js`'s existing `evidence_quote` per `what_it_does` bullet on the public bill page
+    (click-to-expand, mirrors the glossary quote pattern) so `trust.html`'s existing receipt claim
+    becomes true for bill summaries too. Spec:
+    `docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md`; plan:
+    `docs/superpowers/plans/2026-08-02-bullet-citation-exposure.md`. Suite 2205/2205 green. **Only
+    remaining step is Lance's:** apply `supabase/migrations/0021_bullet_citations.sql` (Supabase
+    SQL editor, same as every prior migration), then run `node scripts/probe-public-surface.js`
+    to confirm the new `citations` column is present and correctly gated/shaped against the live
+    DB. No code changes needed after that — the JS already reads the column defensively (falls
+    back to today's plain span if it's absent, null, or malformed).
   - **Cloudflare Pages (deferred, steps preserved for when Lance calls it):** connect
     `lazrexmc/VisibleGov`, production branch `main`, build command EMPTY, **Root directory `site`**
     (required, or `_headers` + the geocode Function are not discovered). Verify at deploy:
