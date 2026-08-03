@@ -96,13 +96,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | all`);
   }
   out.which = which;
   return out;
@@ -1576,6 +1576,91 @@ export async function runCorrectPiersonSplit(client, { dryRun = false } = {}) {
 }
 
 // ============================================================================================
+// Correction — glossary-refuted-claims: FECA/BBEDCA still say what their own verification
+// refuted (accuracy audit, 2026-08-03)
+// ============================================================================================
+//
+// FOUND LIVE: both terms are status='published' while their only glossary_verifications row is
+// overall='flagged' — the published gloss_md still asserts exactly what the verifier's own
+// supported:false verdict refuted. glossary_notes proves this was accidental: the operator's own
+// note agreed the claim was ungrounded, an ADMINISTRATIVE REVERT recorded the intended correction
+// was never saved, and both terms were re-published hours later with no edit note in between.
+// This directly completes the correction Lance already ruled on — not a new editorial call.
+//
+// Each replacement below removes/replaces ONLY the exact phrase the verifier's own verdict
+// quoted as unsupported, grounded in the verifier's own evidence_quote for what the source
+// excerpt actually says — never a rewrite beyond that.
+// FECA (verdict reason): "the excerpt itself never states that the Act is 'the federal law
+// governing money in federal election campaigns'; that characterization is external background
+// knowledge, not something asserted in the excerpt."
+// BBEDCA (verdict reason): "the excerpt never uses or implies the phrase 'program integrity
+// activities' for the continuing disability review/redetermination... provisions"; its own
+// evidence_quote names the real statutory term: "Continuing disability reviews and
+// redeterminations."
+//
+// No in-app path exists for this: the review server's own TRANSITIONS table (src/review/
+// server.js) has no entry for 'published' at all, so there is no "edit a published term" action —
+// this direct patch is the only way to correct already-published content, mirroring exactly what
+// the 'edit' action would have written (gloss_md patch + a glossary_notes 'edited' row), never
+// touching `status`.
+export const FECA_TERM_ID = '51ebf49a-3e42-4089-906a-d679aabd402f';
+export const BBEDCA_TERM_ID = 'ffd0475e-ed93-4c6c-a00c-e33cf949770f';
+
+const GLOSSARY_REFUTED_CLAIM_FIXES = [
+  {
+    termId: FECA_TERM_ID,
+    find: 'The Federal Election Campaign Act of 1971 is the federal law governing money in federal election campaigns; this excerpt is its',
+    replace: 'This excerpt is the Federal Election Campaign Act of 1971\'s',
+  },
+  {
+    termId: BBEDCA_TERM_ID,
+    find: 'and certain program integrity activities',
+    replace: 'and continuing disability reviews and redeterminations under the Social Security Act',
+  },
+];
+
+export async function runCorrectGlossaryRefutedClaims(client, { dryRun = false } = {}) {
+  const failures = [];
+  const termIds = [];
+  const patches = [];
+
+  for (const fix of GLOSSARY_REFUTED_CLAIM_FIXES) {
+    // eslint-disable-next-line no-await-in-loop -- sequential over 2 named rows, same small-backlog
+    // precedent as this file's other one-time corrections.
+    const { data: rows, error } = await client.from('glossary_terms').select('id,gloss_md').eq('id', fix.termId);
+    if (error) { failures.push({ termId: fix.termId, reason: 'glossary_terms_lookup_failed', error: String(error.message ?? error) }); continue; }
+    const row = (rows ?? [])[0];
+    if (!row || !String(row.gloss_md ?? '').includes(fix.find)) continue; // already corrected, or row not found
+    termIds.push(fix.termId);
+    patches.push({ fix, newGlossMd: row.gloss_md.replace(fix.find, fix.replace) });
+  }
+
+  if (dryRun || patches.length === 0) {
+    return { matched: patches.length, termIds, failures };
+  }
+
+  let matched = 0;
+  for (const { fix, newGlossMd } of patches) {
+    // eslint-disable-next-line no-await-in-loop
+    const { error: updErr } = await client.from('glossary_terms').update({ gloss_md: newGlossMd }).eq('id', fix.termId);
+    if (updErr) { failures.push({ termId: fix.termId, reason: 'glossary_terms_update_failed', error: String(updErr.message ?? updErr) }); continue; }
+    // eslint-disable-next-line no-await-in-loop
+    const { error: noteErr } = await client.from('glossary_notes').insert({
+      term_id: fix.termId,
+      action: 'edited',
+      note: 'Corrected 2026-08-03 (accuracy audit): removed the exact claim this term\'s own '
+        + 'adversarial verification refuted as unsupported by the cited source excerpt — completes '
+        + 'the correction the operator already agreed to (glossary_notes 2026-07-29) but that was '
+        + 'never saved before re-publish.',
+    }).select().single();
+    if (noteErr) { failures.push({ termId: fix.termId, reason: 'glossary_notes_insert_failed', error: String(noteErr.message ?? noteErr) }); continue; }
+    matched += 1;
+  }
+
+  return { matched, termIds, failures };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1640,6 +1725,12 @@ export async function runCorrectData(client, {
   if (which === 'pierson-split') {
     out.piersonSplit = await runCorrectPiersonSplit(client, { dryRun });
     failures.push(...out.piersonSplit.failures);
+  }
+  // glossary-refuted-claims (2026-08-03) — a named content correction, not a routine data-shape
+  // fix; excluded from 'all' for the same "operator must name it explicitly" reason as pierson-split.
+  if (which === 'glossary-refuted-claims') {
+    out.glossaryRefutedClaims = await runCorrectGlossaryRefutedClaims(client, { dryRun });
+    failures.push(...out.glossaryRefutedClaims.failures);
   }
 
   out.failures = failures;

@@ -29,6 +29,9 @@ import {
   PIERSON_WRONG_PERSON_ID,
   PIERSON_LEGISLATOR_IDS,
   runCorrectPiersonSplit,
+  FECA_TERM_ID,
+  BBEDCA_TERM_ID,
+  runCorrectGlossaryRefutedClaims,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -69,6 +72,9 @@ function makeFakeClient(seed = {}, { forceError = null, afterExecute = null } = 
     // pierson-split (accuracy audit, 2026-08-03) — same reasoning as ingestion_runs above.
     persons: [],
     person_links: [],
+    // glossary-refuted-claims (accuracy audit, 2026-08-03) — same reasoning as ingestion_runs above.
+    glossary_terms: [],
+    glossary_notes: [],
     ...seed,
   };
   for (const t of Object.keys(tables)) tables[t] = tables[t].map((r) => ({ ...r }));
@@ -415,6 +421,66 @@ test('runCorrectPiersonSplit: never touches an unrelated person/legislator row',
   assert.equal(client.tables.persons.find((p) => p.id === 'person-unrelated') != null, true);
   assert.equal(client.tables.legislators.find((l) => l.id === 'leg-unrelated').person_id, 'person-unrelated');
   assert.equal(client.tables.person_links.find((l) => l.id === 'pl-unrelated') != null, true);
+});
+
+// ---- runCorrectGlossaryRefutedClaims ----
+// FOUND LIVE (accuracy audit, 2026-08-03): FECA and BBEDCA are status='published' while their own
+// only glossary_verifications row is overall='flagged' — the published text still says exactly
+// what the verifier refuted as unsupported by the cited source excerpt. The glossary_notes trail
+// proves this was accidental (the operator agreed the claim was ungrounded; the intended
+// correction was never saved before re-publish). Named, one-time correction — the review app's
+// own state machine has no transition FROM 'published' at all (TRANSITIONS in server.js), so
+// there is no in-app "edit a published term" path; this direct, minimal, evidence-grounded patch
+// (removing/replacing exactly the refuted phrase, nothing else) mirrors what the 'edit' action
+// would have written, with the same glossary_notes 'edited' audit trail.
+
+function seedGlossaryFixture() {
+  return {
+    glossary_terms: [
+      {
+        id: FECA_TERM_ID, term: 'Federal Election Campaign Act of 1971', status: 'published',
+        gloss_md: 'The Federal Election Campaign Act of 1971 is the federal law governing money in federal election campaigns; this excerpt is its definitions section, spelling out terms used throughout the law.',
+      },
+      {
+        id: BBEDCA_TERM_ID, term: 'Balanced Budget and Emergency Deficit Control Act of 1985', status: 'published',
+        gloss_md: 'This law sets dollar caps. It also lists specific adjustments that can raise those caps, such as amounts designated for emergencies, disaster relief, wildfire suppression, and certain program integrity activities.',
+      },
+    ],
+    glossary_notes: [],
+  };
+}
+
+test('runCorrectGlossaryRefutedClaims: dry-run reports both terms would change, without writing', async () => {
+  const client = makeFakeClient(seedGlossaryFixture());
+  const result = await runCorrectGlossaryRefutedClaims(client, { dryRun: true });
+  assert.equal(result.matched, 2);
+  assert.deepEqual(result.termIds.slice().sort(), [BBEDCA_TERM_ID, FECA_TERM_ID].sort());
+  assert.deepEqual(result.failures, []);
+  assert.equal(client.tables.glossary_terms.find((t) => t.id === FECA_TERM_ID).gloss_md.includes('is the federal law governing money'), true, 'dry-run must never write');
+});
+
+test('runCorrectGlossaryRefutedClaims: live run removes exactly the refuted claim from each term and writes an edited note', async () => {
+  const client = makeFakeClient(seedGlossaryFixture());
+  const live = await runCorrectGlossaryRefutedClaims(client, { dryRun: false });
+  assert.equal(live.matched, 2);
+  const feca = client.tables.glossary_terms.find((t) => t.id === FECA_TERM_ID);
+  assert.equal(feca.gloss_md.includes('is the federal law governing money in federal election campaigns'), false);
+  assert.equal(feca.status, 'published', 'status is never touched — only gloss_md');
+  const bbedca = client.tables.glossary_terms.find((t) => t.id === BBEDCA_TERM_ID);
+  assert.equal(bbedca.gloss_md.includes('program integrity activities'), false);
+  const fecaNote = client.tables.glossary_notes.find((n) => n.term_id === FECA_TERM_ID);
+  assert.equal(fecaNote.action, 'edited');
+  const bbedcaNote = client.tables.glossary_notes.find((n) => n.term_id === BBEDCA_TERM_ID);
+  assert.equal(bbedcaNote.action, 'edited');
+});
+
+test('runCorrectGlossaryRefutedClaims: a second run is a clean, honest no-op — never re-edits or errors', async () => {
+  const client = makeFakeClient(seedGlossaryFixture());
+  await runCorrectGlossaryRefutedClaims(client, { dryRun: false });
+  const second = await runCorrectGlossaryRefutedClaims(client, { dryRun: false });
+  assert.equal(second.matched, 0);
+  assert.equal(second.failures.length, 0);
+  assert.equal(client.tables.glossary_notes.length, 2, 'no duplicate note rows on a repeat run');
 });
 
 // ---- parseArgs ----
