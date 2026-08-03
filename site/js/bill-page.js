@@ -698,8 +698,17 @@ export async function loadSummarySection(container, { billId }) {
     // published_at.desc.nullslast,created_at.desc — same ordering person-page.js's own summaries
     // query uses, so "first row" always means "current published," never an arbitrary/unordered
     // row on a tie or a null published_at.
+    // select= is REQUIRED here, not optional (migration 0025, accuracy audit follow-up,
+    // 2026-08-03): summaries/glossary_terms now grant anon SELECT on specific columns only, not
+    // the whole table — Postgres denies a bare `select=*`/unscoped request outright rather than
+    // silently narrowing it to the granted columns, so this query 401'd in production the moment
+    // 0025 landed until this select= was added. Lists exactly the columns 0025 grants anon (id,
+    // bill_id, status, body_md, model, published_at, created_at) — everything this function
+    // actually reads (summary.model at buildVerificationNote, summary.body_md at
+    // renderSummaryStructured) plus id/bill_id/status/published_at/created_at for the row itself
+    // and the ordering above.
     const rows = (await restGet(
-      `summaries?bill_id=eq.${billId}&status=eq.published&order=published_at.desc.nullslast,created_at.desc`,
+      `summaries?bill_id=eq.${billId}&status=eq.published&select=id,bill_id,status,body_md,model,published_at,created_at&order=published_at.desc.nullslast,created_at.desc`,
     )).rows;
     summary = rows[0] || null;
   } catch {
