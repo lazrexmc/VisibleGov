@@ -466,3 +466,51 @@ re-running it, and getting genuinely different (and this time internally consist
 against explicit `codePointAt()` dumps) results. Applies to any tool-mediated shell invocation, not
 just this project — worth checking for the same stripping behavior in a new environment before
 trusting a quick one-liner for anything backslash-sensitive.
+
+## Lesson 26 — `refresh_vote_aggregates()` RPC calls hit a hard ~120s Supabase edge-gateway timeout, separate from and shorter than the function's own 600s DB-side `statement_timeout` (2026-08-04)
+
+Five live attempts at `npm run refresh:aggregates` after the vote-dedup backfill (59 rows written)
+all failed — alternating `"canceling statement due to lock timeout"` (~8s, a later attempt colliding
+with an earlier one's still-running server-side query) and `"upstream request timeout"` (~120-130s).
+Diagnosed by bypassing the SDK entirely with a raw `fetch()` (5-minute client-side `AbortSignal`) to
+rule out any client/SDK-imposed limit: it still died at **125,374ms with HTTP 504, `server:
+cloudflare`, `sb-gateway-version`/`sb-project-ref` headers, body `"upstream request timeout"`**. This
+is Supabase's own edge/gateway infrastructure (Cloudflare in front of the whole API surface)
+enforcing a fixed synchronous-request ceiling, completely independent of Postgres's own
+`statement_timeout` (migration 0026 already correctly sets that to 600s on the function itself — it's
+just irrelevant here, since the HTTP connection watching the request dies first). The underlying
+`REFRESH MATERIALIZED VIEW CONCURRENTLY` calls are very likely still completing successfully
+server-side in every failed attempt; the client (and whatever's fronting PostgREST) just never sees
+the response.
+
+**This is genuinely a scale problem, not a fluke**: the same function completed in ~19s earlier the
+same day (right after 0026 was verified) and now consistently exceeds the ~120s gateway ceiling —
+`vote_casts` sits at ~1.47M rows and grows continuously via the scheduler; whatever margin existed is
+shrinking as the dataset grows, and this will keep getting worse. A per-call code fix (splitting the
+one function's three sequential `REFRESH ... CONCURRENTLY` passes into three separate RPC calls)
+would buy time but not remove the ceiling — the durable fix is running the refresh as a scheduled
+`pg_cron` job directly inside Postgres, with no HTTP/gateway layer involved in the routine case at
+all (`select cron.schedule('refresh-vote-aggregates', '*/30 * * * *', 'select
+refresh_vote_aggregates();');` is the current, confirmed-live Supabase Cron syntax as of this
+writing — verify against `https://supabase.com/docs/guides/cron` again if this project revisits it
+later, since Supabase's own docs explicitly warn this area changes).
+
+**The costlier miss: this exact problem — the RPC call to THIS SAME function timing out no matter
+what — already happened once, earlier the SAME session, and was already solved.** CHATLOG.md
+(2026-08-03, "0022 has been ran in supabase" entry) records a prior ~8s PostgREST-role-level timeout
+on the identical function, worked around by having Lance run `select refresh_vote_aggregates();`
+directly in the Supabase SQL editor — a bypass that (not obviously, but as it turns out) also sidesteps
+the DIFFERENT, newly-discovered gateway-level timeout, since the SQL editor doesn't route through the
+same REST/gateway path at all. Five retries plus a full SDK-bypass diagnostic investigation happened
+before this was found, and only because Lance directly asked "are the calls utilizing the connection
+properly" and separately told me to re-read CHATLOG/PLAYBOOK line by line — not because the check
+happened on its own.
+
+**Rule: before spending any diagnostic effort on an infrastructure/operational problem that "shouldn't
+be happening," grep CHATLOG.md (`grep -in "<function name>\|<error keyword>\|timeout"` at minimum) for
+whether this exact class of problem already occurred and was already solved.** A project with this
+kind of durable, word-for-word decision trail defeats its own purpose if a fresh problem gets
+re-diagnosed from zero instead of consulting it first — the whole point of CHATLOG per PLAYBOOK_DELTA
+§5.2 ("chatlog + memory are the flywheel, not overhead") is that this class of miss should be
+structurally rare, not routine. Applies doubly to anything involving a specific named function,
+script, or error message that's likely to have come up before in a long-running project.

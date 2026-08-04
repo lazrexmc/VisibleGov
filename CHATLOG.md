@@ -1967,3 +1967,61 @@ the suspended per-run API-spend approval policy (still Lance's own call, per his
 and made zero live Claude/LLM API calls — every fix in this pass was mechanical code/test/doc work
 plus one live, tested, dry-run-then-live data correction, the same pattern already established for
 every other correction this session.
+
+
+---
+
+## 2026-08-04 — the refresh timeout, root-caused, and a real process miss owned
+
+Five live `npm run refresh:aggregates` attempts after the vote-dedup backfill (59 rows written, see
+above) all failed, alternating "lock timeout" (~8s) and "upstream request timeout" (~120-130s).
+Lance asked to force-stop the scheduled task and restart the fetchers, suspecting something was
+stuck — investigated first rather than acting: the Task Scheduler task was idle with `Last Result:
+0` (its last tick had succeeded), no local scheduler lock file existed, and no lingering node
+process was running anything ingestion/refresh-related. Presented this and asked how to proceed;
+Lance chose the simplest option, "just retry" — which failed the same way.
+
+Lance then asked directly: "are the calls utilizing the connection properly, requesting and sending
+the proper info and commands." Investigated for real this time: reviewed the actual client
+construction and RPC call shape (both correct, nothing malformed), checked installed vs. declared
+`@supabase/supabase-js` version (2.110.9 vs. `^2.45.0`, matching the audit's own earlier finding,
+not itself the cause), checked `postgrest-js` internals for any default timeout (none), checked live
+row counts (1,466,833 `vote_casts`, not dramatically grown), checked for orphaned `ingestion_runs`
+rows (found one, unrelated — `source='correct-data'`, from an earlier foreground attempt killed by a
+shell timeout during the live correction, not the refresh). Then bypassed the SDK entirely with a
+raw `fetch()` carrying a 5-minute client-side abort — it still died at **125,374ms with HTTP 504**,
+`server: cloudflare`, Supabase's own `sb-gateway-version`/`sb-project-ref` headers, body literally
+`"upstream request timeout"`. Definitive: Supabase's own edge/gateway infrastructure enforces a
+fixed ~120-125s ceiling on synchronous REST/RPC requests, completely separate from and shorter than
+the function's own 600s `statement_timeout` (migration 0026) — the underlying `REFRESH MATERIALIZED
+VIEW CONCURRENTLY` calls are very likely completing successfully server-side every time; the client
+just never sees the response before the gateway kills the connection.
+
+Presented two real fixes (split the one RPC into three shorter calls, or move to `pg_cron` for a
+structural fix with no HTTP layer involved). Lance chose **pg_cron**.
+
+**Then Lance stopped the thread cold: "reread all of the documentation and especially the chatlog
+and playbook... line by line... this problem should not have occurred if Claude had been utilizing
+the memory and logs."** Fair, and correct. Read both files in full, not a grep-and-skim. Found the
+finding INSIDE the read, not from a targeted search: CHATLOG.md already records, from earlier the
+SAME session, a prior ~8s PostgREST-role-level timeout on this EXACT same function
+(`refresh_vote_aggregates()`) — worked around at the time by having Lance run `select
+refresh_vote_aggregates();` directly in the Supabase SQL editor, bypassing the REST/RPC path
+entirely. That bypass (not by design, but as it turns out) also sidesteps tonight's newly-discovered
+gateway-level timeout, since the SQL editor never routes through the same gateway. Five live retries
+and a full diagnostic investigation happened before this was found — and only because Lance directly
+asked the connection-mechanics question and then separately ordered the full reread, not because
+checking CHATLOG for a prior occurrence happened as a first step on its own.
+
+**Owned directly, not explained away:** this project's whole CHATLOG/PLAYBOOK discipline exists
+specifically so this class of miss is structurally rare, and it wasn't checked before diagnosing from
+zero. PLAYBOOK_DELTA lesson 26 written to capture both the technical finding (the gateway timeout
+itself, with the exact empirical evidence) and the process rule (grep CHATLOG for a named function/
+error before re-diagnosing anything that "shouldn't be happening" as new).
+
+**Where this leaves the pg_cron decision: unchanged, still the right call.** The SQL-editor bypass is
+a one-off manual workaround, not a fix for the recurring problem, and tonight's own numbers (19s
+baseline earlier the same day -> consistently 120s+ now, same function, growing dataset) confirm the
+gateway ceiling will keep getting harder to stay under as `vote_casts` keeps growing. Immediate,
+zero-risk relief is available right now via the same SQL-editor bypass that worked before; the
+`pg_cron` migration is the structural fix in progress.
