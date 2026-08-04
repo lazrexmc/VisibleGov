@@ -77,13 +77,28 @@
   `handleIdentityDecision`'s 378-line/71-branch size (exhaustively test-pinned already; extract on
   the next real change to that file) and the README policy-sentence/count issue (fixed above
   anyway, folded into item 7).
-  **One follow-up still open:** the manual `npm run refresh:aggregates` call hit a client-side
-  "upstream request timeout" / "lock timeout" across several retry attempts post-fix (distinct from
-  the DB-side 600s `statement_timeout` migration 0026 already fixed — this looks like a shorter
-  gateway-level HTTP timeout, not yet root-caused). The underlying data fix is verified correct and
-  live regardless (direct REST count confirms `vote_duplicates` = 59 rows); the matviews will pick
-  it up on the next scheduler tick that writes rows (automatic, no action needed) or the next manual
-  `npm run refresh:aggregates` retry.
+  **Follow-up, root-caused (2026-08-04):** the manual `npm run refresh:aggregates` call was hitting
+  a hard ~120-125s Supabase edge-gateway timeout on synchronous REST/RPC requests — confirmed via a
+  raw fetch bypassing the SDK (HTTP 504, `server: cloudflare`, body "upstream request timeout"),
+  distinct from and shorter than the DB-side 600s `statement_timeout` migration 0026 already fixed.
+  Real, worsening-with-scale issue (the same call took ~19s hours earlier the same day). **Fix
+  drafted: migration `0027_pg_cron_refresh_aggregates.sql`** — schedules the refresh as a native
+  `pg_cron` job every 30 min directly inside Postgres (no HTTP/gateway involved for the routine
+  case); the function now keeps its own durable `ingestion_runs` record so `npm run status` is
+  authoritative regardless of whether a manual RPC call's own HTTP response arrives.
+  **Awaiting Lance's apply**, same draft-then-apply pattern as every migration — one genuine unknown
+  flagged in the migration's own header comment (REFRESH CONCURRENTLY inside a new PL/pgSQL
+  exception block, never run in this project before) that needs a real post-apply verification pass,
+  not just trusting it works. Immediate relief in the meantime: Lance is running
+  `select refresh_vote_aggregates();` directly in the SQL editor (the same proven bypass used for
+  this function once before, per PLAYBOOK_DELTA lesson 26) to get the matviews current right now,
+  independent of this migration.
+  A real process miss surfaced and fixed along the way: this exact class of problem (this same
+  function's RPC call timing out) had already happened once, earlier the same session, with an
+  already-proven workaround on record in CHATLOG.md — five retries and a full diagnostic
+  investigation happened before that was found. PLAYBOOK_DELTA lesson 26 + this project's own
+  `investigate-then-report-dont-spiral` memory both updated to make "grep CHATLOG for a prior
+  occurrence first" the actual first step next time, not an afterthought.
 - [ ] **Comprehensive accuracy audit, 2026-08-03 — all 4 criticals fixed live, 2 items left for
   Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
   **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus
