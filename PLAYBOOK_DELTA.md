@@ -514,3 +514,75 @@ re-diagnosed from zero instead of consulting it first — the whole point of CHA
 §5.2 ("chatlog + memory are the flywheel, not overhead") is that this class of miss should be
 structurally rare, not routine. Applies doubly to anything involving a specific named function,
 script, or error message that's likely to have come up before in a long-running project.
+
+## Lesson 27 — Postgres `statement_timeout` is armed ONCE, at the start of the top-level statement, using whatever GUC value is ambient at that instant (2026-08-04)
+
+A function's own `SET statement_timeout = 'X'` clause (whether via `CREATE FUNCTION ... SET ...` or
+a separate `ALTER FUNCTION`) can **never retroactively extend** the cancellation deadline for the
+outer statement that invoked it — that deadline was already fixed before the function body (or its
+own `SET`) ever ran. Confirmed against real Postgres core-developer (Tom Lane) mailing-list threads,
+not guessed. This bit twice in the same investigation: once for the real
+`refresh_vote_aggregates()` function (pg_cron issuing `select refresh_vote_aggregates();` as a
+top-level statement armed the deadline from Supabase's own **built-in 2-minute database-level
+default** — `alter database "postgres" set "statement_timeout" to '2min'`, stored in
+`pg_db_role_setting` keyed on database, invisible to a plain `pg_roles.rolconfig` role-level check —
+regardless of the function's own 600s override), and again, self-inflicted, in a one-off debug
+function built to diagnose it (its own inner `set statement_timeout = '30min'` was silently
+overridden by whatever the database-level default happened to be at that moment).
+
+**The only fix that actually works: raise the ambient default itself** (database- or role-level, via
+`alter database <db> set statement_timeout = 'Xs'` or an equivalent role-level `ALTER ROLE`), so it
+is already correct BEFORE the top-level statement starts. A function-level `SET` is still worth
+keeping for documentation/defense-in-depth (protects a hypothetical future caller that nests the
+function inside another statement), but never rely on it alone for anything that might ever be
+invoked as — or from — a top-level statement. Verify a fix actually took effect via the observable
+proof, not by assumption: if the timeout ceiling shifts to exactly the new value on the next
+failure (rather than continuing to fail at the old boundary), the new default is genuinely in
+effect for that connection.
+
+## Lesson 28 — `LEFT JOIN x ON ... WHERE x.col IS NULL` (the classic anti-join idiom) can get its selectivity catastrophically misestimated by the Postgres planner (2026-08-04)
+
+A materialized view excluding ~59 "superseded" rows out of ~10,103 via
+`left join vote_duplicates vd on vd.superseded_vote_id = v.id ... where vd.id is null` had this
+anti-join's selectivity estimated by the planner as **1 row** — when the honest answer was ~10,044
+(99.4% of rows have no match, i.e. should survive the filter). The likely mechanism: the planner
+estimates a post-LEFT-JOIN `IS NULL` filter using the joined column's OWN null-fraction statistic
+(here, `vote_duplicates.id`, a primary key — 0% null, always) rather than correctly modeling how
+often the join itself fails to match and produces a null-extended row. That single ~10,000x
+misestimate cascaded into Nested Loop joins for the ENTIRE downstream query plan (fine for an
+estimated 1 row, catastrophic once the true cardinality reached ~1.34M rows after further joins) —
+turning a query that should complete in seconds into one that ran past 40 minutes without ever
+completing.
+
+**Fix: rewrite the same exclusion as `NOT EXISTS`** —
+`where not exists (select 1 from vote_duplicates vd where vd.superseded_vote_id = v.id)`. Identical
+semantics, but Postgres has dedicated, far more reliable anti-join selectivity estimation for this
+shape; confirmed via `EXPLAIN` that the same query produced a correct `Hash Anti Join` estimate and
+Hash Joins throughout instead of Nested Loops. **Prefer `NOT EXISTS` over `LEFT JOIN ... WHERE x IS
+NULL` by default for any anti-join in this codebase going forward** — not just when a problem is
+already observed; the LEFT JOIN form is a real, standing planner-misestimation risk, not a style
+preference. This is worth checking in any other Postgres project with the same idiom, especially
+once a "small reference/exclusion table, large base table" join has been running fine for a while
+and then degrades sharply as the base table grows — that growth curve, not a sudden code change, is
+usually the actual trigger.
+
+## Lesson 29 — Run a plain `EXPLAIN` (no `ANALYZE`) BEFORE any empirical timing investigation, not after (2026-08-04)
+
+Root-causing the slow-query problem above (Lesson 28) took roughly two hours of empirical
+timing attempts — raising `statement_timeout` progressively higher, building a one-off pg_cron debug
+function just to get a real duration reading past Supabase's dashboard/gateway ceiling, watching
+`pg_stat_activity` to confirm the query was genuinely still computing and not stuck — before finally
+reaching for a plain `EXPLAIN` (no `ANALYZE`), which **returns in milliseconds regardless of how long
+the real query would take to execute**, and immediately revealed the exact catastrophic misestimate
+(1 row vs. the true ~1.34M) that explained everything. Every minute spent on empirical timing before
+that point added no diagnostic value the plan itself didn't already contain for free.
+
+**Rule: for ANY unexplained query slowness, run a plain `EXPLAIN` FIRST — before `ANALYZE`, before
+raising timeouts, before building any workaround to get a real duration reading.** It's free (no
+execution, no lock contention, no timeout risk of its own) and directly shows the planner's chosen
+strategy and row estimates. Nested Loop joins over large estimated-vs-actual row-count gaps, sequential
+scans on large tables, or any node whose estimate looks obviously wrong relative to known table sizes
+— any of these should be ruled out (or confirmed) before spending any effort measuring actual
+execution time. Reach for `EXPLAIN (ANALYZE, BUFFERS)` — which DOES execute the query and carries
+real timeout/lock risk — only once the plain plan looks sane and the question is genuinely "how long
+does this correctly-planned query take," not "why is this slow at all."

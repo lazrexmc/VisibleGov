@@ -12,6 +12,16 @@
 > else in this document (historical narrative, design rationale, the "why" behind past decisions)
 > remains a reliable record of what happened and when — only forward-looking "is X applied right
 > now" claims rot.
+>
+> **Banner refreshed 2026-08-04 — the gap above has widened, not just persisted.** Migrations 0026
+> through 0029 all landed 2026-08-03/2026-08-04 and none of them are mentioned anywhere in this
+> document's body. The 2026-08-04 session in particular was consumed by a full multi-layer
+> `refresh_vote_aggregates()` timeout saga — a Supabase edge-gateway timeout, a Postgres
+> `statement_timeout` arm-timing trap, and a query-planner anti-join misestimation, each root-caused
+> and fixed in turn (migrations 0027, 0028, 0029) — that this document has zero awareness of below.
+> All three layers are now confirmed fixed and live (manual refresh completes in ~19s; real scheduled
+> `pg_cron` ticks are succeeding). The core instruction is unchanged: **never trust this document for
+> current migration-applied state** — check `TODO.md`'s NOW section or query live instead.
 
 *Compiled 2026-07-31 from 105 SDD ledgers, 5 specs, 9 plans, 4 research docs, 21 migrations, the 925-line CHATLOG, PLAYBOOK_DELTA (17 lessons), TODO.md, DATA_INVENTORY.md, and live code verification.*
 
@@ -194,6 +204,30 @@ yet presented. **Separately notable, and not part of the spec's own scope:** the
 real Playwright browser against live production data for the first time ever, zero console errors —
 the strongest evidence yet that "backend locked in" is a reasonable read of the current state, and
 the reason the priority reordering below is warranted rather than premature.
+
+**Refresh pass 2026-08-04 — brief, narrow-scope correction only (not a full re-verification of this
+document; see `TODO.md`'s NOW section for the full narrative).** Two things independently
+re-verified live this pass: **test suite is now 2,294/2,294 green** (`node --test` from repo root,
+up from 2,259), and **migrations are now 30 files** (`ls supabase/migrations/`: 0001-0029 numbered +
+0018a, up from 26). The four new ones (0026, 0027, 0028, 0029) are the full arc of a multi-layer
+`refresh_vote_aggregates()` timeout saga that consumed most of the 2026-08-04 session: a Supabase
+edge-gateway ~120s timeout on the synchronous RPC call (fixed by 0027, moving the refresh to a native
+`pg_cron` job so no HTTP gateway is involved for the routine case), a Postgres `statement_timeout`
+arm-timing trap where the ambient 2-minute database default was fixed before the function's own `set
+statement_timeout` could take effect (fixed by 0028, raising the database-level default), and a
+query-planner anti-join misestimation where the `LEFT JOIN ... WHERE ... IS NULL` idiom (added by
+0022 to exclude superseded duplicate votes) was catastrophically under-estimated, driving Nested Loop
+joins over ~1.34M rows (fixed by 0029, rewriting the exclusion as `NOT EXISTS`). All three layers are
+independently confirmed fixed and live: three consecutive clean `succeeded` `ingestion_runs` rows
+(two real `pg_cron` ticks on the `*/30` boundary plus a manual `npm run refresh:aggregates` run,
+~19.4s, matching the pre-outage baseline). Full detail: `TODO.md`'s NOW section. **This pass did NOT
+re-verify every other number in this document** (persons/person_links/glossary/summary/
+reconciliation-flag counts, the Cloudflare deploy spec's own progress, etc.) — those may have moved
+too and should not be assumed current just because this paragraph exists. The **"What actually
+matters next, in order" list in §5 is flagged below, not re-derived**: the 2026-08-04 timeout saga
+was an urgent operational bug that intervened and consumed a full session, separate from the
+Cloudflare-deploy-spec thread §5 ranks #1 — that ranking predates 2026-08-04 entirely and should not
+be read as a live snapshot of what actually happened that day without checking `TODO.md` directly.
 
 ---
 
@@ -629,6 +663,13 @@ DATA_INVENTORY has a section literally titled *"Numbers that look alarming but a
 *backend down"), confirmed against live data rather than taken as an agent's judgment call. Reordered*
 *accordingly below.*
 
+*Rewritten again 2026-08-04 — narrow correction only, not a full pass: the test-suite and migration*
+*counts just below were stale (2,259/2,259 and 26 files were the 2026-08-03 numbers); corrected in*
+*place to 2,294/2,294 and 30 files following a multi-layer* `refresh_vote_aggregates()` *timeout saga*
+*that consumed most of that day's session (migrations 0026-0029; full arc in the top-of-file*
+*2026-08-04 note). The "What actually matters next" list below was NOT re-derived this pass — flagged*
+*inline instead, since this operational bug intervened between when that ranking was written and now.*
+
 **Where it stands.** Backend is live and broadly trustworthy — **for the first time in this**
 **document's history, every item in §3's "genuinely blocking" list is closed** (original items 1-5,
 plus the new audit's 4 criticals, all independently re-verified live this pass). Real gaps remain
@@ -638,9 +679,12 @@ materially different risk class than what this document was tracking as recently
 The site is built and merged, **still not deployed, but the deploy spec is now actively being
 written**, not paused behind a backend-readiness gate — see item 1 below. Suite: **2,259/2,259
 green** (live-verified this pass, `node --test` from repo root, up from 2,235 this morning).
+**[Corrected 2026-08-04: now 2,294/2,294 — see the top-of-file 2026-08-04 refresh-pass note.]**
 Migrations: **26 files** — 0001-0021 plus **0022 and 0024 applied and confirmed live**, **0023 and
 0025 drafted, confirmed NOT yet applied** (§3 and the top-of-file note have the detail on what each
-one does and why leaving them drafted is currently safe). Summary waves unchanged since this
+one does and why leaving them drafted is currently safe). **[Corrected 2026-08-04: now 30 files —
+0026-0029 landed since, the full `refresh_vote_aggregates()` timeout saga; see the top-of-file
+2026-08-04 note for what each one fixes.]** Summary waves unchanged since this
 morning: **115 published, 98 draft** (re-verified live, exact match). Identity merge: **36 clusters**
 (was 37 — the Pierson-split correction), **74 person_links** (was 76; `DATA_INVENTORY.md` has not
 been updated to reflect this yet, per the top-of-file note), 4 open flags awaiting Lance (unchanged).
@@ -648,7 +692,9 @@ Glossary: 116 real entries of 2,219 total (unchanged), still no billed E2E run (
 is suspended per §1, but nobody has actually run it). Reconciliation flags: **61 open** (was 49 this
 morning), 0 resolved — see §3's "Accepted residuals" for why this isn't decay.
 
-**What actually matters next, in order (revised 2026-08-03, continued):**
+**What actually matters next, in order (revised 2026-08-03, continued) — ⚠️ this ranking predates
+2026-08-04 and has NOT been re-derived since; see the top-of-file 2026-08-04 refresh-pass note before
+treating it as a live snapshot:**
 
 1. **The Cloudflare Pages deploy spec — NEW #1, the active top-level thread, not a "someday
    milestone."** Lance judged the backend ready, the comprehensive audit confirmed it (4/4 criticals
@@ -668,6 +714,12 @@ morning), 0 resolved — see §3's "Accepted residuals" for why this isn't decay
    3a/3d, finish sections 2 and 4 in the brainstorming conversation, write the spec doc, self-review,
    get sign-off, then `superpowers:writing-plans`. Full detail: TODO.md's NOW section, "Cloudflare
    Pages" entry.
+   **Update, 2026-08-04: no forward movement on this spec's open sub-questions (3a/3d) is confirmed
+   this pass.** The entire 2026-08-04 session was instead consumed by an urgent operational bug — the
+   full multi-layer `refresh_vote_aggregates()` timeout saga (migrations 0026-0029, all root-caused
+   and fixed; see the top-of-file 2026-08-04 note) — not by deploy-spec work. This item's own "IN
+   PROGRESS" status above is therefore still a 2026-08-03 snapshot, not evidence of continued progress
+   since. Cloudflare Pages deployment itself has not happened.
 2. **MO House per-legislator vote-coverage gap (§3 item NEW-B)** — the audit found it, Lance
    explicitly scoped it OUT of the Cloudflare spec (a site-content decision, not deploy mechanics),
    and it's independently confirmed stark this pass: every one of the 18 `mo-house-xml` vote_casts in

@@ -5,16 +5,24 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-03): back end live and accurate; a comprehensive 8-domain accuracy audit ran, all
-4 critical findings fixed and verified live; the Cloudflare Pages deploy is now actively being
-spec'd (in progress, see `TODO.md`).** The cross-adapter vote-duplicate fix (migration 0022) is
-applied and live; its backfill correctly yields ~0 matches for MO House specifically, because a
-separate, deeper gap (a one-legislator test-fixture roster in the MO House roll-call-PDF pipeline)
-leaves most MO House per-legislator vote data structurally incomplete — a real, disclosed,
-still-open item, not a regression in the dedup fix itself. Political neutrality and facts-only,
-the project's one non-negotiable, came back genuinely clean under the audit's dedicated domain —
-zero violations found. Full trail: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md` and
-`TODO.md`'s NOW section.
+**Status (2026-08-04): back end live and accurate.** Three rounds of work landed 2026-08-03 →
+2026-08-04: a comprehensive 8-domain accuracy audit (4 critical findings fixed and verified live),
+a senior-engineering-lens audit (21 findings confirmed, 19 fixed live the same day, 2 deliberately
+deferred as minor), and a 3-layer `refresh_vote_aggregates()` timeout saga (a Supabase gateway
+timeout, a Postgres `statement_timeout` arm-timing trap, then a query-planner anti-join
+misestimation) root-caused and fixed via migrations `0027`-`0029` — a manual refresh now completes
+in ~19s and real scheduled `pg_cron` ticks are succeeding. Migrations `0001`-`0029` (plus `0018a`)
+are applied and live. The cross-adapter vote-duplicate fix (migration 0022) is applied and live;
+its backfill correctly yields ~0 matches for MO House specifically, because a separate, deeper gap
+(a one-legislator test-fixture roster in the MO House roll-call-PDF pipeline) leaves most MO House
+per-legislator vote data structurally incomplete — a real, disclosed, still-open item, not a
+regression in the dedup fix itself. Political neutrality and facts-only, the project's one
+non-negotiable, came back genuinely clean under the accuracy audit's dedicated domain — zero
+violations found. The Cloudflare Pages deploy has not happened yet — spec brainstorming was in
+progress as of 2026-08-03 (two sub-decisions still open) and hasn't been resumed or re-confirmed
+since the timeout saga above took priority; see `TODO.md`'s NOW section for the live state. Full
+trail: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`,
+`docs/audits/2026-08-03-senior-engineering-audit.md`, and `TODO.md`'s NOW section.
 > **Live numbers: run `npm run status`.** An ingestion cron writes every 30 minutes, so any count
 > typed into a document is stale within the hour — that staleness is exactly what made the project's
 > own data state confusing. `docs/DATA_INVENTORY.md` explains what each number *means* and how they
@@ -44,9 +52,10 @@ zero violations found. Full trail: `docs/audits/2026-08-03-comprehensive-accurac
   whose prose was fact-checked against the code. Independently verified end-to-end in a real
   browser against live data (2026-08-03): a visitor can browse the directory, open a legislator
   from any of US Senate/US House/MO Senate/MO House, see their real recorded votes, and click
-  through to the actual bill. Not deployed yet — the Cloudflare Pages deploy is being actively
-  spec'd now that the owner considers the backend locked in; see `TODO.md`'s Cloudflare Pages entry
-  for the live gameplan.
+  through to the actual bill. Not deployed yet — Cloudflare Pages spec brainstorming was in
+  progress as of 2026-08-03 (two sub-decisions still open) and hasn't been resumed since a separate
+  migration/timeout debugging saga took priority; see `TODO.md`'s NOW section for the live
+  gameplan and current status.
 - **Standing policy: every model-calling run is mechanically gated on explicit per-run owner
   approval with cost stated** — currently under Lance's own explicit, active suspension (2026-08-03,
   "temporarily remove the usage and credit usage restrictions... until I reinstate them"; the rule

@@ -53,6 +53,16 @@ to keep an eye on it now that it's running.
 > on cadence; its aggregate-refresh step is currently broken (silently, since ~05:00 UTC that day)
 > and needs a Lance-applied SQL fix — see item 5 under "How to verify it is alive" for the full
 > evidence and likely root cause.**
+>
+> **Superseded, 2026-08-04: fully resolved, in three layers, not one.** The fix drafted at the time
+> (migration 0026) landed and worked immediately, but exposed two further, deeper problems under
+> real production load before the aggregate-refresh step was genuinely healthy end to end — a
+> Supabase edge-gateway ~120s timeout (fixed via migration 0027, moving the routine refresh onto a
+> native `pg_cron` job inside Postgres) and a Postgres `statement_timeout` arm-timing trap (fixed via
+> migration 0028), then a query-planner anti-join misestimation once both timeout layers were clear
+> (fixed via migration 0029). All three applied and verified live 2026-08-04. **Current status: the
+> scheduler and its aggregate-refresh step are both healthy** — see item 5 under "How to verify it
+> is alive" for the full three-layer history and live verification evidence.
 
 ## What it does
 
@@ -92,7 +102,14 @@ Each invocation:
    (`scripts/refresh-aggregates.js`) — the same standing practice every ingest batch has always
    followed, so the profile charts never silently drift behind the vote lists. A tick whose only
    "failures" are the probe window's own expected past-the-edge 404s (see `us-congress`/
-   `us-senate` below) is recognized as healthy and does not spuriously trigger this.
+   `us-senate` below) is recognized as healthy and does not spuriously trigger this. **This is no
+   longer the only refresh path.** Migration `0027_pg_cron_refresh_aggregates.sql` also schedules
+   `refresh_vote_aggregates()` as a native `pg_cron` job running every 30 minutes directly inside
+   Postgres — no HTTP, no PostgREST, no scheduler involvement for that routine case (see item 5
+   under "How to verify it is alive" below for the full history of why this second path exists).
+   `pg_cron` is now the primary, structural guarantee that aggregates stay current; this
+   scheduler's own post-tick call remains an additional, more immediate refresh right after a tick
+   that actually wrote new rows, and still uses the same underlying function.
 5. Logs one entry — to stdout and to a dated (UTC) file — recording what it checked, what it chose
    (or why nothing was due), the CLI's own honest counts, and whether aggregates were refreshed.
 
@@ -355,6 +372,58 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    migration touching this function cannot silently drop it again the same way. Needs a `TODO.md`
    entry and Lance's own apply step (draft-then-apply, same as every other migration here) — flagged,
    not actioned, by this pass.
+   **Update, 2026-08-04: fully resolved — this turned out to be three layers, not one, each found
+   only after the previous one was actually fixed and re-tested against real production load.**
+   Migration `0026` above (Lance-applied) worked immediately on its own — `npm run
+   refresh:aggregates` completed clean in ~19s right after — but as `vote_casts` kept growing via
+   the running scheduler, the manual RPC call started failing again with a *new*, shorter ceiling:
+   Supabase's own edge/gateway infrastructure kills any synchronous REST/RPC request at a hard
+   ~120-125s, confirmed by bypassing supabase-js with a raw `fetch` (still died at 125,374ms, HTTP
+   504, `server: cloudflare`, body `"upstream request timeout"`) — independent of the function's own
+   600s `statement_timeout`, since the HTTP connection watching the request dies first regardless of
+   what Postgres itself is doing. **Fix: migration `0027_pg_cron_refresh_aggregates.sql`** —
+   schedules `refresh_vote_aggregates()` as a native `pg_cron` job running every 30 minutes directly
+   inside Postgres, no HTTP/PostgREST/gateway involved for the routine case; the function also gained
+   its own durable `ingestion_runs` bookkeeping so `npm run status` stays authoritative even if a
+   manual RPC call's own HTTP response times out. Applying `0027` alone did not finish the job:
+   `pg_cron`'s own natural ticks still failed, now at Postgres's *native* `canceling statement due to
+   statement timeout` (57014) at almost exactly 120s — a separate semantics trap, confirmed against
+   real Postgres core-developer mailing-list threads: `statement_timeout` is armed once, at the start
+   of the top-level statement, using whatever value is ambient at that instant, before the function
+   body (or its own `set statement_timeout`) ever runs — so the function's 600s override (folded in
+   by `0026`/`0027`) could never retroactively extend a deadline already fixed before the function
+   started. Supabase's `postgres` database carries a built-in 2-minute database-level default, which
+   was the actual ambient value in effect. **Fix: migration
+   `0028_fix_statement_timeout_arm_timing.sql`** — raises that ambient database-level default itself
+   (`alter database postgres set statement_timeout = '600s'`), the only fix that works given the
+   arm-timing rule (a function-level `set` alone is not sufficient for a top-level call). Confirmed
+   working via `cron.job_run_details`: failures shifted from exactly 120s to exactly 600s, proving
+   the 600s ceiling was now the one actually in effect. With both timeout layers genuinely fixed,
+   `pg_cron` ticks *still* failed — now hitting the real 600s ceiling on genuine query duration,
+   always on the same statement (`refresh materialized view concurrently public_party_alignment`). A
+   plain `EXPLAIN` (not empirical timing — the diagnostic that should have been reached for first)
+   found the real root cause: all three matviews exclude superseded votes via a `left join
+   vote_duplicates vd on ... where vd.id is null` anti-join (added by migration 0022), and Postgres's
+   planner catastrophically misestimated that pattern's selectivity as **1 row** (true answer, given
+   ~10,103 votes vs. 59 duplicates: ~10,044), cascading into Nested Loop joins across the entire
+   downstream plan instead of Hash Joins — catastrophic once the true cardinality reaches ~1.34M
+   rows. **Fix: migration `0029_fix_vote_duplicates_antijoin_planner_misestimate.sql`** — rewrites
+   the same exclusion as `not exists (select 1 from vote_duplicates vd where vd.superseded_vote_id =
+   v.id)` (identical semantics, correct `Hash Anti Join` plan shape) across all three matviews, drop
+   and recreate as migration 0022 already did for the same reason. **All three migrations (0027,
+   0028, 0029) applied and verified live 2026-08-04:** three consecutive clean `succeeded` rows in
+   `ingestion_runs` — two real `pg_cron` scheduled ticks landing exactly on the `*/30` boundary, plus
+   a manual `npm run refresh:aggregates` run at ~19.4s wall-clock, matching the pre-outage healthy
+   baseline exactly. Both the scheduled and manual paths confirmed working, not just one. A
+   regression test (`tests/vote-duplicates-antijoin-migration.test.js`) now fails loudly if a future
+   migration ever reintroduces the `left join ... is null` idiom for any of the three matviews.
+   **Current state: both refresh paths (the native `pg_cron` job every 30 minutes, and this
+   scheduler's own post-tick call) are healthy** — full write-up in `TODO.md`'s NOW section and
+   `CHATLOG.md`'s 2026-08-04 entries. (One small, separately-tracked, low-priority item remains open,
+   not blocking: `0027`'s own exception handler can never actually leave a `'failed'` row in
+   `ingestion_runs` on a genuine error, due to how PL/pgSQL savepoints a `BEGIN...EXCEPTION` block —
+   an observability gap for a now-rare failure case, not a live issue, since the routine case
+   completes in ~19s. See `TODO.md` for the fix-later plan.)
 
 Manual checks any time, safe to run for real (read-only, zero writes, zero external fetches):
 

@@ -2025,3 +2025,108 @@ baseline earlier the same day -> consistently 120s+ now, same function, growing 
 gateway ceiling will keep getting harder to stay under as `vote_casts` keeps growing. Immediate,
 zero-risk relief is available right now via the same SQL-editor bypass that worked before; the
 `pg_cron` migration is the structural fix in progress.
+
+---
+
+## 2026-08-04 (continued) — three layers deep before this was actually fixed
+
+Migration `0027_pg_cron_refresh_aggregates.sql` (pg_cron, no HTTP/gateway involved for the routine
+case) applied by Lance. **Did not fix it.** pg_cron's own natural ticks failed anyway, now with
+Postgres's own native `canceling statement due to statement timeout` at almost exactly 120s, twice
+in a row. `pg_proc.proconfig` confirmed the function's own `set statement_timeout = '600s'` really
+was stored correctly; `pg_roles`/`pg_db_role_setting` confirmed neither `postgres` nor `service_role`
+carried a role-level override that would explain 120s. Dispatched a background research agent rather
+than keep guessing — it returned real Postgres core-developer (Tom Lane) mailing-list citations
+confirming `statement_timeout` is armed ONCE, at the start of the top-level statement, using
+whatever is ambient AT THAT INSTANT, before the function body (or its own `SET`) ever runs. Combined
+with Supabase's own documented built-in 2-minute database-level default (`alter database "postgres"
+set "statement_timeout" to '2min'` — a `pg_db_role_setting` entry keyed on database, invisible to a
+plain `pg_roles.rolconfig` role check), this fully explained the 120s ceiling. **Fix: migration
+`0028_fix_statement_timeout_arm_timing.sql`** (`alter database postgres set statement_timeout =
+'600s'`), applied by Lance. Confirmed working via `cron.job_run_details`: failures shifted from
+exactly 120s to exactly 600s — proof the 600s ceiling was now the one actually in effect, not proof
+of success yet.
+
+**Layer 3.** With both timeout layers genuinely fixed, pg_cron kept failing anyway — now hitting the
+real 600s ceiling on honest query duration, always on the same line:
+`refresh materialized view concurrently public_party_alignment`. Reproduced across 5 consecutive
+real ticks (13:00 through 15:00 UTC, every 30 minutes, every one dying at 600.0x seconds). Ran
+`ANALYZE` on `vote_casts` (1.47M rows, 6 days stale, zero bloat), `votes`, `legislators`,
+`vote_duplicates` as the first hypothesis. Verified live it did NOT fix it — same 600.0x-second
+failures continued on the following ticks.
+
+Lance asked, pointedly, mid-investigation: **"Will we ever resolve this issue???"** — a fair question
+after multiple failed hypotheses and a long investigation. Answered directly rather than just
+reassuring: two real, distinct bugs were already fixed and proven (the gateway timeout, the
+arm-timing trap); what remained was one well-defined unknown (the query's real duration), being
+measured with a proper diagnostic, not another open-ended guess.
+
+**A real diagnostic misstep, caught by re-deriving from what was already known:** first attempt to
+measure the query's true duration was to raise the SQL editor's own session `statement_timeout` to
+15 minutes and run `EXPLAIN (ANALYZE, BUFFERS)` directly in the dashboard — this ignored the
+already-proven fact (same session, Layer 1) that the SQL editor's OWN connection is also subject to
+the ~120s Cloudflare edge-gateway ceiling, independent of whatever Postgres itself is told to wait
+for. It failed with the same "Failed to fetch (api.supabase.com)" error already seen and explained
+earlier. Caught and corrected immediately rather than re-diagnosed as new: moved the diagnostic
+itself to a pg_cron-scheduled debug function (`debug_time_party_alignment_refresh()`), bypassing the
+gateway the same way the real fix already did. Its first two scheduling attempts also hit
+self-inflicted versions of the SAME arm-timing trap (the function's own inner
+`set statement_timeout = '30min'` couldn't retroactively extend an outer-statement deadline already
+armed from the 600s/45min database default) — recognized immediately from the established pattern
+rather than treated as a new mystery, and fixed by raising the ambient database-level default itself
+before each attempt. `pg_stat_activity` confirmed the debug query was genuinely, actively computing
+(not blocked — `wait_event_type` null) past 40 minutes elapsed for ~1.47M rows: wildly disproportionate
+for a straightforward join/aggregate, and the real signal that this was a plan problem, not a scale
+problem.
+
+**Root cause, found via a single plain `EXPLAIN`** (no `ANALYZE` — returns instantly regardless of
+true execution time, and should have been reached for as the FIRST diagnostic step given in hindsight
+just how cheap and immediate it is, not the step reached after ~2 hours of empirical timing attempts):
+all three vote-aggregate matviews exclude superseded votes via
+`left join vote_duplicates vd on vd.superseded_vote_id = v.id ... where vd.id is null` (added by
+migration 0022). Postgres's planner catastrophically misestimated this anti-join's selectivity as
+**1 row**, when the honest answer — `votes` has ~10,103 rows, `vote_duplicates` only 59 — is ~10,044
+(99.4% of votes are not superseded). This is a known, documented Postgres planner limitation: a
+post-LEFT-JOIN `IS NULL` filter is often estimated from the joined column's own null-fraction
+statistic (here, `vote_duplicates.id`, a primary key — 0% null, always) rather than the join's real
+match rate. That single 10,044x-too-low estimate cascaded through the entire downstream plan —
+Nested Loop joins everywhere instead of Hash Joins, catastrophic once the true cardinality reached
+~1.34M rows after `vote_casts` and `legislators` joined in. Confirmed via a second, equally instant
+`EXPLAIN`: rewriting the same exclusion as
+`not exists (select 1 from vote_duplicates vd where vd.superseded_vote_id = v.id)` produced a
+correct `Hash Anti Join` estimate of exactly 10,044 rows, cascading to a correctly-estimated
+~1,341,493-row final join with proper Hash Joins throughout. Same semantics, same excluded rows,
+completely different (correct) plan shape.
+
+**Fix: migration `0029_fix_vote_duplicates_antijoin_planner_misestimate.sql`** — all three matviews
+rewritten with the `NOT EXISTS` anti-join (`public_party_alignment` hit the wall first only because
+its extra CTEs/self-join amplify nested-loop damage most; the other two carried the identical latent
+risk and are fixed here too, before either one failed the same way as data kept growing).
+Regression test added (`tests/vote-duplicates-antijoin-migration.test.js`, dynamic, same pattern as
+the existing `refresh-vote-aggregates-migration.test.js`) so a future migration can't silently
+reintroduce the broken idiom. Full suite green (2,294/2,294) before handing to Lance.
+
+Applying it hit the SAME gateway ceiling one more time (all three `CREATE MATERIALIZED VIEW`
+statements submitted together as one file took long enough combined to trip the ~120s dashboard
+ceiling, even though the underlying work was now fast) — recognized immediately from the
+already-established pattern, split into three separate SQL editor submissions, all three succeeded.
+
+**Verified live, 2026-08-04 ~23:00-23:02 UTC:** `npm run refresh:aggregates` completed in **19.4
+seconds** (23:02:28.034Z -> 23:02:47.466Z) — matching the original pre-outage healthy baseline
+exactly. `ingestion_runs` showed three consecutive clean `succeeded` rows: the manual test AND two
+real pg_cron scheduled ticks (22:30:00 and 23:00:00 UTC, both exactly on the `*/30` boundary) — both
+the automated and manual paths confirmed working, not just one. Database `statement_timeout`
+restored to `600s` (matching migration 0028 — a live `45min` bump made mid-investigation for
+diagnostics only was reverted, not left diverged from what git tracks). All debug scaffolding from
+the investigation (`debug-timeout-check`/`debug_long_running_timeout()`,
+`debug-party-alignment-timing`/`debug_time_party_alignment_refresh()` — both pg_cron jobs, both
+functions, all their `ingestion_runs` rows) removed live.
+
+**Separately found, deliberately left open (real, but no longer urgent):** migration 0027's own
+exception handler can never actually leave a 'failed' row in `ingestion_runs` on a genuine error —
+PL/pgSQL implicitly savepoints a `BEGIN...EXCEPTION` block *before* its first statement (the
+`insert ... 'running'`), so any exception rolls back that insert first, the handler's own `update`
+becomes a no-op against a now-nonexistent row, and the trailing `raise;` then aborts the whole outer
+transaction anyway. Purely an observability gap now that the routine case completes in ~19s, nowhere
+near any timeout — not worth widening this migration's blast radius to fix while the real outage was
+still live. See TODO.md.
