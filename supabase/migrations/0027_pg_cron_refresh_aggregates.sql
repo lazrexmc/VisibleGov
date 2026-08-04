@@ -1,6 +1,15 @@
 -- 0027 (draft — Lance applies). Moves refresh_vote_aggregates() off the synchronous HTTP/RPC path
 -- entirely for its routine, scheduled case.
 --
+-- NEEDS 0028 TOO: applying this migration alone was NOT sufficient — pg_cron's own scheduled ticks
+-- still failed at ~120s with Postgres's own native statement_timeout cancellation, because of a
+-- separate Postgres semantics trap (statement_timeout is armed once, at the start of the
+-- TOP-LEVEL statement, using whatever is ambient at that instant — this function's own `set
+-- statement_timeout` clause below can never retroactively extend that already-armed deadline).
+-- See 0028's own header for the full mechanism and the actual fix (raising the ambient
+-- database-level default itself). This migration's design (pg_cron, no HTTP/gateway involved) is
+-- still correct and still needed — it just wasn't the complete fix on its own.
+--
 -- FOUND LIVE (2026-08-04): the manual `npm run refresh:aggregates` RPC call started failing
 -- consistently after the vote-dedup backfill — not PostgREST's old ~8s role-level timeout
 -- (0018a/0026's own fix, still correct and still preserved below) but a NEW, separate, shorter

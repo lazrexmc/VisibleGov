@@ -1,0 +1,50 @@
+-- 0028 (draft — Lance applies). Fixes the REAL root cause behind 0027's continued failures: a
+-- Postgres semantics trap, not anything wrong with 0027's own design.
+--
+-- FOUND LIVE (2026-08-04): after 0027 scheduled refresh_vote_aggregates() via pg_cron (which
+-- bypasses HTTP/PostgREST/the Cloudflare gateway entirely — no external network layer involved),
+-- the job STILL failed on both its first two natural ticks, with Postgres's own native error:
+-- `ERROR: canceling statement due to statement timeout` at almost exactly 120 seconds, both times.
+-- Confirmed via `pg_proc.proconfig` that the function's own `set statement_timeout = '600s'`
+-- clause (0026, preserved verbatim by 0027) really is stored correctly, and confirmed via
+-- `pg_roles`/`pg_db_role_setting` that neither `postgres` nor `service_role` carry any role-level
+-- override that would explain a 120s ceiling.
+--
+-- The actual mechanism (confirmed against real Postgres core-developer mailing-list threads, not
+-- guessed): **`statement_timeout` is armed ONCE, at the very start of the top-level client
+-- statement, using whatever value is ambient AT THAT INSTANT — before the function body (or its
+-- own `SET`/`proconfig`) ever runs.** A function's `SET statement_timeout = 'X'` changes the GUC
+-- for statements issued AFTER that line runs INSIDE the function; it cannot retroactively extend
+-- the deadline already scheduled for the outer statement that invoked the function in the first
+-- place. Both `pg_cron` and the SQL editor issue `select refresh_vote_aggregates();` as one
+-- top-level statement — the function's own 600s override never gets a chance to matter, because
+-- the cancellation deadline was already fixed before the function started.
+--
+-- Separately confirmed: Supabase's own docs state the `postgres` database carries a built-in
+-- 2-minute default (`alter database "postgres" set "statement_timeout" to '2min'`) — a
+-- DATABASE-level setting (lives in `pg_db_role_setting` keyed on database, role=NULL / a
+-- server-level default depending on how it's actually applied on this project), which is why it
+-- never showed up in a plain `pg_roles.rolconfig` role-level check. 120s = 2 minutes, matching the
+-- observed failures exactly.
+--
+-- FIX: raise the AMBIENT default itself, so it is already correct BEFORE the top-level statement
+-- starts — the only fix that actually works given the arm-timing rule above. This is scoped to
+-- roles with no MORE SPECIFIC override of their own: `anon` (3s) and `authenticated` (8s) already
+-- have their own role-level settings, which take precedence over any database-level default and
+-- are completely unaffected by this change — this only raises the ceiling for `postgres`/
+-- `service_role`/anything else that currently falls through to the database's own default
+-- (i.e. admin/scheduled-job contexts, not ordinary anon/authenticated app traffic).
+--
+-- The function's own `set statement_timeout = '600s'` clause (0026/0027) is LEFT IN PLACE, not
+-- removed — it is genuinely redundant for THIS specific purpose now (the database-level default
+-- makes it unnecessary for the outer statement's own deadline), but it still documents intent
+-- clearly, still protects any hypothetical future caller that nests this function inside another
+-- statement, and costs nothing to keep.
+--
+-- REMINDER for any future SECURITY DEFINER function that needs a longer-than-default
+-- statement_timeout: a function-level `SET statement_timeout` alone is NOT sufficient if it might
+-- ever be called as (or from) a top-level statement — the ambient value at the moment the
+-- OUTERMOST statement begins is what gets armed, regardless of what any function further down the
+-- call chain declares. The database- or role-level default must already be correct.
+
+alter database postgres set statement_timeout = '600s';
