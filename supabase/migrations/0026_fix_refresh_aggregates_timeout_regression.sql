@@ -16,6 +16,14 @@
 -- but did not account for 0018a's later, separate configuration patch — an easy trap: "the body
 -- is unchanged" does not mean "nothing about this function changed."
 --
+-- SUPERSEDED-BY 0027: 0027 redefines this same function again (language sql -> plpgsql, adds its
+-- own ingestion_runs bookkeeping, and moves the routine/scheduled invocation off the HTTP/RPC path
+-- entirely via pg_cron) to fix a DIFFERENT, newly-discovered timeout layer (Supabase's own
+-- edge-gateway ~120s ceiling, separate from and shorter than this migration's own 600s
+-- statement_timeout fix, which 0027 preserves verbatim). 0027 is the current, correct definition —
+-- this version is dead schema history. Do not copy this block forward without also checking 0027's
+-- own header comment for what changed and why.
+--
 -- Practical effect while broken: public_position_totals, public_party_alignment, and
 -- public_party_position_totals (the profile/party-alignment charts on the public site) stopped
 -- auto-refreshing; new votes since ~04:00 UTC today are in the base tables but were not reflected

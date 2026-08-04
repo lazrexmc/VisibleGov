@@ -55,7 +55,7 @@ test('the LATEST migration to redefine refresh_vote_aggregates() still folds sta
   );
 });
 
-test('sanity: as of this audit, 0026 is genuinely the file this test is exercising (fails loudly, not silently, if migration numbering/ordering ever changes)', () => {
+test('sanity: as of this writing, 0027 is genuinely the file this test is exercising (fails loudly, not silently, if migration numbering/ordering ever changes)', () => {
   const latest = findLatestRefreshVoteAggregatesDefinition();
-  assert.equal(latest.file, '0026_fix_refresh_aggregates_timeout_regression.sql');
+  assert.equal(latest.file, '0027_pg_cron_refresh_aggregates.sql');
 });
