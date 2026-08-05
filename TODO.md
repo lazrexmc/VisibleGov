@@ -160,9 +160,9 @@
      `finalPairStatus`) now permanently prevents this class of wrong merge.
   **Also fixed (important findings, root causes):** `buildMoVoteRows` chamber-hardcoding bug fixed
   + the 3 live mislabeled Senate votes corrected (`correct-data.js mo-house-chamber`, live);
-  migration `0023_vote_duplicates_rls_and_view_drift.sql` drafted (enables RLS on `vote_duplicates`
-  for any future rebuild + corrects the committed 0022 file's view definitions to match what's
-  actually live) — **awaiting Lance's apply**, same draft-then-apply pattern as every migration.
+  migration `0023_vote_duplicates_rls_and_view_drift.sql` (enables RLS on `vote_duplicates` for any
+  future rebuild + corrects the committed 0022 file's view definitions to match what's actually
+  live) — **applied and verified live 2026-08-03** (see the top NOW entry).
   **Items deliberately left for Lance, not resolved by an agent (✅ = since closed):**
   - **MO House per-legislator vote coverage — a site-content decision, not a deploy blocker.**
     Sharper than "some data is thin": ~162 of ~163 MO House members show ZERO MO House votes on
@@ -255,9 +255,9 @@
   is locked in and accurate, otherwise I'm troubleshooting two systems back and forth."* Cloudflare
   is a MILESTONE, not a task — do not propose it until Lance says the backend feels solid.
   Remaining operator decisions, none blocking each other:
-  - **4 unresolved identity flags** — Hank vs. Speaker Mike Johnson; Barry vs. Blake Moore; Dan vs.
-    Justin Brown (likely: link Justin's two rows, keep Dan separate — Lance's read, not assumed);
-    plus the Menendez informational flag. Local review server, one decision each.
+  - ✅ **4 identity flags — resolved by Lance, confirmed live.** Hank vs. Speaker Mike Johnson; Barry
+    vs. Blake Moore; Dan vs. Justin Brown; the Menendez informational flag. Verified via direct REST
+    read: `identity_flags?resolved=eq.false` now returns zero rows.
   - **98 unpublished summaries remaining (2026-08-02, corrected count — was 106 before today's
     backfill).** `status` lives on `summaries`; a *verdict* lives on `summary_verifications`. There
     is no "flagged" status. 15 of the original 106 needed zero judgment — they only ever had ONE
