@@ -37,23 +37,25 @@ and the genuinely open threads are further down, including the Cloudflare deploy
 own staleness banner as of 2026-08-03, defer to `TODO.md`/live checks for migration-applied state),
 then the most recent `CHATLOG.md` entries (why things are the way they are).
 
-**Known, disclosed limitation, not an open defect in the fix itself:** the cross-adapter
-vote-duplicate dedup (migration 0022) is applied and live; its backfill was itself found and fixed
-2026-08-03 (a bare `.select()` had silently truncated the scan to 12% of its target — see
+**Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not
+an open defect in the fix itself:** the cross-adapter vote-duplicate dedup (migration 0022) is
+applied and live; its backfill was itself found and fixed 2026-08-03 (a bare `.select()` had
+silently truncated the scan to 12% of its target — see
 `docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries 59 real
-matched pairs, all 2018 MO Senate. It still correctly yields ~0 matches for MO House specifically —
-a separate, deeper gap (the MO House roll-call-PDF pipeline resolves casts against a roster
-containing exactly one real legislator, a leftover test fixture). **Scope corrected 2026-08-05**
-(full investigation, independently re-verified): this is narrower than "most... structurally
-incomplete" — the dominant `legiscan` pipeline already covers 96.9% of all MO House votes with 0%
-zero-cast; `mo-house-xml` itself is a minor, 130-134-vote (all 2026), largely redundant side
-pipeline — every bill it currently resolves any real cast for already has a LegiScan vote for the
-same bill. **Deliberately deprioritized, not fixed:** a roster-ingest-loop fix was investigated and
-found not worth its ~3.4-day cost given that confirmed redundancy (plus a separate, still-open
-`mo_house_id` cross-era-collision risk, TODO 31, that any fix would need to navigate carefully).
-Real, honestly rendered by the site (no fabricated "did not vote" claim), the site-content decision
-(ship as-is vs. add a caveat) still open — see `TODO.md` NOW, "MO House per-legislator vote
-coverage."
+matched pairs, all 2018 MO Senate. The `mo-house-xml` roll-call-PDF adapter resolves casts against
+a roster containing exactly one real legislator, a leftover test fixture — investigated end-to-end
+2026-08-05: the dominant `legiscan` pipeline already covers 96.9% of all MO House votes with 0%
+zero-cast, and every bill `mo-house-xml` currently resolves any real cast for already has a
+LegiScan vote for the same bill (100% overlap, live-verified) — so a roster-ingest-loop fix was
+deliberately deprioritized as low-value (plus a separate, still-open `mo_house_id`
+cross-era-collision risk, TODO 31, any such fix would need to navigate). **Prior "most MO House
+per-legislator vote data structurally incomplete" framing was itself wrong and is corrected here:**
+live-verified directly that all 159 CURRENT MO House legislators have at least one real MO House
+vote on their profile page via LegiScan's own coverage — the gap was specifically "zero votes *from
+`mo-house-xml` specifically*," not "zero votes on the page," and reading it as the latter was a real
+misstatement. **Site-content decision: ship as-is, no caveat needed** — resolved, not open;
+verified there's no meaningful gap for a caveat to warn about. See `TODO.md` NOW, "MO House
+per-legislator vote coverage," for the full evidence trail.
 
 **Two standing rules that are easy to violate without noticing:**
 - **Cloudflare deploy is a MILESTONE, not a task** (Lance, 2026-07-31): *"I'm only interested in

@@ -157,12 +157,14 @@ close.
 pass, not just directionally.** Direct query: `legislators?mo_house_id=not.is.null` returns exactly
 **one** row (Mark Matthiesen, `mo_house_id='107'`). Direct query joining `vote_casts` to `votes`
 where `source_key ilike 'mo-house-xml%'`: **18 casts total in the entire database, all 18 belonging
-to that same one legislator id** — zero belong to anyone else. `terms` rows for
-`chamber='house', jurisdiction_id='mo-legislature'` number 159 (in line with the ~163 MO House seats
-TODO.md cites). This is starker than "162 of ~163 show zero" — closer to "every single MO House vote
-cast on record belongs to one fixture row." Explicitly out of scope for the Cloudflare deploy spec
-(Lance's own scoping call, 2026-08-03); still open, still a site-content decision for Lance (ship
-visibly as-is, or add an explicit completeness caveat to `person-page.js`'s MO House section first).
+to that same one legislator id** — zero belong to anyone else, specifically from the `mo-house-xml`
+adapter. `terms` rows for `chamber='house', jurisdiction_id='mo-legislature'` number 159 (in line
+with the ~163 MO House seats TODO.md cites). This is starker than "162 of ~163 show zero [votes
+sourced from this adapter]" — closer to "every single `mo-house-xml`-sourced MO House vote cast on
+record belongs to one fixture row." **[Corrected 2026-08-05 — see item NEW-B's own update below:**
+this narrow, adapter-scoped figure does NOT mean MO House profile pages are broadly blank; LegiScan's
+independent coverage means all 159 current MO House legislators show real votes. Site-content
+decision resolved: ship as-is, no caveat.]
 
 **Live-reverified counts this pass (direct Supabase REST, service-role key, unless noted):**
 - Test suite: **2,259/2,259 green**, 0 fail (`node --test` from repo root, up from 2,235).
@@ -475,20 +477,18 @@ is the full 16-finding report (4 critical + 12 important); the 12 important find
 closed — 0023/0025 (migrations, drafted not applied) and the MO House gap (NEW-B below) are three of
 them, still open by design, Lance's own calls.
 
-**NEW-B. MO House per-legislator vote-coverage gap — found by the same audit, deliberately NOT
-fixed, genuinely still open.** Independently confirmed at the row level this pass (not just
-directionally): exactly **one** `legislators` row has `mo_house_id` set (Mark Matthiesen, `'107'`)
-out of 159 MO House `terms` rows; **all 18** `mo-house-xml`-sourced `vote_casts` in the entire
-database belong to that one legislator — zero belong to anyone else. Root cause: `persistRoster`
-(`ingest-mo-house.js`) seeds exactly one real legislator row against a roster the roll-call-PDF
-parser resolves votes against — every other MO House member's own profile page shows zero MO House
-votes, forever, with no caveat, while the one fixture legislator looks fully tracked on the same
-roll calls. Related to but distinct from item 6 below ("MO House cross-era misattribution trap" —
-that's about a future multi-era backfill risk; this is about the CURRENT single-era roster already
-resolving almost everyone's votes to nobody). **Explicitly out of scope for the Cloudflare deploy
-spec** (Lance's own scoping call, 2026-08-03) — a real, still-open decision on its own: ship visibly
-as-is, or add an explicit completeness caveat to `person-page.js`'s MO House vote section first. Not
-an agent's call to make silently either way.
+**NEW-B. MO House per-legislator vote-coverage gap in the `mo-house-xml` adapter specifically —
+found by the same audit, deliberately NOT fixed, RESOLVED as a site-content question 2026-08-05 (see
+update below — the "every profile page is blank" framing below was itself wrong and is corrected
+there).** Independently confirmed at the row level this pass (not just directionally): exactly
+**one** `legislators` row has `mo_house_id` set (Mark Matthiesen, `'107'`) out of 159 MO House
+`terms` rows; **all 18** `mo-house-xml`-sourced `vote_casts` in the entire database belong to that
+one legislator — zero belong to anyone else, specifically from this one adapter. Root cause:
+`persistRoster` (`ingest-mo-house.js`) seeds exactly one real legislator row against a roster the
+roll-call-PDF parser resolves votes against. Related to but distinct from item 6 below ("MO House
+cross-era misattribution trap" — that's about a future multi-era backfill risk; this is about the
+CURRENT single-era roster already resolving almost everyone's `mo-house-xml`-sourced votes to
+nobody).
 
 **Update 2026-08-05 — investigated end-to-end whether the source is worth fixing; deliberately
 deprioritized, not built.** Full investigation (parallel investigate → synthesize → adversarially
@@ -508,10 +508,23 @@ all). Given that confirmed redundancy for the source's entire currently-useful o
 real cost (~3.4 days of cooldown budget to wire up the already-defined `fetchMoMemberList`/
 `fetchMoRepresentative`, plus a new replay pass since already-"casted" roll calls are never
 re-attempted, plus careful navigation of item 6's cross-era `mo_house_id` collision risk if roster
-fetching ever grows beyond the current session) was judged not worth building. The site-content
-decision above (ship as-is vs. caveat) remains open and remains Lance's call — this investigation
-sharpens the evidence, doesn't resolve it. Unrelated finding surfaced along the way: zero MO House
-votes exist for 2024 at all in the live dataset, a separate gap not investigated further.
+fetching ever grows beyond the current session) was judged not worth building. Unrelated finding
+surfaced along the way: zero MO House votes exist for 2024 at all in the live dataset, a separate
+gap not investigated further.
+
+**Site-content decision, RESOLVED same day, not just informed — the premise itself was wrong.**
+NEW-B's own text above ("every other MO House member's own profile page shows zero MO House votes,
+forever") was a real, load-bearing misstatement, carried across four docs including this one —
+correct only as "zero votes sourced from `mo-house-xml` specifically," not "zero votes on the
+page." Live-verified directly, 159 individual per-legislator existence checks (scoped one at a time
+to stay under PostgREST's 1,000-row cap): **all 159 current MO House legislators have at least one
+real MO House vote_cast**, via LegiScan's own independent, comprehensive coverage. Confirmed this
+is what actually renders by reading `site/js/person-page.js`: votes display generically by chamber,
+no adapter/source-based filtering excludes LegiScan-sourced MO House rows. The residual gap is
+narrow — a handful of the most recent roll calls that exist only via `mo-house-xml` may be briefly
+missing until LegiScan's own refresh catches up, not a systemic blank section. **Decision: ship
+as-is, no caveat.** A caveat would warn about a gap that doesn't actually exist on the rendered page
+for virtually any legislator or vote.
 
 **TODO 29 (hygiene) was also re-verified 2026-08-02, no action needed** — empty `districts` table
 and zero `image_url`/`contact` rows are both confirmed by design, not decay.

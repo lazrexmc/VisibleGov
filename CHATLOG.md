@@ -2205,3 +2205,39 @@ All four docs (`TODO.md`, `CLAUDE.md`, `docs/DATA_INVENTORY.md`, `docs/CONTROLLE
 updated with this finding and decision, each in its own established style (append-dated for the
 docs/ files, direct correction for the two top-level status paragraphs that had overstated the
 scope).
+
+---
+
+## 2026-08-05 (same day, continued) — the "162 of 163 show zero MO House votes" framing itself was wrong
+
+Lance asked directly: "which is recommended: ship the MO House profile gaps as-is, or add a
+completeness caveat to the site." Before answering, reconciled a tension noticed while re-reading
+the evidence: the "~162 of 163 MO House members show zero MO House votes, forever" framing (carried
+across CLAUDE.md, TODO.md, `docs/CONTROLLER_BRIEFING.md`, and to a lesser extent
+`docs/DATA_INVENTORY.md`) sat awkwardly next to the SAME DAY's own earlier finding that LegiScan
+alone resolves 424 distinct MO House legislators. Checked directly rather than propagate the
+existing framing: for all 159 CURRENT MO House `terms` rows, does the legislator have ANY MO House
+`vote_cast` at all (any source, not just `mo-house-xml`)? Ran as 159 individual per-legislator
+existence checks (necessary — a single combined query hit PostgREST's 1,000-row cap and silently
+returned a wrong, tiny-looking result on the first attempt, caught before it was reported).
+
+**Result: all 159 of 159 current MO House legislators have at least one real MO House vote on
+their profile, via LegiScan's own independent coverage.** Confirmed this is what actually renders,
+not just what's in the database, by reading `site/js/person-page.js`: votes display generically by
+chamber, with no adapter/source-based filtering that would exclude LegiScan-sourced MO House rows.
+The "162 of 163 show zero" claim was correct only as "zero votes sourced from `mo-house-xml`
+specifically" — reading it as "the profile page is blank" was wrong, and several docs (including
+this project's own) had drifted into stating it that way without the qualifier.
+
+**Recommendation given: ship as-is, no caveat.** A completeness caveat would warn users about a gap
+that doesn't actually exist on the rendered page for virtually any legislator or vote — the real
+residual gap is narrow (a handful of the most recent roll calls existing only via `mo-house-xml`
+might be briefly missing until LegiScan's own periodic refresh catches up), not the systemic,
+permanent blank section the prior framing implied. Lance: "fix it." All four docs corrected with
+the verified numbers and the corrected decision (ship as-is, resolved rather than open).
+
+**Process note:** this is exactly the kind of thing "reference all documentation first" is meant to
+catch, and in this case the docs THEMSELVES were the thing that needed re-checking against live
+data rather than trusted at face value — a useful reminder that this project's own accumulated
+documentation is not automatically ground truth just because it was carefully written once; it
+still needs re-verification against current live state before being relied on for a real decision.

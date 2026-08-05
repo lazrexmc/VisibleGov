@@ -164,10 +164,23 @@
   future rebuild + corrects the committed 0022 file's view definitions to match what's actually
   live) — **applied and verified live 2026-08-03** (see the top NOW entry).
   **Items deliberately left for Lance, not resolved by an agent (✅ = since closed):**
-  - **MO House per-legislator vote coverage — a site-content decision, not a deploy blocker.**
-    Sharper than "some data is thin": ~162 of ~163 MO House members show ZERO MO House votes on
-    their own profile page, forever, with no caveat — while the one fixture legislator
-    (Matthiesen) looks fully tracked on the exact same roll calls. Root cause: `persistRoster`
+  - ✅ **MO House per-legislator vote coverage — RESOLVED, effectively 2026-08-05: not the profile-
+    blanking problem this was framed as.** "~162 of ~163 MO House members show ZERO MO House votes
+    on their own profile page, forever, with no caveat" was WRONG as stated and is corrected here —
+    it specifically meant zero votes sourced *from the `mo-house-xml` adapter*, not zero votes
+    overall, and reading it as "the page is blank" was a real, load-bearing misstatement carried
+    across four docs. **Live-verified directly, 2026-08-05: all 159 of the CURRENT MO House
+    legislators have at least one real MO House `vote_cast` on their profile**, via LegiScan's own
+    comprehensive, independently-working coverage (confirmed via `site/js/person-page.js`: votes
+    render generically by chamber, with no source/adapter-based filtering that would exclude
+    LegiScan-sourced MO House rows). The one fixture legislator (Matthiesen) isn't uniquely "fully
+    tracked" — everyone is, just not via this one narrow adapter. The real residual gap is narrow:
+    a handful of the MOST RECENT roll calls that exist ONLY via `mo-house-xml` (the ~40 bills not
+    yet also in LegiScan) may be briefly missing from a profile until LegiScan's own periodic
+    refresh catches up — not a systemic or permanent blank section. **Decision: ship as-is, no site
+    caveat needed** — a caveat would warn users about a problem that doesn't actually exist on the
+    rendered page for virtually any legislator or vote. Root cause of the underlying `mo-house-xml`
+    resolution gap itself (still real, just much lower-stakes than believed): `persistRoster`
     (`ingest-mo-house.js:844-878`) hardcodes a single test fixture
     (`tests/fixtures/research/mo-house-xml/representative-107.xml`) and `insertIfAbsent`s the same
     one row every call — a true no-op after the first run. The live per-district roster fetch
@@ -198,10 +211,9 @@
     open) clearly outweighs the payoff given the confirmed 100% redundancy of everything it
     currently *can* resolve. The pipeline itself keeps running as-is — its bill/action tracking and
     PDF integrity-gated tally extraction are correct, independent work, not affected by this
-    decision. Ship visibly as-is, or add an explicit completeness caveat to `person-page.js`'s MO
-    House vote section? Still explicitly Lance's call, unresolved by this investigation — if
-    anything, the confirmed-permanent nature of the gap is a point in favor of the caveat. Out of
-    scope for the Cloudflare deploy spec (Lance's own 2026-08-03 scoping call).
+    decision. Out of scope for the Cloudflare deploy spec regardless (Lance's own 2026-08-03
+    scoping call) — but per the correction above, it was never actually a deploy-relevant gap in
+    the first place once "zero votes on the page" is replaced with the real, verified picture.
   - **SB 914 adjudication** (`vote_reconciliation_flags` id `214a2be0`) — checked the ALREADY-
     CACHED LegiScan dataset directly (zero new API calls): **Sen. Mike Moon and Sen. Steven Roberts
     are entirely absent from LegiScan's own roll-call vote data for this roll call** — not counted

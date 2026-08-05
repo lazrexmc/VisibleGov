@@ -81,11 +81,15 @@ casts can't be fully resolved against the legislator roster, plus (same conventi
 committed `vote_casts` rows (those are already in Supabase) — but rebuilding it (re-fetch the PDF,
 30-min ToU, re-extract) does **not** buy back more data than before: the 2026-08-03 accuracy audit
 found the real bottleneck is structural, not a cache problem. `persistRoster` seeds exactly one real
-legislator (a leftover test fixture) against which every roll-call PDF resolves, so ~162 of ~163 MO
-House members permanently show zero MO House votes regardless of how many times this cache is
+legislator (a leftover test fixture) against which every roll-call PDF resolves, so this adapter
+specifically resolves casts for only that one legislator regardless of how many times this cache is
 rebuilt — directly visible in the one artifact on disk here as of this writing (157 of ~163 casts
-still unresolved on last replay). Still open, deliberately left for Lance's call — see `TODO.md` NOW
-("MO House per-legislator vote coverage").
+still unresolved on last replay). **Correction, 2026-08-05:** this does NOT mean ~162 of 163 MO
+House members show zero MO House votes on their profile — live-verified all 159 current members
+have real MO House votes via LegiScan's independent, comprehensive coverage of the same bills; only
+this one narrow adapter's own contribution is capped. Investigated end-to-end and resolved — see
+`TODO.md` NOW ("MO House per-legislator vote coverage") for the full evidence; decision was ship
+as-is, no site caveat needed.
 
 Note on `scheduler-logs/`: also lives under `.superpowers/artifacts/` but isn't a source cache in
 the sense the rest of this file describes — it's the background scheduler's own daily tick log

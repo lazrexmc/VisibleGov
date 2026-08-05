@@ -556,16 +556,20 @@ the recorded tally. Check the browser console for errors — there should be non
 These are real, disclosed, structural gaps in the project as it stands — this rebuild does not fix
 them, and you should not expect it to:
 
-- **MO House per-legislator vote coverage is structurally incomplete.** The MO House
-  roll-call-PDF ingestion pipeline (`ingest-mo-house.js`) resolves individual vote casts against a
-  roster (`persistRoster`) that seeds exactly **one real legislator row** — a leftover test
-  fixture. The practical effect: roughly 162 of ~163 MO House members show **zero** MO House votes
-  on their own profile page, forever, with no caveat currently shown to the visitor, while the one
-  fixture legislator looks fully tracked on the exact same roll calls. This is a real, disclosed,
-  open gap — not something a fresh rebuild fixes on its own, since the underlying roster-seeding
-  code is what would need to change. It is a deliberate, honest limitation (the site never
-  fabricates a "did not vote" claim to paper over the gap) but it is a real content-completeness
-  problem a visitor to a MO House member's page will notice.
+- **`mo-house-xml`'s own vote-cast resolution is structurally capped to one legislator — but this
+  is NOT the same as "MO House profile pages are incomplete."** The MO House roll-call-PDF
+  ingestion pipeline (`ingest-mo-house.js`) resolves individual vote casts against a roster
+  (`persistRoster`) that seeds exactly **one real legislator row** — a leftover test fixture — so
+  this one narrow adapter's own contribution never grows past that one person. Investigated
+  end-to-end 2026-08-05 and confirmed live: LegiScan's own independent, comprehensive MO House
+  coverage means all 159 CURRENT MO House legislators actually have real MO House votes visible on
+  their profile page regardless — the "162 of 163 show zero" figure some earlier docs cited was
+  specifically about votes sourced *from `mo-house-xml`*, not the profile page as a whole, and a
+  fresh rebuild will exhibit the identical (narrow, LegiScan-covered) picture, not a broadly blank
+  one. A roster-ingest-loop fix for `mo-house-xml` specifically was deliberately deprioritized
+  (~3.4-day cost for confirmed-redundant output — every bill it resolves any cast for already has a
+  LegiScan vote for the same bill). Decision made: ship as-is, no site caveat needed. See `TODO.md`
+  NOW ("MO House per-legislator vote coverage") for the full evidence trail.
 - **Cloudflare Pages deployment has not happened.** This is a deliberate future milestone, not an
   oversight — the project's own standing rule (Lance, project owner) is that Cloudflare deployment
   only starts once the backend is fully locked in and accurate, specifically to avoid
