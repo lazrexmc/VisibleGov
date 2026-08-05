@@ -2339,3 +2339,87 @@ distinction so a future edit to the detector can't silently regress it). `TODO.m
 with the real, dated debt list (8 files) the allowlist documents — not buried only in a test-file
 comment. Phases 2-4 of the original audit plan remain paused on Lance's own budget call; resuming
 is his decision, not assumed.
+
+---
+
+## 2026-08-05 (continued) — phase 2 of the deep audit: three of six pipelines fail their own documented guarantee
+
+Phase 2 (logical-process/pipeline integrity — 6 pipelines traced end-to-end across file boundaries,
+Fable 5 at max effort, 1.23M tokens) had already been launched before the budget conversation and
+completed in the background while the option-1/option-2 work above was being done. Where phase 1
+asked "is each FILE correct," phase 2 asked "does each PIPELINE actually deliver what it claims,
+end to end" — deliberately hunting bugs that live in the SEAMS between files, which per-file review
+structurally cannot see.
+
+**Result: 21 important findings, and — the headline — three of six pipelines returned
+`pipelineWorksAsIntended: false`.** Not isolated defects: three pipelines do not fully deliver
+guarantees this project's own docs state as fact. Lance, seeing the budget running down: "add
+everything to the todo.md/chatlog and update all documentation as we are about to hit limits on
+usage." Captured rather than investigated further — no new agent spend, no fixes attempted.
+
+**The two that matter most, both of which change what this project believes about itself:**
+
+**1. The Pierson wrong-merge fix does not generalize, and the docs claiming it does are wrong.**
+The 2026-08-03 accuracy audit found father/son Tommie Pierson Sr./Jr. auto-merged into one person;
+the fix added a same-source-key contradiction guard to `finalPairStatus`, and `TODO.md` +
+`docs/CONTROLLER_BRIEFING.md` both recorded that it "permanently prevents this class of wrong
+merge." Phase 2 executed the shape through the real code and found the guard only fires when BOTH
+rows populate the SAME per-person column (`bioguide_id`/`openstates_id`/`legiscan_people_id`) — so
+it covers LegiScan-vs-LegiScan pairs and essentially nothing else. The dominant real case, and the
+entire reason this subsystem exists, is merging rows ACROSS five different sources, each of which
+stamps a DIFFERENT column — those pairs can never trigger the guard at all. The exact Pierson input
+shape (identical printed name, empty/dateless seat evidence) still auto-merges silently today when
+the two rows come from different sources. The code's own inline comment is honest about this
+("ACCEPTED RESIDUAL"); the audit-trail docs are what overstated it. Worth naming plainly: this
+project's discipline of writing down what was fixed is exactly what let a too-broad claim harden
+into believed fact across two documents — the corrective is that a fix's SCOPE has to be recorded
+as carefully as the fix itself.
+
+**2. Quarantine — the mechanism that's supposed to stop contradicted vote data reaching the public
+— is dead code, and today's SB 914 fix was the accidental proof.** `legiscan-votes.js`'s module
+header still states "possibly-contradicted data must never be publicly reachable." Phase 2 traced
+every production branch of `crossCheckAgainstPrimarySource` and found quarantine unreachable from
+all of them (hardcoded `quarantine: false` in Branch B; structurally impossible on both
+tally-unique paths after the IMPORTANT-5 change). `retractLegiscanVoteIfStored` can only fire via
+injected test fakes. Net: a hard-mismatch pair stays fully double-counted on every public surface —
+all three matviews, `public_votes`, `public_vote_feed`, the bill page — from detection until a
+human writes a bespoke, hardcoded, one-flag-at-a-time correction. That is *precisely* what
+happened earlier today with SB 914: a new `correct-data.js sb914-reconcile` correction hardcoded to
+one flag UUID. At the time that read as "implementing Lance's ruling"; phase 2 shows it was also
+the only mechanism that exists, and ~48 other open reconciliation flags each need the same
+treatment. The gap isn't SB 914 — it's that there's no general "adjudicate flag N" tool and the
+module documents a safety property it no longer has.
+
+**The rest, all real, all cataloged in `TODO.md` NOW rather than restated here:** a silent
+wrong-SPLIT class in identity linking (era-blind district contradictions split one real person into
+two with zero flags — same multi-era-backfill trigger as TODO 31, opposite direction, previously
+undocumented); a duplicate-vote invisibility class where two rows for the same real vote coexist
+fully counted with no flag AND no record if they disagree on bill/date/chamber rather than tally
+(already happened live three separate ways — the 2026 session split, the MO House chamber
+mislabels, the 1969 sentinel dates — each fixed as a one-off, the class still undetected); public
+receipt quotes (`evidence_quote`, `supported_by_quote`) never mechanically verified as verbatim
+substrings of their cited source, the single point where a model's self-report is trusted straight
+into public output despite `trust.html` claiming "the exact quoted excerpt"; `src/cli/ingest.js`'s
+production write path (the live `npm run ingest`) having essentially no test coverage on its
+database-writing functions plus 4 more unbounded selects inside that untested code; and
+`scripts/data-status.js` — the tool `CLAUDE.md` designates as the authoritative source for live
+numbers — having zero coverage, being structurally untestable as written, and having already
+silently drifted from the regex it claims to mirror.
+
+One correction to a doc claim worth noting separately because it's about the scheduler's own
+advertised behavior: `docs/SCHEDULED_INGESTION.md` says a tick is "never more than ~15 minutes
+late," but the 5-source registry is structurally oversubscribed (~6 runs/hour of demand against 4
+runs/hour of capacity — one source per 15-minute tick), so in steady state every source converges
+to an ~hourly rotation, with the two MO sources running at roughly 2x their own 30-minute cooldown.
+The doc's own quoted live data (02:00/02:15/02:45/03:01) is that hourly rotation, not the
+cooldown-edge service it describes. Safe direction — nothing is lost, ToU is never violated,
+worst-case service latency is provably bounded around 75 minutes — but the documented bound is only
+true when at most one source is due at a time, which live logs show is not the normal state.
+
+**Phases 3 (intent/mission alignment) and 4 (final synthesis + adversarial verification of every
+phase-1/phase-2 finding) were never run** — paused on Lance's budget call and still paused. Worth
+stating honestly for whoever picks this up: every phase-2 finding above is a SINGLE-agent finding
+that has NOT been through the adversarial re-verification step both prior audits used, and this
+project's own history (the 2026-08-03 accuracy audit refuted 3 of its own findings under
+adversarial pressure) says that step routinely kills or reshapes real-looking findings. Treat the
+list as high-quality leads, not as confirmed defects, until phase 4 or an equivalent pass runs.

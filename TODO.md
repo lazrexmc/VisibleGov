@@ -37,10 +37,71 @@
   the 4-workflow pass, 3.25M tokens, zero critical, 31 important — see CHATLOG 2026-08-05 for the
   synthesized top-6, including a real security gap on `refresh_vote_aggregates()`'s grants, the
   `mo_house_id` unique-constraint landmine matching the already-fixed `mo_senate_id` bug, and a
-  fresh-rebuild blocker in migration 0027's `pg_cron` extension clause) — phases 2-4 (logical-
-  process audit, intent/mission alignment, final synthesis) paused mid-plan on Lance's own budget
-  call (~20% weekly usage remaining at the time) after phase 1 alone came in far larger than
-  expected; resume is his call once budget resets.
+  fresh-rebuild blocker in migration 0027's `pg_cron` extension clause).
+- **Phase 2 of the deep audit — logical-process/pipeline integrity, 6 pipelines traced end-to-end,
+  1.23M tokens, 6 agents. THREE of six pipelines came back verdict FALSE (documented guarantee not
+  actually delivered) — a materially worse result than phase 1's file-level pass.** Full raw
+  findings: workflow output referenced in CHATLOG 2026-08-05 (continued) entry. Not yet fixed —
+  found and cataloged only, per the same "read/report first" scope as phase 1. Ranked by real
+  consequence:
+  1. 🔴 **The Pierson wrong-merge guard (2026-08-03 audit, `person-identity.js`'s
+     `sourceKeyPairStatus`) does not generalize — TODO.md/CONTROLLER_BRIEFING's "permanently
+     prevents this class of wrong merge" claim is FALSE for the general case.** The guard only
+     fires when both legislator rows populate the SAME per-source identity column (e.g. two
+     LegiScan rows, both carrying `legiscan_people_id`). The dominant real case — merging rows
+     ACROSS different sources, the whole point of this system — stamps a DIFFERENT column per
+     source, so the guard never sees it. The exact Pierson input shape (identical name, empty/
+     dateless seat evidence) still auto-merges silently whenever the two rows come from different
+     sources. Needs its own fix: this is a documentation/safety-claim correction plus a real code
+     gap, not just a doc fix.
+  2. 🔴 **Reconciliation-flag "quarantine" is dead code — the module's own header claim
+     ("possibly-contradicted data must never be publicly reachable") is stale and unmet.**
+     `crossCheckAgainstPrimarySource`'s quarantine path is unreachable from every production
+     branch (hardcoded `quarantine=false` in one branch, structurally impossible in the others).
+     The ONLY way a hard-mismatch pair (like SB 914, fixed today) stops double-counting on every
+     public surface is a human writing a bespoke, one-off hardcoded correction per flag —
+     `correct-data.js sb914-reconcile` is hardcoded to exactly one flag UUID. ~48 other open
+     reconciliation flags have no path to resolution except the identical one-at-a-time treatment.
+     This directly explains why SB 914 needed a custom code change today rather than an existing
+     mechanism handling it.
+  3. A silent wrong-*split* class in identity-linking: era-blind district-contradiction logic can
+     silently split one real person's record into two persons with ZERO flags raised (not even a
+     flag for review) when their districts differ across eras (redistricting). Same trigger
+     profile as the already-known TODO 31 (fires on multi-era backfill), opposite direction
+     (split, not merge), previously undocumented.
+  4. Two `votes` rows for the same real floor vote can coexist, both fully counted, with **zero
+     flag and zero record**, if they disagree on the match key itself (bill_id/date/chamber)
+     rather than the tally — already happened live 3 separate times (the 2026 session split, the
+     MO House chamber mislabels, the 1969 sentinel dates), each fixed as a one-off; the *class*
+     still has no detector.
+  5. Public "receipt" quotes (`evidence_quote` for summary bullets, `supported_by_quote` for
+     glossary terms — the exact bill/statute text shown to back a claim) are never mechanically
+     checked to actually be a verbatim substring of the source. This is the one place in the whole
+     trust-model-v3 pipeline where a model's self-report is trusted verbatim, despite
+     `trust.html`'s public claim of "the exact quoted excerpt." A hallucinated quote could pass
+     every other gate and auto-publish.
+  6. `src/cli/ingest.js` (the live `npm run ingest` write path) has almost no test coverage on its
+     actual database-writing functions (`collectUsCongress`/`collectMoLegislature`/
+     `persistUsCongress`/etc.) — only arg-parsing is tested. The untested code also contains 4
+     more unbounded `legislators` selects beyond what phase 1/the enforcement test already found
+     (byBioguide/byOsId map misses → silent cast misresolution once the table crosses 1000 rows).
+  7. `scripts/data-status.js` — the tool `CLAUDE.md` itself designates as "the only source of
+     truth for live numbers" — has zero test coverage and is structurally untestable as written
+     (no exports, top-level side effects). Its passage-question regex has already silently
+     drifted from what it claims to mirror (`summary-queue.js`'s canonical, tested version:
+     `\s*` vs `\s+`) — currently benign-direction, but proves the seam is real and unguarded.
+  8. The documented scheduler freshness bound ("~15 min late at most") isn't actually met — the
+     5-source registry is structurally oversubscribed (~6/hr demand vs 4/hr capacity), so sources
+     converge to an ~hourly rotation in steady state, not every ~30 min as `docs/
+     SCHEDULED_INGESTION.md` claims. Safe direction (nothing lost, provably bounded ~75 min worst
+     case), but the doc's own claim is wrong and should be corrected.
+  9. Reconfirms/sharpens an already-known item: 0027's pg_cron exception handler can never record
+     a failure (PL/pgSQL savepoint semantics — TODO already tracked this as "purely an
+     observability gap"), but phase 2's framing is sharper: the pipeline's stated PRIMARY
+     freshness guarantee currently has NO working automated failure signal at all, and its one
+     honest residual (an aging `finished_at`) is displayed with no staleness threshold anywhere.
+  **Phases 3-4 (intent/mission alignment, final synthesis) remain paused on Lance's own budget
+  call — not resumed, resume is his decision.**
 - [x] ✅ **Migrations `0023`, `0025`, `0026` applied and verified live 2026-08-03 (Lance: "all have
   been ran in supabase").** `0026` (aggregate-refresh timeout fix) confirmed by actually running
   `npm run refresh:aggregates` — completed clean in ~19s (`mode: "refreshed"`), no timeout;
@@ -192,7 +253,11 @@
      (`auto-publish-glossary.js`'s `hasTextCorruption`).
   4. ✅ Tommie Pierson Sr./Jr. split back into two unlinked legislator rows (`correct-data.js
      pierson-split`, live) — a same-source-key contradiction guard (`person-identity.js`'s
-     `finalPairStatus`) now permanently prevents this class of wrong merge.
+     `finalPairStatus`) now prevents this class of wrong merge **for same-source pairs only —
+     see the phase-2 audit finding in NOW above; the original "permanently prevents this class"
+     claim was corrected 2026-08-05 as overstated.** The guard needs BOTH rows to populate the
+     same per-source identity column, so cross-source pairs (the dominant case) are still
+     unguarded.
   **Also fixed (important findings, root causes):** `buildMoVoteRows` chamber-hardcoding bug fixed
   + the 3 live mislabeled Senate votes corrected (`correct-data.js mo-house-chamber`, live);
   migration `0023_vote_duplicates_rls_and_view_drift.sql` (enables RLS on `vote_duplicates` for any

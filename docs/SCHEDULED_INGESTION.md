@@ -110,6 +110,21 @@ Each invocation:
    `pg_cron` is now the primary, structural guarantee that aggregates stay current; this
    scheduler's own post-tick call remains an additional, more immediate refresh right after a tick
    that actually wrote new rows, and still uses the same underlying function.
+   > **Caveat added 2026-08-05 (phase-2 deep audit) — this "primary guarantee" currently has NO
+   > working automated failure signal.** Migration 0027's `EXCEPTION` handler can never actually
+   > record a failure: PL/pgSQL implicitly savepoints the `BEGIN` block, so any error rolls back
+   > the `'running'` INSERT before the handler runs, the handler's UPDATE then matches zero rows,
+   > and the trailing `raise` aborts the rest. Net: **a failing pg_cron refresh writes NOTHING to
+   > `ingestion_runs`.** Downstream, `public_freshness` therefore keeps showing
+   > `source='refresh-aggregates'` as `succeeded` with a quietly aging `finished_at`, and
+   > `npm run status` prints it with no staleness threshold — so a broken pg_cron job (failing
+   > ticks, unscheduled job, disabled extension) is invisible to every automated surface. Nothing
+   > reads `cron.job_run_details`; the scheduler's own `aggregatesHealthy` only exists on ticks
+   > where the scheduler itself wrote rows; the `/fail` healthcheck ping requires the opt-in
+   > `HEALTHCHECK_PING_URL` (inert until set). This is the same silent-failure class that already
+   > produced a real 14-hour outage (see 0026's header) and recurred three more times in one week.
+   > Until it's fixed, **`cron.job_run_details` is the only honest way to check whether the
+   > scheduled refresh is actually working** — see TODO.md NOW.
 5. Logs one entry — to stdout and to a dated (UTC) file — recording what it checked, what it chose
    (or why nothing was due), the CLI's own honest counts, and whether aggregates were refreshed.
 
@@ -210,9 +225,25 @@ source's real timeout right before that source is spawned (see "What it does," s
 outstanding step. Use it again only to re-register (new machine, schedule change — `/f` overwrites
 the existing task safely) or to remind yourself what the registered task actually runs.
 
-Run every 15 minutes — deliberately shorter than every source's own interval above, so a tick is
-never more than ~15 minutes late; the per-source cooldowns above do the real gating, not this
-number.
+Run every 15 minutes — deliberately shorter than every source's own interval above; the per-source
+cooldowns above do the real gating, not this number.
+
+> **Corrected 2026-08-05 (phase-2 deep audit).** This section previously claimed "a tick is never
+> more than ~15 minutes late." That's true of TICK latency but NOT of per-source SERVICE latency,
+> and the distinction matters. The scheduler runs at most ONE source per tick (`pickMostOverdue`),
+> giving a hard capacity of 4 runs/hour — against a registry demanding ~6/hour (mo-senate 2 +
+> mo-house 2 + us-congress 1 + us-senate 1 + legiscan ~0.04). The registry is therefore
+> structurally oversubscribed, and in steady state every source converges to an **~hourly
+> rotation** — the two MO sources running at roughly 2x their own 30-minute cooldown. This doc's
+> own quoted live data further down (mo-house 02:00, mo-senate 02:15, us-congress 02:45, us-senate
+> 03:01) is exactly that hourly rotation, not the cooldown-edge service the older wording
+> described. Provable worst-case service latency is ~5 ticks (~75 min) past cooldown expiry.
+> **Nothing is lost and ToU is never violated** — the delay is entirely in the conservative
+> direction, and staleness stays bounded — but the real bound is ~75 min per source under
+> saturation, not ~15 min, and live logs show saturation is the normal state (22 'live' vs 2
+> 'nothing-due' ticks on 2026-08-03). If the tighter bound is ever actually wanted: shorten the
+> Task Scheduler interval (10 min → 6/hr capacity), or allow more than one source per tick. Side
+> effect worth knowing: MO backfill throughput is currently about half the ToU-allowed rate.
 
 **Command line — use Command Prompt, NOT PowerShell.** (Start menu → type `cmd` → "Command
 Prompt". Windows 11's default terminal is PowerShell, where this command's quoting breaks

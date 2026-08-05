@@ -112,7 +112,13 @@ confirmed live by direct query: both `Tommie Pierson` legislator rows exist (`1e
 below). `docs/DATA_INVENTORY.md` was independently re-verified and corrected to 36/74 in a parallel
 pass the same day (confirmed by file mtime and by direct query — do not assume it's still stale on
 this point without checking fresh). A `finalPairStatus` same-source-key
-contradiction guard (`person-identity.js`) now prevents this exact class of wrong merge permanently.
+contradiction guard (`person-identity.js`) now prevents this exact class of wrong merge —
+**[CORRECTED 2026-08-05, phase-2 deep audit: the original wording here said "permanently," which is
+overstated. The guard requires BOTH rows to populate the SAME per-source identity column
+(`bioguide_id`/`openstates_id`/`legiscan_people_id`), so it covers same-source pairs (e.g.
+LegiScan-vs-LegiScan) and NOT cross-source pairs — which are the dominant case in a system whose
+purpose is merging across five sources. The Pierson input shape still auto-merges silently when the
+two rows come from different sources. See `TODO.md` NOW for the full finding.]**
 Also fixed, both live: `buildMoVoteRows`'s chamber-hardcoding bug (`mo-house-xml.js`) + 3 live
 mislabeled Senate votes corrected (`correct-data.js mo-house-chamber`).
 
