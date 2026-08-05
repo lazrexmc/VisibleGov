@@ -52,8 +52,9 @@ scratch. Short pre-deploy list, mostly already decided:
    `DROP`+`CREATE` would silently restore `authenticated`'s EXECUTE.
 4. ✅ **Both open questions ANSWERED 2026-08-05.** (3a) Lance has an existing Cloudflare account,
    and owns `helpingpeoplehelpingpeople.com` — which currently serves only a disposable caard.io
-   one-pager he is fine losing, so moving nameservers to Cloudflare is clean (confirmed no email to
-   preserve; still glance at the imported record list for `MX` before deleting the parking cruft).
+   one-pager he is fine losing, and he explicitly confirmed the zone has **no email functions at
+   all** — so the nameserver move is a clean sweep: every imported record gets deleted, no judgment
+   call, nothing to preserve.
    (3d) Preview builds: recommended **leave the default on** — this is a public-transparency site,
    the anon key is public by design, RLS is the wall, and there is no auth session to confuse
    across origins. Not yet formally ruled by Lance; nothing blocks on it.

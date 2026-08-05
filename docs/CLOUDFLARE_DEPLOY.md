@@ -100,12 +100,15 @@ move (registrar email forwarding only works on the registrar's own DNS), and lef
 the Pages custom-domain attachment.
 
 1. Cloudflare dashboard → **Add a site** → enter the domain → Free plan.
-2. Cloudflare shows the records it imported. **Read this list before continuing.**
-   - **If any `MX` records appear, stop and decide deliberately** — that means email routing exists
-     on this domain. Recreating them in Cloudflare preserves it; dropping them breaks it silently.
-     (Expected here: none, since the domain hosts only a caard.io page. Confirm rather than assume.)
-   - Delete the parking `A`, parking `www` CNAME, SPF `TXT`, and any `eforward` records — the caard.io
-     records go too.
+2. Cloudflare shows the records it imported. **Delete all of them.**
+   - **Nothing on this zone needs preserving** — Lance confirmed 2026-08-05: no email functions of
+     any kind, and the only content is a disposable caard.io one-pager. That confirmation is what
+     makes this step a clean sweep rather than a judgment call: the usual danger here is dropping
+     `MX` records and silently killing email that someone set up (or that a registrar added by
+     default), and that danger does not exist on this domain.
+   - So: parking `A`, parking `www` CNAME, SPF `TXT`, any `eforward`/`MX`, and the caard.io records
+     all go. Leftover records fight the Pages custom-domain attachment (LinkedUmp §4.3) — a clean
+     zone is the goal, not a minimal edit.
 3. Cloudflare gives you two nameservers. Set them at the current registrar, replacing what's there.
 4. Wait for Cloudflare to report the zone **Active** (usually minutes; can take longer).
 

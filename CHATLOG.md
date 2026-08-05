@@ -2689,3 +2689,15 @@ Closed with LinkedUmp §4.2's status ladder, because this project has over-claim
 deployed/viewable → live**. A URL that resolves is *viewable*. Until someone other than Lance has
 looked up their own representative and gotten a useful answer, the honest phrasing is "deployed, in
 owner testing."
+
+**Lance:** "HPHP (helpingpeoplehelpingpeople.com) does not have any email fucntions" — explicit
+confirmation, which collapses the one genuine risk in Phase 3. The runbook's DNS step changes from
+a judgment call ("if MX records appear, stop and decide") to a clean sweep ("delete all imported
+records, nothing here needs preserving"). Worth noting *why* the caution existed rather than just
+deleting it: the failure mode is silently killing email a registrar added by default that nobody
+remembers setting up — it does not announce itself, it just stops arriving. With the zone confirmed
+empty of email, that failure mode is off the table entirely and a clean zone is strictly better
+anyway, since leftover records fight the Pages custom-domain attachment (LinkedUmp §4.3).
+
+Every open question on the deploy is now answered. Nothing code-side remains; the next action is
+Lance's, at the Cloudflare console, following `docs/CLOUDFLARE_DEPLOY.md` Phase 1.
