@@ -168,10 +168,40 @@
     Sharper than "some data is thin": ~162 of ~163 MO House members show ZERO MO House votes on
     their own profile page, forever, with no caveat — while the one fixture legislator
     (Matthiesen) looks fully tracked on the exact same roll calls. Root cause: `persistRoster`
-    (`ingest-mo-house.js`) seeds exactly one real legislator row against a roster the roll-call-PDF
-    parser resolves against. Ship visibly as-is, or add an explicit completeness caveat to
-    `person-page.js`'s MO House vote section first? Explicitly out of scope for the Cloudflare
-    deploy spec (Lance's own scoping call, 2026-08-03) — a real, still-open decision on its own.
+    (`ingest-mo-house.js:844-878`) hardcodes a single test fixture
+    (`tests/fixtures/research/mo-house-xml/representative-107.xml`) and `insertIfAbsent`s the same
+    one row every call — a true no-op after the first run. The live per-district roster fetch
+    (`fetchMoMemberList`/`fetchMoRepresentative`, `mo-house-xml.js:124-149,314-321`) already exists
+    in the adapter but is called nowhere — deferred work that was never wired up. Compounding bug:
+    `listPendingRollCallPdfs` marks a roll call "done" the moment it resolves even 1 cast, so
+    already-processed roll calls would stay frozen even after a roster fix, without a separate
+    replay pass.
+    **Investigated end-to-end 2026-08-05 (parallel investigate → synthesize → adversarially verify;
+    verdict CONFIRMED on independent re-check) — scope is much narrower than "most... structurally
+    incomplete" implied.** The dominant `legiscan` pipeline already covers 96.9% of ALL MO House
+    votes (6,447/6,652, full 2015-2026 span, 0% zero-cast, 424 legislators correctly resolved,
+    155-163 casts/vote). `mo-house-xml` itself only produced 130-134 votes (all 2026), of which the
+    ~22-24 that resolve ANY real cast are, verified live, **100% bill-level-overlapping with an
+    existing LegiScan vote on the same bill** — i.e., every piece of currently-useful output this
+    source has ever produced already has a LegiScan counterpart. (Can't get a dedup-certified
+    floor-vote match — `vote_duplicates` shows zero hits here — but that's the *same* 1-person-roster
+    gap starving the certifier of enough individual casts, the identical limitation already found on
+    `HB1623-3` during the vote-dedup work; bill-level overlap is strong circumstantial evidence, not
+    a certified match, and is reported as such.) Whole-dataset, only 2.7% of MO House votes (181 of
+    6,652) are zero-cast — 75 from a separate, dead, no-longer-scheduled `mo-ocd-vote` pipeline
+    (2022 only), 106 from `mo-house-xml` (2026 only). Bonus, unrelated finding: **zero MO House
+    votes exist for 2024 at all** — a separate gap, not investigated further.
+    **Decision: deliberately deprioritized the roster-ingest-loop fix (2026-08-05), not building
+    it.** Cost (~3.4 days of cooldown budget for a live per-district roster fetch, plus a new
+    replay-pass mechanism, plus careful navigation of the separate "MO House cross-era
+    misattribution trap" — `mo_house_id` is `unique` with no collision handling, TODO 31, still
+    open) clearly outweighs the payoff given the confirmed 100% redundancy of everything it
+    currently *can* resolve. The pipeline itself keeps running as-is — its bill/action tracking and
+    PDF integrity-gated tally extraction are correct, independent work, not affected by this
+    decision. Ship visibly as-is, or add an explicit completeness caveat to `person-page.js`'s MO
+    House vote section? Still explicitly Lance's call, unresolved by this investigation — if
+    anything, the confirmed-permanent nature of the gap is a point in favor of the caveat. Out of
+    scope for the Cloudflare deploy spec (Lance's own 2026-08-03 scoping call).
   - **SB 914 adjudication** (`vote_reconciliation_flags` id `214a2be0`) — checked the ALREADY-
     CACHED LegiScan dataset directly (zero new API calls): **Sen. Mike Moon and Sen. Steven Roberts
     are entirely absent from LegiScan's own roll-call vote data for this roll call** — not counted

@@ -490,6 +490,29 @@ spec** (Lance's own scoping call, 2026-08-03) — a real, still-open decision on
 as-is, or add an explicit completeness caveat to `person-page.js`'s MO House vote section first. Not
 an agent's call to make silently either way.
 
+**Update 2026-08-05 — investigated end-to-end whether the source is worth fixing; deliberately
+deprioritized, not built.** Full investigation (parallel investigate → synthesize → adversarially
+verify, verdict CONFIRMED on independent re-check): the pipeline itself is operationally healthy
+(214 runs since 2026-07-28, 97% success, the only failures one already-fixed 2026-08-01 timeout
+incident, bill backlog draining monotonically) — this was never a stalled-scheduler problem, only a
+capped-resolution one. Live-verified: every bill where `mo-house-xml` currently resolves ANY real
+cast (~22-24 of its ~130-134 total votes, all 2026) already has a LegiScan vote for the same bill —
+100% bill-level overlap, checked directly. (Can't get a dedup-*certified* same-floor-vote match —
+`vote_duplicates` shows zero hits — but that's the identical 1-person-roster gap starving the
+certifier of enough casts, same limitation already found on `HB1623-3`; reporting this as strong
+circumstantial evidence, not an overclaimed certainty.) Whole-MO-House-dataset scope is also much
+narrower than "most... structurally incomplete" implies: LegiScan alone covers 96.9% of all 6,652
+MO House votes with 0% zero-cast; only 2.7% dataset-wide are zero-cast, split between this source
+(106, all 2026) and a separate dead pipeline (`mo-ocd-vote`, 75, all 2022, no longer scheduled at
+all). Given that confirmed redundancy for the source's entire currently-useful output, the fix's
+real cost (~3.4 days of cooldown budget to wire up the already-defined `fetchMoMemberList`/
+`fetchMoRepresentative`, plus a new replay pass since already-"casted" roll calls are never
+re-attempted, plus careful navigation of item 6's cross-era `mo_house_id` collision risk if roster
+fetching ever grows beyond the current session) was judged not worth building. The site-content
+decision above (ship as-is vs. caveat) remains open and remains Lance's call — this investigation
+sharpens the evidence, doesn't resolve it. Unrelated finding surfaced along the way: zero MO House
+votes exist for 2024 at all in the live dataset, a separate gap not investigated further.
+
 **TODO 29 (hygiene) was also re-verified 2026-08-02, no action needed** — empty `districts` table
 and zero `image_url`/`contact` rows are both confirmed by design, not decay.
 

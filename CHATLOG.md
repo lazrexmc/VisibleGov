@@ -2130,3 +2130,78 @@ becomes a no-op against a now-nonexistent row, and the trailing `raise;` then ab
 transaction anyway. Purely an observability gap now that the routine case completes in ~19s, nowhere
 near any timeout — not worth widening this migration's blast radius to fix while the real outage was
 still live. See TODO.md.
+
+---
+
+## 2026-08-05 — MO House roll-call-PDF pipeline: investigated, redundancy confirmed, fix deliberately deprioritized
+
+Asked what to tackle next; recommended investigating whether `mo-house-xml`'s roll-call-PDF pipeline
+was actually keeping up or effectively stalled — a question flagged twice before (vote-dedup work,
+the senior engineering audit) but never chased down. Lance: "investigating whether mo-house-xml's
+roll-call-PDF pipeline is actually keeping up." Ran as a workflow: three parallel investigators
+(pipeline mechanics, live data state, run history) into a synthesized diagnosis, then an adversarial
+verification pass before trusting it.
+
+**Diagnosis (CONFIRMED on independent re-check): operationally healthy, functionally capped.** The
+scheduler fires reliably (214 runs since 2026-07-28, 97% success, the only 6 failures one already-
+fixed 2026-08-01 timeout incident, zero failures in the last 4 days), and the bill backlog drains
+monotonically — this was never a stalled-scheduler problem. But `persistRoster`
+(`ingest-mo-house.js:844-878`) hardcodes a single test fixture (district 107, "Matthiesen") and
+`insertIfAbsent`s the identical one row every call — a true no-op after the first run. The live
+per-district roster fetch (`fetchMoMemberList`/`fetchMoRepresentative`) already exists in the
+adapter but is called nowhere in the codebase — deferred work that was never wired up. Compounding
+bug: `listPendingRollCallPdfs` marks a roll call permanently "done" the moment it resolves even 1
+cast, so already-processed roll calls would stay frozen at 1 cast forever even after a roster fix,
+without a separate replay pass. Every `rollcall-pdf` run shows the same shape: `castCount: 158,
+unresolved: 157` — the PDF extraction and integrity gate are working fine and recovering the full
+real tally every time; only 1 of 158 real names ever resolves to a stored person.
+
+**Scope correction, the actually good news:** CLAUDE.md's "leaves most MO House per-legislator vote
+data structurally incomplete" framing overstated it. The dominant `legiscan` pipeline already covers
+96.9% of ALL MO House votes (6,447/6,652, full 2015-2026 span) with 0% zero-cast and 424 legislators
+correctly resolved. `mo-house-xml` itself only produced 130-134 votes, all from the current 2026
+session — whole-dataset, only 2.7% of MO House votes are zero-cast (181 of 6,652), split between
+`mo-house-xml` (106) and a separate, dead, no-longer-scheduled `mo-ocd-vote` pipeline (75, all 2022).
+
+Lance: "Proceed with the method you recommend. Be sure to reference all documentation before you
+start... then when complete update all documentation again." Re-read CLAUDE.md, TODO.md,
+`docs/DATA_INVENTORY.md`, `docs/CONTROLLER_BRIEFING.md`, `docs/SCHEDULED_INGESTION.md` before
+touching anything — this surfaced a real, separate, still-open landmine that would have been easy to
+miss going in cold: `docs/CONTROLLER_BRIEFING.md` item 6 ("MO House cross-era misattribution trap,"
+TODO 31) — `mo_house_id` is a `unique` column with **no unique-violation handling** in
+`insertIfAbsent`, and district numbers get reused by different people across different legislative
+eras. The scheduler is currently safe only because it's hardcoded to the current session; any
+roster-growing fix would need to either stay strictly current-session-scoped or add real collision
+handling, or it risks silently misattributing one legislator's votes to a different person who once
+held the same district number.
+
+**The recommended method: check redundancy with LegiScan before investing in the fix, since LegiScan
+already delivers complete correct MO House coverage.** Verified live, directly (not assumed from
+`docs/DATA_INVENTORY.md`'s own pre-existing "LegiScan twin" phrasing): **100% of the ~22-24 bills
+where `mo-house-xml` currently resolves ANY real cast already have a LegiScan vote for the same
+bill.** Honesty caveat, stated plainly rather than overclaimed: this is bill-level overlap, not a
+dedup-*certified* same-floor-vote match — `vote_duplicates` shows zero hits for these vote ids,
+because the identical 1-person-roster gap that cripples `mo-house-xml` also starves
+`isPrimaryCastDataComparable`'s certifier of enough individual casts to certify anything (the same
+limitation already found on `HB1623-3` during the original vote-dedup design work). Bill-level
+overlap is strong circumstantial evidence, not certainty, and was reported as such.
+
+**Decision: deliberately deprioritized the roster-ingest-loop fix, not building it.** Given (a)
+confirmed redundancy for 100% of everything this source currently *can* produce, (b) a real
+build cost (~3.4 days of cooldown budget to wire up the already-defined fetch functions, plus a new
+replay pass, plus careful navigation of the cross-era collision risk above), and (c) uncertain
+payoff even for the 40 non-overlapping bills (their date ranges are interleaved with, not
+systematically newer than, the overlapping ones, so "LegiScan just hasn't caught up yet" isn't a
+clean explanation either way) — the fix isn't worth building right now. The pipeline itself keeps
+running unchanged; its bill/action tracking and PDF-integrity-gated tally extraction are correct,
+independent work, unaffected by this decision. The separate site-content decision (ship the MO
+House vote gaps as-is vs. add an explicit caveat) remains open and remains Lance's call — this
+investigation sharpened the evidence behind it, didn't resolve it.
+
+Unrelated finding surfaced along the way, not investigated further: **zero MO House votes exist for
+2024 at all** in the live dataset.
+
+All four docs (`TODO.md`, `CLAUDE.md`, `docs/DATA_INVENTORY.md`, `docs/CONTROLLER_BRIEFING.md`)
+updated with this finding and decision, each in its own established style (append-dated for the
+docs/ files, direct correction for the two top-level status paragraphs that had overstated the
+scope).

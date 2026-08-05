@@ -43,9 +43,16 @@ vote-duplicate dedup (migration 0022) is applied and live; its backfill was itse
 `docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries 59 real
 matched pairs, all 2018 MO Senate. It still correctly yields ~0 matches for MO House specifically —
 a separate, deeper gap (the MO House roll-call-PDF pipeline resolves casts against a roster
-containing exactly one real legislator, a leftover test fixture) leaves most MO House
-per-legislator vote data structurally incomplete. Real, honestly rendered by the site (no
-fabricated "did not vote" claim), still open — see `TODO.md` NOW, "MO House per-legislator vote
+containing exactly one real legislator, a leftover test fixture). **Scope corrected 2026-08-05**
+(full investigation, independently re-verified): this is narrower than "most... structurally
+incomplete" — the dominant `legiscan` pipeline already covers 96.9% of all MO House votes with 0%
+zero-cast; `mo-house-xml` itself is a minor, 130-134-vote (all 2026), largely redundant side
+pipeline — every bill it currently resolves any real cast for already has a LegiScan vote for the
+same bill. **Deliberately deprioritized, not fixed:** a roster-ingest-loop fix was investigated and
+found not worth its ~3.4-day cost given that confirmed redundancy (plus a separate, still-open
+`mo_house_id` cross-era-collision risk, TODO 31, that any fix would need to navigate carefully).
+Real, honestly rendered by the site (no fabricated "did not vote" claim), the site-content decision
+(ship as-is vs. add a caveat) still open — see `TODO.md` NOW, "MO House per-legislator vote
 coverage."
 
 **Two standing rules that are easy to violate without noticing:**
