@@ -2241,3 +2241,101 @@ catch, and in this case the docs THEMSELVES were the thing that needed re-checki
 data rather than trusted at face value — a useful reminder that this project's own accumulated
 documentation is not automatically ground truth just because it was carefully written once; it
 still needs re-verification against current live state before being relied on for a real decision.
+
+---
+
+## 2026-08-05 (continued) — a full deep audit, a budget call mid-flight, and a mechanical fix for the project's most recurring bug
+
+Lance: "Now we need to run a full deep audit on the system using Fable5 and max effort with
+multiple workflows... nothing should be left out... take as long as needed." Structured as four
+sequential workflows so findings from each phase could be reviewed before committing the next
+phase's scope: (1) code & architecture, every subsystem; (2) logical process/pipeline integrity +
+test coverage; (3) intent/mission alignment; (4) synthesis + adversarial verification.
+
+**Phase 1 launched: 25 parallel subsystem reviewers, Fable 5, max effort, full-file reads.**
+Mid-run, Lance asked directly: "I have about 20% usage left for the week before reset in 2 days,
+will this audit be able to complete?" Answered honestly rather than reassuringly — no tool exposes
+exact account-usage percentage, but the two workflows already run this session (16 agents/1.49M
+tokens; 5 agents/434K tokens) gave a real basis for comparison, and this phase's design (more
+agents, full multi-file reads, the most expensive model at the most expensive effort tier) was
+very plausibly several times larger than either. Presented four real options rather than picking
+one silently. Lance: "let 1 run and we'll determine what to do when it finishes."
+
+**Phase 1 result: 3.25M tokens, 679 tool calls, 25 agents, zero critical findings, 31 important.**
+More than double the largest prior workflow this session, confirming the cost concern was real.
+Read the full output (2,593 lines) rather than trusting the truncated notification preview, and
+found several of the "important" findings were actually independent re-confirmations of ALREADY-
+tracked TODO items (18/32's `summarize.js` unbounded selects; 31's `mo_house_id` cross-era trap) —
+worth naming plainly rather than presenting known debt as fresh discovery. Synthesized the raw
+findings into a ranked top-6 for Lance: a real security gap (`authenticated` retains EXECUTE on
+`refresh_vote_aggregates()` across four migrations' worth of redefinitions, despite stated
+service-role-only intent), the `mo_house_id` unique-constraint landmine (the exact bug already
+fixed for `mo_senate_id` via migration 0009, never applied to the house column — sits directly on
+the path of the open MO House vote-coverage TODO), a fresh-rebuild blocker in THIS SESSION'S OWN
+`docs/DISASTER_RECOVERY.md` (migration 0027's `create extension pg_cron with schema cron` is
+wrong — pg_cron is non-relocatable, pinned to `pg_catalog`; only worked live because the extension
+was already enabled), a silent vote-misattribution path in the MO House PDF/action tally-tie
+matcher, a wrong assumption baked into a test fixture (`FOUNTAIN HENDERS` treated as a genuine
+2-word surname; almost certainly a print-truncated `Fountain Henderson`), and a race in
+`person-page.js` that can poison the neutrality-critical "group of one" party-comparison guard.
+The dominant PATTERN across the whole audit, not any single finding: the PostgREST 1,000-row cap
+— already fixed once, with a shared `selectAll` helper built specifically to prevent recurrence —
+kept resurfacing anyway, bypassed at roughly a dozen NEW call sites beyond the ones already known.
+
+**Lance asked the harder, more useful question: "would another route [than PostgREST] be better,
+or would that be a massive overtaking?"** Answered directly: no — the recurring bug isn't a
+technology problem, it's an enforcement problem. `selectAll` already exists, is correct, and is
+simply not consistently used; a different backend would relocate the same discipline gap, not
+close it. Gave three ranked options (raise Supabase's `db-max-rows` setting as a free stopgap; a
+mechanical enforcement test, matching this project's own established pattern of migration-text
+tests and gate checks; a deeper direct-Postgres-connection swap for server-side-only code, real
+but not proportionate to the actual problem) and recommended against the full-migration option
+explicitly. Lance: "proceed with 1 and 2."
+
+**Option 1 — db-max-rows: informational only, no dashboard access from here.** Verified current
+Supabase guidance via live web search rather than trusting training-data memory (the supabase
+skill's own core principle): Dashboard → Integrations → Data API → Settings, default 1000,
+Supabase's own recommendation is to keep it LOW (payload-size protection against accidental/
+malicious requests, a real tradeoff, not a pure win), and a known propagation-delay bug as of
+March 2026 where dashboard changes may not take effect immediately. Documented for Lance; nothing
+here was or could be changed by an agent.
+
+**Before writing option 2, Lance: "be sure to read all of the lines in all of our documentation
+prior to starting this as well."** Read every top-level doc in full (`CLAUDE.md`, `TODO.md` — all
+852 lines, `PLAYBOOK_DELTA.md` — all 588 lines including sections 0-13 never read this session,
+`README.md`, both `docs/audits/*.md` reports in full, all 2,243 lines of `CHATLOG.md` from the
+very first entry through the point this session's own visible history begins) plus a targeted
+sweep of the remaining 18 spec/plan/research docs for anything relevant. This surfaced two things
+that materially changed the design before any code was written: (1) `docs/CONTROLLER_BRIEFING.md`
+already documents a SEPARATE, still-open landmine — `mo_house_id` is `unique` with no
+unique-violation handling (TODO 31) — that a naive roster-growing fix could trip; noted as a
+constraint for any future fix, not touched here. (2) `docs/superpowers/specs/2026-07-30-public-
+site-design.md` revealed the SITE side of the codebase has its own, separate pagination
+convention — `fetchAllRows` in `site/js/rest.js`, the "browser's own selectAll" — distinct from
+`src/lib/db.js`'s server-side helper. Missing this would have shipped an enforcement test that
+only covered half the codebase's actual convention.
+
+**Option 2 — built, tested, self-corrected before landing.** `tests/select-pagination-
+enforcement.test.js`: a static scan for `.from(table).select(...)` not routed through `selectAll`
+and not otherwise bounded, plus a parallel site-side check that no file importing Supabase
+credentials calls the raw `fetch()` global directly (bypassing `rest.js`). First run surfaced 8
+matches beyond the 19 already known from phase 1's audit — investigated each rather than assumed
+real: all 8 turned out to be legitimate, already-documented exceptions (an `.eq()` filter on a
+specific parent id — `vote_id`, `bill_id`, a seat's district column — inherently bounds the result
+to that one entity's rows; this codebase's own comments already say so in multiple places, e.g.
+legiscan-identity.js's "the chamber+district filter alone already bounds each query's result set
+nowhere near the 1000-row page default"). Refined the detector to recognize `.eq()` as a bounding
+signal (verified this doesn't clear any of the 19 real violations — none of them use a plain
+`.eq()`, they use `.not()`/`.in()`/`.like()`/no filter, categorically broader operations) rather
+than papering over the false positives with an allowlist entry that would have mischaracterized
+reviewed, correct code as debt. One more false positive caught the same way: `directory-page.js`'s
+`fetch('/geocode', ...)` is a legitimate, already-reviewed ("CONTROLLER RULING") same-origin
+Cloudflare Function call, not a Supabase bypass — the site-side check was narrowed to only flag
+files that import Supabase credentials AND call `fetch()` directly, not every direct fetch in
+`site/js/` categorically.
+
+Full suite 2,301 → 2,306 (5 new tests, including two sanity tests that lock in the `.eq()`
+distinction so a future edit to the detector can't silently regress it). `TODO.md` NOW updated
+with the real, dated debt list (8 files) the allowlist documents — not buried only in a test-file
+comment. Phases 2-4 of the original audit plan remain paused on Lance's own budget call; resuming
+is his decision, not assumed.

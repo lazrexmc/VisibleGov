@@ -6,6 +6,41 @@
 
 ## NOW
 
+- **PostgREST 1000-row-cap: mechanical enforcement added 2026-08-05; ~19 pre-existing violations
+  found and cataloged, not yet fixed.** A 4-workflow deep audit (code architecture, logical
+  process/pipeline integrity, intent/mission alignment, synthesis+adversarial verify — Fable 5, max
+  effort, per Lance's request) re-found the single most recurring bug class in this project's
+  history: a bare `.from(table).select(...)` silently truncated at PostgREST's 1,000-row cap. This
+  exact bug shipped live at least five times before (the vote-duplicates truncation, senior
+  engineering audit finding 1; the glossary-queue trio; a hotfix-path recurrence, PLAYBOOK_DELTA's
+  own delta item 12) — asked Lance whether a different backend would fix the *pattern* itself;
+  answer was no (PostgREST isn't the bug, inconsistent enforcement of an already-correct fix is) —
+  he approved two remedies: (1) check/raise Supabase's dashboard `db-max-rows` setting (Dashboard →
+  Integrations → Data API → Settings, default 1000) — **still needs Lance himself, no dashboard
+  access from here; known issue as of March 2026, dashboard changes may not take effect
+  immediately/may need a propagation delay** — and (2) a mechanical test,
+  `tests/select-pagination-enforcement.test.js`, now committed and green, that fails loud on any
+  NEW unbounded multi-row select in `src/`/`scripts/`/`site/js/` while grandfathering today's known
+  debt via a dated, file-scoped allowlist (shrinks as each file gets fixed, never meant to grow).
+  **Currently-allowlisted files, real debt not yet fixed:** `src/cli/ingest.js` (3 lookups,
+  legislators already at 940/1000 on the actively-scheduled us-congress path — closest to actually
+  tripping), `src/cli/ingest-mo-house.js` (`listPendingRollCallPdfs`), `src/cli/correct-data.js`
+  (`runCorrectMoHouseChamber`), `src/cli/golden.js` (`loadGoldenCandidates`),
+  `src/cli/summarize.js` (**already tracked as TODO 18/32, `votes` already past the cap**),
+  `src/cli/verify.js`, `src/cli/extract-terms.js`, `src/review/server.js` (`handleQueue`'s
+  summaries select — the parallel glossary-queue query was already fixed under a prior CRITICAL
+  finding, this one was missed at the time). Each file's exact functions/finding are named in the
+  test's own `ALLOWLISTED_UNSAFE_FILES` map. Fixing each is mechanical (route through `selectAll`)
+  but is real, separate work — not done as part of adding the enforcement itself, per Lance's
+  explicit scope ("proceed with 1 and 2" — the guard and the config check, not the cleanup).
+  **Full audit found 25 subsystem reviews' worth of findings beyond this pattern too** (phase 1 of
+  the 4-workflow pass, 3.25M tokens, zero critical, 31 important — see CHATLOG 2026-08-05 for the
+  synthesized top-6, including a real security gap on `refresh_vote_aggregates()`'s grants, the
+  `mo_house_id` unique-constraint landmine matching the already-fixed `mo_senate_id` bug, and a
+  fresh-rebuild blocker in migration 0027's `pg_cron` extension clause) — phases 2-4 (logical-
+  process audit, intent/mission alignment, final synthesis) paused mid-plan on Lance's own budget
+  call (~20% weekly usage remaining at the time) after phase 1 alone came in far larger than
+  expected; resume is his call once budget resets.
 - [x] ✅ **Migrations `0023`, `0025`, `0026` applied and verified live 2026-08-03 (Lance: "all have
   been ran in supabase").** `0026` (aggregate-refresh timeout fix) confirmed by actually running
   `npm run refresh:aggregates` — completed clean in ~19s (`mode: "refreshed"`), no timeout;
