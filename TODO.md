@@ -50,10 +50,18 @@ scratch. Short pre-deploy list, mostly already decided:
    succeeding after the apply). A migration test asserts the revoke exists AND sorts after the
    newest definition of the function — `CREATE OR REPLACE` preserves privileges, but a
    `DROP`+`CREATE` would silently restore `authenticated`'s EXECUTE.
-4. **Two questions only Lance can answer:** (3a) fresh Cloudflare account, or the existing one
-   holding `helpingpeoplehelpingpeople.com`? (3d) Pages auto-builds a public preview for every
-   branch — since `site/config.js` carries the real anon key, every preview is a live copy of the
-   real site. Not a hole (RLS is the wall), but a deliberate yes/no.
+4. ✅ **Both open questions ANSWERED 2026-08-05.** (3a) Lance has an existing Cloudflare account,
+   and owns `helpingpeoplehelpingpeople.com` — which currently serves only a disposable caard.io
+   one-pager he is fine losing, so moving nameservers to Cloudflare is clean (confirmed no email to
+   preserve; still glance at the imported record list for `MX` before deleting the parking cruft).
+   (3d) Preview builds: recommended **leave the default on** — this is a public-transparency site,
+   the anon key is public by design, RLS is the wall, and there is no auth session to confuse
+   across origins. Not yet formally ruled by Lance; nothing blocks on it.
+   **➡️ The whole deploy is now a runbook: `docs/CLOUDFLARE_DEPLOY.md`** — four phases
+   (`.pages.dev` first → verify with curl at the origin → nameservers → custom domain), exact
+   project-creation values, copy-paste verification commands, and the LinkedUmp traps written next
+   to the steps that trigger them. All code-side work is DONE; what remains is console work in
+   Lance's own account.
 
 **Genuinely open, NOT blocking the deploy** (details further down / in the audit sections):
 - 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with

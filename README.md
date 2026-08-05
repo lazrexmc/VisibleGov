@@ -128,6 +128,9 @@ committed text is still what's live — always confirm.
 - `PLAYBOOK_DELTA.md` - lessons inherited from prior projects, read before building anything.
 - `TODO.md` - backlog: current state, build queue, and raw idea inbox.
 - `CHATLOG.md` - decision trail, kept from day one.
+- `docs/CLOUDFLARE_DEPLOY.md` - the deploy runbook: four phases, exact Pages project settings,
+  copy-paste verification commands, and the inherited traps written beside the steps that trigger
+  them. All code-side pre-deploy work is done; what remains is console work.
 - `docs/CONTROLLER_BRIEFING.md` - deep catch-up doc for a fresh session, compiled from the full
   project history (SDD ledgers, specs, plans, research docs, live code) - the fastest way to get
   oriented beyond what CLAUDE.md/TODO.md/CHATLOG.md alone give you.

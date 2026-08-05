@@ -2652,3 +2652,40 @@ checked and explicitly ruled NOT applicable: "different origins = different sess
 logins, and this site has no auth at all (anon key only).
 
 Awaiting his answer on the email question before any DNS work.
+
+**Lance:** "I have nothing at helpingpeoplehelpingpeople.com it is just a one pager I made with
+caard.io, it is garbage anyways, no hard feelings if it's gone."
+
+That answers the risk question — no email to preserve, the zone is disposable, so moving nameservers
+to Cloudflare is the clean path and the caard.io page disappearing is expected (its DNS records do
+not survive the move). Kept one small caveat rather than dropping it entirely: he answered about the
+*website*, and the thing that breaks silently is *email* — registrars often add default forwarding
+nobody set up on purpose. So the runbook says to glance at the imported record list for `MX` before
+deleting the parking cruft, rather than assuming.
+
+**Wrote `docs/CLOUDFLARE_DEPLOY.md` instead of finishing the deploy spec.** The paused brainstorm
+had sections 2 and 4 outstanding — but section 2 was "implementation detail of the two fixes," and
+those are now built and pushed, so a spec for them would be describing existing code. What was
+actually still missing was the runbook and the verification checklist. Four phases, matching both
+LinkedUmp's own runbook and Lance's 2026-07-28 sequencing ruling: create the Pages project
+(`.pages.dev` only) → verify with curl **at the origin** → move nameservers → attach the custom
+domain, re-running every check because headers/redirects/Functions are host-sensitive and passing on
+`.pages.dev` does not prove them on the custom domain.
+
+The inherited traps are written next to the step that triggers them rather than in a preamble
+nobody re-reads: Cloudflare's UI funnels to Workers (it is Pages tab → Connect to Git — LinkedUmp
+hit this twice, a year apart); framework preset must be **None** or a build command gets injected;
+root directory must be `site` or `_headers`/`_redirects`/`functions/` are never discovered; verify
+with curl not a browser screenshot because Pages ignores `Cache-Control` overrides for assets and a
+browser will show a cached lie; and delete the registrar's parking A/`www` CNAME/SPF/eforward
+records before attaching the custom domain.
+
+Ruled 3d (preview builds) with a recommendation rather than leaving it hanging: **leave the default
+on**. The data is meant to be world-readable, the anon key is public by design, RLS is the wall, and
+there is no auth session to confuse across origins — the concerns that make preview deployments
+risky elsewhere do not exist on a public-transparency site. Flagged as recommended-not-ruled.
+
+Closed with LinkedUmp §4.2's status ladder, because this project has over-claimed before: **built →
+deployed/viewable → live**. A URL that resolves is *viewable*. Until someone other than Lance has
+looked up their own representative and gotten a useful answer, the honest phrasing is "deployed, in
+owner testing."
