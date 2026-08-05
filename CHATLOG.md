@@ -2485,3 +2485,71 @@ the evidence it rested on stay together permanently.
 Draining it is now operator work instead of one code change per flag. Nothing was written live this
 pass: 10 new tests, a dry-run against a real open flag, and the refusal path verified against real
 data. Full suite 2,306 → 2,316, `ℹ fail 0`, gated on the extracted count as always.
+
+---
+
+## 2026-08-05 (end of session) — pre-restart documentation sync, and a phantom regression caught in the act
+
+**Lance:** "update all documentation, chatlogs, readmes, manuals, todos, claude.md and any other
+important items... I've had to do this before but the resume wasn't what Claude said it would be
+because it simply wasn't in sync with the previous session no matter how hard we tried to restore
+the memory. I need to update VS code and restart the machine."
+
+The ask is not "write more docs" — it is "make the resume actually work." The failure mode he
+named is specific and this project has a documented history of it: docs assert a state, the live
+system has moved on, a fresh session trusts the docs, and the session is spent reconciling the two.
+So the method was inverted from the usual: **verify live reality FIRST, then write docs against
+what was verified**, never against what the existing docs claimed.
+
+**Live state confirmed before writing anything** (all re-derived, none copied): git clean at
+`9fcc555`, everything pushed; 30 migration files on disk, **all applied** — nothing awaiting an
+apply; suite 2,316 pass / 0 fail; votes 10,119 · vote_casts 1,467,896 · bills 38,254 · legislators
+1,607 · vote_duplicates **62**; 115 published summaries, 116 published glossary terms; open queues
+107 reconciliation flags / 0 identity flags / 98 draft summaries / 2,103 draft glossary terms; all
+five scheduled sources ticked today and `refresh-aggregates` succeeded at 15:00 UTC via pg_cron.
+Two of those numbers are worth reading as signals rather than trivia: `vote_duplicates` moved 59 →
+62 on its own, which is the live ingest path marking new cross-source duplicates unaided — the
+dedup feature working end-to-end, not drift; and the healthy pg_cron tick is the 3-layer timeout
+saga staying closed a day later.
+
+**A red suite appeared mid-verification, and it was not real.** The batched health-check command
+sourced `.env` into the shell and then ran `node --test` in that same shell — the suite came back
+with `review-logic.test.js` failing `expected: 500, actual: 200`. Two subsequent clean runs were
+green, which made it look like a flake. It is not a flake: sourcing `.env` exports the Supabase
+credentials into the test process, so the two tests that assert the review server degrades cleanly
+when **no** DB client is configured get a real client and correctly return 200 where they correctly
+expect 500. Proven deterministically in both directions (clean shell 181/0; `.env` sourced 179/**2
+fail**) rather than left as a shrug. Both the tests and the code are right; the shell was
+contaminated — by my own convenience batching. Captured as PLAYBOOK_DELTA **lesson 27**, a standing
+rule in `CLAUDE.md`, a README runbook warning, and its own auto-loaded memory, because the symptom
+(a red suite immediately before a machine restart) reads exactly like "we broke something" and
+would have cost a future session a bisect hunt for a break that never happened.
+
+**What was written, ordered by what a resuming session actually reads first:**
+
+1. **Auto-loaded memory** (`~/.claude/projects/f--VisibleGov/memory/`) — highest leverage, since it
+   loads into every session without anyone asking. `deploy-last-backend-first` was actively
+   dangerous as written: it said "no Cloudflare until the backend is locked," which would have made
+   a fresh session **refuse or defer the very deploy Lance just green-lit**. Rewritten to record
+   that the gate is MET, that he raised it himself, and what the short remaining pre-deploy list
+   is. Added `never-source-env-before-node-test`. Index updated.
+2. **`TODO.md` — a new `⏱ RESUME HERE` block at the very top.** The structural problem was that
+   NOW had grown to ~500 lines with resolved items at the top, so "read TODO.md NOW" pointed a
+   fresh session at finished work and buried the open items. The new block states live-verified
+   state, names the Cloudflare deploy as THE next thing, lists the four pre-deploy items, separates
+   genuinely-open work from noise, and says plainly that everything below it is historical.
+3. **`CLAUDE.md`** — a fresh-session banner at the top pointing at RESUME HERE and naming the two
+   traps that cost a session cold (the `.env` one, and "all 30 migrations are applied, any text
+   saying otherwise is stale"). The Cloudflare standing rule was rewritten from "do not propose
+   deploying" to "GATE MET, this is the active task" — left visible with its history rather than
+   deleted, so the reasoning survives. Stale PLAYBOOK lesson count corrected.
+4. **`PLAYBOOK_DELTA.md`** — lesson 27.
+5. **`README.md`** — status banner moved to 2026-08-05 with the deploy named as active, plus the
+   test-shell warning in the runbook where someone would actually hit it.
+
+**The honest caveat, recorded because overclaiming here is what caused the original problem:** this
+sync makes the *state* trustworthy — what is applied, what is open, what is next, what will bite
+you. It cannot make a resumed session remember the *reasoning* behind every past decision; that
+still lives in this CHATLOG, and the audit passes proved that reading it in full is what separates
+a real finding from a superseded design being re-litigated (the quarantine finding earlier today is
+the clean example). A future session that skips the log will still make that class of mistake.

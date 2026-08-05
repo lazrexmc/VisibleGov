@@ -4,6 +4,61 @@
 
 ---
 
+## ⏱ RESUME HERE — verified live 2026-08-05, read this block first
+
+*Everything below this block is a historical record, mostly resolved. This block is the only part
+that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
+check — that drift is exactly what has burned this project before.*
+
+**State, verified live 2026-08-05 (not copied from another doc):**
+- Git clean, `main` @ `9fcc555`, everything pushed. Suite **2,316 pass / 0 fail**.
+- Migrations: **30 files on disk (0001-0029 + 0018a), ALL applied live.** Nothing is awaiting an
+  apply. `0027`/`0028`/`0029` (the refresh-timeout saga) are applied and confirmed working.
+- Data: votes 10,119 · vote_casts 1,467,896 · bills 38,254 · legislators 1,607 ·
+  vote_duplicates **62** (was 59 — the live ingest path is now marking new duplicates on its own,
+  which is the dedup feature working end-to-end, not drift).
+- Published: 115 summaries · 116 glossary terms.
+- Scheduler healthy: all 5 sources ticked today; `refresh-aggregates` succeeded 15:00 UTC via
+  pg_cron. **The 3-layer timeout saga is fully closed.**
+- ⚠️ **Before running the suite: do NOT `source .env` in the same shell.** It makes 2 correct
+  tests in `review-logic.test.js` fail (expected-500-got-200) because they assert behavior when NO
+  DB client is configured. Verified deterministically 2026-08-05. Use `node --test` in a clean
+  shell. Every CLI takes `--env-file=.env` for exactly this reason.
+
+**THE NEXT THING: the Cloudflare Pages deploy.** Lance's own long-standing gate ("backend locked in
+and accurate first") is **MET** — he raised the deploy himself on 2026-08-05 and it was recommended
+yes. Four audit passes produced **zero criticals**. Do not defer this or re-litigate the gate.
+Resume the spec brainstorm where it paused (2026-08-03, sections 2 and 4 unpresented), not from
+scratch. Short pre-deploy list, mostly already decided:
+1. **`geocode.js` security headers** — decided, NOT built. Pages Functions do not inherit
+   `_headers`, so `/geocode` currently returns zero CSP/security headers.
+2. **`site/404.html`** — decided, NOT built.
+3. **One-line `revoke execute on function refresh_vote_aggregates() from authenticated;`** — a real
+   finding from the 2026-08-05 audit (every redefinition revoked `anon` but never `authenticated`,
+   so Supabase's default grant survives on a `SECURITY DEFINER` function). Matters slightly more
+   once deploying makes the project URL public.
+4. **Two questions only Lance can answer:** (3a) fresh Cloudflare account, or the existing one
+   holding `helpingpeoplehelpingpeople.com`? (3d) Pages auto-builds a public preview for every
+   branch — since `site/config.js` carries the real anon key, every preview is a live copy of the
+   real site. Not a hole (RLS is the wall), but a deliberate yes/no.
+
+**Genuinely open, NOT blocking the deploy** (details further down / in the audit sections):
+- 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
+  `correct-data.js reconcile-flag` instead of one code change per flag — but each is a real human
+  ruling about a real legislator's record, so it is Lance's work, not an agent's.
+- 98 draft summaries + 2,103 draft glossary terms in the review queue.
+- ~19 known unbounded-`.select()` sites across 8 files, grandfathered in
+  `tests/select-pagination-enforcement.test.js`'s dated allowlist. `ingest.js` is closest to
+  actually tripping (legislators at ~940 of the 1,000 cap on a live-scheduled path).
+- MO House per-legislator vote coverage: investigated 2026-08-05, roster fix **deliberately
+  deprioritized** as redundant with LegiScan. Site renders honestly. Do not re-investigate — read
+  the entry below first.
+- Deep-audit **phases 3 and 4 never ran** (paused on budget). Phase 4 was the adversarial
+  verification pass; phase-1/phase-2 findings have NOT been through it, and this project's history
+  says that pass routinely refutes real-looking findings. Treat them as leads, not confirmed bugs.
+
+---
+
 ## NOW
 
 - **PostgREST 1000-row-cap: mechanical enforcement added 2026-08-05; ~19 pre-existing violations
@@ -593,8 +648,13 @@
     plus `source_hash`/`needs_mapping` on `glossary_terms`). Column-level `GRANT`, not a view
     rename — site/js already queries these table names directly in three files; a rename would
     require updating and re-testing all three for no added benefit. `model` deliberately stays
-    public on `summaries` (bill-page.js displays it as attribution, not an internal id). No
-    site-code changes needed. Draft-then-apply, awaiting Lance's apply.
+    public on `summaries` (bill-page.js displays it as attribution, not an internal id). ~~No
+    site-code changes needed. Draft-then-apply, awaiting Lance's apply.~~ **APPLIED AND VERIFIED
+    LIVE 2026-08-03** (stale "awaiting apply" wording corrected 2026-08-05). It also turned out to
+    need one site-code change after all: `bill-page.js`'s summary fetch had no explicit `select=`,
+    and Postgres denies a bare `select=*` outright when a role holds only column-level grants —
+    that query started 401ing the moment 0025 landed, and was fixed the same pass (commit
+    `9884b18`).
     ---
     **Prior gameplan review, 2026-08-03 (6-angle workflow + direct live verification) — findings
     folded into the current status above, kept here for the supporting detail:** `site/` confirmed

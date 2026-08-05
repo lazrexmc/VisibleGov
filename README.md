@@ -5,7 +5,9 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-04): back end live and accurate.** Three rounds of work landed 2026-08-03 →
+**Status (2026-08-05): back end live and accurate; the Cloudflare Pages deploy is the active next
+step.** *(Fresh session? Read the RESUME HERE block at the top of `TODO.md` — it is verified
+against the live database and outranks this paragraph, which is a dated snapshot.)* Three rounds of work landed 2026-08-03 →
 2026-08-04: a comprehensive 8-domain accuracy audit (4 critical findings fixed and verified live),
 a senior-engineering-lens audit (21 findings confirmed, 19 fixed live the same day, 2 deliberately
 deferred as minor), and a 3-layer `refresh_vote_aggregates()` timeout saga (a Supabase gateway
@@ -83,7 +85,12 @@ in `package.json` for the ones with an `npm run` shortcut already wired up).
 
 **Run the tests:** `npm test` (equivalently `node --test`) — the whole suite, zero live network/DB
 calls anywhere in it. Gate any commit on the extracted `ℹ fail N` line, never the process's exit
-status (`PLAYBOOK_DELTA.md` lesson 14).
+status (`PLAYBOOK_DELTA.md` lesson 14). **Run it in a clean shell — never one where you have
+`source`d `.env`**: that exports the Supabase credentials into the test process and turns 2
+CORRECT tests red (`review-logic.test.js` asserts the review server degrades when no DB client is
+configured; with credentials present it correctly returns 200 where the test correctly expects
+500). Verified deterministically 2026-08-05 — see `PLAYBOOK_DELTA.md` lesson 27. Every CLI takes
+`--env-file=.env` specifically so credentials never leak into the shell.
 
 **Run the site locally:** `node scripts/serve-site.js` — a zero-dependency static server (port
 8990) mirroring Cloudflare Pages' own `site/_redirects` rewrites and geocode Function passthrough,

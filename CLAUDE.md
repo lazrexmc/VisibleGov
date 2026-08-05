@@ -11,6 +11,21 @@ politicians propose into plain language so anyone can quickly understand what a 
 and why, and surface how legislators voted on it - so people can hold their own representatives
 accountable with real information instead of spin.
 
+> ## ⏱ FRESH SESSION: READ `TODO.md`'s "RESUME HERE" BLOCK FIRST
+> It is at the very top of `TODO.md`, was verified against the live database on 2026-08-05, and is
+> the ONLY place that states what is actually open. Everything else — including the status
+> paragraph directly below — is a historical snapshot that goes stale. **The next thing to do is
+> the Cloudflare Pages deploy**; Lance's "backend first" gate is MET (he raised the deploy himself
+> 2026-08-05, after four audit passes produced zero criticals). Do not defer it or re-litigate it.
+>
+> **Two traps that will cost you a session if you hit them cold:**
+> 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct
+>    tests fail (expected-500-got-200 in `review-logic.test.js`, which assert behavior when no DB
+>    client is configured). Verified deterministically. Run tests in a clean shell; every CLI takes
+>    `--env-file=.env` for this reason.
+> 2. **All 30 migrations (0001-0029 + 0018a) are APPLIED.** Nothing awaits an apply. Older text
+>    anywhere in this repo saying a migration is "drafted, awaiting Lance" is stale.
+
 **Status (2026-08-04): backend live and accurate — two independent audits ran end-to-end 2026-08-03
 (an 8-domain accuracy audit, then a senior-engineering-lens audit), 4 + 19 findings fixed and
 verified live respectively; public site built, merged, and independently verified in a real browser
@@ -28,11 +43,12 @@ missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-bac
 like this one). **Live numbers: run `npm run status`** — any count typed into a doc goes stale
 within the hour.
 
-**If you are a fresh session, read these first, in order:** `PLAYBOOK_DELTA.md` (reusable traps —
-25 lessons, several earned the hard way in THIS repo), `TODO.md` NOW (what's actually open — read
-the whole section, don't assume the top entry is the newest open item; as of 2026-08-04 the top
-entry is a fully-resolved `refresh_vote_aggregates()` timeout saga kept there for its paper trail,
-and the genuinely open threads are further down, including the Cloudflare deploy spec brainstorm),
+**If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
+`TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
+27 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 26/27 are the two
+most recent and most expensive), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+section below it is a long historical record where most entries are already resolved, so do NOT
+read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
 own staleness banner as of 2026-08-03, defer to `TODO.md`/live checks for migration-applied state),
 then the most recent `CHATLOG.md` entries (why things are the way they are).
@@ -57,14 +73,23 @@ misstatement. **Site-content decision: ship as-is, no caveat needed** — resolv
 verified there's no meaningful gap for a caveat to warn about. See `TODO.md` NOW, "MO House
 per-legislator vote coverage," for the full evidence trail.
 
-**Two standing rules that are easy to violate without noticing:**
-- **Cloudflare deploy is a MILESTONE, not a task** (Lance, 2026-07-31): *"I'm only interested in
+**Three standing rules that are easy to violate without noticing:**
+- ~~**Cloudflare deploy is a MILESTONE, not a task**~~ **— GATE MET 2026-08-05, this rule is now
+  SATISFIED, not waived.** Lance's original ruling (2026-07-31) was: *"I'm only interested in
   starting the cloudflare portion once the entire backend is locked in and accurate, otherwise I'm
-  troubleshooting two systems back and forth and each change takes 3 steps instead of 1."* Do not
-  propose deploying until he says the backend feels solid.
+  troubleshooting two systems back and forth and each change takes 3 steps instead of 1."* He
+  raised the deploy himself on 2026-08-05 after four audit passes produced zero criticals, and it
+  was recommended yes. **The deploy is now the active next task** — see `TODO.md`'s RESUME HERE
+  block. Do not use the old wording to defer it. (If he ever says the backend feels shaky again,
+  believe him over this note — the instinct behind the rule is still sound.)
 - **Gate commits on the extracted test fail-count, never on a pipeline's exit status.** `grep`
   exits 0 when it finds the line reading `fail 15`. This mistake shipped a red suite twice in this
   repo. See PLAYBOOK_DELTA lesson 14 for the mechanical form.
+- **Never `source .env` in a shell you then run `node --test` in.** It exports the Supabase
+  credentials into the test process, so `review-logic.test.js`'s "no DB client configured" tests
+  get a real client and 2 CORRECT tests go red (expected 500, got 200). Verified deterministically
+  2026-08-05. Run tests in a clean shell; batching a live `curl` check and a test run into one
+  shell invocation is how this happens. See PLAYBOOK_DELTA lesson 27.
 
 ## The one non-negotiable
 

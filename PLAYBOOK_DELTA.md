@@ -586,3 +586,36 @@ scans on large tables, or any node whose estimate looks obviously wrong relative
 execution time. Reach for `EXPLAIN (ANALYZE, BUFFERS)` — which DOES execute the query and carries
 real timeout/lock risk — only once the plain plan looks sane and the question is genuinely "how long
 does this correctly-planned query take," not "why is this slow at all."
+
+## Lesson 27 — A contaminated SHELL can turn correct tests red; the failure looks exactly like a real regression (2026-08-05)
+
+Ran a batched health check before a documentation pass: `set -a && source .env && set +a`, then a
+few live `curl` probes, then `node --test` — all in one shell invocation, to save round trips. The
+suite came back **RED**: `review-logic.test.js`, `expected: 500, actual: 200`. Nothing had changed
+in that file for days.
+
+The instinct that saves time here is the one that almost didn't fire: *before* bisecting commits,
+ask whether the TEST HARNESS was run in the same conditions as the last green run. It wasn't.
+Sourcing `.env` exported `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` into the shell, `node --test`
+inherited them, and two tests that specifically assert the review server degrades cleanly when **no
+database client is configured** got a real client instead — so the endpoint correctly returned 200
+where the test correctly expected 500. Both the test and the code were right. The shell was wrong.
+
+Proven deterministically rather than assumed (the whole point — an intermittent-looking failure
+invites hand-waving): same file, clean shell → 181 pass / 0 fail; identical command with `.env`
+sourced first → 179 pass / **2 fail**. Reproducible on demand, in both directions.
+
+**Rule: never `source` a `.env` into a shell that will also run the test suite.** This repo already
+had the correct pattern everywhere — every CLI is invoked as `node --env-file=.env <path>`, which
+scopes credentials to ONE process precisely so they cannot leak into sibling commands. Batching a
+live-data `curl` check together with `node --test` for convenience is what defeats it.
+
+**The generalizable trap, worth carrying to any project:** a test that asserts behavior under
+*absent* configuration is silently coupled to the environment it runs in, and therefore to whatever
+else the shell did first. That coupling is invisible in the test file, invisible in the diff, and
+invisible in the failure message — which names an HTTP status, not an env var. Two defenses, both
+cheap: run the suite in its own clean invocation always (not just when you suspect something), and
+when a "no config present" test fails, suspect the harness before the code. The cost of missing
+this is a bisect hunt for a break that never happened — the exact tail-chasing this playbook exists
+to prevent, and doubly expensive right before a machine restart when a red suite reads as "we broke
+something and don't know what."

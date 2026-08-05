@@ -1,3 +1,15 @@
+> # ⏱ STOP — READ THIS FIRST (banner refreshed 2026-08-05)
+> **This document is a dated palimpsest and is NOT the place to learn current state.** Go to the
+> `⏱ RESUME HERE` block at the top of `TODO.md` — it was verified against the live database on
+> 2026-08-05 and is the only doc in this repo that claims to be current.
+>
+> Specifically, as of 2026-08-05, this file is stale on: migration counts (there are now **30**
+> files, 0001-0029 + 0018a, **ALL applied** — nothing awaits an apply anywhere in this repo), test
+> counts, open-queue counts, and the Cloudflare deploy status (**the gate is MET and the deploy is
+> the active next task**). This file remains genuinely useful for one thing only: the deep
+> narrative history of WHY the project is shaped the way it is. Read it for reasoning, never for
+> state.
+
 # VisibleGov — Controller Catch-Up Briefing
 
 > **⚠️ Migration-applied-state claims in this document are NOT authoritative — added 2026-08-03,
