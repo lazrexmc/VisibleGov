@@ -2553,3 +2553,56 @@ you. It cannot make a resumed session remember the *reasoning* behind every past
 still lives in this CHATLOG, and the audit passes proved that reading it in full is what separates
 a real finding from a superseded design being re-litigated (the quarantine finding earlier today is
 the clean example). A future session that skips the log will still make that class of mistake.
+
+---
+
+## 2026-08-05 (continued) — pre-deploy items 1-3 built
+
+Lance, after the resume-path check came back clean: "yes" — knock out the three buildable
+pre-deploy items while he decides 3a/3d (Cloudflare account, preview-build policy).
+
+**1. `geocode.js` security headers.** Cloudflare Pages Functions do NOT inherit `site/_headers` —
+that file governs static assets, and a Function's `Response` is returned as-is. So production
+`/geocode` shipped with zero CSP, zero nosniff, zero Referrer-Policy while every static page
+carried the full set. Local dev hid it completely: `serve-site.js` parses `_headers` at runtime and
+applies it to every response *including* `/geocode`, so dev looked correct and only production was
+bare — a dev/prod divergence is exactly why this survived until a deploy review.
+
+The design problem was avoiding a third source of truth. Today there are two consumers with one
+source (`_headers`, and `serve-site.js` which parses that same file). A Function can't read the
+filesystem at runtime, so it genuinely needs the values as a static import — a real second copy.
+Made safe the only honest way: `site/js/security-headers.js` holds the constant, and a test asserts
+it equals `_headers`' `/*` block key-for-key and value-for-value. **Proved the guard red-then-green**
+by injecting a deliberate mismatch (`Referrer-Policy: origin`) and watching the suite fail, then
+restoring — per this project's own lesson 15, a guard nobody has seen fail is not yet a guard. All
+five response paths were covered, error paths included; a second test walks every `Response.json`
+call in the file and fails if any lacks the headers, so a future edit can't quietly add a bare one.
+Follows the `copy.js` precedent (one string, two consumers, pinned by a test).
+
+**2. `site/404.html`.** Built with zero JavaScript, deliberately: every other page boots a
+`/js/boot-*.js` module that reads Supabase, but a 404 page has to render when the thing that broke
+IS the site (partial deploy, bad path, CSP problem). A 404 that depends on a working data layer can
+show a blank screen at the exact moment someone needs an explanation. No footer either — rather
+than hand-copy a static lookalike of what `mountFooter` renders at runtime and create another
+drifting copy. Also updated `serve-site.js` to serve it on a miss (it returned `text/plain "Not
+found"`), so dev exercises the real 404 page instead of hiding the difference — the same
+dev-mirrors-production principle whose absence caused item 1.
+
+**3. `0030_revoke_refresh_aggregates_from_authenticated.sql` — drafted, awaiting Lance's apply.**
+All four definitions of the function (0018/0022/0026/0027) revoke PUBLIC and `anon` but never
+`authenticated`, so Supabase's stock default EXECUTE grant on public-schema functions survived every
+pass — while 0018's own comment claimed it was "executable only by service_role." Scoped honestly in
+the migration header: not anon-reachable, the public site never authenticates, so exploiting it
+needs a real signup; with one, a caller could invoke a SECURITY DEFINER function that writes
+`ingestion_runs` rows feeding the public freshness signal, contending locks with the legitimate
+pg_cron tick. A nuisance/contention vector, not data integrity — and trivially closed. Timing is
+deliberate: deploying publishes `site/config.js` with the real project URL, so the gap doesn't
+change but its discoverability does.
+
+The accompanying test asserts the revoke exists **and sorts after the newest definition** of the
+function. That ordering is the real guard: `CREATE OR REPLACE` preserves privileges, but a
+`DROP`+`CREATE` resets them to schema defaults and would silently hand `authenticated` its EXECUTE
+back — so a future redefinition is forced to re-assert the revoke.
+
+Suite 2,316 → **2,321**, `ℹ fail 0`, run in a clean shell per lesson 27. Items 1 and 2 need nothing
+from Lance; item 3 is the only outstanding apply in the repo, and 3a/3d remain his calls.

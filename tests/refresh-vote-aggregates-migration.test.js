@@ -59,3 +59,40 @@ test('sanity: as of this writing, 0027 is genuinely the file this test is exerci
   const latest = findLatestRefreshVoteAggregatesDefinition();
   assert.equal(latest.file, '0027_pg_cron_refresh_aggregates.sql');
 });
+
+// ---- 2026-08-05: `authenticated` must not hold EXECUTE on this SECURITY DEFINER function ----
+//
+// Deep-audit phase-1 finding: all four definitions (0018/0022/0026/0027) revoke PUBLIC and `anon`
+// but never `authenticated`, so Supabase's stock default grant on public-schema functions survived
+// every pass — while 0018's own comment claimed the function was "executable only by service_role".
+// Migration 0030 revokes it. This test keeps it revoked.
+//
+// Ordering matters, and that is the real point: `CREATE OR REPLACE FUNCTION` preserves privileges,
+// but `DROP FUNCTION` + `CREATE` resets them to schema defaults and would silently hand
+// `authenticated` its EXECUTE back. So the revoke must sort AFTER whichever migration most
+// recently defines the function — if a future migration redefines it, the revoke has to be
+// re-asserted after that point, and this assertion is what forces the question.
+
+const REVOKE_AUTHENTICATED_RE = /revoke\s+(?:execute|all)\s+on\s+function\s+refresh_vote_aggregates\(\)\s+from\s+authenticated/i;
+
+test('a migration revokes EXECUTE on refresh_vote_aggregates() from `authenticated`, and it sorts AFTER the latest definition of the function', () => {
+  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
+
+  const revokingFiles = files.filter((f) => REVOKE_AUTHENTICATED_RE.test(readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')));
+  assert.ok(
+    revokingFiles.length > 0,
+    'no migration revokes EXECUTE on refresh_vote_aggregates() from `authenticated` — Supabase grants '
+      + 'EXECUTE on new public-schema functions to anon/authenticated/service_role by default, and this '
+      + 'is a SECURITY DEFINER function that writes ingestion_runs. Add the revoke (see migration 0030).',
+  );
+
+  const latestDefinition = findLatestRefreshVoteAggregatesDefinition();
+  const latestRevoke = revokingFiles[revokingFiles.length - 1];
+  assert.ok(
+    latestRevoke > latestDefinition.file,
+    `the newest migration defining refresh_vote_aggregates() (${latestDefinition.file}) sorts AFTER the `
+      + `newest one revoking EXECUTE from \`authenticated\` (${latestRevoke}). CREATE OR REPLACE keeps `
+      + 'privileges, but a DROP+CREATE resets them to Supabase\'s defaults and silently restores '
+      + '`authenticated`\'s EXECUTE — re-assert the revoke in (or after) the redefining migration.',
+  );
+});

@@ -12,8 +12,10 @@ check — that drift is exactly what has burned this project before.*
 
 **State, verified live 2026-08-05 (not copied from another doc):**
 - Git clean, `main` @ `9fcc555`, everything pushed. Suite **2,316 pass / 0 fail**.
-- Migrations: **30 files on disk (0001-0029 + 0018a), ALL applied live.** Nothing is awaiting an
-  apply. `0027`/`0028`/`0029` (the refresh-timeout saga) are applied and confirmed working.
+- Migrations: **31 files on disk (0001-0030 + 0018a).** 0001-0029 are ALL applied live;
+  **`0030` is drafted and awaiting Lance's apply** (the one-line `authenticated` revoke, pre-deploy
+  item 3 below — the ONLY thing in this repo currently awaiting an apply).
+  `0027`/`0028`/`0029` (the refresh-timeout saga) are applied and confirmed working.
 - Data: votes 10,119 · vote_casts 1,467,896 · bills 38,254 · legislators 1,607 ·
   vote_duplicates **62** (was 59 — the live ingest path is now marking new duplicates on its own,
   which is the dedup feature working end-to-end, not drift).
@@ -30,13 +32,20 @@ and accurate first") is **MET** — he raised the deploy himself on 2026-08-05 a
 yes. Four audit passes produced **zero criticals**. Do not defer this or re-litigate the gate.
 Resume the spec brainstorm where it paused (2026-08-03, sections 2 and 4 unpresented), not from
 scratch. Short pre-deploy list, mostly already decided:
-1. **`geocode.js` security headers** — decided, NOT built. Pages Functions do not inherit
-   `_headers`, so `/geocode` currently returns zero CSP/security headers.
-2. **`site/404.html`** — decided, NOT built.
-3. **One-line `revoke execute on function refresh_vote_aggregates() from authenticated;`** — a real
-   finding from the 2026-08-05 audit (every redefinition revoked `anon` but never `authenticated`,
-   so Supabase's default grant survives on a `SECURITY DEFINER` function). Matters slightly more
-   once deploying makes the project URL public.
+1. ✅ **`geocode.js` security headers — BUILT 2026-08-05.** All five response paths (incl. the
+   400/502 error paths) now set them from `site/js/security-headers.js`, a shared constant the
+   Function can statically import (Pages Functions have no filesystem, so they cannot read
+   `_headers` the way `serve-site.js` does). That constant is a genuine second copy of the values,
+   so drift is caught mechanically: a test asserts it equals `_headers`' `/*` block key-for-key —
+   **verified red-then-green** by injecting a deliberate mismatch.
+2. ✅ **`site/404.html` — BUILT 2026-08-05.** Deliberately zero JavaScript (it has to render when
+   the thing that broke IS the site). `serve-site.js` now serves it on a miss too, so local dev
+   mirrors what Pages does in production instead of hiding the difference behind a text/plain body.
+3. ✅ **Revoke drafted: `0030_revoke_refresh_aggregates_from_authenticated.sql`** —
+   **AWAITING LANCE'S APPLY** (draft-then-apply; this is the only item here that needs him). One
+   statement, no schema change, safe to re-run. A migration test now asserts the revoke exists AND
+   sorts after the newest definition of the function — `CREATE OR REPLACE` preserves privileges,
+   but a `DROP`+`CREATE` would silently restore `authenticated`'s EXECUTE.
 4. **Two questions only Lance can answer:** (3a) fresh Cloudflare account, or the existing one
    holding `helpingpeoplehelpingpeople.com`? (3d) Pages auto-builds a public preview for every
    branch — since `site/config.js` carries the real anon key, every preview is a live copy of the

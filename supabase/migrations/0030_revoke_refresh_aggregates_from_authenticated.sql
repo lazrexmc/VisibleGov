@@ -1,0 +1,55 @@
+-- 0030 (draft — Lance applies). Closes a real authorization gap on refresh_vote_aggregates():
+-- the `authenticated` role can still EXECUTE it.
+--
+-- FOUND: 2026-08-05 deep code audit (phase 1, migrations 0021-0029 domain), reported as an
+-- important security/authorization finding and confirmed by reading all four definitions.
+--
+-- THE GAP. Supabase's stock default privileges grant EXECUTE on every new function in the `public`
+-- schema to `anon`, `authenticated`, and `service_role`. Every migration that has ever defined this
+-- function — 0018:279-281, 0022:232-234, 0026:53-55, 0027:112-114 — revokes PUBLIC and revokes
+-- `anon`, then grants `service_role`:
+--
+--     revoke all on function refresh_vote_aggregates() from public;
+--     revoke all on function refresh_vote_aggregates() from anon;
+--     grant execute on function refresh_vote_aggregates() to service_role;
+--
+-- `authenticated` is never named, so its default-privilege EXECUTE survives all four passes. That
+-- reads as an oversight rather than intent: 0018:254's own comment describes the function as
+-- "executable only by service_role", and every SELECT grant in these same files deliberately pairs
+-- `anon, authenticated` as the two public-facing roles — this is the one place the pair was split
+-- without saying why. (The `revoke ... from public` lines do not cover it: revoking from PUBLIC
+-- does not remove a privilege already held by a named role.)
+--
+-- WHY IT MATTERS, stated honestly rather than inflated. This is NOT anon-reachable, and the public
+-- site never authenticates — it uses the anon key only, so no ordinary visitor can reach this.
+-- Exploiting it requires a valid `authenticated` JWT, which means a real Supabase signup (enabled
+-- by default; this project has no evidence of having disabled it). With one, a caller could invoke
+-- `/rest/v1/rpc/refresh_vote_aggregates` at will. The function is SECURITY DEFINER and, since 0027,
+-- writes `ingestion_runs` rows that feed `public_freshness` — the public site's own freshness
+-- signal. Post-0029 the refresh completes in ~19s rather than timing out, so such calls now
+-- genuinely succeed: repeated invocations mean real REFRESH MATERIALIZED VIEW CONCURRENTLY work
+-- and lock contention against the legitimate pg_cron tick (0027's own header records an observed
+-- "lock timeout" from exactly that kind of overlap), plus junk rows in the run ledger.
+-- `authenticated`'s own role-level statement_timeout (8s) caps any single call, so this is a
+-- nuisance/contention vector, not a data-integrity one — but it is trivially closed.
+--
+-- The timing is deliberate: this is being applied as a pre-deploy item. Deploying to Cloudflare
+-- Pages publishes `site/config.js`, which carries the real Supabase project URL — making the
+-- endpoint trivially discoverable by anyone who views source, where today it sits in a private
+-- repo. The gap is the same either way; the discoverability is not.
+--
+-- SCOPE. One statement, no schema change, no data touched, nothing else's privileges altered. It
+-- is safe to run at any time and safe to re-run (REVOKE on an already-revoked privilege is a
+-- no-op, not an error). Nothing in this project calls this function as `authenticated`: the
+-- pg_cron job runs as `postgres` (superuser, unaffected by GRANT/REVOKE), and
+-- scripts/refresh-aggregates.js uses the service-role key.
+--
+-- NOTE FOR A FUTURE REDEFINITION OF THIS FUNCTION. `CREATE OR REPLACE FUNCTION` preserves existing
+-- privileges, so this revoke survives an in-place redefinition — unlike the `SET statement_timeout`
+-- config that 0022 silently dropped and 0026 had to restore (see 0026's header for that saga). A
+-- `DROP FUNCTION` + `CREATE`, however, resets privileges to the schema defaults and would silently
+-- restore `authenticated`'s EXECUTE. If this function is ever dropped and recreated rather than
+-- replaced, re-apply this revoke in the same migration.
+-- `tests/refresh-vote-aggregates-migration.test.js` enforces this mechanically.
+
+revoke execute on function refresh_vote_aggregates() from authenticated;

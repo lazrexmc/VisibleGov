@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 
 import {
@@ -1361,6 +1362,66 @@ test('Every page (index, trust, person, legislator, bill) serves the footer moun
       assert.ok(bootJs.body.includes(module), `${boot}: imports its page module (${module})`);
       assert.ok(bootJs.body.includes(`${bootstrap}()`), `${boot}: calls its own bootstrap function (${bootstrap})`);
     }
+  } finally {
+    server.close();
+  }
+});
+
+// ---- Pre-deploy items (2026-08-05): Pages Functions do not inherit site/_headers, and the
+// site had no 404.html. See site/js/security-headers.js's header for the full reasoning. ----
+
+test('FUNCTION_SECURITY_HEADERS matches site/_headers /* EXACTLY — the drift guard that makes a second copy safe', async () => {
+  const { FUNCTION_SECURITY_HEADERS } = await import('../site/js/security-headers.js');
+  const fromHeadersFile = loadSiteHeaders(SITE_ROOT);
+  // Key-for-key and value-for-value. A Pages Function cannot read _headers at runtime, so these
+  // values MUST be duplicated as a static import — this assertion is the entire reason that
+  // duplication is acceptable. Tighten the real CSP without updating the constant (or the
+  // reverse) and this fails loudly instead of shipping a Function with a stale policy.
+  assert.deepEqual(
+    FUNCTION_SECURITY_HEADERS,
+    fromHeadersFile,
+    'site/js/security-headers.js has drifted from site/_headers\' /* block — update both together',
+  );
+});
+
+test('geocode Function sets the security headers on EVERY response path, including the 400 and 502 error paths', async () => {
+  const source = await readFile(new URL('../site/functions/geocode.js', import.meta.url), 'utf8');
+  const responseCalls = source.match(/Response\.json\([^;]*?\);/gs) ?? [];
+  assert.ok(responseCalls.length >= 4, `expected several Response.json calls, found ${responseCalls.length}`);
+  for (const call of responseCalls) {
+    assert.match(
+      call,
+      /headers:\s*FUNCTION_SECURITY_HEADERS/,
+      `a geocode Response.json call omits the security headers — Pages Functions do NOT inherit `
+        + `site/_headers, so an unheadered response ships bare to production:\n${call}`,
+    );
+  }
+});
+
+test('site/404.html exists, is JS-free, and links back to the directory', async () => {
+  const html = await readFile(new URL('../site/404.html', import.meta.url), 'utf8');
+  assert.match(html, /Page not found/i);
+  assert.match(html, /href="\/"/, '404 page must offer a way back to the directory');
+  // Deliberately zero JS: this page has to render when the thing that broke IS the site.
+  assert.doesNotMatch(html, /<script/i, 'the 404 page must not depend on any script to render');
+});
+
+test('createSiteServer: a missing path serves the real 404.html as HTML (dev mirrors what Pages does in production)', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  try {
+    const res = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/no-such-page`, (r) => {
+        let body = '';
+        r.on('data', (c) => { body += c; });
+        r.on('end', () => resolve({ status: r.statusCode, headers: r.headers, body }));
+      }).on('error', reject);
+    });
+    assert.equal(res.status, 404);
+    assert.match(res.headers['content-type'], /text\/html/);
+    assert.match(res.body, /Page not found/i);
+    assert.ok(res.headers['content-security-policy'], 'the 404 page still carries the CSP');
   } finally {
     server.close();
   }

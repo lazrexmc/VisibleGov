@@ -205,8 +205,20 @@ export function createSiteServer(siteRoot = SITE_ROOT) {
       res.writeHead(200, { ...securityHeaders, 'content-type': contentTypeFor(filePath) });
       res.end(body);
     } catch {
-      res.writeHead(404, { ...securityHeaders, 'content-type': 'text/plain; charset=utf-8' });
-      res.end('Not found');
+      // Serve site/404.html, the same file Cloudflare Pages serves automatically for an unmatched
+      // path in production (2026-08-05). Dev mirroring production is the whole point of this
+      // server — a text/plain "Not found" here would mean the real 404 page is never exercised
+      // locally, which is precisely how the /geocode missing-headers gap stayed invisible until a
+      // deploy review caught it. Falls back to plain text if 404.html is somehow absent: a missing
+      // error page must not turn into a 500, and the status code is the load-bearing part.
+      try {
+        const notFoundBody = await readFile(path.join(siteRoot, '404.html'));
+        res.writeHead(404, { ...securityHeaders, 'content-type': 'text/html; charset=utf-8' });
+        res.end(notFoundBody);
+      } catch {
+        res.writeHead(404, { ...securityHeaders, 'content-type': 'text/plain; charset=utf-8' });
+        res.end('Not found');
+      }
     }
   });
 }

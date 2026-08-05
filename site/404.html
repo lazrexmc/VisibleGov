@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisibleGov — page not found</title>
+  <link rel="icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <!-- site/404.html — Cloudflare Pages serves this automatically for any path that matches no
+       static asset and no _redirects rule. Decided in the 2026-08-03 deploy-spec brainstorm
+       (section 1), built 2026-08-05 as a pre-deploy item.
+
+       Deliberately ZERO JavaScript. Every other page in this site boots a /js/boot-*.js module
+       that reads from Supabase; this one must render correctly when the thing that failed IS the
+       site — a partial deploy, a bad path, a CSP problem. A 404 page that itself depends on a
+       working data layer is a 404 page that can show a blank screen at the exact moment someone
+       needs an explanation. Static markup only, no fetch, no module script.
+
+       No nav element is included because the site has no persistent nav bar — index.html is the
+       directory and the only hub, so a plain link back to it IS the navigation. The footer is
+       likewise omitted rather than faked: site/js/render.js's mountFooter fills #site-footer with
+       real source attribution at runtime, and hand-copying a static lookalike here would create
+       exactly the kind of second, drifting copy this project keeps getting bitten by. -->
+  <main id="app">
+    <h1>VisibleGov</h1>
+    <section aria-label="Page not found">
+      <h2>Page not found</h2>
+      <p>There's nothing at this address. The link may be mistyped, or it may point to a page that
+        no longer exists.</p>
+      <p><a href="/">Go to the legislator directory</a></p>
+    </section>
+  </main>
+</body>
+</html>

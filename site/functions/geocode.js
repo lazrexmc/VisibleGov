@@ -30,6 +30,13 @@
 // https://geocoding.geo.census.gov/geocoder/vintages?benchmark=Public_AR_Current&format=json,
 // which lists `Current_Current` as the one paired with benchmark `Public_AR_Current`) — the
 // brief's verbatim value would have shipped a function that always fails.
+// SECURITY HEADERS (2026-08-03 deploy-spec review, built 2026-08-05 as a pre-deploy item):
+// Cloudflare Pages Functions do NOT inherit site/_headers — that file governs static assets only,
+// and a Function's Response is returned as-is. Every response below therefore sets the headers
+// explicitly from the shared constant. See site/js/security-headers.js for why that constant
+// exists and how drift against site/_headers is caught mechanically.
+import { FUNCTION_SECURITY_HEADERS } from '../js/security-headers.js';
+
 export function buildUpstreamUrl(address) {
   const u = new URL('https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress');
   u.searchParams.set('address', address);
@@ -45,10 +52,10 @@ export async function onRequestPost({ request }) {
     const body = await request.json();
     address = body?.address;
   } catch {
-    return Response.json({ error: 'address required' }, { status: 400 });
+    return Response.json({ error: 'address required' }, { status: 400, headers: FUNCTION_SECURITY_HEADERS });
   }
   if (typeof address !== 'string' || !address || address.length > 500) {
-    return Response.json({ error: 'address required' }, { status: 400 });
+    return Response.json({ error: 'address required' }, { status: 400, headers: FUNCTION_SECURITY_HEADERS });
   }
   // LOW-12 (task-8 review): the try opens one line earlier than before, so buildUpstreamUrl
   // itself (a defensive-only concern — `new URL(...)`/searchParams never throw on a plain string
@@ -57,9 +64,9 @@ export async function onRequestPost({ request }) {
   try {
     const u = buildUpstreamUrl(address);
     const upstream = await fetch(u, { signal: AbortSignal.timeout(15000) });
-    if (!upstream.ok) return Response.json({ error: 'geocoder unavailable' }, { status: 502 });
-    return Response.json(await upstream.json());
+    if (!upstream.ok) return Response.json({ error: 'geocoder unavailable' }, { status: 502, headers: FUNCTION_SECURITY_HEADERS });
+    return Response.json(await upstream.json(), { headers: FUNCTION_SECURITY_HEADERS });
   } catch {
-    return Response.json({ error: 'geocoder unavailable' }, { status: 502 });
+    return Response.json({ error: 'geocoder unavailable' }, { status: 502, headers: FUNCTION_SECURITY_HEADERS });
   }
 }
