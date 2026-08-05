@@ -34,6 +34,10 @@ import {
   runCorrectGlossaryRefutedClaims,
   GLOSSARY_CORRUPTED_TEXT_FIXES,
   runCorrectGlossaryCorruptedText,
+  SB914_FLAG_ID,
+  SB914_CANONICAL_VOTE_ID,
+  SB914_SUPERSEDED_VOTE_ID,
+  runCorrectSb914Reconcile,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -2140,5 +2144,102 @@ test('runCorrectData: "legiscan-source-split" runs only that correction, and it 
   }), { which: 'all', dryRun: true });
   assert.ok(all.legiscanSourceSplit, '"all" must include this correction');
   assert.ok(all.moStatus);
+  assert.equal(all.failures.length, 0);
+});
+
+// ---- runCorrectSb914Reconcile ----
+
+function seedSb914Fixture() {
+  return {
+    vote_reconciliation_flags: [
+      {
+        id: SB914_FLAG_ID,
+        vote_id: SB914_CANONICAL_VOTE_ID,
+        source_a: 'legiscan',
+        source_b: 'mo-senate-web',
+        discrepancy: {
+          reason: 'hard_mismatch',
+          hard_mismatches: ['yea: legiscan 29 vs primary 28', 'nay: legiscan 0 vs primary 1'],
+        },
+        resolved: false,
+      },
+      // an unrelated open flag — proves this correction never touches anything but its own named row
+      {
+        id: 'other-flag-1', vote_id: 'other-vote-1', source_a: 'legiscan', source_b: 'mo-house-xml', discrepancy: { reason: 'primary_cast_data_not_comparable' }, resolved: false,
+      },
+    ],
+    vote_duplicates: [],
+  };
+}
+
+test('runCorrectSb914Reconcile: dry-run reports what it would do, without writing', async () => {
+  const client = makeFakeClient(seedSb914Fixture());
+  const result = await runCorrectSb914Reconcile(client, { dryRun: true });
+  assert.equal(result.matched, 1);
+  assert.equal(result.willInsertDuplicate, true);
+  assert.equal(result.willResolveFlag, true);
+  assert.equal(client.tables.vote_duplicates.length, 0, 'dry-run must not write');
+  assert.equal(client.tables.vote_reconciliation_flags.find((f) => f.id === SB914_FLAG_ID).resolved, false, 'dry-run must not resolve the flag');
+});
+
+test('runCorrectSb914Reconcile: live run inserts the vote_duplicates exclusion and resolves the flag with a recorded adjudication', async () => {
+  const client = makeFakeClient(seedSb914Fixture());
+  const result = await runCorrectSb914Reconcile(client, { dryRun: false });
+  assert.equal(result.matched, 1);
+  assert.equal(result.failures.length, 0);
+
+  const dup = client.tables.vote_duplicates[0];
+  assert.ok(dup, 'must insert a vote_duplicates row');
+  assert.equal(dup.canonical_vote_id, SB914_CANONICAL_VOTE_ID);
+  assert.equal(dup.superseded_vote_id, SB914_SUPERSEDED_VOTE_ID);
+  assert.match(dup.reason, /trust senate journals/i);
+
+  const flag = client.tables.vote_reconciliation_flags.find((f) => f.id === SB914_FLAG_ID);
+  assert.equal(flag.resolved, true);
+  assert.ok(flag.discrepancy.adjudication, 'must record the adjudication in the flag\'s own discrepancy JSON');
+  assert.equal(flag.discrepancy.adjudication.ruling, 'trust senate journals');
+  assert.equal(flag.discrepancy.reason, 'hard_mismatch', 'must preserve the original discrepancy fields, not overwrite them');
+});
+
+test('runCorrectSb914Reconcile: a second run is a clean, honest no-op — never inserts a duplicate exclusion or re-writes the flag', async () => {
+  const client = makeFakeClient(seedSb914Fixture());
+  await runCorrectSb914Reconcile(client, { dryRun: false });
+  const second = await runCorrectSb914Reconcile(client, { dryRun: false });
+  assert.equal(second.matched, 0);
+  assert.equal(second.alreadyApplied, true);
+  assert.equal(client.tables.vote_duplicates.length, 1, 'must not insert a second exclusion row');
+});
+
+test('runCorrectSb914Reconcile: never touches an unrelated open reconciliation flag', async () => {
+  const client = makeFakeClient(seedSb914Fixture());
+  await runCorrectSb914Reconcile(client, { dryRun: false });
+  const other = client.tables.vote_reconciliation_flags.find((f) => f.id === 'other-flag-1');
+  assert.equal(other.resolved, false);
+});
+
+test('runCorrectSb914Reconcile: reports flag_not_found rather than throwing if the named flag is missing', async () => {
+  const client = makeFakeClient({ vote_reconciliation_flags: [], vote_duplicates: [] });
+  const result = await runCorrectSb914Reconcile(client, { dryRun: false });
+  assert.equal(result.matched, 0);
+  assert.equal(result.failures[0].reason, 'flag_not_found');
+});
+
+test('parseArgs: accepts sb914-reconcile as a <which> value', () => {
+  assert.equal(parseArgs(['sb914-reconcile']).which, 'sb914-reconcile');
+  assert.equal(parseArgs(['sb914-reconcile', '--dry-run']).dryRun, true);
+});
+
+test('runCorrectData: "sb914-reconcile" runs only that correction, and is excluded from "all" (a specific human ruling on a named flag must be requested explicitly, same as pierson-split)', async () => {
+  const seed = seedSb914Fixture();
+
+  const onlyThis = await runCorrectData(makeFakeClient(seed), { which: 'sb914-reconcile', dryRun: true });
+  assert.ok(onlyThis.sb914Reconcile);
+  assert.equal(onlyThis.sb914Reconcile.matched, 1);
+  assert.equal(onlyThis.moStatus, undefined);
+
+  const all = await runCorrectData(makeFakeClient({
+    ...seed, bills: [], votes: [], vote_casts: [],
+  }), { which: 'all', dryRun: true });
+  assert.equal(all.sb914Reconcile, undefined, '"all" must NOT include this correction');
   assert.equal(all.failures.length, 0);
 });

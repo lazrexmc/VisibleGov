@@ -214,14 +214,18 @@
     decision. Out of scope for the Cloudflare deploy spec regardless (Lance's own 2026-08-03
     scoping call) — but per the correction above, it was never actually a deploy-relevant gap in
     the first place once "zero votes on the page" is replaced with the real, verified picture.
-  - **SB 914 adjudication** (`vote_reconciliation_flags` id `214a2be0`) — checked the ALREADY-
-    CACHED LegiScan dataset directly (zero new API calls): **Sen. Mike Moon and Sen. Steven Roberts
-    are entirely absent from LegiScan's own roll-call vote data for this roll call** — not counted
-    as yea/nay/absent, just missing (LegiScan's own total field says 32, not the Senate's real 34).
-    The MO Senate journal (primary source, 28-1, Moon's NAY) is the more complete record; LegiScan's
-    "29-0" reflects an incomplete 32-of-34 tally, not genuine unanimity. Strong evidence, but
-    attributing a specific senator's public vote record is Lance's call, not an agent's to make
-    silently — needs his adjudication of the flag.
+  - ✅ **SB 914 adjudication — RESOLVED and applied live, 2026-08-05.** Lance's ruling: "trust
+    senate journals." Applied via a new `correct-data.js sb914-reconcile` correction (dry-run then
+    live, 7 new tests, full suite green throughout): inserted a `vote_duplicates` exclusion marking
+    the LegiScan row (`1adec486...`, incomplete 32-of-34 "29-0") superseded by the mo-senate-web
+    primary-source row (`adf5aa8a...`, complete 28-1, Moon's NAY) — implementing CONTROLLER RULING
+    3 via the existing dedup mechanism, non-destructively (neither `votes` row touched or deleted).
+    Flag `214a2be0` marked resolved, with the full adjudication (who/what/why) appended into its
+    own `discrepancy` JSON alongside the original evidence — verified live. This also fixed a
+    second, previously-unnoticed problem found while applying it: this vote had been double-counted
+    in the public aggregates (both the LegiScan and primary-source rows were live and uncounted-out
+    simultaneously) — now correctly excluded to one canonical row, same as every other deduped
+    cross-source vote.
   - ✅ **`legiscan_datasets` locked down — applied and verified live 2026-08-03.** Migration `0024`
     (dropped the `anon_read` policy) ran clean. Verified with both keys: anon now gets `200 []`
     (RLS default-deny, matching `vote_reconciliation_flags`' posture), service-role still sees all

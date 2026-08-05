@@ -99,13 +99,13 @@ export function parseArgs(argv) {
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | sb914-reconcile | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'glossary-corrupted-text', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'glossary-corrupted-text', 'sb914-reconcile', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | sb914-reconcile | all`);
   }
   out.which = which;
   return out;
@@ -1765,6 +1765,95 @@ export async function runCorrectGlossaryCorruptedText(client, { dryRun = false }
 }
 
 // ============================================================================================
+// Correction — sb914-reconcile: manually-adjudicated hard-mismatch reconciliation (2026-08-05)
+// ============================================================================================
+//
+// FOUND LIVE: vote_reconciliation_flags 214a2be0-7e14-4941-a024-31d1e9223b05 flagged a genuine
+// tally CONTRADICTION (not the usual "insufficient data to compare" case) between two votes rows
+// for the same real Senate floor vote (SB 914, 3rd reading, 2026-02-12): the primary-source
+// mo-senate-web row (adf5aa8a-2a2d-42d1-be77-75aa3cedb889, 33 real individually-recorded casts,
+// 28-1) and a competing legiscan row (1adec486-4dc3-4961-a334-ad465f9b1503, 29-0). Investigated:
+// Sen. Mike Moon and Sen. Steven Roberts are entirely absent from LegiScan's own roll-call data for
+// this vote — not counted as yea/nay/absent, just missing (LegiScan's total is 32, not the Senate's
+// real 34) — which is why 29-0 looks unanimous. runCorrectVoteDuplicates's own findCleanPrimaryMatch
+// (:1380) explicitly declines to auto-match anything with a hard or soft mismatch, by design — this
+// is exactly the class of case that mechanism correctly punts to a human rather than silently
+// picking a side. Lance's ruling, verbatim: "trust senate journals." Implements CONTROLLER RULING 3
+// ("the primary-source row wins for display whenever both exist for the same real floor vote") via
+// the existing `vote_duplicates` mechanism — the same non-destructive shape as the vote-duplicates
+// backfill above (neither votes row is ever deleted or rewritten; only an exclusion record is
+// added), so a future correction can still see and re-examine both original records. Also marks the
+// reconciliation flag resolved, appending the adjudication (who/what/why) into the flag's own
+// `discrepancy` JSON so the ruling has a permanent, self-documenting audit trail rather than a bare
+// boolean flip.
+//
+// Named, one-time correction (not a general "adjudicate any flag" tool) — same precedent as
+// pierson-split/mo-house-chamber. Deliberately EXCLUDED from 'all': a specific human ruling on a
+// specific flagged case must be named explicitly, never swept in by omission.
+export const SB914_FLAG_ID = '214a2be0-7e14-4941-a024-31d1e9223b05';
+export const SB914_CANONICAL_VOTE_ID = 'adf5aa8a-2a2d-42d1-be77-75aa3cedb889'; // mo-senate-web (primary source, 28-1)
+export const SB914_SUPERSEDED_VOTE_ID = '1adec486-4dc3-4961-a334-ad465f9b1503'; // legiscan (29-0, missing 2 senators)
+
+export async function runCorrectSb914Reconcile(client, { dryRun = false } = {}) {
+  const { data: existingDupRows, error: dupErr } = await client
+    .from('vote_duplicates').select('id').eq('superseded_vote_id', SB914_SUPERSEDED_VOTE_ID);
+  if (dupErr) return { matched: 0, failures: [{ reason: 'vote_duplicates_lookup_failed', error: String(dupErr.message ?? dupErr) }] };
+  const existingDup = (existingDupRows ?? [])[0] ?? null;
+
+  const { data: flagRows, error: flagErr } = await client
+    .from('vote_reconciliation_flags').select('id,resolved,discrepancy').eq('id', SB914_FLAG_ID);
+  if (flagErr) return { matched: 0, failures: [{ reason: 'flag_lookup_failed', error: String(flagErr.message ?? flagErr) }] };
+  const flagRow = (flagRows ?? [])[0] ?? null;
+  if (!flagRow) return { matched: 0, failures: [{ reason: 'flag_not_found' }] };
+
+  if (existingDup && flagRow.resolved) {
+    return {
+      matched: 0, alreadyApplied: true, canonicalVoteId: SB914_CANONICAL_VOTE_ID, supersededVoteId: SB914_SUPERSEDED_VOTE_ID, failures: [],
+    };
+  }
+
+  if (dryRun) {
+    return {
+      matched: 1,
+      willInsertDuplicate: !existingDup,
+      willResolveFlag: !flagRow.resolved,
+      canonicalVoteId: SB914_CANONICAL_VOTE_ID,
+      supersededVoteId: SB914_SUPERSEDED_VOTE_ID,
+      failures: [],
+    };
+  }
+
+  if (!existingDup) {
+    const { error: insErr } = await client.from('vote_duplicates').insert({
+      canonical_vote_id: SB914_CANONICAL_VOTE_ID,
+      superseded_vote_id: SB914_SUPERSEDED_VOTE_ID,
+      reason: "SB 914 3rd-reading, 2026-02-12 — Lance adjudicated 2026-08-05, 'trust senate journals': LegiScan is missing 2 senators (Moon, Roberts) from this roll call entirely, making its 29-0 an incomplete 32-of-34 tally, not genuine unanimity. mo-senate-web's primary-source 28-1 (Moon voting NAY) is the complete, trustworthy record.",
+    }).select().single();
+    if (insErr) return { matched: 0, failures: [{ reason: 'vote_duplicates_insert_failed', error: String(insErr.message ?? insErr) }] };
+  }
+
+  if (!flagRow.resolved) {
+    const adjudicatedDiscrepancy = {
+      ...flagRow.discrepancy,
+      adjudication: {
+        ruling: 'trust senate journals',
+        by: 'Lance',
+        date: '2026-08-05',
+        rationale: 'LegiScan is missing Sen. Mike Moon and Sen. Steven Roberts entirely from this roll call (32-of-34 tally), not genuinely unanimous; the MO Senate journal (mo-senate-web) carries the complete 28-1 record with Moon voting NAY.',
+        canonicalVoteId: SB914_CANONICAL_VOTE_ID,
+        supersededVoteId: SB914_SUPERSEDED_VOTE_ID,
+      },
+    };
+    const { error: updErr } = await client.from('vote_reconciliation_flags').update({ resolved: true, discrepancy: adjudicatedDiscrepancy }).eq('id', SB914_FLAG_ID);
+    if (updErr) return { matched: 1, failures: [{ reason: 'flag_resolve_failed', error: String(updErr.message ?? updErr) }] };
+  }
+
+  return {
+    matched: 1, canonicalVoteId: SB914_CANONICAL_VOTE_ID, supersededVoteId: SB914_SUPERSEDED_VOTE_ID, failures: [],
+  };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
@@ -1841,6 +1930,12 @@ export async function runCorrectData(client, {
   if (which === 'glossary-corrupted-text') {
     out.glossaryCorruptedText = await runCorrectGlossaryCorruptedText(client, { dryRun });
     failures.push(...out.glossaryCorruptedText.failures);
+  }
+  // sb914-reconcile (2026-08-05) — a specific, manually-adjudicated flag resolution, excluded from
+  // 'all' for the same "operator must name it explicitly" reason as pierson-split.
+  if (which === 'sb914-reconcile') {
+    out.sb914Reconcile = await runCorrectSb914Reconcile(client, { dryRun });
+    failures.push(...out.sb914Reconcile.failures);
   }
 
   out.failures = failures;
