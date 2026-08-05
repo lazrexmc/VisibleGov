@@ -12,9 +12,11 @@ check — that drift is exactly what has burned this project before.*
 
 **State, verified live 2026-08-05 (not copied from another doc):**
 - Git clean, `main` @ `9fcc555`, everything pushed. Suite **2,316 pass / 0 fail**.
-- Migrations: **31 files on disk (0001-0030 + 0018a).** 0001-0029 are ALL applied live;
-  **`0030` is drafted and awaiting Lance's apply** (the one-line `authenticated` revoke, pre-deploy
-  item 3 below — the ONLY thing in this repo currently awaiting an apply).
+- Migrations: **31 files on disk (0001-0030 + 0018a), ALL applied live.** Nothing is awaiting an
+  apply. `0030` applied 2026-08-05 and verified via `information_schema.role_routine_grants`:
+  `service_role` + `postgres` hold EXECUTE, `authenticated` is gone. Both legitimate callers
+  re-confirmed working after the revoke (pg_cron ticks as `postgres`; the scheduler's own
+  `refresh-aggregates.js` call as `service_role`).
   `0027`/`0028`/`0029` (the refresh-timeout saga) are applied and confirmed working.
 - Data: votes 10,119 · vote_casts 1,467,896 · bills 38,254 · legislators 1,607 ·
   vote_duplicates **62** (was 59 — the live ingest path is now marking new duplicates on its own,
@@ -41,11 +43,13 @@ scratch. Short pre-deploy list, mostly already decided:
 2. ✅ **`site/404.html` — BUILT 2026-08-05.** Deliberately zero JavaScript (it has to render when
    the thing that broke IS the site). `serve-site.js` now serves it on a miss too, so local dev
    mirrors what Pages does in production instead of hiding the difference behind a text/plain body.
-3. ✅ **Revoke drafted: `0030_revoke_refresh_aggregates_from_authenticated.sql`** —
-   **AWAITING LANCE'S APPLY** (draft-then-apply; this is the only item here that needs him). One
-   statement, no schema change, safe to re-run. A migration test now asserts the revoke exists AND
-   sorts after the newest definition of the function — `CREATE OR REPLACE` preserves privileges,
-   but a `DROP`+`CREATE` would silently restore `authenticated`'s EXECUTE.
+3. ✅ **`0030_revoke_refresh_aggregates_from_authenticated.sql` — APPLIED AND VERIFIED LIVE
+   2026-08-05.** `information_schema.role_routine_grants` now shows only `service_role` and
+   `postgres` with EXECUTE; `authenticated` is gone. Verified the revoke did not break either
+   legitimate caller (pg_cron runs as `postgres`, the scheduler as `service_role` — both observed
+   succeeding after the apply). A migration test asserts the revoke exists AND sorts after the
+   newest definition of the function — `CREATE OR REPLACE` preserves privileges, but a
+   `DROP`+`CREATE` would silently restore `authenticated`'s EXECUTE.
 4. **Two questions only Lance can answer:** (3a) fresh Cloudflare account, or the existing one
    holding `helpingpeoplehelpingpeople.com`? (3d) Pages auto-builds a public preview for every
    branch — since `site/config.js` carries the real anon key, every preview is a live copy of the

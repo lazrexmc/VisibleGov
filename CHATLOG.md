@@ -2606,3 +2606,49 @@ back — so a future redefinition is forced to re-assert the revoke.
 
 Suite 2,316 → **2,321**, `ℹ fail 0`, run in a clean shell per lesson 27. Items 1 and 2 need nothing
 from Lance; item 3 is the only outstanding apply in the repo, and 3a/3d remain his calls.
+
+---
+
+## 2026-08-05 (continued) — 0030 applied and verified; Cloudflare domain question opened
+
+**Lance:** "0030 has been ran and as for cloudflare, I have an account already but I already own the
+domain helpingpeoplehelpingpeople.com so I'll just have cloudflare take over for namechange if that
+works?"
+
+**0030 verified, not assumed.** Role privileges are not queryable over PostgREST, so this needed a
+read-only query in the SQL editor rather than an agent-side check — handed Lance the
+`information_schema.role_routine_grants` one-liner instead of declaring it done. Result:
+`service_role` and `postgres` hold EXECUTE, **`authenticated` absent**, `anon`/PUBLIC absent. The
+gap is closed.
+
+Then checked the thing that actually could have gone wrong: whether revoking a privilege on a
+`SECURITY DEFINER` function broke its legitimate callers. It did not — `ingestion_runs` shows
+`refresh-aggregates` succeeding at 19:30/19:00/18:30 (pg_cron, running as `postgres`) plus an
+off-boundary 19:15 (the scheduler's own `scripts/refresh-aggregates.js` call, running as
+`service_role`). Both paths confirmed alive after the revoke. This is the check worth doing every
+time a grant changes: proving the thing you removed access from is the ONLY thing that lost access.
+
+**On the domain — surfaced a real risk rather than just saying yes.** Read the LinkedUmp
+PLAYBOOK_DELTA in place first, because this project's own §7 lesson 5 explicitly says to do that at
+deploy time. It paid: LinkedUmp documents a four-phase deploy runbook (Pages deploy → verify on
+pages.dev → zone/NS → custom domain → auth config) and a specific trap — *"Registrar cruft fights
+your DNS. Fresh domains carry a parking A record, a parking `www` CNAME, five `eforward` MX and an
+SPF TXT — all dead weight after moving nameservers (the forwarding only works on Namecheap DNS).
+Delete all imported records before attaching the Pages custom domain."*
+
+Three points made back to Lance: (1) "Cloudflare takes over" conflates two separate things — moving
+NAMESERVERS (free, keeps the registrar, all he needs) versus TRANSFERRING REGISTRATION (optional,
+unrelated); (2) an NS move affects the **entire zone**, not just the `visiblegov.` subdomain he
+plans to use, so if that domain carries email forwarding the move breaks it unless MX records are
+recreated in Cloudflare — the one mistake here with off-project consequences; (3) a lower-risk
+alternative exists for a subdomain deploy: leave DNS where it is and add a single CNAME, touching
+nothing else on the domain. **Asked him directly whether that domain currently carries email**
+before recommending one over the other — the answer changes the recommendation.
+
+Also reiterated his own 2026-07-28 sequencing ruling, which LinkedUmp's runbook independently
+agrees with: **`.pages.dev` first, verify, custom domain as a separate later phase.** Doing the
+deploy and the DNS at once means a broken result is ambiguous between the two. One LinkedUmp lesson
+checked and explicitly ruled NOT applicable: "different origins = different sessions" concerns
+logins, and this site has no auth at all (anon key only).
+
+Awaiting his answer on the email question before any DNS work.
