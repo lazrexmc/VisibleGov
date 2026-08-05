@@ -20,6 +20,21 @@ import { isMissingRelationError } from '../lib/db.js';
 //           LegiScan vote/casts must NOT be stored (`votes`/`vote_casts` are anon-readable;
 //           possibly-contradicted data must never be publicly reachable — "never store what you
 //           can't reconcile", the same rule reconcileLegiscanTallies already enforces internally).
+//           *** SUPERSEDED — READ THIS BEFORE TRUSTING THE PARAGRAPH ABOVE (corrected 2026-08-05).
+//           The `quarantine:true` branch described here is UNREACHABLE from every production path
+//           today, deliberately: the 2026-07-29 final-review doctrine (CHATLOG; fuzz-confirmed over
+//           200k inputs) established that "machine-proven quarantine is a null set at this data
+//           granularity — correspondence proof requires tally agreement, contradiction requires
+//           disagreement; cross-source disputes are permanently human-review flags with
+//           primary-wins display." Quarantine was RETIRED in favor of store-and-flag; Branch B
+//           hardcodes `quarantine:false` and both tally-unique paths make a hard mismatch
+//           impossible by construction, so `retractLegiscanVoteIfStored` only ever fires via
+//           injected test fakes. This project therefore does NOT have the property the paragraph
+//           above asserts: a contradicted pair IS publicly reachable (both rows stored, both
+//           counted) until a human adjudicates its flag. That adjudication is now a real tool —
+//           `correct-data.js reconcile-flag` (2026-08-05) — rather than the one-off-per-flag code
+//           change it used to require. The paragraph is left in place because the `quarantine`
+//           return value it documents still exists in this function's contract and its tests. ***
 //         - only the combined present/not_voting/absent bucket differs (yea/nay both agree) ->
 //           `quarantine:false`, vote STORES anyway — this is an accounting difference between two
 //           sources' own category vocabularies (the Present-category caveat below), not a

@@ -85,27 +85,55 @@ const SOURCE = 'correct-data';
 
 // ---- args ----
 
+// reconcile-flag's own string flags (2026-08-05). Kept as a small table rather than five more
+// `if` arms so adding an operand later can't drift the "value is required" check.
+const RECONCILE_FLAG_STRING_FLAGS = new Map([
+  ['--flag-id', 'flagId'],
+  ['--ruling', 'ruling'],
+  ['--rationale', 'rationale'],
+  ['--canonical-vote', 'canonicalVoteId'],
+  ['--superseded-vote', 'supersededVoteId'],
+]);
+
 export function parseArgs(argv) {
-  const out = { dryRun: false, limit: null, which: null };
+  const out = {
+    dryRun: false,
+    limit: null,
+    which: null,
+    flagId: null,
+    ruling: null,
+    rationale: null,
+    canonicalVoteId: null,
+    supersededVoteId: null,
+  };
   const positionals = [];
   let i = 0;
   while (i < argv.length) {
     const key = argv[i];
     if (key === '--dry-run') { out.dryRun = true; i += 1; continue; }
     if (key === '--limit') { out.limit = parsePositiveIntegerFlag(argv[i + 1], '--limit'); i += 2; continue; }
+    if (RECONCILE_FLAG_STRING_FLAGS.has(key)) {
+      const value = argv[i + 1];
+      if (value === undefined || String(value).startsWith('--')) {
+        throw new Error(`${key} requires a value`);
+      }
+      out[RECONCILE_FLAG_STRING_FLAGS.get(key)] = String(value);
+      i += 2;
+      continue;
+    }
     if (key.startsWith('--')) throw new Error(`unknown flag: ${key}`);
     positionals.push(key);
     i += 1;
   }
   if (positionals.length !== 1) {
     throw new Error(
-      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | sb914-reconcile | all), got ${positionals.length} — `
+      `correct-data: requires exactly one <which> argument (mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | sb914-reconcile | reconcile-flag | all), got ${positionals.length} — `
         + 'no default, so an operator can never accidentally run every correction at once',
     );
   }
   const [which] = positionals;
-  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'glossary-corrupted-text', 'sb914-reconcile', 'all'].includes(which)) {
-    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | sb914-reconcile | all`);
+  if (!['mo-status', 'mo-1969-dates', 'party-normalize', 'mo-2026-session-merge', 'mo-2026-vote-reconcile', 'legiscan-source-split', 'vote-duplicates', 'mo-house-chamber', 'pierson-split', 'glossary-refuted-claims', 'glossary-corrupted-text', 'sb914-reconcile', 'reconcile-flag', 'all'].includes(which)) {
+    throw new Error(`correct-data: unknown <which> "${which}" — expected mo-status | mo-1969-dates | party-normalize | mo-2026-session-merge | mo-2026-vote-reconcile | legiscan-source-split | vote-duplicates | mo-house-chamber | pierson-split | glossary-refuted-claims | glossary-corrupted-text | sb914-reconcile | reconcile-flag | all`);
   }
   out.which = which;
   return out;
@@ -1854,11 +1882,179 @@ export async function runCorrectSb914Reconcile(client, { dryRun = false } = {}) 
 }
 
 // ============================================================================================
+// Correction — reconcile-flag: the GENERAL adjudication tool for vote_reconciliation_flags
+// (2026-08-05)
+// ============================================================================================
+//
+// WHY THIS EXISTS. `sb914-reconcile` above is hardcoded to one flag UUID. The 2026-08-05 phase-2
+// deep audit found that was not an oversight in that one correction — it was the ONLY mechanism
+// this project had for resolving a reconciliation flag at all, against 107 open flags live
+// (61 hard_mismatch, 22 no_tally_corresponding_primary, 20 primary_cast_data_not_comparable,
+// 4 ambiguous_tally_match). Draining that queue one bespoke code change per flag is not a
+// workflow. This generalizes exactly what sb914-reconcile does, with the operator supplying the
+// ruling instead of the code hardcoding it.
+//
+// WHAT IT IS *NOT*: an automatic adjudicator. It never inspects tallies, never picks a winner,
+// never infers which source is right. That is deliberate and load-bearing — this project's whole
+// premise is that attributing a specific legislator's public vote record is a HUMAN call
+// (CLAUDE.md's one non-negotiable; the same reason sb914-reconcile waited on Lance's own "trust
+// senate journals" ruling rather than acting on strong evidence already in hand). The operator
+// names both vote rows explicitly; this tool only executes and records the decision.
+//
+// ON QUARANTINE, since the audit finding that prompted this reads as if it were broken:
+// `crossCheckAgainstPrimarySource`'s quarantine path being unreachable from production is BY
+// DESIGN, not a defect — the 2026-07-29 final-review doctrine (CHATLOG, fuzz-confirmed over 200k
+// inputs) established that "machine-proven quarantine is a null set at this data granularity —
+// correspondence proof requires tally agreement, contradiction requires disagreement; cross-source
+// disputes are permanently human-review flags with primary-wins display." Quarantine was correctly
+// RETIRED in favor of store-and-flag. The real gap was never the missing quarantine; it was the
+// missing human-adjudication path, which is this.
+//
+// TWO SHAPES, because the four flag reasons need different outcomes:
+//   1. Supersede (the SB 914 / hard_mismatch shape): the operator names which vote row wins and
+//      which loses; a `vote_duplicates` row excludes the loser from every public surface (all
+//      three matviews, public_votes, public_vote_feed) via the existing dedup mechanism. Neither
+//      `votes` row is ever deleted or rewritten — same non-destructive design as migration 0022.
+//   2. Resolve-only (no vote ids supplied): records a ruling and closes the flag without any dedup
+//      write. The honest outcome for "both rows are genuinely distinct real votes," "no counterpart
+//      exists after all," or "not actionable until the MO House roster gap is fixed" — the last of
+//      which is most of the 20 primary_cast_data_not_comparable flags.
+//
+// SAFETY GUARDS, all mechanical:
+//   - Both vote ids must be supplied together or not at all (a half-specified dedup is refused,
+//     never silently downgraded to resolve-only — that would quietly not do what was asked).
+//   - One of the two supplied ids MUST equal the flag's own `vote_id`. A typo'd or unrelated uuid
+//     would otherwise let this tool supersede a vote that has nothing to do with the flag being
+//     adjudicated — the single worst thing it could do, and the cheapest to prevent.
+//   - Both vote rows must actually exist (a stale uuid from an old report is refused, not written).
+//   - `--ruling` and `--rationale` are both REQUIRED: an adjudication with no recorded reasoning
+//     is exactly the "rubber-stamp" failure mode trust model v3 exists to prevent, and this writes
+//     to a public-facing data surface.
+//   - Idempotent: a second run against an already-adjudicated flag is a clean, honest no-op.
+//   - The full adjudication (ruling, rationale, operator, date, both vote ids) is appended INTO
+//     the flag's own `discrepancy` JSON alongside the original evidence, never replacing it —
+//     the ruling and the evidence it was made on stay together permanently.
+export const RECONCILE_FLAG_OPERATOR = 'Lance';
+
+export async function runReconcileFlag(client, {
+  flagId, ruling, rationale, canonicalVoteId = null, supersededVoteId = null, dryRun = false,
+} = {}) {
+  const fail = (reason, extra = {}) => ({ matched: 0, failures: [{ reason, ...extra }] });
+
+  if (!flagId) return fail('flag_id_required');
+  if (!ruling) return fail('ruling_required');
+  if (!rationale) return fail('rationale_required');
+
+  const wantsDedup = Boolean(canonicalVoteId) || Boolean(supersededVoteId);
+  if (wantsDedup && !(canonicalVoteId && supersededVoteId)) {
+    return fail('both_vote_ids_required', {
+      detail: '--canonical-vote and --superseded-vote must be supplied together (a half-specified '
+        + 'dedup is refused rather than silently downgraded to a resolve-only adjudication)',
+    });
+  }
+  if (wantsDedup && canonicalVoteId === supersededVoteId) {
+    return fail('canonical_and_superseded_identical', { voteId: canonicalVoteId });
+  }
+
+  const { data: flagRows, error: flagErr } = await client
+    .from('vote_reconciliation_flags').select('id,vote_id,source_a,source_b,discrepancy,resolved').eq('id', flagId);
+  if (flagErr) return fail('flag_lookup_failed', { error: String(flagErr.message ?? flagErr) });
+  const flagRow = (flagRows ?? [])[0] ?? null;
+  if (!flagRow) return fail('flag_not_found', { flagId });
+
+  // Typo guard: the adjudication must actually concern the flagged vote.
+  if (wantsDedup && flagRow.vote_id !== canonicalVoteId && flagRow.vote_id !== supersededVoteId) {
+    return fail('vote_ids_unrelated_to_flag', {
+      flagId, flagVoteId: flagRow.vote_id, canonicalVoteId, supersededVoteId,
+      detail: 'neither supplied vote id matches this flag\'s own vote_id — refusing to supersede a '
+        + 'vote row this flag does not concern',
+    });
+  }
+
+  let existingDup = null;
+  if (wantsDedup) {
+    const { data: voteRows, error: voteErr } = await client
+      .from('votes').select('id,source_key').in('id', [canonicalVoteId, supersededVoteId]);
+    if (voteErr) return fail('votes_lookup_failed', { error: String(voteErr.message ?? voteErr) });
+    const foundIds = new Set((voteRows ?? []).map((r) => r.id));
+    const missing = [canonicalVoteId, supersededVoteId].filter((id) => !foundIds.has(id));
+    if (missing.length > 0) return fail('vote_row_not_found', { missing });
+
+    const { data: dupRows, error: dupErr } = await client
+      .from('vote_duplicates').select('id,canonical_vote_id').eq('superseded_vote_id', supersededVoteId);
+    if (dupErr) return fail('vote_duplicates_lookup_failed', { error: String(dupErr.message ?? dupErr) });
+    existingDup = (dupRows ?? [])[0] ?? null;
+    if (existingDup && existingDup.canonical_vote_id !== canonicalVoteId) {
+      return fail('already_superseded_by_different_canonical', {
+        supersededVoteId, existingCanonicalVoteId: existingDup.canonical_vote_id, requestedCanonicalVoteId: canonicalVoteId,
+      });
+    }
+  }
+
+  const alreadyDone = flagRow.resolved && (!wantsDedup || Boolean(existingDup));
+  if (alreadyDone) {
+    return {
+      matched: 0, alreadyApplied: true, flagId, canonicalVoteId, supersededVoteId, failures: [],
+    };
+  }
+
+  if (dryRun) {
+    return {
+      matched: 1,
+      flagId,
+      mode: wantsDedup ? 'supersede' : 'resolve-only',
+      willInsertDuplicate: wantsDedup && !existingDup,
+      willResolveFlag: !flagRow.resolved,
+      canonicalVoteId,
+      supersededVoteId,
+      ruling,
+      failures: [],
+    };
+  }
+
+  if (wantsDedup && !existingDup) {
+    const { error: insErr } = await client.from('vote_duplicates').insert({
+      canonical_vote_id: canonicalVoteId,
+      superseded_vote_id: supersededVoteId,
+      reason: `reconciliation flag ${flagId} adjudicated ${RECONCILE_FLAG_OPERATOR ? `by ${RECONCILE_FLAG_OPERATOR} ` : ''}— ruling: ${ruling}. ${rationale}`,
+    }).select().single();
+    if (insErr) return fail('vote_duplicates_insert_failed', { error: String(insErr.message ?? insErr) });
+  }
+
+  if (!flagRow.resolved) {
+    const adjudicatedDiscrepancy = {
+      ...(flagRow.discrepancy ?? {}),
+      adjudication: {
+        ruling,
+        rationale,
+        by: RECONCILE_FLAG_OPERATOR,
+        mode: wantsDedup ? 'supersede' : 'resolve-only',
+        canonicalVoteId,
+        supersededVoteId,
+      },
+    };
+    const { error: updErr } = await client
+      .from('vote_reconciliation_flags').update({ resolved: true, discrepancy: adjudicatedDiscrepancy }).eq('id', flagId);
+    if (updErr) return { matched: 1, failures: [{ reason: 'flag_resolve_failed', error: String(updErr.message ?? updErr) }] };
+  }
+
+  return {
+    matched: 1,
+    flagId,
+    mode: wantsDedup ? 'supersede' : 'resolve-only',
+    canonicalVoteId,
+    supersededVoteId,
+    failures: [],
+  };
+}
+
+// ============================================================================================
 // Top-level dispatcher
 // ============================================================================================
 
 export async function runCorrectData(client, {
   which, dryRun = false, limit = null, runId = null,
+  flagId = null, ruling = null, rationale = null, canonicalVoteId = null, supersededVoteId = null,
 } = {}) {
   const out = { mode: dryRun ? 'dry-run' : 'live', which };
   const failures = [];
@@ -1937,6 +2133,16 @@ export async function runCorrectData(client, {
     out.sb914Reconcile = await runCorrectSb914Reconcile(client, { dryRun });
     failures.push(...out.sb914Reconcile.failures);
   }
+  // reconcile-flag (2026-08-05) — the general adjudication tool. Excluded from 'all' for the
+  // strongest version of the same reason as pierson-split/sb914-reconcile: it encodes a specific
+  // human ruling about a specific legislator's public vote record, and it requires operand flags
+  // ('all' supplies none, so it could only ever fail). An operator must name it explicitly.
+  if (which === 'reconcile-flag') {
+    out.reconcileFlag = await runReconcileFlag(client, {
+      flagId, ruling, rationale, canonicalVoteId, supersededVoteId, dryRun,
+    });
+    failures.push(...out.reconcileFlag.failures);
+  }
 
   out.failures = failures;
   return out;
@@ -1954,7 +2160,16 @@ async function main() {
   }
 
   if (args.dryRun) {
-    const report = await runCorrectData(client, { which: args.which, dryRun: true, limit: args.limit });
+    const report = await runCorrectData(client, {
+      which: args.which,
+      dryRun: true,
+      limit: args.limit,
+      flagId: args.flagId,
+      ruling: args.ruling,
+      rationale: args.rationale,
+      canonicalVoteId: args.canonicalVoteId,
+      supersededVoteId: args.supersededVoteId,
+    });
     console.log(JSON.stringify({ source: SOURCE, ...report }, null, 2));
     return;
   }
@@ -1962,7 +2177,15 @@ async function main() {
   const runId = await openRun(client, SOURCE);
   try {
     const report = await runCorrectData(client, {
-      which: args.which, dryRun: false, limit: args.limit, runId,
+      which: args.which,
+      dryRun: false,
+      limit: args.limit,
+      runId,
+      flagId: args.flagId,
+      ruling: args.ruling,
+      rationale: args.rationale,
+      canonicalVoteId: args.canonicalVoteId,
+      supersededVoteId: args.supersededVoteId,
     });
     const status = report.failures.length === 0 ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, { which: args.which, report });

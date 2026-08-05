@@ -2423,3 +2423,65 @@ that has NOT been through the adversarial re-verification step both prior audits
 project's own history (the 2026-08-03 accuracy audit refuted 3 of its own findings under
 adversarial pressure) says that step routinely kills or reshapes real-looking findings. Treat the
 list as high-quality leads, not as confirmed defects, until phase 4 or an equivalent pass runs.
+
+---
+
+## 2026-08-05 (continued) — "can we fix #1?": the general flag-adjudication tool, and half a finding retracted
+
+**Lance:** "can we fix #1?" — the phase-2 headline finding: reconciliation-flag quarantine is dead
+code, and ~48 open flags each need a bespoke one-off correction like the `sb914-reconcile` written
+earlier the same day.
+
+**Checked the premise before building anything, and half of it did not survive.** Grepped CHATLOG
+for the quarantine design history: the 2026-07-29 final whole-branch review established, and
+fuzz-confirmed over 200k inputs, that *"machine-proven quarantine is a null set at this data
+granularity — correspondence proof requires tally agreement, contradiction requires disagreement;
+cross-source disputes are permanently human-review flags with primary-wins display."* Quarantine
+being unreachable from production is therefore a **deliberate, reviewed, evidence-backed retirement**
+— not the accidental breakage phase 2 read it as. Building "make quarantine work again" would have
+re-litigated a settled ruling using a single unverified agent's framing as the reason. This is
+exactly the failure mode phase 4 (the adversarial pass that never ran) exists to catch, and exactly
+what this project's own history predicts: the 2026-08-03 accuracy audit refuted 3 of its own 16
+findings under adversarial pressure.
+
+**What was genuinely real, and got fixed:**
+
+1. **A false safety claim in the code.** `legiscan-votes.js`'s module header still asserted
+   "possibly-contradicted data must never be publicly reachable" — a property the code deliberately
+   abandoned. Corrected in place (marked SUPERSEDED with the doctrine, its date, and the reason)
+   rather than deleted, since the `quarantine` return value that paragraph documents still exists in
+   the function's contract and its tests. A code comment claiming a safety guarantee the code does
+   not have is worse than no comment.
+
+2. **No general adjudication path — the actual gap.** `sb914-reconcile` was hardcoded to one flag
+   UUID; there was no way to resolve flag N without writing new code. Built
+   `correct-data.js reconcile-flag`, generalizing exactly what that one-off did.
+
+**Design, and what it deliberately refuses to do.** It never inspects tallies, never picks a winner,
+never infers which source is right — the operator names both vote rows and supplies a mandatory
+`--ruling` and `--rationale`. That is load-bearing, not laziness: attributing a specific
+legislator's public vote record is a human call (CLAUDE.md's one non-negotiable, and the same
+reason SB 914 waited on Lance's own "trust senate journals" ruling despite strong evidence already
+being in hand). Two modes, because the four flag reasons need different outcomes: **supersede**
+(names canonical + superseded, writes the `vote_duplicates` exclusion — the SB 914 / `hard_mismatch`
+shape, non-destructive, neither `votes` row ever touched) and **resolve-only** (no vote ids — closes
+the flag with a recorded ruling and no dedup write; the honest outcome for "both rows are genuinely
+distinct real votes," "no counterpart exists after all," or "not actionable until the MO House
+roster gap is fixed," which covers most of the 20 `primary_cast_data_not_comparable` flags).
+
+**Mechanical guards, every one tested:** one of the two supplied vote ids MUST equal the flag's own
+`vote_id` — the typo guard against superseding an innocent, unrelated vote row, which is the single
+worst thing this tool could do and the cheapest to prevent (**verified live**: fed it two real,
+valid, but unrelated vote uuids from the SB 914 pair and it correctly refused with
+`vote_ids_unrelated_to_flag`); both vote rows must actually exist; a half-specified dedup is refused
+outright rather than silently downgraded to resolve-only (silently not doing what was asked is worse
+than failing); re-superseding under a different canonical row is refused; ruling and rationale are
+both mandatory; re-running is a clean, honest no-op. The full adjudication is appended INTO the
+flag's own `discrepancy` JSON alongside the original evidence, never replacing it — the ruling and
+the evidence it rested on stay together permanently.
+
+**Live queue is 107 open flags, not the ~48 the older audit cited** — 61 `hard_mismatch`, 22
+`no_tally_corresponding_primary`, 20 `primary_cast_data_not_comparable`, 4 `ambiguous_tally_match`.
+Draining it is now operator work instead of one code change per flag. Nothing was written live this
+pass: 10 new tests, a dry-run against a real open flag, and the refusal path verified against real
+data. Full suite 2,306 → 2,316, `ℹ fail 0`, gated on the extracted count as always.

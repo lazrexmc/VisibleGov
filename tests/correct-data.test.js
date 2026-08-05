@@ -38,6 +38,7 @@ import {
   SB914_CANONICAL_VOTE_ID,
   SB914_SUPERSEDED_VOTE_ID,
   runCorrectSb914Reconcile,
+  runReconcileFlag,
 } from '../src/cli/correct-data.js';
 
 // Data-corrections CLI (.superpowers/sdd/2026-07-31-data-corrections/brief.md). Two REVERSIBLE
@@ -2242,4 +2243,173 @@ test('runCorrectData: "sb914-reconcile" runs only that correction, and is exclud
   }), { which: 'all', dryRun: true });
   assert.equal(all.sb914Reconcile, undefined, '"all" must NOT include this correction');
   assert.equal(all.failures.length, 0);
+});
+
+// ---- runReconcileFlag (the general adjudication tool) ----
+
+const RF_FLAG_ID = 'flag-1';
+const RF_PRIMARY_VOTE = 'vote-primary-1'; // the flag's own vote_id
+const RF_LEGISCAN_VOTE = 'vote-legiscan-1';
+
+function seedReconcileFlagFixture({ resolved = false } = {}) {
+  return {
+    vote_reconciliation_flags: [
+      {
+        id: RF_FLAG_ID,
+        vote_id: RF_PRIMARY_VOTE,
+        source_a: 'legiscan',
+        source_b: 'mo-senate-web',
+        discrepancy: { reason: 'hard_mismatch', hard_mismatches: ['yea: legiscan 29 vs primary 28'] },
+        resolved,
+      },
+      {
+        id: 'other-flag', vote_id: 'other-vote', source_a: 'legiscan', source_b: 'mo-house-xml', discrepancy: { reason: 'ambiguous_tally_match' }, resolved: false,
+      },
+    ],
+    votes: [
+      { id: RF_PRIMARY_VOTE, source_key: 'mo-senate-web-2026-x' },
+      { id: RF_LEGISCAN_VOTE, source_key: 'legiscan-2239-rollcall-1632662' },
+      { id: 'unrelated-vote', source_key: 'legiscan-2239-rollcall-9999999' },
+    ],
+    vote_duplicates: [],
+  };
+}
+
+const RF_BASE = { flagId: RF_FLAG_ID, ruling: 'trust senate journals', rationale: 'LegiScan is missing two senators from this roll call.' };
+
+test('runReconcileFlag: supersede mode writes the vote_duplicates exclusion and resolves the flag with the operator’s recorded ruling', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+  const result = await runReconcileFlag(client, {
+    ...RF_BASE, canonicalVoteId: RF_PRIMARY_VOTE, supersededVoteId: RF_LEGISCAN_VOTE,
+  });
+  assert.equal(result.matched, 1);
+  assert.equal(result.mode, 'supersede');
+  assert.deepEqual(result.failures, []);
+
+  const dup = client.tables.vote_duplicates[0];
+  assert.equal(dup.canonical_vote_id, RF_PRIMARY_VOTE);
+  assert.equal(dup.superseded_vote_id, RF_LEGISCAN_VOTE);
+  assert.match(dup.reason, /trust senate journals/);
+
+  const flag = client.tables.vote_reconciliation_flags.find((f) => f.id === RF_FLAG_ID);
+  assert.equal(flag.resolved, true);
+  assert.equal(flag.discrepancy.adjudication.ruling, 'trust senate journals');
+  assert.equal(flag.discrepancy.adjudication.mode, 'supersede');
+  assert.equal(flag.discrepancy.reason, 'hard_mismatch', 'original evidence must survive alongside the ruling');
+});
+
+test('runReconcileFlag: resolve-only mode (no vote ids) closes the flag WITHOUT any dedup write — the honest outcome for "both rows are real" or "not actionable yet"', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+  const result = await runReconcileFlag(client, {
+    ...RF_BASE, ruling: 'both rows are genuinely distinct real votes',
+  });
+  assert.equal(result.matched, 1);
+  assert.equal(result.mode, 'resolve-only');
+  assert.equal(client.tables.vote_duplicates.length, 0, 'resolve-only must never write a dedup row');
+  const flag = client.tables.vote_reconciliation_flags.find((f) => f.id === RF_FLAG_ID);
+  assert.equal(flag.resolved, true);
+  assert.equal(flag.discrepancy.adjudication.mode, 'resolve-only');
+});
+
+test('runReconcileFlag: dry-run reports what it would do and writes nothing', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+  const result = await runReconcileFlag(client, {
+    ...RF_BASE, canonicalVoteId: RF_PRIMARY_VOTE, supersededVoteId: RF_LEGISCAN_VOTE, dryRun: true,
+  });
+  assert.equal(result.matched, 1);
+  assert.equal(result.willInsertDuplicate, true);
+  assert.equal(result.willResolveFlag, true);
+  assert.equal(client.tables.vote_duplicates.length, 0);
+  assert.equal(client.tables.vote_reconciliation_flags.find((f) => f.id === RF_FLAG_ID).resolved, false);
+});
+
+test('runReconcileFlag: REFUSES a vote id pair unrelated to the flag — the typo guard against superseding an innocent vote row', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+  const result = await runReconcileFlag(client, {
+    ...RF_BASE, canonicalVoteId: 'unrelated-vote', supersededVoteId: RF_LEGISCAN_VOTE,
+  });
+  assert.equal(result.matched, 0);
+  assert.equal(result.failures[0].reason, 'vote_ids_unrelated_to_flag');
+  assert.equal(client.tables.vote_duplicates.length, 0, 'nothing may be written on a refused adjudication');
+});
+
+test('runReconcileFlag: REFUSES a half-specified dedup rather than silently downgrading to resolve-only', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+  const result = await runReconcileFlag(client, { ...RF_BASE, supersededVoteId: RF_LEGISCAN_VOTE });
+  assert.equal(result.matched, 0);
+  assert.equal(result.failures[0].reason, 'both_vote_ids_required');
+  assert.equal(client.tables.vote_reconciliation_flags.find((f) => f.id === RF_FLAG_ID).resolved, false);
+});
+
+test('runReconcileFlag: REFUSES a nonexistent vote row, a missing flag, and a missing ruling/rationale — never a partial write', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+
+  const ghostVote = await runReconcileFlag(client, {
+    ...RF_BASE, canonicalVoteId: RF_PRIMARY_VOTE, supersededVoteId: 'does-not-exist',
+  });
+  assert.equal(ghostVote.failures[0].reason, 'vote_row_not_found');
+
+  const ghostFlag = await runReconcileFlag(client, { ...RF_BASE, flagId: 'no-such-flag' });
+  assert.equal(ghostFlag.failures[0].reason, 'flag_not_found');
+
+  const noRuling = await runReconcileFlag(client, { flagId: RF_FLAG_ID, rationale: 'x' });
+  assert.equal(noRuling.failures[0].reason, 'ruling_required');
+
+  const noRationale = await runReconcileFlag(client, { flagId: RF_FLAG_ID, ruling: 'x' });
+  assert.equal(noRationale.failures[0].reason, 'rationale_required');
+
+  assert.equal(client.tables.vote_duplicates.length, 0);
+  assert.equal(client.tables.vote_reconciliation_flags.find((f) => f.id === RF_FLAG_ID).resolved, false);
+});
+
+test('runReconcileFlag: REFUSES to re-supersede a vote already superseded by a DIFFERENT canonical row', async () => {
+  const seed = seedReconcileFlagFixture();
+  seed.vote_duplicates = [{ id: 'vd-1', canonical_vote_id: 'unrelated-vote', superseded_vote_id: RF_LEGISCAN_VOTE }];
+  const client = makeFakeClient(seed);
+  const result = await runReconcileFlag(client, {
+    ...RF_BASE, canonicalVoteId: RF_PRIMARY_VOTE, supersededVoteId: RF_LEGISCAN_VOTE,
+  });
+  assert.equal(result.matched, 0);
+  assert.equal(result.failures[0].reason, 'already_superseded_by_different_canonical');
+});
+
+test('runReconcileFlag: a second run is a clean, honest no-op (idempotent), and never touches an unrelated open flag', async () => {
+  const client = makeFakeClient(seedReconcileFlagFixture());
+  await runReconcileFlag(client, { ...RF_BASE, canonicalVoteId: RF_PRIMARY_VOTE, supersededVoteId: RF_LEGISCAN_VOTE });
+  const second = await runReconcileFlag(client, { ...RF_BASE, canonicalVoteId: RF_PRIMARY_VOTE, supersededVoteId: RF_LEGISCAN_VOTE });
+  assert.equal(second.matched, 0);
+  assert.equal(second.alreadyApplied, true);
+  assert.equal(client.tables.vote_duplicates.length, 1, 'must not insert a second exclusion row');
+  assert.equal(client.tables.vote_reconciliation_flags.find((f) => f.id === 'other-flag').resolved, false);
+});
+
+test('parseArgs: reconcile-flag accepts its operand flags, and a flag missing its value fails loud', () => {
+  const args = parseArgs([
+    'reconcile-flag', '--flag-id', 'f1', '--ruling', 'trust senate journals',
+    '--rationale', 'because X', '--canonical-vote', 'v1', '--superseded-vote', 'v2', '--dry-run',
+  ]);
+  assert.equal(args.which, 'reconcile-flag');
+  assert.equal(args.flagId, 'f1');
+  assert.equal(args.ruling, 'trust senate journals');
+  assert.equal(args.rationale, 'because X');
+  assert.equal(args.canonicalVoteId, 'v1');
+  assert.equal(args.supersededVoteId, 'v2');
+  assert.equal(args.dryRun, true);
+
+  assert.throws(() => parseArgs(['reconcile-flag', '--flag-id']), /--flag-id requires a value/);
+  assert.throws(() => parseArgs(['reconcile-flag', '--flag-id', '--ruling', 'x']), /--flag-id requires a value/);
+});
+
+test('runCorrectData: "reconcile-flag" runs only that correction and is excluded from "all"', async () => {
+  const seed = seedReconcileFlagFixture();
+
+  const onlyThis = await runCorrectData(makeFakeClient(seed), {
+    which: 'reconcile-flag', dryRun: true, ...RF_BASE,
+  });
+  assert.ok(onlyThis.reconcileFlag);
+  assert.equal(onlyThis.reconcileFlag.matched, 1);
+  assert.equal(onlyThis.moStatus, undefined);
+
+  const all = await runCorrectData(makeFakeClient({ ...seed, bills: [], vote_casts: [] }), { which: 'all', dryRun: true });
+  assert.equal(all.reconcileFlag, undefined, '"all" must NOT include this correction');
 });

@@ -90,6 +90,17 @@ status (`PLAYBOOK_DELTA.md` lesson 14).
 so local dev behaves the same as production. Never used in production itself; Cloudflare Pages
 serves `site/` directly from the repo.
 
+**Adjudicate a cross-source vote-reconciliation flag** (107 open as of 2026-08-05): two of this
+project's independent sources recorded the same roll call differently, and deciding which is right
+is deliberately a human call, never automated. Dry-run first, always:
+```
+node --env-file=.env src/cli/correct-data.js reconcile-flag --flag-id <uuid>   --ruling "<short ruling>" --rationale "<why>"   [--canonical-vote <uuid> --superseded-vote <uuid>] [--dry-run]
+```
+Supply the vote-id pair to mark the losing row superseded (it drops out of every public surface via
+the existing `vote_duplicates` mechanism; neither row is ever deleted). Omit both to close the flag
+with a recorded ruling and no dedup write. One supplied id must belong to the flag being
+adjudicated — the tool refuses unrelated ids rather than superseding an innocent vote row.
+
 **Check live data state:** `npm run status` (`scripts/data-status.js`) prints the current real
 counts and per-source freshness — the only source of truth for "what's true right now"; see
 `docs/DATA_INVENTORY.md` for what each number *means*.

@@ -54,16 +54,38 @@
      dateless seat evidence) still auto-merges silently whenever the two rows come from different
      sources. Needs its own fix: this is a documentation/safety-claim correction plus a real code
      gap, not just a doc fix.
-  2. 🔴 **Reconciliation-flag "quarantine" is dead code — the module's own header claim
-     ("possibly-contradicted data must never be publicly reachable") is stale and unmet.**
-     `crossCheckAgainstPrimarySource`'s quarantine path is unreachable from every production
-     branch (hardcoded `quarantine=false` in one branch, structurally impossible in the others).
-     The ONLY way a hard-mismatch pair (like SB 914, fixed today) stops double-counting on every
-     public surface is a human writing a bespoke, one-off hardcoded correction per flag —
-     `correct-data.js sb914-reconcile` is hardcoded to exactly one flag UUID. ~48 other open
-     reconciliation flags have no path to resolution except the identical one-at-a-time treatment.
-     This directly explains why SB 914 needed a custom code change today rather than an existing
-     mechanism handling it.
+  2. ✅ **FIXED 2026-08-05 — `correct-data.js reconcile-flag`, the general adjudication tool.**
+     *(Original finding: "quarantine is dead code — the module header's claim that
+     possibly-contradicted data is never publicly reachable is stale and unmet; the only way to
+     resolve a flag is a bespoke one-off correction per flag, like `sb914-reconcile`'s hardcoded
+     UUID.")* **Half of that finding was a misread and is worth recording as such:**
+     quarantine's unreachability is NOT a defect — it's a deliberate, fuzz-confirmed doctrine
+     (CHATLOG 2026-07-29 final review, 200k inputs: *"machine-proven quarantine is a null set at
+     this data granularity — correspondence proof requires tally agreement, contradiction requires
+     disagreement; cross-source disputes are permanently human-review flags with primary-wins
+     display"*). Quarantine was correctly RETIRED in favor of store-and-flag. Phase 2 flagged a
+     superseded design as a broken guarantee — a good example of why phase 4's adversarial pass
+     matters. **What WAS real and is now fixed:** (a) the module header in `legiscan-votes.js`
+     genuinely asserted a safety property the code deliberately abandoned — corrected in place with
+     the doctrine and its date, rather than deleted, since the `quarantine` return value it
+     documents still exists in the function's contract; (b) there was no general adjudication path.
+     `reconcile-flag` now generalizes exactly what `sb914-reconcile` did for one hardcoded UUID:
+     `--flag-id`, a required `--ruling` + `--rationale`, and either a `--canonical-vote` /
+     `--superseded-vote` pair (supersede mode — writes the `vote_duplicates` exclusion, same
+     non-destructive mechanism as migration 0022) or neither (resolve-only mode — closes the flag
+     with a recorded ruling and no dedup write, the honest outcome for "both rows are genuinely
+     real," "no counterpart exists after all," or "not actionable until the MO House roster gap is
+     fixed"). It never guesses a winner — the operator names both rows, deliberately, because
+     attributing a legislator's public vote record is a human call (CLAUDE.md's one non-negotiable).
+     Mechanical guards, all tested: one supplied vote id MUST match the flag's own `vote_id` (typo
+     guard — verified live that it refuses two real-but-unrelated vote ids), both vote rows must
+     exist, a half-specified dedup is refused rather than silently downgraded, re-supersession under
+     a different canonical row is refused, ruling and rationale are both mandatory, and re-running is
+     a clean no-op. 10 new tests; dry-run verified against a real live flag; nothing written live.
+     **Live queue is 107 open flags, not the ~48 the older audit cited** — 61 `hard_mismatch`,
+     22 `no_tally_corresponding_primary`, 20 `primary_cast_data_not_comparable`, 4
+     `ambiguous_tally_match`. Draining it is now operator work rather than a code change per flag,
+     and is Lance's own call (each one is a real ruling about a real legislator's record).
   3. A silent wrong-*split* class in identity-linking: era-blind district-contradiction logic can
      silently split one real person's record into two persons with ZERO flags raised (not even a
      flag for review) when their districts differ across eras (redistricting). Same trigger
