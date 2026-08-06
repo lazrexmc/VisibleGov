@@ -19,3 +19,6 @@ Thumbs.db
 !.superpowers/sdd/*.md
 node_modules/
 .playwright-mcp/
+
+# Playwright snapshot artifacts written with --filename to repo root
+*-resolved.yml
