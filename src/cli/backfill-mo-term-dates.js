@@ -67,3 +67,38 @@ export async function readCachedDatasetFull(filePath, { readFileFn = readFileSyn
     };
   } catch { return { ok: false, filePath }; }
 }
+
+export function buildLegiscanPresenceIndex(sessions) {
+  const index = new Map();
+  const ensure = (peopleId) => {
+    let entry = index.get(peopleId);
+    if (!entry) {
+      entry = { presenceYears: new Set(), chamberVoteYears: { house: new Set(), senate: new Set() } };
+      index.set(peopleId, entry);
+    }
+    return entry;
+  };
+  for (const session of sessions) {
+    const year = session.yearStart;
+    for (const person of session.people ?? []) {
+      if (person.people_id != null) ensure(person.people_id).presenceYears.add(year);
+    }
+    for (const rc of session.rollCalls ?? []) {
+      let chamber;
+      try { chamber = mapLegiscanChamber(rc.chamber); } catch { continue; } // unknown chamber code -> skip
+      for (const vote of rc.votes ?? []) {
+        if (vote.people_id != null) ensure(vote.people_id).chamberVoteYears[chamber].add(year);
+      }
+    }
+  }
+  return index;
+}
+
+export function earliestLegiscanYear(index, peopleId, chamber) {
+  const entry = index.get(peopleId);
+  if (!entry) return null;
+  const voteYears = entry.chamberVoteYears[chamber];
+  if (voteYears && voteYears.size > 0) return Math.min(...voteYears);
+  if (entry.presenceYears.size > 0) return Math.min(...entry.presenceYears);
+  return null;
+}

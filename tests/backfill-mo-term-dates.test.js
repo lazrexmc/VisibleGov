@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull } from '../src/cli/backfill-mo-term-dates.js';
+import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear } from '../src/cli/backfill-mo-term-dates.js';
 
 const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
 const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
@@ -60,4 +60,32 @@ test('readCachedDatasetFull returns people AND rollCalls plus the envelope year'
 test('readCachedDatasetFull returns ok:false on unreadable file (no throw)', async () => {
   const out = await readCachedDatasetFull('does/not/exist.json');
   assert.equal(out.ok, false);
+});
+
+const SESSIONS = [
+  { yearStart: 2011, people: [{ people_id: 1 }], rollCalls: [] }, // presence only, pre-2015 (no roll calls)
+  { yearStart: 2019, people: [{ people_id: 1 }, { people_id: 2 }],
+    rollCalls: [
+      { chamber: 'S', votes: [{ people_id: 1 }] },   // person 1 votes in Senate 2019
+      { chamber: 'H', votes: [{ people_id: 2 }] },   // person 2 votes in House 2019
+    ] },
+  { yearStart: 2023, people: [{ people_id: 1 }],
+    rollCalls: [{ chamber: 'S', votes: [{ people_id: 1 }] }] },
+];
+
+test('earliestLegiscanYear uses the chamber-matched vote year (defeats person.role), earliest wins', () => {
+  const idx = buildLegiscanPresenceIndex(SESSIONS);
+  assert.equal(earliestLegiscanYear(idx, 1, 'senate'), 2019); // first Senate vote, not 2011 presence
+  assert.equal(earliestLegiscanYear(idx, 2, 'house'), 2019);
+});
+
+test('earliestLegiscanYear falls back to earliest presence year when no chamber-matched vote', () => {
+  const idx = buildLegiscanPresenceIndex(SESSIONS);
+  // person 1 never votes in the House -> fall back to earliest presence (2011)
+  assert.equal(earliestLegiscanYear(idx, 1, 'house'), 2011);
+});
+
+test('earliestLegiscanYear returns null for an unknown people_id', () => {
+  const idx = buildLegiscanPresenceIndex(SESSIONS);
+  assert.equal(earliestLegiscanYear(idx, 999, 'senate'), null);
 });
