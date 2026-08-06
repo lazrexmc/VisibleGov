@@ -97,6 +97,17 @@ go to Lance rather than auto-applying.
     `no-openstates-date`; leave NULL. We do **not** fall back to a LegiScan-year→January-convene date,
     because inventing that January date is exactly the "session-derived boundary" the `DATES STAY
     NULL` guard forbids. The dry-run will quantify how many rows this hits.
+- **Adjudication policy ruling (Lance, 2026-08-06, post-apply):** *"Start date should be start of
+  the current term they are serving."* Operationally: `start_date` means the start of the current
+  term/stint, and the `openstates/people` open-role `start_date` is authoritative for it. A
+  year-mismatch where LegiScan-first-seen *precedes* the OpenStates current-role start is the
+  expected benign pattern for returning members (LegiScan's earliest-qualifying-year answers the
+  *first-service* question, not the current-term one) — those flags resolve to the OpenStates date.
+  Surname-format mismatches (spacing/hyphen/compound differences on the same seat) resolve the same
+  way after individual identity verification. Executed via the CLI's `--apply-overrides` path with
+  the committed adjudication record `docs/adjudications/2026-08-06-mo-term-date-flag-adjudication.json`
+  (ruling text + per-entry citations land in `ingestion_runs.detail`). Terms with no authored date
+  (unmatched seats) and the parked Onder row remain NULL regardless.
 - **Wikipedia: rejected as a citation, outright.** It is never written into any stored provenance
   string, source column, or public receipt — a transparency platform citing a crowd-edited source for
   when a legislator took office is self-defeating. It may be used only privately, during development,

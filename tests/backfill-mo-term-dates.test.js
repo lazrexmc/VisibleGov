@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile, parseArgs, runBackfillMoTermDates, citationString, updateTermStartDate } from '../src/cli/backfill-mo-term-dates.js';
+import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile, parseArgs, runBackfillMoTermDates, citationString, updateTermStartDate, loadAdjudicationFile, runApplyOverrides } from '../src/cli/backfill-mo-term-dates.js';
 
 const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
 const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
@@ -307,4 +307,72 @@ test('updateTermStartDate: a DB error throws /start_date patch failed/', async (
     () => updateTermStartDate(client, 'run-1', { termId: 'term-1', startDate: '2019-01-09' }),
     /start_date patch failed/,
   );
+});
+
+// ---- adjudicated-overrides path (Lance ruling 2026-08-06: start_date = current-term start) ----
+
+test('parseArgs accepts --apply-overrides <path>, composing with --apply', () => {
+  assert.deepEqual(parseArgs(['--apply-overrides', 'f.json']), { apply: false, overridesPath: 'f.json' });
+  assert.deepEqual(parseArgs(['--apply-overrides', 'f.json', '--apply']), { apply: true, overridesPath: 'f.json' });
+  assert.equal(parseArgs([]).overridesPath, null);
+  assert.throws(() => parseArgs(['--apply-overrides']), /requires a file path/);
+});
+
+const VALID_ADJUDICATION = {
+  ruling: 'start_date means the start of the current term/stint',
+  rulingDate: '2026-08-06',
+  entries: [
+    { termId: 't1', surname: 'Cook', chamber: 'house', district: '143', startDate: '2023-01-04', citation: 'openstates/people@abc … adjudicated per ruling' },
+    { termId: 't2', surname: 'Crawford', chamber: 'senate', district: '28', startDate: '2017-09-13', citation: 'openstates/people@abc … adjudicated per ruling' },
+  ],
+};
+
+test('loadAdjudicationFile parses a valid file and rejects malformed entries', () => {
+  const readFileFn = () => JSON.stringify(VALID_ADJUDICATION);
+  const adj = loadAdjudicationFile('adj.json', { readFileFn });
+  assert.equal(adj.entries.length, 2);
+  assert.match(adj.ruling, /current term/);
+
+  const missingDate = { ...VALID_ADJUDICATION, entries: [{ termId: 't1', citation: 'c' }] };
+  assert.throws(() => loadAdjudicationFile('adj.json', { readFileFn: () => JSON.stringify(missingDate) }), /invalid adjudication entry/);
+  const badDate = { ...VALID_ADJUDICATION, entries: [{ termId: 't1', startDate: 'January 2023', citation: 'c' }] };
+  assert.throws(() => loadAdjudicationFile('adj.json', { readFileFn: () => JSON.stringify(badDate) }), /invalid adjudication entry/);
+  const noRuling = { ...VALID_ADJUDICATION, ruling: '' };
+  assert.throws(() => loadAdjudicationFile('adj.json', { readFileFn: () => JSON.stringify(noRuling) }), /ruling/);
+});
+
+test('runApplyOverrides dry-run: plans every entry, writes nothing', async () => {
+  const written = [];
+  const report = await runApplyOverrides(null, {
+    overrides: VALID_ADJUDICATION,
+    apply: false,
+    updateTermFn: async (_c, _r, row) => { written.push(row); return { written: true }; },
+  });
+  assert.equal(report.mode, 'dry-run');
+  assert.equal(written.length, 0);
+  assert.equal(report.plan.length, 2);
+  assert.equal(report.plan[0].termId, 't1');
+  assert.equal(report.counts.written, 0);
+});
+
+test('runApplyOverrides apply: writes each entry via updateTermFn, counts already-dated as skipped', async () => {
+  const written = [];
+  const report = await runApplyOverrides(null, {
+    overrides: VALID_ADJUDICATION,
+    apply: true,
+    runId: 'run-ov',
+    updateTermFn: async (_c, runId, row) => {
+      written.push({ runId, ...row });
+      return { written: row.termId !== 't2' }; // t2 simulates a row already dated (race / re-run)
+    },
+  });
+  assert.equal(report.mode, 'live');
+  assert.equal(written.length, 2);
+  assert.equal(written[0].runId, 'run-ov');
+  assert.equal('endDate' in written[0], false);
+  assert.equal(report.counts.written, 1);
+  assert.equal(report.counts.skippedAlreadyDated, 1);
+  assert.equal(report.citations.length, 1);
+  assert.equal(report.citations[0].termId, 't1');
+  assert.match(report.citations[0].citation, /adjudicated per ruling/);
 });

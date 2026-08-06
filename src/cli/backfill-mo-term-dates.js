@@ -144,9 +144,18 @@ export function reconcile({ startDate, legiscanYear, surnameOk }) {
 }
 
 export function parseArgs(argv) {
-  const out = { apply: false };
-  for (const key of argv) {
-    if (key === '--apply') { out.apply = true; continue; }
+  const out = { apply: false, overridesPath: null };
+  let i = 0;
+  while (i < argv.length) {
+    const key = argv[i];
+    if (key === '--apply') { out.apply = true; i += 1; continue; }
+    if (key === '--apply-overrides') {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('--')) throw new Error('--apply-overrides requires a file path');
+      out.overridesPath = value;
+      i += 2;
+      continue;
+    }
     throw new Error(`unknown flag: ${key}`);
   }
   return out;
@@ -276,12 +285,74 @@ export async function runBackfillMoTermDates(client, {
   return { mode: apply ? 'live' : 'dry-run', counts, plan, flags, citations };
 }
 
+// A human-adjudicated overrides file resolves flagged terms the automatic gate would never write.
+// Shape: { ruling, rulingDate, entries: [{ termId, startDate, citation, ... }] } — the ruling text
+// and per-entry citations land verbatim in ingestion_runs.detail so the human decision is auditable.
+export function loadAdjudicationFile(filePath, { readFileFn = readFileSync } = {}) {
+  const parsed = JSON.parse(readFileFn(filePath, 'utf8'));
+  if (typeof parsed.ruling !== 'string' || parsed.ruling.trim() === '') {
+    throw new Error(`backfill-mo-term-dates: adjudication file ${filePath} is missing its ruling text`);
+  }
+  if (!Array.isArray(parsed.entries) || parsed.entries.length === 0) {
+    throw new Error(`backfill-mo-term-dates: adjudication file ${filePath} has no entries`);
+  }
+  for (const entry of parsed.entries) {
+    const dateOk = typeof entry.startDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.startDate);
+    if (!entry.termId || !dateOk || !entry.citation) {
+      throw new Error(`backfill-mo-term-dates: invalid adjudication entry ${JSON.stringify(entry)} — termId, ISO startDate, and citation are all required`);
+    }
+  }
+  return parsed;
+}
+
+export async function runApplyOverrides(client, {
+  overrides, apply = false, runId = null, updateTermFn = updateTermStartDate,
+} = {}) {
+  const counts = { entries: overrides.entries.length, written: 0, skippedAlreadyDated: 0 };
+  const plan = [];
+  const citations = [];
+  for (const entry of overrides.entries) {
+    if (!apply) {
+      plan.push({ termId: entry.termId, surname: entry.surname, chamber: entry.chamber,
+        district: entry.district, startDate: entry.startDate, citation: entry.citation });
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop -- sequential writes, ~21 adjudicated rows
+    const res = await updateTermFn(client, runId, { termId: entry.termId, startDate: entry.startDate });
+    if (res.written) {
+      counts.written += 1;
+      citations.push({ termId: entry.termId, startDate: entry.startDate, citation: entry.citation });
+    } else {
+      counts.skippedAlreadyDated += 1;
+    }
+  }
+  return { mode: apply ? 'live' : 'dry-run', counts, plan: apply ? undefined : plan, citations };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const client = getClient();
   if (!client) {
     console.log(JSON.stringify({ mode: 'blocked', reason: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set' }, null, 2));
     process.exitCode = 1;
+    return;
+  }
+  if (args.overridesPath) {
+    const overrides = loadAdjudicationFile(args.overridesPath);
+    if (!args.apply) {
+      const report = await runApplyOverrides(client, { overrides, apply: false });
+      console.log(JSON.stringify({ source: `${SOURCE}-overrides`, ruling: overrides.ruling, ...report }, null, 2));
+      return;
+    }
+    const runId = await openRun(client, `${SOURCE}-overrides`);
+    try {
+      const report = await runApplyOverrides(client, { overrides, apply: true, runId });
+      await closeRun(client, runId, 'succeeded', { ruling: overrides.ruling, rulingDate: overrides.rulingDate ?? null, counts: report.counts, citations: report.citations });
+      console.log(JSON.stringify({ source: `${SOURCE}-overrides`, run_id: runId, ruling: overrides.ruling, ...report }, null, 2));
+    } catch (err) {
+      await closeRun(client, runId, 'failed', { error: String(err) });
+      throw err;
+    }
     return;
   }
   if (!args.apply) {

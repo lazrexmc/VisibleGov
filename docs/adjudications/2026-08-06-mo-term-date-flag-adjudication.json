@@ -1,0 +1,217 @@
+{
+  "ruling": "Lance 2026-08-06: start_date means the start of the CURRENT term/stint being served; the openstates/people open-role start_date is authoritative for it. LegiScan earliest-qualifying-year answers a different question (first service in the chamber), so year-mismatch where LegiScan-first-seen precedes the OpenStates current-role start is the expected benign pattern for returning members. Surname-format mismatches were individually identity-verified (same seat, name spacing/hyphen/compound differences).",
+  "rulingDate": "2026-08-06",
+  "source": "dry-run resolution table, run of 2026-08-06",
+  "entries": [
+    {
+      "termId": "0cdbcd9f-3057-4b9d-b8ef-bf573eaa01d6",
+      "surname": "Cook",
+      "chamber": "house",
+      "district": "143",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "1d7c63c9-2157-40d0-8f02-1ac5155d7dd4",
+      "surname": "Van Schoiack",
+      "chamber": "house",
+      "district": "9",
+      "startDate": "2021-01-06",
+      "originalFlag": "surname-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2021-01-06; original flag=surname-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "242a9b11-a938-4bf0-a926-1ff224ffa63c",
+      "surname": "Matthiesen",
+      "chamber": "house",
+      "district": "107",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2017,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2017); adjudicated per ruling"
+    },
+    {
+      "termId": "34c77782-d17a-4309-9930-f7ccbaecdf0b",
+      "surname": "Walsh Moore",
+      "chamber": "house",
+      "district": "93",
+      "startDate": "2021-01-06",
+      "originalFlag": "surname-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2021-01-06; original flag=surname-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "38e596ea-3190-4c5e-896f-6551b1812dc7",
+      "surname": "Knight",
+      "chamber": "house",
+      "district": "142",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2018,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2018); adjudicated per ruling"
+    },
+    {
+      "termId": "41b714e2-076a-405a-813f-adef3825dfd0",
+      "surname": "Mackey",
+      "chamber": "house",
+      "district": "99",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2019,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2019); adjudicated per ruling"
+    },
+    {
+      "termId": "80ce598a-5e88-4022-b672-78caf20313ac",
+      "surname": "Simmons",
+      "chamber": "house",
+      "district": "109",
+      "startDate": "2025-01-08",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2019,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2025-01-08; original flag=year-mismatch (legiscan first-seen=2019); adjudicated per ruling"
+    },
+    {
+      "termId": "932fb5b8-4aeb-462b-a59f-6e2cc252de9b",
+      "surname": "Smith",
+      "chamber": "house",
+      "district": "46",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "a3a16b70-d8d6-41f4-b8fb-81443f30f8c6",
+      "surname": "Bunting Parker",
+      "chamber": "house",
+      "district": "150",
+      "startDate": "2023-01-04",
+      "originalFlag": "surname-mismatch",
+      "legiscanYear": 2023,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=surname-mismatch (legiscan first-seen=2023); adjudicated per ruling"
+    },
+    {
+      "termId": "a54edecd-b626-49a5-b89c-02e15cd62c36",
+      "surname": "Fountain Henderson",
+      "chamber": "house",
+      "district": "85",
+      "startDate": "2023-01-04",
+      "originalFlag": "surname-mismatch",
+      "legiscanYear": 2023,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=surname-mismatch (legiscan first-seen=2023); adjudicated per ruling"
+    },
+    {
+      "termId": "b29f27c8-a576-42d2-bba3-73c5b72ab226",
+      "surname": "Kalberloh",
+      "chamber": "house",
+      "district": "126",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "b5d31fcd-5661-4880-8450-9c0be18d597e",
+      "surname": "Mayhew",
+      "chamber": "house",
+      "district": "124",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2019,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2019); adjudicated per ruling"
+    },
+    {
+      "termId": "cb846252-cf1d-4ffa-8de1-ded1639be660",
+      "surname": "Sharp",
+      "chamber": "house",
+      "district": "37",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2020,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2020); adjudicated per ruling"
+    },
+    {
+      "termId": "cd8c96fd-53a3-4add-9d6f-01e7dbc27567",
+      "surname": "Hurlbert",
+      "chamber": "house",
+      "district": "8",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "df21fae8-3ea6-4720-8217-a01294601b3a",
+      "surname": "Hardwick",
+      "chamber": "house",
+      "district": "121",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "dff514ce-7d96-4688-90d3-b91884d396d5",
+      "surname": "Sassmann",
+      "chamber": "house",
+      "district": "61",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "e09af8c2-beae-4429-8a43-c42ea5e07a61",
+      "surname": "McGaugh",
+      "chamber": "house",
+      "district": "7",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2017,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2017); adjudicated per ruling"
+    },
+    {
+      "termId": "e1ed15b5-7c31-4688-8a04-b2b6c3ba8144",
+      "surname": "Black",
+      "chamber": "house",
+      "district": "129",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2019,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2019); adjudicated per ruling"
+    },
+    {
+      "termId": "e53acd57-41d1-4e35-8158-c688d39b3f49",
+      "surname": "West",
+      "chamber": "house",
+      "district": "102",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "e6ec6a07-640e-46fb-afc2-13517b5a2c6c",
+      "surname": "Doll",
+      "chamber": "house",
+      "district": "91",
+      "startDate": "2023-01-04",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2021,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2023-01-04; original flag=year-mismatch (legiscan first-seen=2021); adjudicated per ruling"
+    },
+    {
+      "termId": "fd504819-efd6-44f9-b647-90245f2e3e2e",
+      "surname": "Crawford",
+      "chamber": "senate",
+      "district": "28",
+      "startDate": "2017-09-13",
+      "originalFlag": "year-mismatch",
+      "legiscanYear": 2018,
+      "citation": "openstates/people@934bf09a94a35351baf872c70e778a4367c8266e (CC0-1.0) data/mo/legislature roles[open].start_date=2017-09-13; original flag=year-mismatch (legiscan first-seen=2018); adjudicated per ruling"
+    }
+  ]
+}
