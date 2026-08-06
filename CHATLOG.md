@@ -3012,3 +3012,43 @@ Lesson 25 discipline held: the PLAYBOOK renumber and the escaping-sensitive edit
 byte-verified script files, and the one script that hit a bad anchor failed atomically (wrote
 nothing) — caught the un-applied "29 files" edit on the final consistency re-grep and fixed it.
 Suite 2,328/0 in a clean shell throughout. The docs now match live reality to the line.
+
+## 2026-08-06 — Directory filtering → "fill the dateless MO term dates first" (backfill spec written)
+
+Started on the requested legislator-directory filtering (by last name / date / currently-serving).
+Brainstorming surfaced the real tension: a "currently serving" filter fights the currency-honesty law
+(the code deliberately never asserts "current"). Lance reshaped it twice: first **filters → two lists
+("Current" vs "Past")**, then chose a **toggle defaulting to a short "Serving now" list** (solves the
+"long ass list" complaint), **dropped the date filter**, and picked honest labels **"Serving now" /
+"Past members"** (not "Current" — the one word the honesty law forbids). Then he redirected: **"We
+should fill all the unknown members dates in first, even wiki has them."**
+
+I held the line on sourcing (Wikipedia is fine to *find* a date, never to *cite* one on a transparency
+platform) and ran a 4-agent investigation workflow (`wf_9eeed494-93d`) — DB census + code-provenance
+trace + authoritative-source inventory + synthesis. Findings that reshaped the task:
+
+- The gap is **not 194, it's 193**: all 194 dateless terms are current MO **state** legislators (159
+  house + 35 senate, `end_date` NULL is *correct* for them), EXCEPT **Bob Onder** — a stale
+  MO-Senate-D2 duplicate (0 votes, party spelled "Republican", duplicates real current D2 senator Nick
+  Schroer). He's a former senator now in **US House D3**; the `terms` table holds both his rows.
+- Dateless-ness is **by design**: `backfill-mo-terms.js` hardcodes null dates under a `DATES STAY
+  NULL` guard ("session-derived dates would invent term boundaries the source does not assert").
+- The cleanest authoritative fill already exists 90%: `mo-legislature.js` parses real OpenStates
+  `current_role.start_date`; it's just scoped to fetch one person today.
+
+Decisions (Lance): **fill = OpenStates real dates + LegiScan on-disk year cross-check, mismatches FLAG
+for review, never auto-apply** (the project's own author→verify→flag pattern); **Onder = parked**
+(backfill skips him; the UI must keep him out of "Serving now" via an "open term AND has votes" rule).
+
+Lance's mid-turn correction — **"Missouri's congressional map changed in 2026, use it, this could be
+why you see zeros."** Verified and answered: the `terms` table conflates `chamber='house'+state='MO'`
+across BOTH the state house and the 8-member federal delegation; only `jurisdiction_id` separates them
+(159 `mo-legislature` + 8 `us-congress`). The 2026 remap moved only the **congressional** map — MO
+**state** districts (2022 map) are unchanged — so the state backfill is immune; the remap is a
+checkpoint for the federal delegation + the eventual UI. Onder's zero is a stale *state* row, not a
+map artifact. Captured as **PLAYBOOK Lesson 34**.
+
+Wrote the backfill design spec: `docs/superpowers/specs/2026-08-06-mo-current-term-dates-backfill-design.md`
+(new CLI `backfill-mo-term-dates.js`, UPDATE-in-place, `end_date` always NULL, dry-run-first
+draft-then-apply, OpenStates-sparse-date → flag). Awaiting Lance's review of the spec before
+writing-plans.

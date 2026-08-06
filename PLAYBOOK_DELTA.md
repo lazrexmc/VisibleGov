@@ -724,3 +724,31 @@ every check run before the data crosses the threshold — the first check run AF
 first anon browser walk on prod) is where it surfaces. Load-bearing verification has to run under the
 real role (anon, not service_role, whose 3s-vs-longer timeout was the entire difference here) against
 real data volume, or it is testing a different, easier system.
+
+## Lesson 34 — `state` + `chamber` do NOT identify a legislature; `jurisdiction_id` does — and a mid-decade remap moves only the map it belongs to (2026-08-06)
+
+A `terms` row carries `chamber` (`'house'`/`'senate'`) and `state` (`'MO'`), and it is tempting to
+read `chamber='house' AND state='MO'` as "Missouri House of Representatives." It is not: that filter
+also matches every member of **Missouri's US House delegation** (federal), because a US Representative
+from Missouri is likewise a `house` member from `MO`. The only column that separates the two
+legislatures is **`jurisdiction_id`** (`'mo-legislature'` vs `'us-congress'`). Live proof: 167 rows
+match `chamber='house', state='MO'` — 159 `mo-legislature` (state reps) + 8 `us-congress` (the federal
+delegation: Bell D1 … Smith D8). Any scoping, counting, or dating query over one legislature MUST
+filter `jurisdiction_id`, or it silently rakes in the other. The same person can legitimately hold a
+row in BOTH (Bob Onder: a stale `mo-legislature` Senate D2 row AND a live `us-congress` House D3 row).
+
+Two corollaries that cost real time here:
+
+1. **A zero can be a stale identity artifact, not a data-collection gap.** Onder's `mo-legislature`
+   Senate D2 row had 0 vote_casts while all 193 real current MO members had 427–5,073. The zero did
+   not mean "his votes failed to ingest" — it meant the row is a *former* senator's leftover,
+   duplicating the real current D2 senator. Before treating a zero as a pipeline failure, check
+   whether the row is a duplicate of a populated one (same chamber+district, different id) — the
+   populated sibling is the tell.
+
+2. **A mid-decade redistricting only moves the district system it belongs to.** Missouri redrew its
+   **congressional (US House)** map in 2026; its **state** house (163) / senate (34) districts follow
+   the 2022 census map and did not change. So "the 2026 remap" is relevant when reasoning about
+   `us-congress` rows and MUST be reflected when the UI renders the federal delegation — but it is
+   irrelevant to any `mo-legislature` row. Don't let a congressional-map caveat leak into state-seat
+   logic (or vice-versa); the `jurisdiction_id` tells you which map even applies.
