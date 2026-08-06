@@ -3052,3 +3052,43 @@ Wrote the backfill design spec: `docs/superpowers/specs/2026-08-06-mo-current-te
 (new CLI `backfill-mo-term-dates.js`, UPDATE-in-place, `end_date` always NULL, dry-run-first
 draft-then-apply, OpenStates-sparse-date → flag). Awaiting Lance's review of the spec before
 writing-plans.
+
+## 2026-08-06 (later) — term-date backfill built end-to-end on branch `backfill-mo-term-dates`
+
+Lance approved the plan and chose subagent-driven execution ("1"). Execution history, all on the
+branch (main untouched):
+
+- **Task 1's probe gate FIRED — and it was right to.** The OpenStates v3 REST API carries NO role
+  dates at all (`include=other_roles` → 422; permitted includes are only names/identifiers/links/
+  sources/offices; `current_role` has no start_date). The spec's author source was unviable as
+  designed. Verified fix live: the **`openstates/people` CC0-1.0 GitHub data repo** (the dataset
+  that FEEDS the API) carries full day-precision role history. Lance approved the source swap + the
+  `yaml` dep ("Approve swap"). Spec §3 + plan amended; 192 MO YAMLs cached to
+  `.superpowers/artifacts/openstates-people/` with a commit-SHA manifest.
+- **Mid-execution a power outage killed the session.** Recovery was clean off the SDD ledger +
+  git (nothing lost; the outage landed between Task 4's commit and its review). Post-reboot the
+  Bash tool's PATH came back un-converted (raw Windows form) — all commands were routed through
+  PowerShell for the rest of the run.
+- Tasks 1-8: TDD'd `parsePersonYaml`/`loadCachedRoster` (yaml cache), `readCachedDatasetFull`
+  (LegiScan decode keeping rollCalls), `buildLegiscanPresenceIndex`/`earliestLegiscanYear`
+  (chamber signal from roll_call.chamber, never person.role), `matchRoster` (OPEN roles only — an
+  ended role can never claim a seat), `reconcile` (agree/flag gate), then the `--apply`-gated
+  orchestrator (dry-run default; single UPDATE `.eq(id).is(start_date,null).select(id)`; end_date
+  structurally unwritable; citations with source commit SHA into `ingestion_runs.detail`).
+  Per-task adversarial reviews all clean; two real catches along the way (a plan fixture that
+  decodes to 0 rollCalls; a misleading test title).
+- **Task 9, the read-only dry-run against live data: 194 seen / 193 matched / 171 AGREE /
+  23 flagged / 0 written.** Flags: 1 unmatched (Brown H-149 — seat genuinely absent from the
+  current roster), 17 year-mismatch (mostly "current role starts 2023" vs "first seen in LegiScan
+  earlier" — a semantic question for Lance: current-stint start vs first service; plus Crawford's
+  2017-09-13 special election vs LegiScan's 2018 floor), 5 surname-mismatch (4 multi-word-surname
+  artifacts: Van Schoiack/Walsh Moore/Bunting Parker/Fountain Henderson; 1 REAL: Onder's stale D2
+  row seat-matching Schroer — flagged, never written, exactly as designed). Table:
+  `.superpowers/sdd/2026-08-06-mo-current-term-dates-backfill/dryrun-resolution-table.json`.
+- Final whole-branch review (most capable model): **MERGE-READY**, no Criticals; its 1 Important +
+  4 doc findings closed in one fix wave (direct test of the real writer; `--apply` now hard-fails
+  without a source commit SHA; spec/plan drift reconciled) and re-review confirmed all addressed.
+  Suite: 2354/2354, fail 0, clean shell.
+
+Open: integration decision (merge/PR/keep) is Lance's; then his adjudication of the 23 flags and
+the `--apply` run (draft-then-apply — agent never applies).
