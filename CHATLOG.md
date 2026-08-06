@@ -2890,3 +2890,15 @@ THIRD live surfacing of this one idiom (matview refresh timeout -> 0029; now ano
 
 Suite 2,325 -> 2,328. **Everything else on the deployed site is correct** — this is one broken query
 behind one fetch, not a broad failure. TODO.md RESUME HERE now leads with "apply 0031 first."
+
+**Lance: "0031 has ran"** — verified on both axes, not just speed. (1) The exact query that 500'd
+returns 200 in 0.27s as anon (~12x under the old 3.2s timeout); public_votes 0.13s. (2) Dedup
+semantics intact — a known superseded vote with 33 real base-table casts shows 0 rows in
+public_vote_feed, and the feed excludes 2,045 casts overall (real arithmetic, not an accidental
+empty set). Then the definitive check: the real-browser walk that originally caught the bug.
+Profile (Jason Bean) now loads with ZERO console errors — 162 vote rows with bill links, plus
+populated aggregate charts (Position distribution "Yea 846 96.5%, Nay 8 0.9%"). Clicked a vote
+through to its bill page (HB 3080): sponsors, plain-language summary, roll-call tallies all render,
+zero errors. The full product loop — directory -> profile -> real votes -> bill -> tally — works on
+the deployed site. The deploy-night regression is fully closed; TODO RESUME HERE updated to drop
+the blocker and point at the custom-domain phases as next.

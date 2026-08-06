@@ -1,0 +1,891 @@
+- generic [active] [ref=f1e1]:
+  - main [ref=f1e2]:
+    - region "Identity" [ref=f1e3]:
+      - paragraph [ref=f1e16]: No photo on record.
+      - generic [ref=f1e17]:
+        - heading "Jason Bean" [level=1] [ref=f1e18]
+        - paragraph [ref=f1e19]: Republican
+        - paragraph [ref=f1e20]: MO Senate, district 25
+        - paragraph [ref=f1e21]: service dates unrecorded
+    - heading "Vote aggregates" [level=2] [ref=f1e5]
+    - region "Vote aggregates" [ref=f1e22]:
+      - generic [ref=f1e23]:
+        - generic [ref=f1e24]:
+          - heading "Position distribution" [level=3] [ref=f1e25]
+          - button "Yea 846 (96.5%)" [ref=f1e26] [cursor=pointer]:
+            - generic [ref=f1e27]: Yea
+            - generic [ref=f1e30]: 846 (96.5%)
+          - button "Nay 8 (0.9%)" [ref=f1e31] [cursor=pointer]:
+            - generic [ref=f1e32]: Nay
+            - generic [ref=f1e35]: 8 (0.9%)
+          - button "Not voting 0 (0.0%)" [ref=f1e36] [cursor=pointer]:
+            - generic [ref=f1e37]: Not voting
+            - generic [ref=f1e39]: 0 (0.0%)
+          - button "Absent 23 (2.6%)" [ref=f1e40] [cursor=pointer]:
+            - generic [ref=f1e41]: Absent
+            - generic [ref=f1e44]: 23 (2.6%)
+          - button "Other / present 0 (0.0%)" [ref=f1e45] [cursor=pointer]:
+            - generic [ref=f1e46]: Other / present
+            - generic [ref=f1e48]: 0 (0.0%)
+        - generic [ref=f1e49]:
+          - heading "Yea share vs. party" [level=3] [ref=f1e50]
+          - generic [ref=f1e51]:
+            - generic [ref=f1e52]: This legislator
+            - generic [ref=f1e55]: 846 of 877 (96.5%)
+          - generic [ref=f1e56]:
+            - generic [ref=f1e57]: Republican (party aggregate)
+            - generic [ref=f1e60]: 13513 of 15580 (86.7%)
+        - generic [ref=f1e61]:
+          - heading "Party-line cohesion" [level=3] [ref=f1e62]
+          - generic [ref=f1e63]: 776 of 785 comparable roll calls (98.9%)
+        - link "About these numbers" [ref=f1e67] [cursor=pointer]:
+          - /url: /trust#metrics
+    - heading "Votes" [level=2] [ref=f1e6]
+    - generic "Vote filters" [ref=f1e68]:
+      - combobox [ref=f1e69]:
+        - option "All chambers" [selected]
+        - option "House"
+        - option "Senate"
+      - spinbutton "Year (e.g. 2023)" [ref=f1e70]
+      - generic [ref=f1e71]:
+        - checkbox "Missed votes only (not voting / absent)" [ref=f1e72]
+        - text: Missed votes only (not voting / absent)
+    - region "Votes" [ref=f1e73]:
+      - list [ref=f1e74]:
+        - listitem [ref=f1e75]:
+          - paragraph [ref=f1e76]: MO Senate
+          - link "HB 3080 — Modifies the historic preservation tax credit and includes an emergency clause" [ref=f1e77] [cursor=pointer]:
+            - /url: /bill/767860f4-262b-456b-b219-b647d9abde74/hb-3080
+          - paragraph [ref=f1e78]: "Position: yea"
+          - link "source" [ref=f1e79] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1886
+        - listitem [ref=f1e80]:
+          - paragraph [ref=f1e81]: MO Senate
+          - link "HB 1867 — Authorizes Joplin to increase a transient guest tax for tourism to no more than six percent upon a vote of the people" [ref=f1e82] [cursor=pointer]:
+            - /url: /bill/279330aa-c1df-4072-8fff-9b1805e8849f/hb-1867
+          - paragraph [ref=f1e83]: "Position: yea"
+          - link "source" [ref=f1e84] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1876
+        - listitem [ref=f1e85]:
+          - paragraph [ref=f1e86]: MO Senate
+          - link "SB 953 — Modifies provisions relating to environmental programs within the Department of Natural Resources" [ref=f1e87] [cursor=pointer]:
+            - /url: /bill/2f8ca7b5-30cd-430f-aaee-feb33624a67c/sb-953
+          - paragraph [ref=f1e88]: "Position: yea"
+          - link "source" [ref=f1e89] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1880.2
+        - listitem [ref=f1e90]:
+          - paragraph [ref=f1e91]: MO Senate
+          - link "HB 2397 — Modifies requirements for a dissolution of a public water supply district" [ref=f1e92] [cursor=pointer]:
+            - /url: /bill/2997a5ca-aa18-45ea-8502-2f70d3d53800/hb-2397
+          - paragraph [ref=f1e93]: "Position: yea"
+          - link "source" [ref=f1e94] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#0
+        - listitem [ref=f1e95]:
+          - paragraph [ref=f1e96]: MO Senate
+          - link "HB 1696 — Modifies provisions relating to the right of sepulcher" [ref=f1e97] [cursor=pointer]:
+            - /url: /bill/b451e9c1-6e7c-490b-9e9d-20507ec84b98/hb-1696
+          - paragraph [ref=f1e98]: "Position: yea"
+          - link "source" [ref=f1e99] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1884
+        - listitem [ref=f1e100]:
+          - paragraph [ref=f1e101]: MO Senate
+          - link "HB 1768 — Modifies provisions relating to the classification of certain residential real property used for short-term rentals" [ref=f1e102] [cursor=pointer]:
+            - /url: /bill/8822b9e4-070c-4ba3-bbb3-3712ed6804e8/hb-1768
+          - paragraph [ref=f1e103]: "Position: yea"
+          - link "source" [ref=f1e104] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1872
+        - listitem [ref=f1e105]:
+          - paragraph [ref=f1e106]: MO Senate
+          - link "SB 953 — Modifies provisions relating to environmental programs within the Department of Natural Resources" [ref=f1e107] [cursor=pointer]:
+            - /url: /bill/2f8ca7b5-30cd-430f-aaee-feb33624a67c/sb-953
+          - paragraph [ref=f1e108]: "Position: yea"
+          - link "source" [ref=f1e109] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1880.3
+        - listitem [ref=f1e110]:
+          - paragraph [ref=f1e111]: MO Senate
+          - link "HB 2292 — Modifies provisions relating to abuse and neglect reporting, including a requirement to report companion animal abuse" [ref=f1e112] [cursor=pointer]:
+            - /url: /bill/f106b189-919d-4d88-a5d2-9d05a484b9ab/hb-2292
+          - paragraph [ref=f1e113]: "Position: nay"
+          - link "source" [ref=f1e114] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1872.2
+        - listitem [ref=f1e115]:
+          - paragraph [ref=f1e116]: MO Senate
+          - link "SB 1019 — Modifies several provisions relating to health care" [ref=f1e117] [cursor=pointer]:
+            - /url: /bill/d088d573-cb8f-4878-a085-985a809967db/sb-1019
+          - paragraph [ref=f1e118]: Repeals Missouri law sections 96.192, 96.196, and 206.110, plus section 192.026 as passed earlier in house bill no. 2372, and enacts five new sections in their place (96.192, 96.196, 192.026, 206.110, and a new 206.158), all relating to health care.
+          - paragraph [ref=f1e119]: "Position: yea"
+          - link "source" [ref=f1e120] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1876.3
+        - listitem [ref=f1e121]:
+          - paragraph [ref=f1e122]: MO Senate
+          - link "SB 1572 — Modifies provisions relating to public employee retirement systems" [ref=f1e123] [cursor=pointer]:
+            - /url: /bill/93b33359-e0f9-47f4-b211-fb7229f0d9d5/sb-1572
+          - paragraph [ref=f1e124]: Keeps qualification requirements for appointment as a police officer (no conviction of an offense punishable by confinement in the state penitentiary, proven good character, United States citizenship, ability to read and write English, ordinary physical strength and courage, and at least twenty-one years of age) and gives the board sole authority to determine conditions of employment for police officers under section 84.460.
+          - paragraph [ref=f1e125]: "Position: yea"
+          - link "source" [ref=f1e126] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1870
+        - listitem [ref=f1e127]:
+          - paragraph [ref=f1e128]: MO Senate
+          - link "HB 2885 — Requires all proceeds from boating registrations to be deposited in the water patrol division fund and used exclusively for the water patrol division" [ref=f1e129] [cursor=pointer]:
+            - /url: /bill/2ab22311-1341-4c3d-9336-f7e97e814280/hb-2885
+          - paragraph [ref=f1e130]: "Position: yea"
+          - link "source" [ref=f1e131] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1878.2
+        - listitem [ref=f1e132]:
+          - paragraph [ref=f1e133]: MO Senate
+          - link "HB 2474 — Modifies provisions governing design-build contracts" [ref=f1e134] [cursor=pointer]:
+            - /url: /bill/be4bef0a-b44c-413f-a042-3d2065ec78ac/hb-2474
+          - paragraph [ref=f1e135]: "Position: yea"
+          - link "source" [ref=f1e136] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1878
+        - listitem [ref=f1e137]:
+          - paragraph [ref=f1e138]: MO Senate
+          - link "SB 973 — Creates and modifies provisions relating to real estate transactions" [ref=f1e139] [cursor=pointer]:
+            - /url: /bill/ff3f8969-684b-4151-a1b2-7dadf8e63b62/sb-973
+          - paragraph [ref=f1e140]: "Position: yea"
+          - link "source" [ref=f1e141] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1866.2
+        - listitem [ref=f1e142]:
+          - paragraph [ref=f1e143]: MO Senate
+          - link "SB 1572 — Modifies provisions relating to public employee retirement systems" [ref=f1e144] [cursor=pointer]:
+            - /url: /bill/93b33359-e0f9-47f4-b211-fb7229f0d9d5/sb-1572
+          - paragraph [ref=f1e145]: Keeps qualification requirements for appointment as a police officer (no conviction of an offense punishable by confinement in the state penitentiary, proven good character, United States citizenship, ability to read and write English, ordinary physical strength and courage, and at least twenty-one years of age) and gives the board sole authority to determine conditions of employment for police officers under section 84.460.
+          - paragraph [ref=f1e146]: "Position: yea"
+          - link "source" [ref=f1e147] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1870.2
+        - listitem [ref=f1e148]:
+          - paragraph [ref=f1e149]: MO Senate
+          - link "SB 973 — Creates and modifies provisions relating to real estate transactions" [ref=f1e150] [cursor=pointer]:
+            - /url: /bill/ff3f8969-684b-4151-a1b2-7dadf8e63b62/sb-973
+          - paragraph [ref=f1e151]: "Position: yea"
+          - link "source" [ref=f1e152] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1868.2
+        - listitem [ref=f1e153]:
+          - paragraph [ref=f1e154]: MO Senate
+          - link "HB 2896 — Modifies provisions relating to the governing bodies of certain public institutions of higher education" [ref=f1e155] [cursor=pointer]:
+            - /url: /bill/53bfe12c-498a-478a-9e46-9f58b42dc8e1/hb-2896
+          - paragraph [ref=f1e156]: "Position: yea"
+          - link "source" [ref=f1e157] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1880
+        - listitem [ref=f1e158]:
+          - paragraph [ref=f1e159]: MO Senate
+          - link "HB 2474 — Modifies provisions governing design-build contracts" [ref=f1e160] [cursor=pointer]:
+            - /url: /bill/be4bef0a-b44c-413f-a042-3d2065ec78ac/hb-2474
+          - paragraph [ref=f1e161]: "Position: yea"
+          - link "source" [ref=f1e162] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1876.4
+        - listitem [ref=f1e163]:
+          - paragraph [ref=f1e164]: MO Senate
+          - link "SB 973 — Creates and modifies provisions relating to real estate transactions" [ref=f1e165] [cursor=pointer]:
+            - /url: /bill/ff3f8969-684b-4151-a1b2-7dadf8e63b62/sb-973
+          - paragraph [ref=f1e166]: "Position: yea"
+          - link "source" [ref=f1e167] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1868
+        - listitem [ref=f1e168]:
+          - paragraph [ref=f1e169]: MO Senate
+          - link "HB 2397 — Modifies requirements for a dissolution of a public water supply district" [ref=f1e170] [cursor=pointer]:
+            - /url: /bill/2997a5ca-aa18-45ea-8502-2f70d3d53800/hb-2397
+          - paragraph [ref=f1e171]: "Position: yea"
+          - link "source" [ref=f1e172] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1866
+        - listitem [ref=f1e173]:
+          - paragraph [ref=f1e174]: MO Senate
+          - link "SB 1019 — Modifies several provisions relating to health care" [ref=f1e175] [cursor=pointer]:
+            - /url: /bill/d088d573-cb8f-4878-a085-985a809967db/sb-1019
+          - paragraph [ref=f1e176]: Repeals Missouri law sections 96.192, 96.196, and 206.110, plus section 192.026 as passed earlier in house bill no. 2372, and enacts five new sections in their place (96.192, 96.196, 192.026, 206.110, and a new 206.158), all relating to health care.
+          - paragraph [ref=f1e177]: "Position: yea"
+          - link "source" [ref=f1e178] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1876.2
+        - listitem [ref=f1e179]:
+          - paragraph [ref=f1e180]: MO Senate
+          - link "SB 1544 — Modifies provisions relating to state designations" [ref=f1e181] [cursor=pointer]:
+            - /url: /bill/8e90810c-7994-42f4-aef9-b24ba9c53f48/sb-1544
+          - paragraph [ref=f1e182]: "Amends chapters 9, 10, 227, and 620 of Missouri law by adding thirty-eight new sections creating state designations: commemorative days, weeks, and a month; official state symbols and titles; named highways and bridges; and a trail-community designation."
+          - paragraph [ref=f1e183]: "Position: yea"
+          - link "source" [ref=f1e184] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1792.2
+        - listitem [ref=f1e185]:
+          - paragraph [ref=f1e186]: MO Senate
+          - link "HB 2636 — Establishes the \"Uniform Mortgage Modification Act\"" [ref=f1e187] [cursor=pointer]:
+            - /url: /bill/17354a5f-184b-4408-8550-3dc36566dcbf/hb-2636
+          - paragraph [ref=f1e188]: "Position: yea"
+          - link "source" [ref=f1e189] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1796
+        - listitem [ref=f1e190]:
+          - paragraph [ref=f1e191]: MO Senate
+          - link "SB 1544 — Modifies provisions relating to state designations" [ref=f1e192] [cursor=pointer]:
+            - /url: /bill/8e90810c-7994-42f4-aef9-b24ba9c53f48/sb-1544
+          - paragraph [ref=f1e193]: "Amends chapters 9, 10, 227, and 620 of Missouri law by adding thirty-eight new sections creating state designations: commemorative days, weeks, and a month; official state symbols and titles; named highways and bridges; and a trail-community designation."
+          - paragraph [ref=f1e194]: "Position: yea"
+          - link "source" [ref=f1e195] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1792
+        - listitem [ref=f1e196]:
+          - paragraph [ref=f1e197]: MO Senate
+          - link "SB 905 — Modifies language relating to school protection officers and creates Missouri Rangers training program" [ref=f1e198] [cursor=pointer]:
+            - /url: /bill/ed76186c-0e27-4036-997a-17fbba2d54d4/sb-905
+          - paragraph [ref=f1e199]: "Position: yea"
+          - link "source" [ref=f1e200] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1792.3
+        - listitem [ref=f1e201]:
+          - paragraph [ref=f1e202]: MO Senate
+          - link "HB 1740 — Modifies provisions relating to driving while intoxicated" [ref=f1e203] [cursor=pointer]:
+            - /url: /bill/65187332-2990-4585-bfc4-7a06c7cbb37f/hb-1740
+          - paragraph [ref=f1e204]: "Position: yea"
+          - link "source" [ref=f1e205] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1790
+        - listitem [ref=f1e206]:
+          - paragraph [ref=f1e207]: MO Senate
+          - link "HB 2097 — Changes a pilot agricultural education program in elementary schools to a statewide program" [ref=f1e208] [cursor=pointer]:
+            - /url: /bill/bb3242fc-df94-4791-b6eb-8c4d02e10cdd/hb-2097
+          - paragraph [ref=f1e209]: "Position: yea"
+          - link "source" [ref=f1e210] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1822
+        - listitem [ref=f1e211]:
+          - paragraph [ref=f1e212]: MO Senate
+          - link "HB 2397 — Modifies requirements for a dissolution of a public water supply district" [ref=f1e213] [cursor=pointer]:
+            - /url: /bill/2997a5ca-aa18-45ea-8502-2f70d3d53800/hb-2397
+          - paragraph [ref=f1e214]: "Position: yea"
+          - link "source" [ref=f1e215] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1856
+        - listitem [ref=f1e216]:
+          - paragraph [ref=f1e217]: MO Senate
+          - link "SB 905 — Modifies language relating to school protection officers and creates Missouri Rangers training program" [ref=f1e218] [cursor=pointer]:
+            - /url: /bill/ed76186c-0e27-4036-997a-17fbba2d54d4/sb-905
+          - paragraph [ref=f1e219]: "Position: yea"
+          - link "source" [ref=f1e220] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6705141789-1863.pdf#1792.4
+        - listitem [ref=f1e221]:
+          - paragraph [ref=f1e222]: MO Senate
+          - link "HB 2372 — Modifies provisions relating to health care" [ref=f1e223] [cursor=pointer]:
+            - /url: /bill/adbe9de1-afad-4bef-8bed-a1bdd0fbf781/hb-2372
+          - paragraph [ref=f1e224]: "Position: yea"
+          - link "source" [ref=f1e225] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1676
+        - listitem [ref=f1e226]:
+          - paragraph [ref=f1e227]: MO Senate
+          - link "HB 2819 — Modifies provisions relating to certain cash transactions requiring rounding to the nearest five cent denomination" [ref=f1e228] [cursor=pointer]:
+            - /url: /bill/b2f0c3d0-b923-4ad7-a08a-23577d64bc69/hb-2819
+          - paragraph [ref=f1e229]: "Position: yea"
+          - link "source" [ref=f1e230] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1670
+        - listitem [ref=f1e231]:
+          - paragraph [ref=f1e232]: MO Senate
+          - link "HB 1840 — Establishes an alert system to assist in the location of missing persons with developmental disabilities" [ref=f1e233] [cursor=pointer]:
+            - /url: /bill/9f316007-a21d-43ed-915e-718452696082/hb-1840
+          - paragraph [ref=f1e234]: "Position: yea"
+          - link "source" [ref=f1e235] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1676.2
+        - listitem [ref=f1e236]:
+          - paragraph [ref=f1e237]: MO Senate
+          - link "SB 1470 — Modifies duties and functions of the Joint Committee on Legislative Research" [ref=f1e238] [cursor=pointer]:
+            - /url: /bill/32682920-7bb8-46bc-ac1d-e344af4aa563/sb-1470
+          - paragraph [ref=f1e239]: Repeals twenty-two sections of Missouri law concerning the joint committee on legislative research and enacts nineteen new sections in their place, so three sections (23.160, 23.170, and 23.262) are repealed without replacement.
+          - paragraph [ref=f1e240]: "Position: yea"
+          - link "source" [ref=f1e241] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1672.2
+        - listitem [ref=f1e242]:
+          - paragraph [ref=f1e243]: MO Senate
+          - link "HB 2596 — Modifies provisions relating to health benefit plans" [ref=f1e244] [cursor=pointer]:
+            - /url: /bill/395bf0bf-5624-4d97-88ee-6597b3114cd2/hb-2596
+          - paragraph [ref=f1e245]: "Position: yea"
+          - link "source" [ref=f1e246] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1674.2
+        - listitem [ref=f1e247]:
+          - paragraph [ref=f1e248]: MO Senate
+          - link "SB 975 — Modifies provisions relating to ambulance districts" [ref=f1e249] [cursor=pointer]:
+            - /url: /bill/cf4595a2-5272-463e-ad67-ad99514001f6/sb-975
+          - paragraph [ref=f1e250]: "Position: yea"
+          - link "source" [ref=f1e251] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1672
+        - listitem [ref=f1e252]:
+          - paragraph [ref=f1e253]: MO Senate
+          - link "HB 2819 — Modifies provisions relating to certain cash transactions requiring rounding to the nearest five cent denomination" [ref=f1e254] [cursor=pointer]:
+            - /url: /bill/b2f0c3d0-b923-4ad7-a08a-23577d64bc69/hb-2819
+          - paragraph [ref=f1e255]: "Position: yea"
+          - link "source" [ref=f1e256] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1670.2
+        - listitem [ref=f1e257]:
+          - paragraph [ref=f1e258]: MO Senate
+          - link "HB 2819 — Modifies provisions relating to certain cash transactions requiring rounding to the nearest five cent denomination" [ref=f1e259] [cursor=pointer]:
+            - /url: /bill/b2f0c3d0-b923-4ad7-a08a-23577d64bc69/hb-2819
+          - paragraph [ref=f1e260]: "Position: yea"
+          - link "source" [ref=f1e261] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#0
+        - listitem [ref=f1e262]:
+          - paragraph [ref=f1e263]: MO Senate
+          - link "HB 3231 — Establishes the \"Missouri Innovation, Public Safety, and Accountability Act\"" [ref=f1e264] [cursor=pointer]:
+            - /url: /bill/e357c7ad-444f-4f29-bd8f-07e0c678371e/hb-3231
+          - paragraph [ref=f1e265]: "Position: yea"
+          - link "source" [ref=f1e266] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1682
+        - listitem [ref=f1e267]:
+          - paragraph [ref=f1e268]: MO Senate
+          - link "SB 1470 — Modifies duties and functions of the Joint Committee on Legislative Research" [ref=f1e269] [cursor=pointer]:
+            - /url: /bill/32682920-7bb8-46bc-ac1d-e344af4aa563/sb-1470
+          - paragraph [ref=f1e270]: Repeals twenty-two sections of Missouri law concerning the joint committee on legislative research and enacts nineteen new sections in their place, so three sections (23.160, 23.170, and 23.262) are repealed without replacement.
+          - paragraph [ref=f1e271]: "Position: yea"
+          - link "source" [ref=f1e272] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1674
+        - listitem [ref=f1e273]:
+          - paragraph [ref=f1e274]: MO Senate
+          - link "SB 1470 — Modifies duties and functions of the Joint Committee on Legislative Research" [ref=f1e275] [cursor=pointer]:
+            - /url: /bill/32682920-7bb8-46bc-ac1d-e344af4aa563/sb-1470
+          - paragraph [ref=f1e276]: Repeals twenty-two sections of Missouri law concerning the joint committee on legislative research and enacts nineteen new sections in their place, so three sections (23.160, 23.170, and 23.262) are repealed without replacement.
+          - paragraph [ref=f1e277]: "Position: absent"
+          - link "source" [ref=f1e278] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6605131668-1788.pdf#1672.3
+        - listitem [ref=f1e279]:
+          - paragraph [ref=f1e280]: MO Senate
+          - link "SB 1233 — Modifies provisions relating to activities requiring licensure" [ref=f1e281] [cursor=pointer]:
+            - /url: /bill/098dfd46-15f7-4486-9853-d6752668f163/sb-1233
+          - paragraph [ref=f1e282]: "Position: yea"
+          - link "source" [ref=f1e283] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf#1562
+        - listitem [ref=f1e284]:
+          - paragraph [ref=f1e285]: MO Senate
+          - link "SB 1233 — Modifies provisions relating to activities requiring licensure" [ref=f1e286] [cursor=pointer]:
+            - /url: /bill/098dfd46-15f7-4486-9853-d6752668f163/sb-1233
+          - paragraph [ref=f1e287]: "Position: yea"
+          - link "source" [ref=f1e288] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf#1562.2
+        - listitem [ref=f1e289]:
+          - paragraph [ref=f1e290]: MO Senate
+          - link "SB 937 — Conveys certain state property" [ref=f1e291] [cursor=pointer]:
+            - /url: /bill/a8f1a205-24cd-45e1-950d-12f6f130dac5/sb-937
+          - paragraph [ref=f1e292]: "Position: yea"
+          - link "source" [ref=f1e293] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf#0.2
+        - listitem [ref=f1e294]:
+          - paragraph [ref=f1e295]: MO Senate
+          - link "SB 937 — Conveys certain state property" [ref=f1e296] [cursor=pointer]:
+            - /url: /bill/a8f1a205-24cd-45e1-950d-12f6f130dac5/sb-937
+          - paragraph [ref=f1e297]: "Position: yea"
+          - link "source" [ref=f1e298] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf#0
+        - listitem [ref=f1e299]:
+          - paragraph [ref=f1e300]: MO Senate
+          - link "HB 1825 — Removes the prosecuting attorney and the sheriff from the county salary commission" [ref=f1e301] [cursor=pointer]:
+            - /url: /bill/3983f463-4847-4f4c-9045-b6c2e7b5afa4/hb-1825
+          - paragraph [ref=f1e302]: "Position: yea"
+          - link "source" [ref=f1e303] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf#1566
+        - listitem [ref=f1e304]:
+          - paragraph [ref=f1e305]: MO Senate
+          - link "HB 1940 — Changes the law regarding advertisements and orders of publication in newspapers" [ref=f1e306] [cursor=pointer]:
+            - /url: /bill/238f8dee-1153-4c9b-b91e-38a4a92efbe6/hb-1940
+          - paragraph [ref=f1e307]: "Position: yea"
+          - link "source" [ref=f1e308] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf#1568
+        - listitem [ref=f1e309]:
+          - paragraph [ref=f1e310]: MO Senate
+          - link "HB 2003 — Appropriates money for the expenses, grants, refunds, and distributions of the Department of Higher Education and Workforce Development" [ref=f1e311] [cursor=pointer]:
+            - /url: /bill/d1e2388d-dc5a-44b7-b7b8-a2d376c1b0d8/hb-2003
+          - paragraph [ref=f1e312]: "Position: yea"
+          - link "source" [ref=f1e313] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6205061522-1559.pdf#1546
+        - listitem [ref=f1e314]:
+          - paragraph [ref=f1e315]: MO Senate
+          - link "HB 2003 — Appropriates money for the expenses, grants, refunds, and distributions of the Department of Higher Education and Workforce Development" [ref=f1e316] [cursor=pointer]:
+            - /url: /bill/d1e2388d-dc5a-44b7-b7b8-a2d376c1b0d8/hb-2003
+          - paragraph [ref=f1e317]: "Position: yea"
+          - link "source" [ref=f1e318] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6205061522-1559.pdf#1544.2
+        - listitem [ref=f1e319]:
+          - paragraph [ref=f1e320]: MO Senate
+          - link "HB 2003 — Appropriates money for the expenses, grants, refunds, and distributions of the Department of Higher Education and Workforce Development" [ref=f1e321] [cursor=pointer]:
+            - /url: /bill/d1e2388d-dc5a-44b7-b7b8-a2d376c1b0d8/hb-2003
+          - paragraph [ref=f1e322]: "Position: yea"
+          - link "source" [ref=f1e323] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6205061522-1559.pdf#1542.2
+        - listitem [ref=f1e324]:
+          - paragraph [ref=f1e325]: MO Senate
+          - link "HB 2003 — Appropriates money for the expenses, grants, refunds, and distributions of the Department of Higher Education and Workforce Development" [ref=f1e326] [cursor=pointer]:
+            - /url: /bill/d1e2388d-dc5a-44b7-b7b8-a2d376c1b0d8/hb-2003
+          - paragraph [ref=f1e327]: "Position: yea"
+          - link "source" [ref=f1e328] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6205061522-1559.pdf#1550
+        - listitem [ref=f1e329]:
+          - paragraph [ref=f1e330]: MO Senate
+          - link "HB 2003 — Appropriates money for the expenses, grants, refunds, and distributions of the Department of Higher Education and Workforce Development" [ref=f1e331] [cursor=pointer]:
+            - /url: /bill/d1e2388d-dc5a-44b7-b7b8-a2d376c1b0d8/hb-2003
+          - paragraph [ref=f1e332]: "Position: yea"
+          - link "source" [ref=f1e333] [cursor=pointer]:
+            - /url: https://www.senate.mo.gov/26info/Journals/RDay6205061522-1559.pdf#1550.2
+      - generic [ref=f1e334]:
+        - generic [ref=f1e335]: Showing 1–50 of 877
+        - button "Prev" [disabled] [ref=f1e336]
+        - button "Next" [ref=f1e337]
+    - heading "Sponsored bills" [level=2] [ref=f1e7]
+    - region "Sponsored bills" [ref=f1e338]:
+      - generic [ref=f1e339]:
+        - heading "Primary sponsor (106)" [level=3] [ref=f1e340]
+        - list [ref=f1e341]:
+          - listitem [ref=f1e342]:
+            - link "SB 373 — Creates provisions relating to vandalism of certain property designated b a county commission" [ref=f1e343] [cursor=pointer]:
+              - /url: /bill/395d77c5-ae1b-4c68-8df5-6c952a5d70fd/sb-373
+            - text: "[Introduced]"
+          - listitem [ref=f1e344]:
+            - link "SB 140 — Creates provisions relating to workforce development investments of public utilities" [ref=f1e345] [cursor=pointer]:
+              - /url: /bill/7816c76e-452f-4cfe-9c44-548db62be3a8/sb-140
+            - text: "[Introduced]"
+          - listitem [ref=f1e346]:
+            - link "SB 210 — Allows for the curing of incomplete absentee ballot envelopes" [ref=f1e347] [cursor=pointer]:
+              - /url: /bill/789a8f25-af5a-46dd-8e50-a965f13b7ffd/sb-210
+            - text: "[Introduced]"
+          - listitem [ref=f1e348]:
+            - link "SB 199 — Creates provisions relating to condemnation of land by certain utilities" [ref=f1e349] [cursor=pointer]:
+              - /url: /bill/484c5c23-eeac-40ad-a68b-f5b4ce06c901/sb-199
+            - text: "[Introduced]"
+          - listitem [ref=f1e350]:
+            - link "SB 209 — Repeals provisions regulating industrial hemp and hemp cultivation" [ref=f1e351] [cursor=pointer]:
+              - /url: /bill/a640cc7e-210f-4b73-96bb-5de724c9e1b0/sb-209
+            - text: "[Introduced]"
+          - listitem [ref=f1e352]:
+            - link "SB 953 — Modifies provisions relating to environmental programs within the Department of Natural Resources" [ref=f1e353] [cursor=pointer]:
+              - /url: /bill/2f8ca7b5-30cd-430f-aaee-feb33624a67c/sb-953
+            - text: "[Passed]"
+          - listitem [ref=f1e354]:
+            - link "SB 1104 — Specifies that drivers shall stop at railroad crossings for \"any on-track equipment\" in addition to trains" [ref=f1e355] [cursor=pointer]:
+              - /url: /bill/33c591ea-0951-4be4-846d-8917c12cba68/sb-1104
+            - text: "[Introduced]"
+          - listitem [ref=f1e356]:
+            - link "SB 874 — Repeals provisions relating to hemp extract for the treatment of intractable epilepsy" [ref=f1e357] [cursor=pointer]:
+              - /url: /bill/659a853d-bc6c-40e4-ac32-eea88f28ce24/sb-874
+            - text: "[Introduced]"
+          - listitem [ref=f1e358]:
+            - link "SB 1545 — Repeals a prohibition on off-track pari-mutuel wagering on horse racing" [ref=f1e359] [cursor=pointer]:
+              - /url: /bill/76553d03-e6a3-403a-a0ed-dbbf7b62a7a3/sb-1545
+            - text: "[Introduced]"
+          - listitem [ref=f1e360]:
+            - link "SB 958 — Modifies provisions relating to agricultural tax credits" [ref=f1e361] [cursor=pointer]:
+              - /url: /bill/302952c7-dd2e-464b-b000-ce11ce1b94d2/sb-958
+            - text: "[Introduced]"
+          - listitem [ref=f1e362]:
+            - link "SB 56 — Enacts provisions relating to motor vehicles" [ref=f1e363] [cursor=pointer]:
+              - /url: /bill/71b66b65-9888-4c2c-9961-479bd768ed06/sb-56
+            - text: "[Engrossed]"
+          - listitem [ref=f1e364]:
+            - link "SJR 11 — Modifies provisions relating to initiative petitions" [ref=f1e365] [cursor=pointer]:
+              - /url: /bill/8367a2f8-d840-4264-9715-efef317bc4e3/sjr-11
+            - text: "[Introduced]"
+          - listitem [ref=f1e366]:
+            - link "SB 185 — Establishes provisions relating to certain trespass and inverse condemnation actions against public utilities" [ref=f1e367] [cursor=pointer]:
+              - /url: /bill/6e834b30-067f-490f-9182-eb0dfe49d704/sb-185
+            - text: "[Introduced]"
+          - listitem [ref=f1e368]:
+            - link "SB 1306 — Exempts certain farm vehicles from emissions inspection requirements" [ref=f1e369] [cursor=pointer]:
+              - /url: /bill/5531b6d4-4392-4da2-9486-8e916fa72755/sb-1306
+            - text: "[Introduced]"
+          - listitem [ref=f1e370]:
+            - link "SB 987 — Modifies provisions relating to excursion gambling boat facilities" [ref=f1e371] [cursor=pointer]:
+              - /url: /bill/ee902b9b-ddcf-48e6-bfd5-830afa4dc752/sb-987
+            - text: "[Passed]"
+          - listitem [ref=f1e372]:
+            - link "SB 1030 — Modifies provisions relating to the soybean producers assessment" [ref=f1e373] [cursor=pointer]:
+              - /url: /bill/a092aaa1-6750-4a27-9abf-899c1932645b/sb-1030
+            - text: "[Introduced]"
+          - listitem [ref=f1e374]:
+            - link "SB 120 — Modifies provisions relating to the expenditure of moneys in funds by certain state departments" [ref=f1e375] [cursor=pointer]:
+              - /url: /bill/0626072c-20b2-4091-953f-1b809ec1288d/sb-120
+            - text: "[Engrossed]"
+          - listitem [ref=f1e376]:
+            - link "SB 848 — Allows electrical corporations to operate and use broadband infrastructure" [ref=f1e377] [cursor=pointer]:
+              - /url: /bill/a39383be-e80c-49ed-ad63-9827a3f37de9/sb-848
+            - text: "[Introduced]"
+          - listitem [ref=f1e378]:
+            - link "SB 201 — Provides that the State Board of Education shall be responsible for handling appeals of decisions made by statewide activities associations" [ref=f1e379] [cursor=pointer]:
+              - /url: /bill/0aa0458a-c4cc-4a73-ab5d-0074cde37c01/sb-201
+            - text: "[Introduced]"
+          - listitem [ref=f1e380]:
+            - link "SB 121 — Creates a county option to enact \"right-to-work\" laws" [ref=f1e381] [cursor=pointer]:
+              - /url: /bill/60cf2adf-4cbf-4396-9828-7629f0bcb8d2/sb-121
+            - text: "[Introduced]"
+          - listitem [ref=f1e382]:
+            - link "SB 506 — Modifies provisions relating to gambling facilities" [ref=f1e383] [cursor=pointer]:
+              - /url: /bill/1cbcb06d-3c6b-45a2-9d2f-016a5349070a/sb-506
+            - text: "[Introduced]"
+          - listitem [ref=f1e384]:
+            - link "SB 139 — Establishes the Workforce Diploma Program to assist students in obtaining a high school diploma and in developing employability and career and technical skills" [ref=f1e385] [cursor=pointer]:
+              - /url: /bill/54ea265a-a9e9-499f-89a6-ba5786580f88/sb-139
+            - text: "[Introduced]"
+          - listitem [ref=f1e386]:
+            - link "SB 875 — Modifies provisions relating to background checks for certain applicants of agencies, boards, and commissions" [ref=f1e387] [cursor=pointer]:
+              - /url: /bill/75f28d40-3588-463f-b522-9b2ffc216a93/sb-875
+            - text: "[Introduced]"
+          - listitem [ref=f1e388]:
+            - link "SB 787 — Modifies provisions relating to minimum prison terms" [ref=f1e389] [cursor=pointer]:
+              - /url: /bill/a0a2925a-676c-4694-a67a-81b733fd55f0/sb-787
+            - text: "[Introduced]"
+          - listitem [ref=f1e390]:
+            - link "SB 1789 — Modifies provision relating to extended term of imprisonment" [ref=f1e391] [cursor=pointer]:
+              - /url: /bill/7a544054-ae86-4188-ae7b-7d50f2cffba9/sb-1789
+            - text: "[Introduced]"
+          - listitem [ref=f1e392]:
+            - link "SB 74 — Modifies provisions relating to hate crimes against law enforcement officers and first responders" [ref=f1e393] [cursor=pointer]:
+              - /url: /bill/e2fac6ce-d98b-43ed-aa7f-68fe6699d6eb/sb-74
+            - text: "[Introduced]"
+          - listitem [ref=f1e394]:
+            - link "SB 184 — Allows electrical corporations to operate and use broadband infrastructure" [ref=f1e395] [cursor=pointer]:
+              - /url: /bill/b1841736-eb86-46f0-9438-a5abd4b8b276/sb-184
+            - text: "[Introduced]"
+          - listitem [ref=f1e396]:
+            - link "SB 782 — Creates provisions relating to water exportation outside the state" [ref=f1e397] [cursor=pointer]:
+              - /url: /bill/2f780065-452c-4016-98be-c6873ff5b8da/sb-782
+            - text: "[Introduced]"
+          - listitem [ref=f1e398]:
+            - link "SB 850 — Modifies provisions relating to criminal laws" [ref=f1e399] [cursor=pointer]:
+              - /url: /bill/d51dc05d-56de-456d-ae9f-2ba616e86ba2/sb-850
+            - text: "[Introduced]"
+          - listitem [ref=f1e400]:
+            - link "SB 565 — Establishes the Workforce Housing Tax Incentives Program" [ref=f1e401] [cursor=pointer]:
+              - /url: /bill/d2d49fe9-bc3a-454b-837a-87f0cc3cc6ec/sb-565
+            - text: "[Introduced]"
+          - listitem [ref=f1e402]:
+            - link "SB 705 — Establishes the Joint Committee on Rural Economic Development" [ref=f1e403] [cursor=pointer]:
+              - /url: /bill/f2f1f624-dbdd-40aa-a2dd-b4765c80dab3/sb-705
+            - text: "[Introduced]"
+          - listitem [ref=f1e404]:
+            - link "SB 474 — Repeals certain provisions relating to health benefit plans offered by health maintenance organizations" [ref=f1e405] [cursor=pointer]:
+              - /url: /bill/b97f6931-28eb-4887-9476-ff9f959fb3b7/sb-474
+            - text: "[Introduced]"
+          - listitem [ref=f1e406]:
+            - link "SB 507 — Modifies provisions relating to the sale of copper" [ref=f1e407] [cursor=pointer]:
+              - /url: /bill/f418691d-ebf2-4f97-8cba-3d611e3c21bf/sb-507
+            - text: "[Introduced]"
+          - listitem [ref=f1e408]:
+            - link "SB 695 — Modifies provisions relating to public safety" [ref=f1e409] [cursor=pointer]:
+              - /url: /bill/7119b39e-cae2-4301-ac81-6ddb7b9c3cf9/sb-695
+            - text: "[Introduced]"
+          - listitem [ref=f1e410]:
+            - link "SB 788 — Creates provisions relating to vandalism of certain property designated by a county commission" [ref=f1e411] [cursor=pointer]:
+              - /url: /bill/6ec82719-cc4b-4c05-809a-ff16e624e305/sb-788
+            - text: "[Introduced]"
+          - listitem [ref=f1e412]:
+            - link "SB 140 — Authorizes a tax credit for the sale of ethanol fuel" [ref=f1e413] [cursor=pointer]:
+              - /url: /bill/759321d4-e50c-4687-99a1-b46608a66b43/sb-140
+            - text: "[Introduced]"
+          - listitem [ref=f1e414]:
+            - link "SB 957 — Establishes the Education Stabilization Fund" [ref=f1e415] [cursor=pointer]:
+              - /url: /bill/3b750afd-a08d-4ccb-a1a5-1da2d81c4846/sb-957
+            - text: "[Introduced]"
+          - listitem [ref=f1e416]:
+            - link "SCR 33 — Designates Campbell, Missouri, as the Peach Capital of Missouri" [ref=f1e417] [cursor=pointer]:
+              - /url: /bill/ce692f87-05dc-4597-9c6a-f4ce0e6e449f/scr-33
+            - text: "[Introduced]"
+          - listitem [ref=f1e418]:
+            - link "SB 29 — Creates provisions relating to water resources" [ref=f1e419] [cursor=pointer]:
+              - /url: /bill/5633051b-57cd-4da5-9bcd-28e982d422a7/sb-29
+            - text: "[Introduced]"
+          - listitem [ref=f1e420]:
+            - link "SB 508 — Modifies provisions relating to the construction of electric transmission lines" [ref=f1e421] [cursor=pointer]:
+              - /url: /bill/cfa838f0-0cdd-41b9-b150-4cbf032a318c/sb-508
+            - text: "[Introduced]"
+          - listitem [ref=f1e422]:
+            - link "SB 1483 — Modifies provisions relating to the expenditure of moneys in certain funds by the Department of Natural Resources" [ref=f1e423] [cursor=pointer]:
+              - /url: /bill/edd3be3c-d0f8-4f72-8941-111a2675fef1/sb-1483
+            - text: "[Introduced]"
+          - listitem [ref=f1e424]:
+            - link "SB 707 — Authorizes a tax credit for the sale of ethanol fuel" [ref=f1e425] [cursor=pointer]:
+              - /url: /bill/cb4220b4-46c9-4ef5-b8ed-ab574a1bd301/sb-707
+            - text: "[Introduced]"
+          - listitem [ref=f1e426]:
+            - link "SB 656 — Establishes the Rural Workforce Housing Investment Act" [ref=f1e427] [cursor=pointer]:
+              - /url: /bill/4051ed56-aca2-4efe-8732-3c220d744167/sb-656
+            - text: "[Introduced]"
+          - listitem [ref=f1e428]:
+            - link "SB 266 — Creates provisions related to the disposal of contaminants into state waters" [ref=f1e429] [cursor=pointer]:
+              - /url: /bill/5e321f41-6a39-4999-8d3c-c78308406cfa/sb-266
+            - text: "[Introduced]"
+          - listitem [ref=f1e430]:
+            - link "SB 849 — Establishes the \"Stars and Stripes Historic Region of Missouri\"" [ref=f1e431] [cursor=pointer]:
+              - /url: /bill/0f795321-0d89-46d9-a9a6-d5959203c3ea/sb-849
+            - text: "[Introduced]"
+          - listitem [ref=f1e432]:
+            - link "SB 1297 — Provides that the State Board of Education shall be responsible for handling appeals of decisions made by statewide activities associations" [ref=f1e433] [cursor=pointer]:
+              - /url: /bill/cf046170-212c-4d47-ada8-ae4de6013344/sb-1297
+            - text: "[Introduced]"
+          - listitem [ref=f1e434]:
+            - link "SB 28 — Modifies provisions relating to transportation" [ref=f1e435] [cursor=pointer]:
+              - /url: /bill/20eae20f-9b1e-4871-a1c1-b0a6eaca9471/sb-28
+            - text: "[Passed]"
+          - listitem [ref=f1e436]:
+            - link "SB 546 — Repeals provisions relating to hemp extract for the treatment of intractable epilepsy" [ref=f1e437] [cursor=pointer]:
+              - /url: /bill/c20739b8-b847-4c39-bc84-8c3c2e41fdae/sb-546
+            - text: "[Introduced]"
+          - listitem [ref=f1e438]:
+            - link "SB 555 — Establishes the \"Health Professional Loan Repayment Program\"" [ref=f1e439] [cursor=pointer]:
+              - /url: /bill/bc2e996f-9d3e-44bc-91f7-669a5ac7ea72/sb-555
+            - text: "[Introduced]"
+          - listitem [ref=f1e440]:
+            - link "SB 957 — Modifies provisions relating to workforce development in education" [ref=f1e441] [cursor=pointer]:
+              - /url: /bill/96702723-916f-49e2-aed0-e68215075b95/sb-957
+            - text: "[Introduced]"
+          - listitem [ref=f1e442]:
+            - link "SB 1301 — Modifies the Missouri Works program" [ref=f1e443] [cursor=pointer]:
+              - /url: /bill/2d4fd178-8a94-4197-bb29-351e1da2b5ef/sb-1301
+            - text: "[Introduced]"
+          - listitem [ref=f1e444]:
+            - link "SB 139 — Enacts provisions relating to state designations" [ref=f1e445] [cursor=pointer]:
+              - /url: /bill/0d310b94-91c0-483f-ad9b-55ba7f69c616/sb-139
+            - text: "[Passed]"
+          - listitem [ref=f1e446]:
+            - link "SB 75 — Modifies provisions relating to minimum prison terms" [ref=f1e447] [cursor=pointer]:
+              - /url: /bill/a7b36231-80d3-4175-bee3-72e8e83b2a7f/sb-75
+            - text: "[Introduced]"
+          - listitem [ref=f1e448]:
+            - link "SB 786 — Establishes a reimbursement program for peace officer training" [ref=f1e449] [cursor=pointer]:
+              - /url: /bill/6286af05-8e74-4444-932f-9073997797f2/sb-786
+            - text: "[Introduced]"
+          - listitem [ref=f1e450]:
+            - link "SB 1639 — Modifies provisions relating to public contracts" [ref=f1e451] [cursor=pointer]:
+              - /url: /bill/e90c6a33-0985-4b80-a3cc-ba400463eabd/sb-1639
+            - text: "[Introduced]"
+          - listitem [ref=f1e452]:
+            - link "SB 876 — Authorizes a tax credit for certain railroad infrastructure investments" [ref=f1e453] [cursor=pointer]:
+              - /url: /bill/faa6625d-06a6-4710-99fe-bdd4df8877ab/sb-876
+            - text: "[Introduced]"
+          - listitem [ref=f1e454]:
+            - link "SB 599 — Creates provisions relating to water exportation outside the state" [ref=f1e455] [cursor=pointer]:
+              - /url: /bill/b6e5982d-cd25-43ce-a4f8-6066fa4f2089/sb-599
+            - text: "[Introduced]"
+          - listitem [ref=f1e456]:
+            - link "SB 200 — Exempts certain farm vehicles from emissions inspection requirements" [ref=f1e457] [cursor=pointer]:
+              - /url: /bill/63282eea-f3c7-4afb-b0ca-4d46c943e83f/sb-200
+            - text: "[Introduced]"
+          - listitem [ref=f1e458]:
+            - link "SB 954 — Creates provisions relating to condemnation of land by certain utilities" [ref=f1e459] [cursor=pointer]:
+              - /url: /bill/22074d9e-0f38-4dde-94e2-146ad2410f49/sb-954
+            - text: "[Introduced]"
+          - listitem [ref=f1e460]:
+            - link "SB 587 — Establishes the Education Stabilization Fund" [ref=f1e461] [cursor=pointer]:
+              - /url: /bill/d1fe5142-60f2-4a29-8fc8-4e7c0efd8346/sb-587
+            - text: "[Introduced]"
+          - listitem [ref=f1e462]:
+            - link "SCR 31 — Approves the Missouri Water Resources Plan and its implementation" [ref=f1e463] [cursor=pointer]:
+              - /url: /bill/2d0b1438-e1fb-44fb-92e7-8bb1f3711ffd/scr-31
+            - text: "[Enrolled]"
+          - listitem [ref=f1e464]:
+            - link "SB 1299 — Specifies that drivers shall stop at railroad crossings for \"any on-track equipment\" in addition to trains" [ref=f1e465] [cursor=pointer]:
+              - /url: /bill/5108ab3f-a8c4-4a37-86a5-13a6fa95dfb7/sb-1299
+            - text: "[Introduced]"
+          - listitem [ref=f1e466]:
+            - link "SB 706 — Creates new provisions relating to labor organizations" [ref=f1e467] [cursor=pointer]:
+              - /url: /bill/2e661e26-8b15-46a7-8a15-731427faaeae/sb-706
+            - text: "[Introduced]"
+          - listitem [ref=f1e468]:
+            - link "SB 986 — Modifies provisions relating to tax credits" [ref=f1e469] [cursor=pointer]:
+              - /url: /bill/45d92282-06be-472a-a192-8c62c79c6d53/sb-986
+            - text: "[Introduced]"
+          - listitem [ref=f1e470]:
+            - link "SCR 8 — Establishes the Joint Interim Committee on Drainage and Levee Districts" [ref=f1e471] [cursor=pointer]:
+              - /url: /bill/7d8f5a70-cfe9-470d-8f6d-98d12c82bf14/scr-8
+            - text: "[Introduced]"
+          - listitem [ref=f1e472]:
+            - link "SB 254 — Specifies that drivers shall stop at railroad crossings for \"any on-track equipment\" in addition to trains" [ref=f1e473] [cursor=pointer]:
+              - /url: /bill/ac06de62-b4df-4a8d-9fd4-190568efabe0/sb-254
+            - text: "[Introduced]"
+          - listitem [ref=f1e474]:
+            - link "SB 141 — Creates a peace officer basic training tuition reimbursement program" [ref=f1e475] [cursor=pointer]:
+              - /url: /bill/6130c8e3-e615-471e-bd4b-2fdc946ab405/sb-141
+            - text: "[Introduced]"
+          - listitem [ref=f1e476]:
+            - link "SB 830 — Modifies provisions relating to ketamine" [ref=f1e477] [cursor=pointer]:
+              - /url: /bill/77d5c0ac-8d37-4d30-ba8a-47de8d809062/sb-830
+            - text: "[Introduced]"
+          - listitem [ref=f1e478]:
+            - link "SB 8 — Modifies provisions relating to agricultural tax relief" [ref=f1e479] [cursor=pointer]:
+              - /url: /bill/8fee9000-ae65-4088-ba58-3aad2cc976f3/sb-8
+            - text: "[Engrossed]"
+          - listitem [ref=f1e480]:
+            - link "SB 475 — Repeals certain requirements for the associations eligible to be issued policies of group health insurance" [ref=f1e481] [cursor=pointer]:
+              - /url: /bill/9e8bc817-c543-40de-985a-b0e5f1e571e3/sb-475
+            - text: "[Introduced]"
+          - listitem [ref=f1e482]:
+            - link "SB 55 — Modifies provisions regarding foreign ownership of agricultural land" [ref=f1e483] [cursor=pointer]:
+              - /url: /bill/c55120a9-4cc9-4d63-bb3d-f9e2c29305ff/sb-55
+            - text: "[Introduced]"
+          - listitem [ref=f1e484]:
+            - link "SB 958 — Modifies provisions relating to transportation of school children" [ref=f1e485] [cursor=pointer]:
+              - /url: /bill/6da4cac5-7489-4c5a-bedf-3c102873e7cb/sb-958
+            - text: "[Introduced]"
+          - listitem [ref=f1e486]:
+            - link "SB 1493 — Authorizes counties to impose a sales tax for senior services" [ref=f1e487] [cursor=pointer]:
+              - /url: /bill/f02f5a94-3a95-457f-ba98-bdf012f103f2/sb-1493
+            - text: "[Introduced]"
+          - listitem [ref=f1e488]:
+            - link "SB 264 — Modifies provisions relating to the Missouri Rap Back Program" [ref=f1e489] [cursor=pointer]:
+              - /url: /bill/a3824023-c353-4220-bd77-ab498fdefc4f/sb-264
+            - text: "[Introduced]"
+          - listitem [ref=f1e490]:
+            - link "SB 1107 — Modifies provisions regarding teacher career plans" [ref=f1e491] [cursor=pointer]:
+              - /url: /bill/57a28747-8b17-4dbb-af27-e93355b1fb81/sb-1107
+            - text: "[Introduced]"
+          - listitem [ref=f1e492]:
+            - link "SB 141 — Modifies provisions relating to utilities" [ref=f1e493] [cursor=pointer]:
+              - /url: /bill/45909512-0f6f-4cfe-a6a4-0c494cb876e3/sb-141
+            - text: "[Engrossed]"
+          - listitem [ref=f1e494]:
+            - link "SB 4 — Authorizes the expedited disbursement of funds from the Missouri Housing Trust Fund for emergency aid" [ref=f1e495] [cursor=pointer]:
+              - /url: /bill/42153ded-d4b7-49e8-a9b6-8f308072a96c/sb-4
+            - text: "[Passed]"
+          - listitem [ref=f1e496]:
+            - link "SB 1300 — Modifies provisions relating to transportation" [ref=f1e497] [cursor=pointer]:
+              - /url: /bill/dc50e8ec-2e34-40ea-97bf-2b9ac8306ee8/sb-1300
+            - text: "[Introduced]"
+          - listitem [ref=f1e498]:
+            - link "SB 1790 — Modifies provisions relating to the calculation of property tax levies" [ref=f1e499] [cursor=pointer]:
+              - /url: /bill/83d68c81-669c-41ad-84b1-0baf264feb78/sb-1790
+            - text: "[Introduced]"
+          - listitem [ref=f1e500]:
+            - link "SB 73 — Creates new provisions relating to labor organizations" [ref=f1e501] [cursor=pointer]:
+              - /url: /bill/c4feca51-77ea-4dd1-8e98-b71078031f33/sb-73
+            - text: "[Introduced]"
+          - listitem [ref=f1e502]:
+            - link "SB 955 — Modifies provisions regarding the rights of firearms owners" [ref=f1e503] [cursor=pointer]:
+              - /url: /bill/a421c7be-9571-4c6d-8f33-10186d6e1f04/sb-955
+            - text: "[Introduced]"
+          - listitem [ref=f1e504]:
+            - link "SB 122 — Modifies provisions relating to self-defense" [ref=f1e505] [cursor=pointer]:
+              - /url: /bill/406d5b2c-6b12-4e58-bf02-fa613b43b1ba/sb-122
+            - text: "[Introduced]"
+          - listitem [ref=f1e506]:
+            - link "SB 1492 — Establishes the PA Licensure Compact" [ref=f1e507] [cursor=pointer]:
+              - /url: /bill/7e636024-ddff-4ef1-aff5-5b2cc8fa95a7/sb-1492
+            - text: "[Introduced]"
+          - listitem [ref=f1e508]:
+            - link "SB 862 — Modifies provisions relating to gaming" [ref=f1e509] [cursor=pointer]:
+              - /url: /bill/ed0b78f2-ec1f-4493-93d5-ff60d2056c20/sb-862
+            - text: "[Introduced]"
+          - listitem [ref=f1e510]:
+            - link "SB 30 — Modifies provisions relating to tax credits" [ref=f1e511] [cursor=pointer]:
+              - /url: /bill/c76027e5-69f7-4a1a-8fc1-5621ba7b4f65/sb-30
+            - text: "[Introduced]"
+          - listitem [ref=f1e512]:
+            - link "SB 211 — Modifies provisions relating to reemployment rights of Missouri Task Force One members" [ref=f1e513] [cursor=pointer]:
+              - /url: /bill/bfcf9937-b0d4-4aee-8e1d-5eaa724fef19/sb-211
+            - text: "[Introduced]"
+          - listitem [ref=f1e514]:
+            - link "SB 1298 — Modifies provisions relating to cotton trailers" [ref=f1e515] [cursor=pointer]:
+              - /url: /bill/eea942b2-9509-4b7c-9810-dea5b7d7781a/sb-1298
+            - text: "[Engrossed]"
+          - listitem [ref=f1e516]:
+            - link "SB 781 — Creates a county option to enact \"right-to-work\" laws" [ref=f1e517] [cursor=pointer]:
+              - /url: /bill/092bf564-8bbd-4aa1-8588-46066f980578/sb-781
+            - text: "[Introduced]"
+          - listitem [ref=f1e518]:
+            - link "SB 1211 — Modifies provisions relating to eminent domain for electrical corporations" [ref=f1e519] [cursor=pointer]:
+              - /url: /bill/2a7606cc-6c3e-45c6-9408-702cf2a8e110/sb-1211
+            - text: "[Introduced]"
+          - listitem [ref=f1e520]:
+            - link "SB 864 — Modifies provisions relating to tax credits" [ref=f1e521] [cursor=pointer]:
+              - /url: /bill/63827195-cbc5-4bef-9b76-852c0924b227/sb-864
+            - text: "[Introduced]"
+          - listitem [ref=f1e522]:
+            - link "SB 1580 — Modifies provisions relating to ketamine" [ref=f1e523] [cursor=pointer]:
+              - /url: /bill/533ccc6e-9806-4c84-87ac-bb421aceef0d/sb-1580
+            - text: "[Introduced]"
+          - listitem [ref=f1e524]:
+            - link "SB 1080 — Creates provisions relating to workforce development investments of public utilities" [ref=f1e525] [cursor=pointer]:
+              - /url: /bill/d3fa1834-5bd6-4df0-8a79-1ee2f7a7d36a/sb-1080
+            - text: "[Introduced]"
+          - listitem [ref=f1e526]:
+            - link "SB 1105 — Establishes the Rural Workforce Housing Investment Act" [ref=f1e527] [cursor=pointer]:
+              - /url: /bill/ed94f205-fa45-477c-b465-c88cca77c7fb/sb-1105
+            - text: "[Introduced]"
+          - listitem [ref=f1e528]:
+            - link "SB 1035 — Creates a county option to enact \"right-to-work\" laws" [ref=f1e529] [cursor=pointer]:
+              - /url: /bill/e5724c73-e8dd-42a9-a9e2-57906a6476fd/sb-1035
+            - text: "[Introduced]"
+          - listitem [ref=f1e530]:
+            - link "SB 385 — Authorizes a tax credit for certain railroad construction expenses" [ref=f1e531] [cursor=pointer]:
+              - /url: /bill/e58f731b-d924-4e2a-94eb-113762ae712b/sb-385
+            - text: "[Introduced]"
+          - listitem [ref=f1e532]:
+            - link "SB 783 — Modifies provisions relating to self-defense" [ref=f1e533] [cursor=pointer]:
+              - /url: /bill/f70e5146-2d5d-40bc-b7cd-90297ce207ac/sb-783
+            - text: "[Introduced]"
+          - listitem [ref=f1e534]:
+            - link "SCR 8 — Designates Campbell, Missouri, as the Peach Capital of Missouri" [ref=f1e535] [cursor=pointer]:
+              - /url: /bill/077a5aa0-eca3-4051-bce6-089cca83cf1c/scr-8
+            - text: "[Introduced]"
+          - listitem [ref=f1e536]:
+            - link "SB 1052 — Modifies provisions relating to adult high schools" [ref=f1e537] [cursor=pointer]:
+              - /url: /bill/bcd1e260-7ce2-4e29-9c9a-c9f293f59ed3/sb-1052
+            - text: "[Introduced]"
+          - listitem [ref=f1e538]:
+            - link "SB 1262 — Creates provisions relating to condemnation of land by certain utilities" [ref=f1e539] [cursor=pointer]:
+              - /url: /bill/ba87271e-6991-4438-85d3-64e6005a28c6/sb-1262
+            - text: "[Introduced]"
+          - listitem [ref=f1e540]:
+            - link "SB 575 — Extends the sunset of the SNAP farmers' market pilot program" [ref=f1e541] [cursor=pointer]:
+              - /url: /bill/046c7b1b-286c-4da0-9ce1-6a1ea60b034b/sb-575
+            - text: "[Introduced]"
+          - listitem [ref=f1e542]:
+            - link "SB 54 — Creates a county option to enact \"right-to-work\" laws" [ref=f1e543] [cursor=pointer]:
+              - /url: /bill/21aa91e5-86fe-447a-89cb-0d0b8fd670e3/sb-54
+            - text: "[Introduced]"
+          - listitem [ref=f1e544]:
+            - link "SB 863 — Establishes the \"Interscholastic Athletic Oversight Commission\", a board of directors appointed by the Governor to hear appeals of certain decisions made by statewide activities associations" [ref=f1e545] [cursor=pointer]:
+              - /url: /bill/8e53ef38-20c9-45f3-8654-788d83535dca/sb-863
+            - text: "[Passed]"
+          - listitem [ref=f1e546]:
+            - link "SB 265 — Establishes the \"Waterways and Ports Trust Fund\"" [ref=f1e547] [cursor=pointer]:
+              - /url: /bill/b0c7cefc-3461-404d-9dfa-d960df67609b/sb-265
+            - text: "[Engrossed]"
+          - listitem [ref=f1e548]:
+            - link "SB 1581 — Establishes the \"Veterans Mental Health Innovation Act\" relating to ibogaine treatment" [ref=f1e549] [cursor=pointer]:
+              - /url: /bill/14353609-e443-470a-bac0-e9d1587731f1/sb-1581
+            - text: "[Introduced]"
+          - listitem [ref=f1e550]:
+            - link "SB 1033 — Creates provisions relating to the regulation of air quality" [ref=f1e551] [cursor=pointer]:
+              - /url: /bill/3e020fc3-e12f-4f05-b383-751c8bf3272b/sb-1033
+            - text: "[Passed]"
+          - listitem [ref=f1e552]:
+            - link "SB 1034 — Modifies provisions relating to certain water management districts" [ref=f1e553] [cursor=pointer]:
+              - /url: /bill/24ea3429-f3a5-46e4-85be-732884b37e0e/sb-1034
+            - text: "[Introduced]"
+      - generic [ref=f1e554]:
+        - heading "Cosponsor (6)" [level=3] [ref=f1e555]
+        - list [ref=f1e556]:
+          - listitem [ref=f1e557]:
+            - link "SRM 1 — Remonstrates against Circuit Attorney Kimberly Gardner" [ref=f1e558] [cursor=pointer]:
+              - /url: /bill/b57449e1-f47b-4c51-ba1e-38bd37300698/srm-1
+            - text: "[Introduced]"
+          - listitem [ref=f1e559]:
+            - link "SB 39 — Establishes guidelines for student participation in athletic contests organized by sex" [ref=f1e560] [cursor=pointer]:
+              - /url: /bill/e6297341-9c75-4229-85ff-2e7b1235467e/sb-39
+            - text: "[Passed]"
+          - listitem [ref=f1e561]:
+            - link "SB 925 — Specifies that certain contracts for health care benefits provided by qualified membership organizations to their members shall not be considered insurance under the laws of this state" [ref=f1e562] [cursor=pointer]:
+              - /url: /bill/fe1d1ebc-1b4e-4028-9d1a-92a3b28bb562/sb-925
+            - text: "[Introduced]"
+          - listitem [ref=f1e563]:
+            - link "SB 708 — Modifies provisions relating to civil actions" [ref=f1e564] [cursor=pointer]:
+              - /url: /bill/59841a88-b768-4ab2-8eab-bd3631b742c0/sb-708
+            - text: "[Introduced]"
+          - listitem [ref=f1e565]:
+            - link "SB 1134 — Modifies provisions relating to self-defense" [ref=f1e566] [cursor=pointer]:
+              - /url: /bill/f291852b-e701-4283-843c-393331530f93/sb-1134
+            - text: "[Introduced]"
+          - listitem [ref=f1e567]:
+            - link "SB 49 — Establishes the \"Missouri Save Adolescents from Experimentation (SAFE) Act\" and modifies provisions relating to public funding of certain gender transition procedures" [ref=f1e568] [cursor=pointer]:
+              - /url: /bill/e081ec93-3c30-4dfb-8a0b-0b95d4282fbb/sb-49
+            - text: "[Passed]"
+    - heading "Data freshness" [level=2] [ref=f1e8]
+    - region "Data freshness" [ref=f1e569]:
+      - list [ref=f1e570]:
+        - listitem [ref=f1e571]: legiscan — succeeded, last finished 2026-08-05T08:22:49.452+00:00
+        - listitem [ref=f1e572]: mo-house-xml — succeeded, last finished 2026-08-06T00:15:03.88+00:00
+        - listitem [ref=f1e573]: mo-legislature — succeeded, last finished 2026-07-27T20:10:52.747+00:00
+        - listitem [ref=f1e574]:
+          - text: mo-senate-web — succeeded, last finished 2026-08-06T01:15:05.732+00:00
+          - paragraph [ref=f1e575]: 13 journal days pending human review
+  - contentinfo [ref=f1e9]:
+    - paragraph [ref=f1e10]: Every fact links to its source.
+    - navigation "About this site" [ref=f1e11]:
+      - link "How this works" [ref=f1e12] [cursor=pointer]:
+        - /url: /trust
+      - link "Data freshness" [ref=f1e13] [cursor=pointer]:
+        - /url: /trust#freshness
+      - link "Attribution" [ref=f1e14] [cursor=pointer]:
+        - /url: /trust#attribution
