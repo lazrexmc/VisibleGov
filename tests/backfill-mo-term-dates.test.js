@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear } from '../src/cli/backfill-mo-term-dates.js';
+import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf } from '../src/cli/backfill-mo-term-dates.js';
 
 const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
 const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
@@ -88,4 +88,46 @@ test('earliestLegiscanYear falls back to earliest presence year when no chamber-
 test('earliestLegiscanYear returns null for an unknown people_id', () => {
   const idx = buildLegiscanPresenceIndex(SESSIONS);
   assert.equal(earliestLegiscanYear(idx, 999, 'senate'), null);
+});
+
+const ROSTER = [
+  { openstates_id: 'os-1', full_name: 'Jane Adams', family_name: 'Adams',
+    roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09', end_date: null }] },
+  { openstates_id: 'os-2', full_name: 'Bob Baker', family_name: 'Baker',
+    roles: [
+      { chamber: 'senate', district: '2', start_date: '2023-01-04', end_date: null },
+      { chamber: 'house', district: '60', start_date: '2017-01-04', end_date: '2023-01-03' }, // ended — must NOT steal seat house|60
+    ] },
+];
+
+test('matchRoster joins by (chamber, district) on OPEN roles only and carries the role start_date', () => {
+  const terms = [
+    { termId: 't1', legislatorId: 'l1', chamber: 'house', district: '60', surname: 'Adams', legiscanPeopleId: 11 },
+  ];
+  const { matches, unmatchedTerms } = matchRoster(terms, ROSTER);
+  assert.equal(matches.length, 1);
+  assert.equal(unmatchedTerms.length, 0);
+  assert.equal(matches[0].openStatesId, 'os-1'); // Adams, not Baker's ended house-60 role
+  assert.equal(matches[0].startDate, '2019-01-09');
+  assert.equal(matches[0].surnameOk, true);
+});
+
+test('matchRoster puts a term with no roster counterpart (e.g. retired Onder) in unmatchedTerms', () => {
+  const terms = [
+    { termId: 't-onder', legislatorId: 'l-onder', chamber: 'senate', district: '2', surname: 'Onder', legiscanPeopleId: 16351 },
+  ];
+  const { matches, unmatchedTerms } = matchRoster(terms, ROSTER); // roster D2 senator is Baker, surname differs
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].surnameOk, false); // matched the seat but the surname disagrees -> flaggable
+  assert.equal(unmatchedTerms.length, 0);
+});
+
+test('matchRoster: a term whose seat has no OPEN roster role goes to unmatchedTerms', () => {
+  const terms = [
+    { termId: 't-gone', legislatorId: 'l-gone', chamber: 'house', district: '99', surname: 'Ghost', legiscanPeopleId: 12 },
+  ];
+  const { matches, unmatchedTerms } = matchRoster(terms, ROSTER);
+  assert.equal(matches.length, 0);
+  assert.equal(unmatchedTerms.length, 1);
+  assert.equal(unmatchedTerms[0].termId, 't-gone');
 });

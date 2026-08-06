@@ -102,3 +102,35 @@ export function earliestLegiscanYear(index, peopleId, chamber) {
   if (entry.presenceYears.size > 0) return Math.min(...entry.presenceYears);
   return null;
 }
+
+export function lastNameOf(fullName) {
+  const parts = String(fullName ?? '').trim().split(/\s+/);
+  return (parts[parts.length - 1] ?? '').toLowerCase();
+}
+
+export function matchRoster(datelessTerms, rosterPeople) {
+  // index roster roles by chamber|district -> { person, role } — OPEN roles only:
+  // an ended role (Schnelting's old House seat) must never claim the seat's current term
+  const bySeat = new Map();
+  for (const person of rosterPeople) {
+    for (const role of person.roles ?? []) {
+      if (!role.chamber || role.district == null) continue;
+      if (role.end_date != null) continue;
+      bySeat.set(`${role.chamber}|${String(role.district)}`, { person, role });
+    }
+  }
+  const matches = [];
+  const unmatchedTerms = [];
+  for (const term of datelessTerms) {
+    const hit = bySeat.get(`${term.chamber}|${String(term.district)}`);
+    if (!hit) { unmatchedTerms.push(term); continue; }
+    const personSurname = (hit.person.family_name ?? lastNameOf(hit.person.full_name) ?? '').toLowerCase();
+    matches.push({
+      term,
+      openStatesId: hit.person.openstates_id,
+      startDate: hit.role.start_date ?? null,
+      surnameOk: !!term.surname && personSurname === String(term.surname).toLowerCase(),
+    });
+  }
+  return { matches, unmatchedTerms };
+}
