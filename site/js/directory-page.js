@@ -204,7 +204,14 @@ function renderDirectoryList(container, entries) {
   for (const entry of entries) {
     const li = el('li', { class: 'directory-row' });
     li.appendChild(el('a', { href: entry.href }, entry.displayName));
-    const meta = [entry.chamber, entry.district ? `district ${entry.district}` : null, entry.party]
+    const meta = [
+      entry.chamber,
+      entry.district ? `district ${entry.district}` : null,
+      entry.party,
+      // Tenure fragment (2026-08-06 spec §2): only for a serving entry whose displayed anchor
+      // term is open AND dated — absent data renders nothing, never a guess.
+      entry.servingNow && entry.sinceYear ? `since ${entry.sinceYear}` : null,
+    ]
       .filter(Boolean)
       .join(' · ');
     if (meta) li.appendChild(el('span', { class: 'directory-meta' }, ` — ${meta}`));
@@ -471,24 +478,50 @@ async function runAddressLookupWithData(address, { resultsContainer, dataState, 
   });
 }
 
-function wireDirectoryFilter(input, container, allEntries) {
-  if (!input) return;
-  input.addEventListener('input', () => {
-    const filtered = filterDirectory(allEntries, input.value);
+// The two-view controller (2026-08-06 spec §2/§4): tracks the active view + re-renders on toggle
+// or search input. The search filters rows WITHIN the active view; the toggle badges always carry
+// the FULL partition counts. Per-view empty messages keep "no matches" distinguishable from a
+// broken fetch (sectionState discipline). The word "current" appears nowhere.
+const VIEW_EMPTY_MESSAGE = {
+  serving: 'No legislators match this filter among members serving now.',
+  past: 'No legislators match this filter among past members.',
+};
+
+function wireDirectoryView({
+  servingButton, pastButton, filterInput, container, partitions,
+}) {
+  if (!container) return;
+  const state = { activeView: 'serving' };
+
+  if (servingButton) servingButton.textContent = `Serving now (${partitions.servingNow.length})`;
+  if (pastButton) pastButton.textContent = `Past members (${partitions.past.length})`;
+
+  const render = () => {
+    if (servingButton) servingButton.setAttribute('aria-pressed', String(state.activeView === 'serving'));
+    if (pastButton) pastButton.setAttribute('aria-pressed', String(state.activeView === 'past'));
+    const activeEntries = state.activeView === 'serving' ? partitions.servingNow : partitions.past;
+    const filtered = filterDirectory(activeEntries, filterInput ? filterInput.value : '');
     if (filtered.length === 0) {
-      sectionState(container, { state: 'empty', message: 'No legislators match this filter.' });
+      sectionState(container, { state: 'empty', message: VIEW_EMPTY_MESSAGE[state.activeView] });
     } else {
       sectionState(container, { state: 'ready' });
       renderDirectoryList(container, filtered);
     }
-  });
+  };
+
+  if (servingButton) servingButton.addEventListener('click', () => { state.activeView = 'serving'; render(); });
+  if (pastButton) pastButton.addEventListener('click', () => { state.activeView = 'past'; render(); });
+  if (filterInput) filterInput.addEventListener('input', render);
+  render();
 }
 
 // The directory-list section's own fetch-or-reuse + render + retry — split out from
 // bootstrapDirectoryPage so its retry can refresh `dataState.promise` IN PLACE (benefiting the
 // address form's next submit too) without ever re-running bootstrapDirectoryPage as a whole
 // (which would re-attach a second submit listener to the same, already-wired form element).
-async function loadAndRenderDirectory(dataState, { directoryListContainer, filterInput }) {
+async function loadAndRenderDirectory(dataState, {
+  directoryListContainer, filterInput, servingButton, pastButton,
+}) {
   sectionState(directoryListContainer, { state: 'loading' });
   let entries;
   try {
@@ -499,7 +532,9 @@ async function loadAndRenderDirectory(dataState, { directoryListContainer, filte
       message: "Couldn't load the directory — retry",
       onRetry: () => {
         dataState.promise = loadDirectoryData();
-        loadAndRenderDirectory(dataState, { directoryListContainer, filterInput }).catch(() => {});
+        loadAndRenderDirectory(dataState, {
+          directoryListContainer, filterInput, servingButton, pastButton,
+        }).catch(() => {});
       },
     });
     return;
@@ -507,11 +542,11 @@ async function loadAndRenderDirectory(dataState, { directoryListContainer, filte
 
   if (entries.length === 0) {
     sectionState(directoryListContainer, { state: 'empty', message: 'No legislators recorded.' });
-  } else {
-    sectionState(directoryListContainer, { state: 'ready' });
-    renderDirectoryList(directoryListContainer, entries);
+    return;
   }
-  wireDirectoryFilter(filterInput, directoryListContainer, entries);
+  wireDirectoryView({
+    servingButton, pastButton, filterInput, container: directoryListContainer, partitions: partitionDirectory(entries),
+  });
 }
 
 // renderPrivacyContract: fills index.html's #privacy-contract placeholder with the SAME
@@ -529,6 +564,8 @@ export function renderPrivacyContract(container) {
 export async function bootstrapDirectoryPage() {
   const directoryListContainer = document.getElementById('directory-list');
   const filterInput = document.getElementById('directory-filter');
+  const servingButton = document.getElementById('directory-view-serving');
+  const pastButton = document.getElementById('directory-view-past');
   const addressForm = document.getElementById('address-form');
   const addressInput = document.getElementById('address-input');
   const addressResults = document.getElementById('address-results');
@@ -543,5 +580,7 @@ export async function bootstrapDirectoryPage() {
     form: addressForm, input: addressInput, resultsContainer: addressResults, dataState,
   });
 
-  await loadAndRenderDirectory(dataState, { directoryListContainer, filterInput });
+  await loadAndRenderDirectory(dataState, {
+    directoryListContainer, filterInput, servingButton, pastButton,
+  });
 }

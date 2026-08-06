@@ -41,6 +41,11 @@
 
     <section id="directory" aria-label="Directory">
       <h2>All legislators</h2>
+      <div class="directory-toggle" role="group" aria-label="Directory view">
+        <button id="directory-view-serving" type="button" aria-pressed="true">Serving now</button>
+        <button id="directory-view-past" type="button" aria-pressed="false">Past members</button>
+      </div>
+      <p class="directory-footnote">ⓘ no recorded end date — the honest signal a term is still open</p>
       <label for="directory-filter">Filter by name, chamber, or party</label>
       <input id="directory-filter" type="text" name="filter" />
       <div id="directory-list" aria-live="polite"></div>
