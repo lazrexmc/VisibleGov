@@ -2789,3 +2789,47 @@ live DB state). Runbooks should be built to be *checkable* — exact field names
 so that comparison stays cheap enough to actually happen.
 
 Nothing was deployed yet; he asked before clicking Save and Deploy.
+
+---
+
+## 2026-08-05 (evening) — FIRST DEPLOY: visiblegov.pages.dev, one real bug found live, root-caused, fixed
+
+**Lance:** "https://visiblegov.pages.dev/" — Phase 1 done, first deploy live.
+
+**Phase 2 verification, in the runbook's order.** The called-out highest-risk item passed first:
+the geocode Function's cross-directory import (`../js/security-headers.js`) bundles fine in
+Cloudflare's environment — `/geocode` returned 200 with real Census data (5,085 bytes) AND all
+three security headers on the response, today's header fix working in production on its first
+exposure. The 400 error path carries the headers too. Static pages serve the full `_headers` CSP.
+The 404 page works.
+
+**Check 4 failed, and it was real: every `_redirects` rule was broken in production.** `/trust`
+returned 308 → `/trust` — an infinite redirect loop, trust page unreachable. `/person/<uuid>`
+returned 308 → `/person` — the uuid STRIPPED from the URL, breaking every deep link to a
+legislator or bill. That is the core of the product.
+
+**Root cause, diagnosed against the live deploy rather than guessed:** Cloudflare Pages
+automatically canonicalizes `.html` paths to extensionless with a 308 (`/person.html` → `/person`,
+`/index.html` → `/` — all verified live). Our `_redirects` targets pointed AT `.html` files, so
+Pages immediately redirected away from every rewrite target. Local dev never caught it because
+`scripts/serve-site.js` resolved rewrites straight to files on disk and never emulated the
+canonicalization — the SECOND dev/prod divergence found on this one deploy (first: Functions not
+inheriting `_headers`).
+
+**Fix, both halves:** `_redirects` targets are now extensionless (`/person/*` → `/person` etc.),
+which is what Pages actually serves, so the rewrite lands with no redirect and the uuid survives in
+`location.pathname` where the page's JS reads it. `/trust` needs no rule at all — Pages serves
+`trust.html` at `/trust` natively; the rule that used to exist is precisely what looped it. And the
+dev server now mirrors both behaviors (308 canonicalization + extensionless serving) so this
+divergence class is closed, not just this instance.
+
+**A wrong first implementation, caught by existing tests and corrected against production
+evidence:** the first pass canonicalized every `.html` unconditionally — two existing tests went
+red on `/does-not-exist.html` becoming a 308. Before "fixing" the tests, checked what production
+actually does: it returns 404 for a nonexistent `.html` — Pages only redirects what it can serve.
+The tests were right, the implementation was wrong; corrected to canonicalize only when the target
+file exists. Every new test's expectation was verified against the real visiblegov.pages.dev
+response first, not inferred from docs.
+
+Suite 2,321 → 2,325. The push auto-deploys; re-verification of the failed checks runs against the
+new build next.

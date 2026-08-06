@@ -87,14 +87,36 @@ export class PathTraversalError extends Error {
   }
 }
 
-// Mirrors site/_redirects exactly (four lines, kept in sync by hand — low drift risk at this
-// size). /trust is an EXACT match (no trailing /*); the other three rewrite anything under them.
+// Mirrors site/_redirects exactly (three lines, kept in sync by hand — low drift risk at this
+// size). Targets are EXTENSIONLESS, matching the real file after the 2026-08-05 first-deploy fix:
+// Cloudflare Pages canonicalizes `.html` to extensionless with a 308, so a `.html` rewrite target
+// produced a redirect rather than a silent rewrite (an infinite loop on /trust; a stripped uuid on
+// /person/<id>). See site/_redirects' own header for the full trace.
+//
+// `/trust` deliberately has NO rule — Pages serves trust.html at /trust natively, and it is
+// canonicalizeHtmlPath + resolveSitePath below that reproduce that behavior here.
 export function applyRewrites(urlPath) {
-  if (urlPath === '/trust') return '/trust.html';
-  if (urlPath.startsWith('/person/')) return '/person.html';
-  if (urlPath.startsWith('/legislator/')) return '/legislator.html';
-  if (urlPath.startsWith('/bill/')) return '/bill.html';
+  if (urlPath.startsWith('/person/')) return '/person';
+  if (urlPath.startsWith('/legislator/')) return '/legislator';
+  if (urlPath.startsWith('/bill/')) return '/bill';
   return urlPath;
+}
+
+// Cloudflare Pages' automatic `.html` canonicalization, reproduced so dev cannot disagree with
+// production about it again. Verified against the live deploy 2026-08-05: `/person.html` -> 308
+// -> `/person`, `/trust.html` -> 308 -> `/trust`, `/index.html` -> 308 -> `/`.
+//
+// This exists because its ABSENCE is what let the broken _redirects ship: locally, a rewrite
+// straight to `/person.html` resolved to a real file and served 200, so the loop and the stripped
+// uuid were both invisible until the first real deploy. A dev server whose whole purpose is
+// mirroring production has to mirror the parts that bite, not just the parts that are easy.
+//
+// Returns the canonical path to redirect to, or null when the path is already canonical.
+export function canonicalizeHtmlPath(urlPath) {
+  if (!urlPath.endsWith('.html')) return null;
+  if (urlPath === '/index.html') return '/';
+  const withoutExtension = urlPath.slice(0, -'.html'.length);
+  return withoutExtension.endsWith('/index') ? `${withoutExtension.slice(0, -'index'.length)}` : withoutExtension;
 }
 
 // Pure path resolver, exported specifically so path-traversal rejection is testable without a
@@ -192,6 +214,28 @@ export function createSiteServer(siteRoot = SITE_ROOT) {
       await handleGeocodeRequest(req, res, securityHeaders);
       return;
     }
+    // Pages canonicalizes `.html` -> extensionless with a 308 before anything else resolves;
+    // reproduced here so a `.html` URL behaves identically in dev (2026-08-05 — the absence of
+    // this is what hid the broken _redirects until the first real deploy).
+    //
+    // ONLY when the file actually exists. Verified against the live deploy: `/person.html` 308s to
+    // `/person`, but `/does-not-exist.html` returns a plain 404 — Pages does not redirect a path it
+    // has nothing to serve. Canonicalizing unconditionally would turn every missing `.html` into a
+    // redirect to a missing extensionless path, i.e. a 404 wearing a 308's clothes. Two existing
+    // tests caught exactly that when this was first written unconditionally; they were right.
+    const canonical = canonicalizeHtmlPath(urlPath);
+    if (canonical !== null) {
+      let canonicalTargetExists = false;
+      try {
+        await readFile(resolveSitePath(siteRoot, urlPath));
+        canonicalTargetExists = true;
+      } catch { canonicalTargetExists = false; }
+      if (canonicalTargetExists) {
+        res.writeHead(308, { ...securityHeaders, location: canonical });
+        res.end();
+        return;
+      }
+    }
     let filePath;
     try {
       filePath = resolveSitePath(siteRoot, req.url);
@@ -205,6 +249,19 @@ export function createSiteServer(siteRoot = SITE_ROOT) {
       res.writeHead(200, { ...securityHeaders, 'content-type': contentTypeFor(filePath) });
       res.end(body);
     } catch {
+      // Extensionless serving, the other half of Pages' behavior: `/person` serves `person.html`,
+      // `/trust` serves `trust.html`. Production does this natively, which is why `_redirects` can
+      // (and must) point at extensionless targets and why `/trust` needs no rule at all. Without
+      // this, dev 404s on the exact URLs production serves — the same class of divergence, in the
+      // opposite direction.
+      if (!path.extname(filePath)) {
+        try {
+          const htmlBody = await readFile(`${filePath}.html`);
+          res.writeHead(200, { ...securityHeaders, 'content-type': 'text/html; charset=utf-8' });
+          res.end(htmlBody);
+          return;
+        } catch { /* fall through to the 404 below */ }
+      }
       // Serve site/404.html, the same file Cloudflare Pages serves automatically for an unmatched
       // path in production (2026-08-05). Dev mirroring production is the whole point of this
       // server — a text/plain "Not found" here would mean the real 404 page is never exercised

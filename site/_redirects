@@ -1,4 +1,34 @@
-/person/*      /person.html      200
-/legislator/*  /legislator.html  200
-/bill/*        /bill.html        200
-/trust         /trust.html       200
+# site/_redirects — Cloudflare Pages rewrites for the site's deep-link URL shapes.
+#
+# ⚠️ TARGETS ARE EXTENSIONLESS ON PURPOSE. Do NOT change these back to `/person.html` etc.
+#
+# FOUND LIVE 2026-08-05, on the very first deploy: with `.html` targets, every rule was broken,
+# because Cloudflare Pages automatically canonicalizes `.html` paths to their extensionless form
+# with a 308 (verified against the live deploy: `/person.html` -> 308 -> `/person`, `/trust.html`
+# -> 308 -> `/trust`, `/index.html` -> 308 -> `/`). A rule pointing AT `/person.html` therefore
+# sent the browser a redirect instead of quietly serving that file:
+#
+#   `/trust` -> `/trust.html` -> 308 -> `/trust` -> ...  an INFINITE REDIRECT LOOP; the trust page
+#                                                        was completely unreachable.
+#   `/person/<uuid>` -> `/person.html` -> 308 -> `/person`  the uuid was STRIPPED FROM THE URL, so
+#                                                        the page had no id to render and every
+#                                                        deep link to a legislator or a bill was
+#                                                        broken — the core of the product.
+#
+# Pointing at the extensionless path is what Pages actually serves (`/person` returns 200 and is
+# the canonical form), so the rewrite lands without a redirect and the original URL — including the
+# uuid the page's JS reads out of `location.pathname` — is preserved.
+#
+# `/trust` needs NO RULE AT ALL: Pages already serves `trust.html` at `/trust` natively. The rule
+# that used to be here is exactly what created the loop.
+#
+# Why local dev did not catch this: `scripts/serve-site.js` resolved rewrites straight to files on
+# disk and never emulated Pages' `.html` canonicalization, so both the loop and the stripped uuid
+# were invisible until the first real deploy. That gap is now closed — the dev server canonicalizes
+# and serves extensionless paths the way Pages does (see its own comments), pinned by
+# tests/site-modules.test.js. This is the SECOND dev/prod divergence found on this one deploy (the
+# first: Pages Functions not inheriting `_headers`) — when changing anything here, assume Pages'
+# real behavior differs from a naive local implementation until proven otherwise.
+/person/*      /person      200
+/legislator/*  /legislator  200
+/bill/*        /bill        200

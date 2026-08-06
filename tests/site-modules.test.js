@@ -13,7 +13,7 @@ import {
 } from '../site/js/render.js';
 import { voteReceiptUrl, photoUrl, officialBillUrl } from '../site/js/receipts.js';
 import {
-  resolveSitePath, applyRewrites, createSiteServer, contentTypeFor, SITE_ROOT, PathTraversalError,
+  resolveSitePath, applyRewrites, canonicalizeHtmlPath, createSiteServer, contentTypeFor, SITE_ROOT, PathTraversalError,
   _setGeocodeFetch, parseHeadersFile, loadSiteHeaders,
 } from '../scripts/serve-site.js';
 import { buildUpstreamUrl, onRequestPost } from '../site/functions/geocode.js';
@@ -652,13 +652,13 @@ test('officialBillUrl: returns canonical_url, or null when absent', () => {
 // scripts/serve-site.js
 // ============================================================================
 
-test('applyRewrites: mirrors the exact four site/_redirects rules', () => {
-  assert.equal(applyRewrites('/trust'), '/trust.html');
-  assert.equal(applyRewrites('/person/abc-123/jane-doe'), '/person.html');
-  assert.equal(applyRewrites('/legislator/xyz'), '/legislator.html');
-  assert.equal(applyRewrites('/bill/1/hb-1'), '/bill.html');
+test('applyRewrites: mirrors site/_redirects — EXTENSIONLESS targets (a .html target 308s on Pages; see site/_redirects header)', () => {
+  assert.equal(applyRewrites('/person/abc-123/jane-doe'), '/person');
+  assert.equal(applyRewrites('/legislator/xyz'), '/legislator');
+  assert.equal(applyRewrites('/bill/1/hb-1'), '/bill');
   assert.equal(applyRewrites('/css/site.css'), '/css/site.css', 'non-matching paths pass through unchanged');
-  assert.equal(applyRewrites('/trusty'), '/trusty', '/trust is an EXACT match, not a prefix');
+  assert.equal(applyRewrites('/trust'), '/trust', '/trust has NO rewrite rule — Pages serves trust.html at /trust natively');
+  assert.equal(applyRewrites('/trusty'), '/trusty');
 });
 
 test('contentTypeFor: maps html/js/css/json/svg/png by extension', () => {
@@ -1422,6 +1422,87 @@ test('createSiteServer: a missing path serves the real 404.html as HTML (dev mir
     assert.match(res.headers['content-type'], /text\/html/);
     assert.match(res.body, /Page not found/i);
     assert.ok(res.headers['content-security-policy'], 'the 404 page still carries the CSP');
+  } finally {
+    server.close();
+  }
+});
+
+// ---- Cloudflare Pages behavior the dev server must mirror (2026-08-05, first-deploy findings).
+// Every expectation below was verified against the REAL deploy at visiblegov.pages.dev before
+// being written here — not inferred from docs. See site/_redirects' header for the full trace. ----
+
+test('canonicalizeHtmlPath: computes Pages\' .html -> extensionless canonical target', () => {
+  assert.equal(canonicalizeHtmlPath('/person.html'), '/person');
+  assert.equal(canonicalizeHtmlPath('/trust.html'), '/trust');
+  assert.equal(canonicalizeHtmlPath('/index.html'), '/', 'root index canonicalizes to / (verified live)');
+  assert.equal(canonicalizeHtmlPath('/person'), null, 'already-canonical paths are left alone');
+  assert.equal(canonicalizeHtmlPath('/css/site.css'), null);
+});
+
+test('createSiteServer: an EXISTING .html path 308s to its extensionless form, matching production', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  const head = (p) => new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}${p}`, (r) => {
+      r.resume();
+      r.on('end', () => resolve({ status: r.statusCode, location: r.headers.location }));
+    }).on('error', reject);
+  });
+  try {
+    assert.deepEqual(await head('/person.html'), { status: 308, location: '/person' });
+    assert.deepEqual(await head('/trust.html'), { status: 308, location: '/trust' });
+  } finally {
+    server.close();
+  }
+});
+
+test('createSiteServer: a NONEXISTENT .html 404s rather than redirecting — Pages does not redirect what it cannot serve', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  try {
+    const status = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/does-not-exist.html`, (r) => {
+        r.resume();
+        r.on('end', () => resolve(r.statusCode));
+      }).on('error', reject);
+    });
+    // Verified live: production returns 404 here, NOT 308. Canonicalizing unconditionally would
+    // turn every missing .html into a redirect toward another 404.
+    assert.equal(status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+test('createSiteServer: extensionless paths serve their .html file, and deep links keep their id in the URL', async () => {
+  const server = createSiteServer(SITE_ROOT);
+  await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const { port } = server.address();
+  const get = (p) => new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}${p}`, (r) => {
+      let body = '';
+      r.on('data', (c) => { body += c; });
+      r.on('end', () => resolve({ status: r.statusCode, body }));
+    }).on('error', reject);
+  });
+  try {
+    // /trust has NO _redirects rule — it must still serve, exactly as Pages serves it natively.
+    const trust = await get('/trust');
+    assert.equal(trust.status, 200);
+    assert.match(trust.body, /boot-trust\.js/);
+
+    // The regression that shipped to production: /person/<uuid> must serve the person shell at the
+    // ORIGINAL url. With the old `.html` rewrite target, Pages 308'd to /person and dropped the
+    // uuid, leaving the page with no id to render.
+    const person = await get('/person/abc-123-def');
+    assert.equal(person.status, 200);
+    assert.match(person.body, /boot-person\.js/);
+
+    const bill = await get('/bill/xyz/hb-1');
+    assert.equal(bill.status, 200);
+    assert.match(bill.body, /boot-bill\.js/);
   } finally {
     server.close();
   }
