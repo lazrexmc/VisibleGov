@@ -87,8 +87,17 @@ kept as the record of what had to be true:
   record: `docs/adjudications/2026-08-06-mo-term-date-flag-adjudication.json`, applied with
   `--apply-overrides`, ruling + citations in `ingestion_runs.detail`). The 2 remaining NULLs are
   deliberate: Brown H-149 (no authored date in openstates/people — seat absent from their current
-  roster) and Onder's parked stale D2 row (TODO 31). 0 end_dates written. **This unblocks the
-  Current/Past directory UI sub-project (tenure display now possible at day precision).**
+  roster) and Onder's parked stale D2 row (TODO 31). 0 end_dates written.
+
+- **Directory "Serving now / Past members" split — SHIPPED 2026-08-06 (same evening), live-verified:**
+  the homepage now opens on "Serving now (730)" with a "Past members (837)" toggle, per-view name
+  search, byte-exact honesty footnote, and `since YYYY` tenure fragments (powered by the backfill
+  above). Verified in a real browser post-deploy: Onder renders only as U.S. House D3 · since 2025,
+  Schroer alone holds MO Senate D2 · since 2023, zero console errors, suite 2367/0. Spec:
+  `docs/superpowers/specs/2026-08-06-directory-serving-now-split-design.md`. This CLOSES the
+  2026-08-05 "filter the long ass list" request end-to-end. Known pre-existing nit logged for later
+  (not a regression): federal `Last, First "Nick"` name shapes make the surname-fallback sort put
+  quoted nicknames first within each view.
 
 **Genuinely open, NOT blocking the deploy** (details further down / in the audit sections):
 - 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
