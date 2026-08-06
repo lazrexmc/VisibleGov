@@ -68,11 +68,22 @@ row; touching federal terms; changing the directory UI (separate sub-project); r
 Mirrors the project's own trust model: an author proposes, an independent check verifies, mismatches
 go to Lance rather than auto-applying.
 
-- **Author (fills the date): OpenStates v3** (`https://v3.openstates.org`, key already configured as
-  `OPENSTATES_API_KEY`). Its `/people` records carry **real day-precision** `current_role.start_date`
-  the state itself asserts. The existing adapter `src/adapters/mo-legislature.js` `parsePerson()`
-  already parses `current_role`/`other_roles` into `{chamber, district, start_date, end_date}` (lines
-  41–52) — this spec broadens *which* people we fetch, it does not invent a new parser.
+- **Author (fills the date): the `openstates/people` CC0-1.0 data repo** (GitHub;
+  `data/mo/legislature/*.yml` — 192 files ≈ the current seated MO members). **AMENDED 2026-08-06,
+  Lance-approved, after Task 1's probe proved the original choice unviable:** the OpenStates v3 REST
+  API does not expose role dates at all (live-verified — `include=other_roles` is rejected 422; the
+  permitted includes are `other_names/other_identifiers/links/sources/offices`; `current_role`
+  carries only title/org_classification/district/division_id, and the adapter's `parsePerson`
+  date-reading is defensive dead code). The YAML data repo is what *feeds* that API and carries
+  **full role history at day precision** (`roles: [{start_date, end_date, type: lower|upper,
+  district}]`) — live-verified on a regular member (Crossley, `2023-01-04`) and a House→Senate
+  transition member (Schnelting, three dated roles). It is the direct analog of
+  `congress-legislators` (also CC0), which this project already trusts for every federal date.
+  Downloaded once into `.superpowers/artifacts/openstates-people/mo-legislature/` with a
+  `manifest.json` (source commit SHA + retrieval date); the CLI reads only the cache. Retired
+  members (Onder) are structurally absent from the current-legislature directory, preserving the
+  parked-row exclusion. Parsing uses the standard `yaml` npm package (new dependency,
+  Lance-approved in the same ruling).
 - **Verifier (independent, on-disk): the 32 cached LegiScan MO datasets**
   (`.superpowers/artifacts/legiscan-datasets/`). For each member we derive the **earliest qualifying
   session-year** from `people[]` presence gated by `roll_call.chamber` (the `roll_call.chamber`

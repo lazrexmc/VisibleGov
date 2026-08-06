@@ -4,9 +4,9 @@
 
 **Goal:** Fill the 193 current MO *state* legislators' `terms.start_date` with real OpenStates dates, cross-checked against on-disk LegiScan session-years, mismatches flagged for human review, via a new dry-run-first `backfill-mo-term-dates.js` CLI.
 
-**Architecture:** A new date-filler CLI cloned from `backfill-federal-names.js`'s shape (pure resolvers + an injectable-seam orchestrator + a thin `main()`). OpenStates supplies the authored date (a new paginated roster fetch, since only single-person fetch exists today); the 32 cached LegiScan datasets supply an independent earliest-qualifying-year verifier (people-presence + `roll_call.chamber`); a pure `reconcile` gate marks each term `agree` (write-eligible) or `flag`. Writes are `UPDATE`-in-place on the null-`start_date` row, `end_date` never touched, gated behind `--apply` (dry-run is the default). Provenance = `run_id` stamp + a citation list in `ingestion_runs.detail`.
+**Architecture:** A new date-filler CLI cloned from `backfill-federal-names.js`'s shape (pure resolvers + an injectable-seam orchestrator + a thin `main()`). The `openstates/people` CC0 YAML data (cached locally, like `congress-legislators`) supplies the authored day-precision date — **amended 2026-08-06 after the original v3-API path was live-disproven (the API exposes no role dates)**; the 32 cached LegiScan datasets supply an independent earliest-qualifying-year verifier (people-presence + `roll_call.chamber`); a pure `reconcile` gate marks each term `agree` (write-eligible) or `flag`. Writes are `UPDATE`-in-place on the null-`start_date` row, `end_date` never touched, gated behind `--apply` (dry-run is the default). Provenance = `run_id` stamp + a citation list (incl. the source repo commit SHA) in `ingestion_runs.detail`.
 
-**Tech Stack:** Node ≥22 ESM, `node:test` + `node:assert/strict`, `@supabase/supabase-js` (service role, via `src/lib/db.js`), OpenStates v3 REST (`src/adapters/mo-legislature.js`), cached LegiScan datasets (`src/adapters/legiscan-dataset.js`).
+**Tech Stack:** Node ≥22 ESM, `node:test` + `node:assert/strict`, `@supabase/supabase-js` (service role, via `src/lib/db.js`), `yaml` (new dep) for the cached `openstates/people` data, cached LegiScan datasets (`src/adapters/legiscan-dataset.js`).
 
 ## Global Constraints
 
@@ -25,147 +25,208 @@
 
 ---
 
-### Task 1: Capture a real OpenStates MO roster fixture and confirm `current_role.start_date` is present
+### Task 1: Cache the `openstates/people` MO YAML data + commit fixtures + add the `yaml` dependency
 
-This is the one networked, gating step. It de-risks the core assumption (that OpenStates carries a real `current_role.start_date` for *current* MO members — unverified in-repo, since the only fixture is retired Onder with no roles) and produces the multi-member fixture every later parser test needs. If `start_date` is absent, STOP and report — the whole approach depends on it.
+> **AMENDED 2026-08-06 (Lance-approved):** the original Task 1 probed the OpenStates v3 API and its
+> decision gate correctly FIRED — the API does not expose role dates at all (`include=other_roles`
+> is rejected 422; `current_role` has no `start_date`). The author source is now the
+> **`openstates/people` CC0-1.0 GitHub data repo**, whose `data/mo/legislature/*.yml` files carry
+> full role history at day precision (verified live: Crossley `start_date: 2023-01-04`; Schnelting
+> three dated roles incl. a House→Senate transition). This task caches that data locally, captures
+> committed fixtures, and adds the `yaml` parser dependency.
 
 **Files:**
-- Create: `tests/fixtures/mo-legislature/roster-page-sample.json` (a real, saved OpenStates response — trimmed to ~5 members)
+- Create: `.superpowers/artifacts/openstates-people/mo-legislature/*.yml` (gitignored cache, ~192 files)
+- Create: `.superpowers/artifacts/openstates-people/manifest.json` (gitignored: `{ source, commit, retrieved, count }`)
+- Create: `tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml` (committed, verbatim)
+- Create: `tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml` (committed, verbatim — the House→Senate transition case)
+- Modify: `package.json` + `package-lock.json` (add `yaml`)
 
 **Interfaces:**
-- Consumes: `OPENSTATES_API_KEY` from `.env`; the OpenStates v3 `/people` endpoint.
-- Produces: a committed fixture in the exact `{ results: [...], pagination: {...} }` shape `parseRoster` (Task 2) will parse.
+- Produces: the cache dir + manifest every later task reads; two committed YAML fixtures; the `yaml` package importable as `import { parse } from 'yaml'`.
 
-- [ ] **Step 1: Fetch one page of the live MO roster** (clean shell, key by name only — never print the key value)
+- [ ] **Step 1: Shallow sparse-clone the data repo and copy the MO legislature dir into the cache**
 
 ```bash
-# In a shell that has NOT sourced .env for test purposes; this is a CLI-style call.
-set -a && source .env && set +a
-curl -s "https://v3.openstates.org/people?jurisdiction=Missouri&include=other_roles&per_page=5&page=1" \
-  -H "X-API-KEY: $OPENSTATES_API_KEY" > tests/fixtures/mo-legislature/roster-page-sample.json
+cd /tmp && rm -rf osp-clone && git clone --depth 1 --filter=blob:none --sparse https://github.com/openstates/people.git osp-clone
+cd osp-clone && git sparse-checkout set data/mo/legislature && COMMIT=$(git rev-parse HEAD) && cd /f/VisibleGov
+mkdir -p .superpowers/artifacts/openstates-people/mo-legislature
+cp /tmp/osp-clone/data/mo/legislature/*.yml .superpowers/artifacts/openstates-people/mo-legislature/
+COUNT=$(ls .superpowers/artifacts/openstates-people/mo-legislature/*.yml | wc -l)
+python - "$COMMIT" "$COUNT" <<'PYEOF'
+import json, sys, datetime
+json.dump({"source": "https://github.com/openstates/people (CC0-1.0)", "path": "data/mo/legislature",
+           "commit": sys.argv[1], "retrieved": datetime.date.today().isoformat(), "count": int(sys.argv[2])},
+          open(".superpowers/artifacts/openstates-people/manifest.json", "w"), indent=2)
+PYEOF
+rm -rf /tmp/osp-clone
+```
+Expected: ~192 `.yml` files cached; manifest written with the source commit SHA.
+
+- [ ] **Step 2: Verify the cached shape — roles carry `start_date`, `type` (lower/upper), `district`**
+
+```bash
+grep -A3 "^roles:" ".superpowers/artifacts/openstates-people/mo-legislature/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml"
+```
+Expected: a `- start_date: 2023-01-04` line with `type: lower` and `district: '29'`.
+
+- [ ] **Step 3: Copy the two fixtures verbatim and install the `yaml` package**
+
+```bash
+mkdir -p tests/fixtures/openstates-people
+cp ".superpowers/artifacts/openstates-people/mo-legislature/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml" tests/fixtures/openstates-people/
+cp ".superpowers/artifacts/openstates-people/mo-legislature/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml" tests/fixtures/openstates-people/
+npm install yaml
 ```
 
-- [ ] **Step 2: Confirm the shape — `current_role` carries `start_date`, `org_classification`, `district`**
+- [ ] **Step 4: Whole suite still green in a clean shell** — `node --test`, expect `# fail 0`.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-python -c "
-import json,io
-d=json.load(io.open('tests/fixtures/mo-legislature/roster-page-sample.json',encoding='utf-8'))
-print('results:', len(d.get('results',[])))
-for p in d['results'][:5]:
-    cr=p.get('current_role') or {}
-    print(p.get('name'),'| org=',cr.get('org_classification'),'| dist=',cr.get('district'),'| start=',cr.get('start_date'))
-"
-```
-Expected: 5 members, each with `org_classification` in {`lower`,`upper`}, a `district`, and a **non-empty `start_date`**.
-
-- [ ] **Step 3: Decision gate.** If `start_date` is present for the current members → proceed. If it is **absent/empty**, STOP: the OpenStates author path is not viable as designed; report to the controller (the fallback would be LegiScan-year-only, which the spec says leaves those rows flagged/null — a different plan).
-
-- [ ] **Step 4: Trim the fixture to ~5 members and commit**
-
-```bash
-git add tests/fixtures/mo-legislature/roster-page-sample.json
-git commit -m "test(fixture): real OpenStates MO roster page sample for term-date backfill"
+git add tests/fixtures/openstates-people/ package.json package-lock.json
+git commit -m "test(fixture): openstates/people MO YAML fixtures + yaml dep for term-date backfill"
 ```
 
 ---
 
-### Task 2: `fetchCurrentRoster` + `parseRoster` in the OpenStates adapter
+### Task 2: `parsePersonYaml` + `loadCachedRoster` in the backfill CLI module
+
+Parses one `openstates/people` YAML into the roster-person shape the rest of the pipeline consumes, and loads the whole cache dir. Lives in the new CLI module (the API adapter `mo-legislature.js` is untouched — this data comes from files, not the API).
 
 **Files:**
-- Modify: `src/adapters/mo-legislature.js` (add two exports near `fetchPersonById`/`parsePerson`)
-- Test: `tests/mo-legislature.test.js` (add cases; existing file)
+- Create: `src/cli/backfill-mo-term-dates.js` (module start: imports + these two functions; Task 3 extends the same file)
+- Test: `tests/backfill-mo-term-dates.test.js` (new)
 
 **Interfaces:**
-- Consumes: the Task 1 fixture; existing module-locals `BASE`, `SOURCE`, `moLimiter`, `headers()`, `mapChamber`, `fetchWithLimit`.
+- Consumes: the Task 1 fixtures; `parse` from `yaml`; `readFileSync`/`readdirSync` from `node:fs`.
 - Produces:
-  - `fetchCurrentRoster(page, limiter = moLimiter) -> Promise<json>` — GETs `${BASE}/people?jurisdiction=Missouri&include=other_roles&per_page=50&page=${page}`.
-  - `parseRoster(json) -> Array<{ openstates_id, full_name, party, roles: Array<{chamber:'house'|'senate', district:string|null, start_date:string|null, end_date:string|null}> }>` — maps ALL `json.results` (not `[0]`), same per-role mapping as `parsePerson`.
+  - `parsePersonYaml(text) -> { openstates_id, full_name, family_name, party, roles: Array<{chamber:'house'|'senate', district:string|null, start_date:string|null, end_date:string|null}> }` — maps `type: lower->house / upper->senate` (any other type skipped), coerces district/dates to strings (YAML parses bare dates as strings here; guard with `String()`), `party` = first `party[].name` or null.
+  - `loadCachedRoster(cacheDir, { readdirFn, readFileFn } = {}) -> Array<person>` — parses every `*.yml` in the dir, sorted by filename; throws if the dir is missing/empty (the cache is required input, not optional).
 
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// tests/mo-legislature.test.js — add near the other parse tests
-import { parseRoster } from '../src/adapters/mo-legislature.js'; // extend the existing import line
-const rosterJson = JSON.parse(readFileSync('tests/fixtures/mo-legislature/roster-page-sample.json', 'utf8'));
+// tests/backfill-mo-term-dates.test.js
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parsePersonYaml, loadCachedRoster } from '../src/cli/backfill-mo-term-dates.js';
 
-test('parseRoster maps every result, not just the first, with chamber/district/start_date per current role', () => {
-  const people = parseRoster(rosterJson);
-  assert.equal(people.length, rosterJson.results.length);
-  assert.ok(people.length > 1, 'fixture should carry more than one member');
-  for (const person of people) {
-    assert.ok(person.openstates_id && person.full_name);
-    assert.ok(Array.isArray(person.roles));
-  }
-  // at least one current member resolves a house/senate role with a real start_date
-  const withCurrent = people.find((p) => p.roles.some((r) => r.start_date));
-  assert.ok(withCurrent, 'at least one current member should carry a role start_date');
-  const role = withCurrent.roles.find((r) => r.start_date);
-  assert.ok(['house', 'senate'].includes(role.chamber));
-  assert.match(role.start_date, /^\d{4}-\d{2}-\d{2}$/);
+const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
+const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
+
+test('parsePersonYaml maps a current House member with a day-precision start_date', () => {
+  const p = parsePersonYaml(crossleyYaml);
+  assert.equal(p.full_name, 'Aaron Crossley');
+  assert.equal(p.family_name, 'Crossley');
+  assert.match(p.openstates_id, /^ocd-person\//);
+  const role = p.roles.find((r) => r.chamber === 'house');
+  assert.equal(role.district, '29');
+  assert.equal(role.start_date, '2023-01-04');
+  assert.equal(role.end_date, null);
 });
 
-test('parseRoster returns [] for an empty results payload (no throw, unlike parsePerson)', () => {
-  assert.deepEqual(parseRoster({ results: [] }), []);
+test('parsePersonYaml keeps full role history for a House→Senate transition member', () => {
+  const p = parsePersonYaml(schneltingYaml);
+  const senate = p.roles.find((r) => r.chamber === 'senate');
+  assert.equal(senate.district, '23');
+  assert.equal(senate.start_date, '2025-01-08');
+  assert.equal(senate.end_date, null);
+  const endedHouse = p.roles.filter((r) => r.chamber === 'house' && r.end_date);
+  assert.ok(endedHouse.length >= 1, 'prior house roles carry end dates');
+});
+
+test('loadCachedRoster parses every yml in a dir and throws on a missing/empty dir', () => {
+  const people = loadCachedRoster('tests/fixtures/openstates-people');
+  assert.equal(people.length, 2);
+  assert.ok(people.every((p) => p.openstates_id && Array.isArray(p.roles)));
+  assert.throws(() => loadCachedRoster('tests/fixtures/does-not-exist'), /openstates-people cache/);
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test tests/mo-legislature.test.js`
-Expected: FAIL — `parseRoster` is not exported / not a function.
+Run: `node --test tests/backfill-mo-term-dates.test.js`
+Expected: FAIL — module/functions do not exist.
 
-- [ ] **Step 3: Implement `parseRoster` and `fetchCurrentRoster`**
+- [ ] **Step 3: Implement**
 
 ```js
-// src/adapters/mo-legislature.js — add after parsePerson / fetchPersonById
+// src/cli/backfill-mo-term-dates.js
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+import { getClient, openRun, closeRun, selectAll } from '../lib/db.js';
+import { decodeDatasetZip, extractDatasetFiles } from '../adapters/legiscan-dataset.js';
+import { mapLegiscanChamber } from '../adapters/legiscan-votes.js';
+import { listCachedDatasetFiles } from './backfill-nicknames.js';
 
-export function parseRoster(json) {
-  const people = json.results ?? [];
-  return people.map((p) => {
-    const roles = [];
-    const allRoles = [p.current_role, ...(p.other_roles ?? [])].filter(Boolean);
-    for (const r of allRoles) {
-      const chamber = mapChamber(r.org_classification ?? r.classification);
-      if (!chamber) continue;
-      roles.push({
-        chamber,
-        district: r.district != null ? String(r.district) : null,
-        start_date: r.start_date || null,
-        end_date: r.end_date || null,
-      });
-    }
-    return { openstates_id: p.id, full_name: p.name, party: p.party ?? null, roles };
-  });
+const CACHE_DIR = '.superpowers/artifacts/legiscan-datasets';
+const ROSTER_CACHE_DIR = '.superpowers/artifacts/openstates-people/mo-legislature';
+const SOURCE = 'backfill-mo-term-dates';
+const MO_JURISDICTION = 'mo-legislature';
+
+const TYPE_CHAMBER = { lower: 'house', upper: 'senate' };
+
+export function parsePersonYaml(text) {
+  const p = parseYaml(text);
+  const roles = [];
+  for (const r of p.roles ?? []) {
+    const chamber = TYPE_CHAMBER[r.type];
+    if (!chamber) continue;
+    roles.push({
+      chamber,
+      district: r.district != null ? String(r.district) : null,
+      start_date: r.start_date != null ? String(r.start_date) : null,
+      end_date: r.end_date != null ? String(r.end_date) : null,
+    });
+  }
+  return {
+    openstates_id: p.id,
+    full_name: p.name,
+    family_name: p.family_name ?? null,
+    party: p.party?.[0]?.name ?? null,
+    roles,
+  };
 }
 
-export function fetchCurrentRoster(page, limiter = moLimiter) {
-  const url = `${BASE}/people?jurisdiction=Missouri&include=other_roles&per_page=50&page=${page}`;
-  return fetchWithLimit(url, { source: SOURCE, limiter, headers: headers(), as: 'json' });
+export function loadCachedRoster(cacheDir = ROSTER_CACHE_DIR, {
+  readdirFn = readdirSync, readFileFn = readFileSync,
+} = {}) {
+  let files;
+  try { files = readdirFn(cacheDir); } catch {
+    throw new Error(`backfill-mo-term-dates: openstates-people cache missing at ${cacheDir} — run the Task 1 cache step first`);
+  }
+  const ymls = files.filter((f) => f.endsWith('.yml')).sort();
+  if (ymls.length === 0) {
+    throw new Error(`backfill-mo-term-dates: openstates-people cache empty at ${cacheDir}`);
+  }
+  return ymls.map((f) => parsePersonYaml(readFileFn(join(cacheDir, f), 'utf8')));
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test tests/mo-legislature.test.js`
+Run: `node --test tests/backfill-mo-term-dates.test.js`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/adapters/mo-legislature.js tests/mo-legislature.test.js
-git commit -m "feat(mo-legislature): add fetchCurrentRoster + parseRoster (paginated roster)"
+git add src/cli/backfill-mo-term-dates.js tests/backfill-mo-term-dates.test.js
+git commit -m "feat(backfill-mo-term-dates): parse openstates/people YAML + load cached roster"
 ```
 
 ---
 
 ### Task 3: `readCachedDatasetFull` — decode wrapper that returns BOTH people and rollCalls
 
-The existing `readCachedDatasetPeople` (in `backfill-nicknames.js`) decodes the full archive but discards `rollCalls`, which the cross-check needs. Add a self-contained wrapper in the new CLI module that returns people + rollCalls + the envelope year.
+The existing `readCachedDatasetPeople` (in `backfill-nicknames.js`) decodes the full archive but discards `rollCalls`, which the cross-check needs. Add a self-contained wrapper in the CLI module (created in Task 2; its import block already carries everything this needs).
 
 **Files:**
-- Create: `src/cli/backfill-mo-term-dates.js` (start the file with just this function + imports)
-- Test: `tests/backfill-mo-term-dates.test.js` (new)
+- Modify: `src/cli/backfill-mo-term-dates.js` (add this function)
+- Test: `tests/backfill-mo-term-dates.test.js` (extend)
 
 **Interfaces:**
 - Consumes: `decodeDatasetZip`, `extractDatasetFiles` from `../adapters/legiscan-dataset.js`; committed fixture `tests/fixtures/research/legiscan/mo-2018-dataset.json` (base64 at `envelope.dataset.zip`).
@@ -213,20 +274,10 @@ test('readCachedDatasetFull returns ok:false on unreadable file (no throw)', asy
 Run: `node --test tests/backfill-mo-term-dates.test.js`
 Expected: FAIL — module/function does not exist.
 
-- [ ] **Step 3: Implement the file header + `readCachedDatasetFull`**
+- [ ] **Step 3: Implement `readCachedDatasetFull`** (append to the existing module — imports/constants already there from Task 2)
 
 ```js
-// src/cli/backfill-mo-term-dates.js
-import { readFileSync } from 'node:fs';
-import { getClient, openRun, closeRun, selectAll } from '../lib/db.js';
-import { decodeDatasetZip, extractDatasetFiles } from '../adapters/legiscan-dataset.js';
-import { mapLegiscanChamber } from '../adapters/legiscan-votes.js';
-import { fetchCurrentRoster, parseRoster } from '../adapters/mo-legislature.js';
-import { listCachedDatasetFiles } from './backfill-nicknames.js';
-
-const CACHE_DIR = '.superpowers/artifacts/legiscan-datasets';
-const SOURCE = 'backfill-mo-term-dates';
-const MO_JURISDICTION = 'mo-legislature';
+// src/cli/backfill-mo-term-dates.js — add
 
 export async function readCachedDatasetFull(filePath, { readFileFn = readFileSync } = {}) {
   let raw;
@@ -382,8 +433,8 @@ git commit -m "feat(backfill-mo-term-dates): pure LegiScan presence/chamber year
   - `lastNameOf(fullName) -> string` — lowercased last whitespace-token (surname sanity helper).
   - `matchRoster(datelessTerms, rosterPeople) -> { matches: Array<{ term, openStatesId, startDate:string|null, surnameOk:boolean }>, unmatchedTerms: object[] }` where
     - `datelessTerms = Array<{ termId, legislatorId, chamber, district, surname, legiscanPeopleId }>`
-    - each roster person is a `parseRoster` element `{ openstates_id, full_name, roles:[{chamber, district, start_date}] }`.
-    - Match key: a roster role whose `chamber` and `String(district)` equal the term's. `surnameOk` = the term surname and the person's last name share (case-insensitive). No match → the term goes to `unmatchedTerms`.
+    - each roster person is a `parsePersonYaml` element `{ openstates_id, full_name, family_name, roles:[{chamber, district, start_date, end_date}] }`.
+    - Match key: a roster role whose `chamber` and `String(district)` equal the term's, **and whose `end_date` is null** (only a person's *current* role identifies their current seat — Schnelting's ended House-69 role must not match today's House-69 term). `surnameOk` = the term surname equals the person's `family_name` (falling back to `lastNameOf(full_name)`), case-insensitive. No match → the term goes to `unmatchedTerms`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -392,20 +443,23 @@ git commit -m "feat(backfill-mo-term-dates): pure LegiScan presence/chamber year
 import { matchRoster, lastNameOf } from '../src/cli/backfill-mo-term-dates.js';
 
 const ROSTER = [
-  { openstates_id: 'os-1', full_name: 'Jane Adams',
-    roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09' }] },
-  { openstates_id: 'os-2', full_name: 'Bob Baker',
-    roles: [{ chamber: 'senate', district: '2', start_date: '2023-01-04' }] },
+  { openstates_id: 'os-1', full_name: 'Jane Adams', family_name: 'Adams',
+    roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09', end_date: null }] },
+  { openstates_id: 'os-2', full_name: 'Bob Baker', family_name: 'Baker',
+    roles: [
+      { chamber: 'senate', district: '2', start_date: '2023-01-04', end_date: null },
+      { chamber: 'house', district: '60', start_date: '2017-01-04', end_date: '2023-01-03' }, // ended — must NOT steal seat house|60
+    ] },
 ];
 
-test('matchRoster joins by (chamber, district) and carries the role start_date', () => {
+test('matchRoster joins by (chamber, district) on OPEN roles only and carries the role start_date', () => {
   const terms = [
     { termId: 't1', legislatorId: 'l1', chamber: 'house', district: '60', surname: 'Adams', legiscanPeopleId: 11 },
   ];
   const { matches, unmatchedTerms } = matchRoster(terms, ROSTER);
   assert.equal(matches.length, 1);
   assert.equal(unmatchedTerms.length, 0);
-  assert.equal(matches[0].openStatesId, 'os-1');
+  assert.equal(matches[0].openStatesId, 'os-1'); // Adams, not Baker's ended house-60 role
   assert.equal(matches[0].startDate, '2019-01-09');
   assert.equal(matches[0].surnameOk, true);
 });
@@ -418,6 +472,16 @@ test('matchRoster puts a term with no roster counterpart (e.g. retired Onder) in
   assert.equal(matches.length, 1);
   assert.equal(matches[0].surnameOk, false); // matched the seat but the surname disagrees -> flaggable
   assert.equal(unmatchedTerms.length, 0);
+});
+
+test('matchRoster: a term whose seat has no OPEN roster role goes to unmatchedTerms', () => {
+  const terms = [
+    { termId: 't-gone', legislatorId: 'l-gone', chamber: 'house', district: '99', surname: 'Ghost', legiscanPeopleId: 12 },
+  ];
+  const { matches, unmatchedTerms } = matchRoster(terms, ROSTER);
+  assert.equal(matches.length, 0);
+  assert.equal(unmatchedTerms.length, 1);
+  assert.equal(unmatchedTerms[0].termId, 't-gone');
 });
 ```
 
@@ -437,11 +501,13 @@ export function lastNameOf(fullName) {
 }
 
 export function matchRoster(datelessTerms, rosterPeople) {
-  // index roster roles by chamber|district -> { person, role }
+  // index roster roles by chamber|district -> { person, role } — OPEN roles only:
+  // an ended role (Schnelting's old House seat) must never claim the seat's current term
   const bySeat = new Map();
   for (const person of rosterPeople) {
     for (const role of person.roles ?? []) {
       if (!role.chamber || role.district == null) continue;
+      if (role.end_date != null) continue;
       bySeat.set(`${role.chamber}|${String(role.district)}`, { person, role });
     }
   }
@@ -450,11 +516,12 @@ export function matchRoster(datelessTerms, rosterPeople) {
   for (const term of datelessTerms) {
     const hit = bySeat.get(`${term.chamber}|${String(term.district)}`);
     if (!hit) { unmatchedTerms.push(term); continue; }
+    const personSurname = (hit.person.family_name ?? lastNameOf(hit.person.full_name) ?? '').toLowerCase();
     matches.push({
       term,
       openStatesId: hit.person.openstates_id,
       startDate: hit.role.start_date ?? null,
-      surnameOk: !!term.surname && lastNameOf(hit.person.full_name) === String(term.surname).toLowerCase(),
+      surnameOk: !!term.surname && personSurname === String(term.surname).toLowerCase(),
     });
   }
   return { matches, unmatchedTerms };
@@ -564,9 +631,9 @@ Wire the pure pieces into an injectable-seam `runBackfillMoTermDates`, plus the 
   - `parseArgs(argv) -> { apply: boolean }` (default `{apply:false}`; only `--apply`; unknown flag throws `/unknown flag/`).
   - `loadDatelessMoTerms(client) -> Promise<Array<{termId, legislatorId, chamber, district}>>` — `selectAll(client,'terms','id,legislator_id,jurisdiction_id,chamber,district,start_date')`, filtered to `jurisdiction_id==='mo-legislature' && start_date==null`.
   - `loadLegislatorLookup(client) -> Promise<Map<legislatorId,{surname, legiscanPeopleId}>>` — `selectAll(client,'legislators','id,full_name,surname,legiscan_people_id')`.
-  - `citationString({ openStatesId, startDate, legiscanYear, chamber }) -> string`.
-  - `runBackfillMoTermDates(client, { apply=false, runId=null, cacheDir=CACHE_DIR, loadTermsFn=loadDatelessMoTerms, loadLegislatorsFn=loadLegislatorLookup, fetchRosterFn=fetchAllRosterPages, loadPresenceIndexFn=loadLegiscanPresenceIndex, updateTermFn=updateTermStartDate } = {}) -> Promise<{ mode, counts, plan, flags, citations }>`.
-  - `fetchAllRosterPages() -> Promise<Array<rosterPerson>>` (paginates `fetchCurrentRoster` + `parseRoster`).
+  - `citationString({ openStatesId, startDate, legiscanYear, chamber, sourceCommit }) -> string`.
+  - `runBackfillMoTermDates(client, { apply=false, runId=null, cacheDir=CACHE_DIR, rosterCacheDir=ROSTER_CACHE_DIR, loadTermsFn=loadDatelessMoTerms, loadLegislatorsFn=loadLegislatorLookup, loadRosterFn=loadCachedRoster, loadManifestFn=loadRosterManifest, loadPresenceIndexFn=loadLegiscanPresenceIndex, updateTermFn=updateTermStartDate } = {}) -> Promise<{ mode, counts, plan, flags, citations }>`.
+  - `loadRosterManifest() -> { commit:string|null, retrieved:string|null }` — reads `.superpowers/artifacts/openstates-people/manifest.json`; `{commit:null, retrieved:null}` if unreadable.
   - `loadLegiscanPresenceIndex(cacheDir) -> Promise<index>` (decodes every cached dataset via `readCachedDatasetFull` + `buildLegiscanPresenceIndex`).
   - `updateTermStartDate(client, runId, { termId, startDate }) -> Promise<{written:boolean}>` (the `UPDATE`-in-place write).
 
@@ -594,11 +661,12 @@ function fakeDeps() {
       ['l-house', { surname: 'Adams', legiscanPeopleId: 11 }],
       ['l-onder', { surname: 'Onder', legiscanPeopleId: 16351 }],
     ]),
-    fetchRosterFn: async () => ([
-      { openstates_id: 'os-1', full_name: 'Jane Adams',
-        roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09' }] },
+    loadRosterFn: () => ([
+      { openstates_id: 'os-1', full_name: 'Jane Adams', family_name: 'Adams',
+        roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09', end_date: null }] },
       // NOTE: no senate D2 member -> Onder's seat is unmatched
     ]),
+    loadManifestFn: () => ({ commit: 'abc1234def', retrieved: '2026-08-06' }),
     loadPresenceIndexFn: async () => new Map([[11, {
       presenceYears: new Set([2019]), chamberVoteYears: { house: new Set([2019]), senate: new Set() },
     }]]),
@@ -636,7 +704,7 @@ test('apply: an agreeing member is written via updateTermFn; end_date is never i
   assert.equal('endDate' in written[0], false); // end_date is never touched
   assert.equal(report.counts.written, 1);
   assert.equal(report.citations.length, 1);
-  assert.match(report.citations[0].citation, /openstates\.org/);
+  assert.match(report.citations[0].citation, /openstates\/people@abc1234def/);
 });
 ```
 
@@ -678,18 +746,13 @@ export async function loadLegislatorLookup(client) {
   return map;
 }
 
-export async function fetchAllRosterPages(fetchPageFn = fetchCurrentRoster) {
-  const people = [];
-  let page = 1;
-  let maxPage = 1;
-  do {
-    // eslint-disable-next-line no-await-in-loop -- sequential by design (7s OpenStates limiter)
-    const json = await fetchPageFn(page);
-    people.push(...parseRoster(json));
-    maxPage = json.pagination?.max_page ?? page;
-    page += 1;
-  } while (page <= maxPage);
-  return people;
+export function loadRosterManifest({ readFileFn = readFileSync } = {}) {
+  try {
+    const m = JSON.parse(readFileFn('.superpowers/artifacts/openstates-people/manifest.json', 'utf8'));
+    return { commit: m.commit ?? null, retrieved: m.retrieved ?? null };
+  } catch {
+    return { commit: null, retrieved: null };
+  }
 }
 
 export async function loadLegiscanPresenceIndex(cacheDir = CACHE_DIR, {
@@ -704,8 +767,9 @@ export async function loadLegiscanPresenceIndex(cacheDir = CACHE_DIR, {
   return buildLegiscanPresenceIndex(sessions);
 }
 
-export function citationString({ openStatesId, startDate, legiscanYear, chamber }) {
-  return `openstates.org /people id=${openStatesId} current_role.start_date=${startDate}; `
+export function citationString({ openStatesId, startDate, legiscanYear, chamber, sourceCommit }) {
+  return `openstates/people@${sourceCommit ?? 'unknown'} (CC0-1.0) data/mo/legislature `
+    + `id=${openStatesId} roles[open].start_date=${startDate}; `
     + `verified-against legiscan-dataset earliest-qualifying-year=${legiscanYear} `
     + `[people[] presence + roll_call.chamber=${chamber === 'senate' ? 'S' : 'H'}]`;
 }
@@ -726,10 +790,11 @@ function emptyCounts() {
 }
 
 export async function runBackfillMoTermDates(client, {
-  apply = false, runId = null, cacheDir = CACHE_DIR,
+  apply = false, runId = null, cacheDir = CACHE_DIR, rosterCacheDir = ROSTER_CACHE_DIR,
   loadTermsFn = loadDatelessMoTerms,
   loadLegislatorsFn = loadLegislatorLookup,
-  fetchRosterFn = fetchAllRosterPages,
+  loadRosterFn = loadCachedRoster,
+  loadManifestFn = loadRosterManifest,
   loadPresenceIndexFn = loadLegiscanPresenceIndex,
   updateTermFn = updateTermStartDate,
 } = {}) {
@@ -747,7 +812,8 @@ export async function runBackfillMoTermDates(client, {
     return { ...t, surname: leg.surname ?? null, legiscanPeopleId: leg.legiscanPeopleId ?? null };
   });
 
-  const rosterPeople = await fetchRosterFn();
+  const rosterPeople = await loadRosterFn(rosterCacheDir);
+  const { commit: sourceCommit } = loadManifestFn();
   const presenceIndex = await loadPresenceIndexFn(cacheDir);
 
   const { matches, unmatchedTerms } = matchRoster(datelessTerms, rosterPeople);
@@ -766,7 +832,7 @@ export async function runBackfillMoTermDates(client, {
       continue;
     }
     counts.agreed += 1;
-    const citation = citationString({ openStatesId: m.openStatesId, startDate: m.startDate, legiscanYear, chamber: m.term.chamber });
+    const citation = citationString({ openStatesId: m.openStatesId, startDate: m.startDate, legiscanYear, chamber: m.term.chamber, sourceCommit });
     if (!apply) {
       plan.push({ termId: m.term.termId, surname: m.term.surname, chamber: m.term.chamber,
         district: m.term.district, startDate: m.startDate, legiscanYear, citation });
