@@ -29,6 +29,7 @@
     "@supabase/supabase-js": "^2.45.0",
     "fast-xml-parser": "^4.4.0",
     "pdfjs-dist": "6.1.200",
+    "yaml": "^2.9.0",
     "yauzl": "3.4.0"
   },
   "devDependencies": {
