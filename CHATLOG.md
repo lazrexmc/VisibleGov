@@ -3092,3 +3092,11 @@ branch (main untouched):
 
 Open: integration decision (merge/PR/keep) is Lance's; then his adjudication of the 23 flags and
 the `--apply` run (draft-then-apply — agent never applies).
+
+**Apply ran (Lance, 2026-08-06 ~22:00 UTC)** — before flag adjudication, which is safe by design
+(flags are never write-eligible). Live-verified immediately after: 171/194 MO terms dated (exactly
+the dual-source-agreed set), 23 still NULL awaiting adjudication, 0 end_dates written, Onder's
+stale D2 row untouched, ingestion_runs row `succeeded` with all 171 commit-SHA citations + 23
+flags recorded. Remaining: adjudicate the 23 flags (17 year-mismatch = the current-stint vs
+first-service policy question; 4 multi-word-surname artifacts; Brown H-149 + Onder stay null),
+then a second idempotent --apply for whatever is approved.
