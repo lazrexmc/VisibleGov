@@ -3100,3 +3100,11 @@ stale D2 row untouched, ingestion_runs row `succeeded` with all 171 commit-SHA c
 flags recorded. Remaining: adjudicate the 23 flags (17 year-mismatch = the current-stint vs
 first-service policy question; 4 multi-word-surname artifacts; Brown H-149 + Onder stay null),
 then a second idempotent --apply for whatever is approved.
+
+**Overrides apply ran (Lance, 2026-08-06 ~22:50 UTC)** — the 21 adjudicated flags written per his
+ruling ("start date = start of the current term they are serving"); run recorded with ruling text +
+21 commit-SHA citations in ingestion_runs.detail. Lance ran the command twice; the second run
+skipped all 21 as already-dated (idempotency verified in production). Live end-state: **192/194 MO
+terms dated; Brown H-149 (no authored date) + Onder (parked) remain NULL by design; 0 end_dates
+written.** The term-date backfill sub-project is COMPLETE — the Current/Past directory UI
+(its parent project) is now unblocked with day-precision tenure display available.
