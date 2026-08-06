@@ -81,13 +81,14 @@ kept as the record of what had to be true:
    to the steps that trigger them. All code-side work is DONE; what remains is console work in
    Lance's own account.
 
-- **MO term-date backfill — APPLIED 2026-08-06, merged to main, partially open:** Lance ran
-  `--apply`; live-verified 171/194 MO terms now dated (the dual-source-agreed set, citations with
-  source commit SHA in `ingestion_runs.detail`), 0 end_dates written, Onder untouched. **Still
-  open: adjudicate the 23 flags** (17 year-mismatch — policy call: current-stint vs first-service;
-  4 multi-word-surname artifacts: Van Schoiack/Walsh Moore/Bunting Parker/Fountain Henderson;
-  Brown H-149 unmatched + Onder stay null), then a second idempotent `--apply` for whatever is
-  approved. Flag table: `.superpowers/sdd/2026-08-06-mo-current-term-dates-backfill/dryrun-resolution-table.json`.
+- **MO term-date backfill — COMPLETE 2026-08-06 (both applies ran + live-verified):** 192/194 MO
+  terms dated. 171 via the dual-source auto-agree apply; 21 via Lance's adjudication ruling
+  (*"start date = start of the current term they are serving"* → OpenStates open-role date wins;
+  record: `docs/adjudications/2026-08-06-mo-term-date-flag-adjudication.json`, applied with
+  `--apply-overrides`, ruling + citations in `ingestion_runs.detail`). The 2 remaining NULLs are
+  deliberate: Brown H-149 (no authored date in openstates/people — seat absent from their current
+  roster) and Onder's parked stale D2 row (TODO 31). 0 end_dates written. **This unblocks the
+  Current/Past directory UI sub-project (tenure display now possible at day precision).**
 
 **Genuinely open, NOT blocking the deploy** (details further down / in the audit sections):
 - 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
