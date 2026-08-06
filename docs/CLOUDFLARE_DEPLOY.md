@@ -25,6 +25,25 @@ result ambiguous between the deploy and the DNS.
 | `revoke execute ... from authenticated` | ✅ migration `0030`, applied + verified live 2026-08-05 |
 | Site verified end-to-end in a real browser against live data | ✅ 2026-08-03 (Playwright, zero console errors) |
 | Suite green | ✅ 2,321 / 0 |
+| LegiScan CC BY 4.0 attribution present | ✅ full text + license link on `trust.html`; every page's footer links to `/trust#attribution` |
+
+### ⚠️ The one genuinely unproven thing — check it first in Phase 2
+
+`site/functions/geocode.js` imports `../js/security-headers.js` — a module **outside** the
+`functions/` directory. That import was added 2026-08-05 and **has never run in Cloudflare's
+environment**; it works locally only because Node resolves it directly and
+`scripts/serve-site.js` imports the same file. Cloudflare bundles Functions with esbuild and
+normally follows relative imports fine, so this is *expected* to work — but "expected" is not
+"verified," and it is the only piece of this deploy that has no prior production evidence behind it.
+
+**If it fails, `/geocode` returns 500 and address lookup breaks** — the rest of the site is
+unaffected (directory, profiles, votes, bills, trust page all work; only "find my representatives"
+goes down). Fix, if needed: move the constant into `site/functions/` and import it locally, or
+inline the three header values in `geocode.js` — then re-point the drift test in
+`tests/site-modules.test.js` at the new location so the `_headers` guard keeps working.
+
+**This is not a reason to delay the deploy.** It is a reason to run Phase 2 check #2 first and know
+what you are looking at if it errors.
 
 ---
 
@@ -38,6 +57,7 @@ Settings — these exact values:
 
 | Field | Value | Why |
 |---|---|---|
+| **Project name** | e.g. `visiblegov` | **pick deliberately — this becomes the permanent `<name>.pages.dev` URL** and is the first field in the wizard; renaming later means a new URL |
 | Repository | `lazrexmc/VisibleGov` | private repo; authorize Cloudflare's GitHub app for it |
 | Production branch | `main` | |
 | Framework preset | **None** | a preset injects an assumed build command you'd then have to clear |
@@ -83,7 +103,26 @@ Then, in a real browser, walk the product claim end-to-end (the same loop verifi
 2026-08-03): directory → click a legislator → see real recorded votes → click a bill from a vote →
 see that bill's real roll-call tally. Check the console is clean.
 
+**Two browser checks beyond the happy path:**
+
+- **Address lookup actually works** (the geocode Function end-to-end, not just its headers) — type a
+  real Missouri address and confirm it returns representatives. This is the feature that breaks if
+  the cross-directory import fails; check #2 above tests the plumbing, this tests the product.
+- **Attribution renders and resolves.** Click **Attribution** in the footer → it must land on
+  `/trust#attribution` and show the LegiScan CC BY 4.0 notice with its license link. This is not
+  cosmetic: LegiScan's binding terms (`docs/research/2026-07-28-legiscan-terms.md`, rule 10) require
+  CC BY 4.0 attribution *with link* on every public surface displaying their data, and going public
+  is the exact moment that obligation starts applying. CC BY 4.0 explicitly permits satisfying it via
+  a hyperlink to a page carrying the notice, which is what the footer does — so this is compliant as
+  built, and the check is confirming it survived the deploy, not redesigning it.
+
 **Do not proceed to Phase 3 until Phase 2 is fully green.**
+
+**If something fails.** Pages keeps every deployment: project → **Deployments** → any prior build →
+**Rollback**. Nothing here touches the database, so a bad deploy is cosmetic and reversible — the
+backend, the scheduler, and all ingestion keep running untouched regardless of what the site does.
+A failed *build* is even simpler: nothing was ever published, and the previous deployment (or, on
+the first attempt, nothing at all) stays live.
 
 ---
 

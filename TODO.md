@@ -58,7 +58,9 @@ scratch. Short pre-deploy list, mostly already decided:
    (3d) Preview builds: recommended **leave the default on** — this is a public-transparency site,
    the anon key is public by design, RLS is the wall, and there is no auth session to confuse
    across origins. Not yet formally ruled by Lance; nothing blocks on it.
-   **➡️ The whole deploy is now a runbook: `docs/CLOUDFLARE_DEPLOY.md`** — four phases
+   **➡️ The whole deploy is now a runbook: `docs/CLOUDFLARE_DEPLOY.md`** (reviewed and tightened
+   2026-08-05 — added the project-name field, a called-out highest-risk item, live attribution
+   verification, and rollback guidance; every factual claim in it re-verified against the code) — four phases
    (`.pages.dev` first → verify with curl at the origin → nameservers → custom domain), exact
    project-creation values, copy-paste verification commands, and the LinkedUmp traps written next
    to the steps that trigger them. All code-side work is DONE; what remains is console work in

@@ -2701,3 +2701,49 @@ anyway, since leftover records fight the Pages custom-domain attachment (LinkedU
 
 Every open question on the deploy is now answered. Nothing code-side remains; the next action is
 Lance's, at the Cloudflare console, following `docs/CLOUDFLARE_DEPLOY.md` Phase 1.
+
+---
+
+## 2026-08-05 (continued) — deploy runbook reviewed against the code, four gaps closed
+
+**Lance:** "Review the cloudflare_deploy document and ensure it still matches our intent. make
+changes if needed and document in other documents if needed then provide feedback on those changes
+and the next steps needed to deploy."
+
+Reviewed it the way this project has learned to review its own docs — by checking claims against
+the code rather than re-reading the prose. Four real gaps, one of which was a genuine risk nobody
+had named:
+
+**1. The highest-risk item in the deploy was not called out anywhere.**
+`site/functions/geocode.js` imports `../js/security-headers.js` — a module OUTSIDE the `functions/`
+directory. That import was written today and has never run in Cloudflare's environment; it works
+locally only because Node resolves it directly. Pages bundles Functions with esbuild and normally
+follows relative imports fine, so it is *expected* to work — but expected is not verified, and this
+is the only piece of the deploy with zero prior production evidence. Added a callout with the blast
+radius stated honestly (if it fails, `/geocode` 500s and address lookup breaks; everything else —
+directory, profiles, votes, bills — is unaffected) and two concrete fixes (move the constant inside
+`functions/`, or inline the three values and re-point the drift test). Explicitly framed as "run
+this check first," NOT as a reason to delay.
+
+**2. Project name was missing from the settings table** — it is the first field in the wizard and
+permanently determines the `<name>.pages.dev` URL. It was in TODO.md's older notes but never made it
+into the runbook.
+
+**3. LegiScan attribution was not in the verification checklist.** This is a binding ToU term
+(`docs/research/2026-07-28-legiscan-terms.md` rule 10: CC BY 4.0 attribution *with link* on every
+public surface displaying their data) and deploying is the exact moment it starts applying. Traced
+the implementation before writing the check: `trust.html` carries the full notice with its license
+link, and `mountFooter` puts an "Attribution" link to `/trust#attribution` on every page. CC BY 4.0
+§3(a)(2) explicitly permits satisfying attribution via a hyperlink to a page carrying the notice, so
+the site is compliant as built — the added step confirms it survived the deploy, it does not
+redesign anything. Also added a browser check that address lookup actually returns representatives,
+since the curl check only proves the Function's plumbing, not the feature.
+
+**4. No failure/rollback guidance.** Added: Pages keeps every deployment and can roll back to any
+prior build, a failed *build* publishes nothing at all, and — the part worth saying plainly —
+**nothing in this deploy touches the database**, so a bad deploy is cosmetic and fully reversible
+while the scheduler and all ingestion keep running untouched.
+
+Re-verified every factual claim the runbook makes against the actual code (the import path, the
+`#attribution` anchor, the footer link, the `_redirects` rule) rather than trusting the document it
+was describing. Suite still 2,321/0.
