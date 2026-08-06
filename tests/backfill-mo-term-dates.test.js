@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf } from '../src/cli/backfill-mo-term-dates.js';
+import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile } from '../src/cli/backfill-mo-term-dates.js';
 
 const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
 const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
@@ -130,4 +130,29 @@ test('matchRoster: a term whose seat has no OPEN roster role goes to unmatchedTe
   assert.equal(matches.length, 0);
   assert.equal(unmatchedTerms.length, 1);
   assert.equal(unmatchedTerms[0].termId, 't-gone');
+});
+
+test('reconcile: matching years with a good surname agrees', () => {
+  assert.deepEqual(reconcile({ startDate: '2019-01-09', legiscanYear: 2019, surnameOk: true }),
+    { verdict: 'agree', reason: null });
+});
+
+test('reconcile flags a year mismatch', () => {
+  assert.deepEqual(reconcile({ startDate: '2023-01-04', legiscanYear: 2019, surnameOk: true }),
+    { verdict: 'flag', reason: 'year-mismatch' });
+});
+
+test('reconcile flags a missing OpenStates date before anything else', () => {
+  assert.deepEqual(reconcile({ startDate: null, legiscanYear: 2019, surnameOk: true }),
+    { verdict: 'flag', reason: 'no-openstates-date' });
+});
+
+test('reconcile flags a surname mismatch (e.g. matched seat, wrong person)', () => {
+  assert.deepEqual(reconcile({ startDate: '2023-01-04', legiscanYear: 2023, surnameOk: false }),
+    { verdict: 'flag', reason: 'surname-mismatch' });
+});
+
+test('reconcile flags when the cross-check has no year', () => {
+  assert.deepEqual(reconcile({ startDate: '2019-01-09', legiscanYear: null, surnameOk: true }),
+    { verdict: 'flag', reason: 'no-legiscan-year' });
 });

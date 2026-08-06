@@ -134,3 +134,11 @@ export function matchRoster(datelessTerms, rosterPeople) {
   }
   return { matches, unmatchedTerms };
 }
+
+export function reconcile({ startDate, legiscanYear, surnameOk }) {
+  if (!startDate) return { verdict: 'flag', reason: 'no-openstates-date' };
+  if (!surnameOk) return { verdict: 'flag', reason: 'surname-mismatch' };
+  if (legiscanYear == null) return { verdict: 'flag', reason: 'no-legiscan-year' };
+  if (Number(String(startDate).slice(0, 4)) !== legiscanYear) return { verdict: 'flag', reason: 'year-mismatch' };
+  return { verdict: 'agree', reason: null };
+}
