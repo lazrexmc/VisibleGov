@@ -21,7 +21,7 @@
 - **Tests:** `import { test } from 'node:test'` + `import assert from 'node:assert/strict'`; flat `test()` calls; fixtures loaded `JSON.parse(readFileSync('tests/fixtures/...','utf8'))` (CWD=repo root). Test pure functions + injectable orchestrators with a hand-rolled fake client; **never** construct a real Supabase client in a test.
 - **NEVER `source .env` in a shell you then run `node --test` in** — it turns 2 correct tests red. Run tests in a clean shell; run the CLI with `node --env-file=.env src/cli/backfill-mo-term-dates.js`. (PLAYBOOK lesson 30)
 - **Run tests as** `node --test` (whole suite, no path arg) or `node --test tests/<file>.test.js` (single file). Never `node --test tests/` (dir arg breaks on Node 24/Windows). Gate commits on the parsed `# fail N` count, never the runner exit status. (PLAYBOOK lessons 14, and the dir-arg trap)
-- **Onder (stale MO-Senate-D2 row) is parked** — not dated. He is retired from the MO Senate so he is absent from the current OpenStates roster and lands in the `unmatched` bucket structurally; a test must assert his row is never written. (spec §1a)
+- **Onder (stale MO-Senate-D2 row) is parked** — not dated. Live-verified 2026-08-06: this is NOT structural absence-from-roster — senate D2 has an OPEN roster role, now held by Nick Schroer, so Onder's stale term seat-matches that role and is flagged `surname-mismatch` (via the D2 seat now held by Schroer) — or `unmatched` if the seat were vacant; either path flags, never writes. A test must assert his row is never written. (spec §1a)
 
 ---
 
@@ -986,7 +986,7 @@ for r,c in Counter(f['reason'] for f in d['flags']).items(): print('  ',r,c)
 
 **1. Spec coverage:**
 - §1/§2 target = 193 current MO state, federal out of scope → Task 7 `loadDatelessMoTerms` filters `mo-legislature` + `start_date null`. ✓
-- §1a Onder parked → structural (retired ⇒ absent from roster ⇒ `unmatched`), asserted in Task 7 test + Task 9 check. ✓
+- §1a Onder parked → live-verified 2026-08-06 this is not structural roster-absence: senate D2 has an open roster role (Schroer), so Onder's stale term seat-matches and is flagged `surname-mismatch` (via the D2 seat now held by Schroer) — or `unmatched` if the seat were vacant; either path flags, never writes; asserted in Task 7 test + Task 9 check. ✓
 - §3 author→verify→flag (OpenStates + LegiScan year, mismatch flags) → Tasks 2,4,5,6,7. ✓
 - §3 Wikipedia never in data → no source anywhere references it; citation string is OpenStates+LegiScan only. ✓
 - §5 end_date always null / UPDATE-in-place / unique-key trap → Task 7 `updateTermStartDate` (patch omits end_date; `.eq(id).is('start_date',null).select('id')`) + explicit test asserting `'endDate' in row === false`. ✓
@@ -999,6 +999,6 @@ for r,c in Counter(f['reason'] for f in d['flags']).items(): print('  ',r,c)
 
 **2. Placeholder scan:** No "TBD"/"handle edge cases"/"similar to Task N". Every code step carries real code. ✓
 
-**3. Type consistency:** `runBackfillMoTermDates` seam names (`loadTermsFn/loadLegislatorsFn/fetchRosterFn/loadPresenceIndexFn/updateTermFn`) match their defaults (`loadDatelessMoTerms/loadLegislatorLookup/fetchAllRosterPages/loadLegiscanPresenceIndex/updateTermStartDate`). `matchRoster` output `{matches:[{term,openStatesId,startDate,surnameOk}], unmatchedTerms}` matches Task 7 consumption. `reconcile` input `{startDate,legiscanYear,surnameOk}` matches call site. `readCachedDatasetFull` return `{ok,yearStart,people,rollCalls}` matches `loadLegiscanPresenceIndex` usage. ✓
+**3. Type consistency:** `runBackfillMoTermDates` seam names (`loadTermsFn/loadLegislatorsFn/loadRosterFn/loadPresenceIndexFn/updateTermFn`) match their defaults (`loadDatelessMoTerms/loadLegislatorLookup/loadCachedRoster/loadLegiscanPresenceIndex/updateTermStartDate`). `matchRoster` output `{matches:[{term,openStatesId,startDate,surnameOk}], unmatchedTerms}` matches Task 7 consumption. `reconcile` input `{startDate,legiscanYear,surnameOk}` matches call site. `readCachedDatasetFull` return `{ok,yearStart,people,rollCalls}` matches `loadLegiscanPresenceIndex` usage. ✓
 
 **Known residual (not a gap):** the "corrupt `person.role`" premise from the spec was not reproduced in-repo (fixtures show clean `Sen`/`Rep`); the plan still uses `roll_call.chamber` as the chamber signal because it is genuinely independent per-vote data and correctly handles House→Senate members regardless. No change needed.

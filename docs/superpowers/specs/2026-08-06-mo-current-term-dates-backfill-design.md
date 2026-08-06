@@ -129,6 +129,15 @@ the federal split exactly: `ingest.js`/`enrich-federal-bills.js` create null-dat
   and `UPDATE ... SET start_date = …`.
 - **Collision guard:** before each UPDATE, verify there is not already a *dated* OpenStates-residue row
   for the same `(legislator_id, chamber, district)` — if there is, flag rather than write.
+  **Disclosure (2026-08-06, implementation-time):** this is not implemented as a separate check. A
+  live read-only query against `terms` (2026-08-06) found `mo-legislature` currently has 194 rows,
+  **all 194 dateless** — the "8 house + 11 senate already-dated historical residue rows" this spec's
+  §1 describes reflects an earlier database state, not the live one, so the premise set for this
+  guard (a pre-existing *dated* residue row colliding with a fresh write) is currently empty. The
+  guard that is actually live is `updateTermStartDate`'s own `.is('start_date', null)` scope on every
+  write (`src/cli/backfill-mo-term-dates.js`) — it is unconditional (not contingent on the collision
+  premise ever being nonempty) and mechanically prevents overwriting any row that is not still
+  null-dated at write time, which covers this case and any other race on the same row.
 - **TODO 31 / `mo_house_id` cross-era collision:** before writing any *house* row, confirm the
   `legislator_id` did not cluster two different-era people; stamping a date onto a cross-era-merged id
   would attribute it to the wrong era. Flag such rows rather than write.
@@ -137,8 +146,11 @@ the federal split exactly: `ingest.js`/`enrich-federal-bills.js` create null-dat
 
 1. Load the 194 dateless MO terms (`start_date IS NULL, state='MO'`) with `legislator_id`, `chamber`,
    `district`, `legiscan_people_id`, `full_name`. **Exclude Onder's senate D2 row** (parked).
-2. Fetch the current MO roster from OpenStates `/people?jurisdiction=Missouri` (both chambers; paginate
-   within the adapter's existing 7 s rate limiter — the roster is ~197 people, a handful of pages).
+2. Load the current MO roster (`loadCachedRoster`) from the locally cached `openstates/people`
+   CC0-1.0 YAML files (`.superpowers/artifacts/openstates-people/mo-legislature/*.yml`, ~192 files,
+   both chambers) — per the §3 amendment, the OpenStates v3 REST API does not expose role dates at
+   all, so this reads the cached data-repo YAML directly, not the API; zero live OpenStates calls at
+   run time.
 3. `matchRoster`: join each OpenStates person to a DB term by `(chamber, district)`; surname must
    match (sanity). Unmatched DB terms and unmatched OpenStates people are both reported.
 4. `resolveOpenStatesStart`: the proposed `start_date` is the matched role's real `start_date`.
@@ -167,8 +179,8 @@ column, no migration. The `run_id` is stamped on each updated row; the `citation
 `ingestion_runs.detail` records:
 
 ```
-openstates.org /people id=<osid> current_role.start_date=<YYYY-MM-DD> (retrieved <date>);
-verified-against legiscan-dataset earliest-qualifying-year=<YYYY> [people[] presence + roll_call.chamber=<H|S>]
+openstates/people@<commit> (CC0-1.0) data/mo/legislature id=<ocd-person> roles[open].start_date=<date>;
+verified-against legiscan-dataset earliest-qualifying-year=<year> [people[] presence + roll_call.chamber=<H|S>]
 ```
 
 The two honesty-critical tokens are the verbatim OpenStates date (what we assert) and the LegiScan
