@@ -48,3 +48,22 @@ export function loadCachedRoster(cacheDir = ROSTER_CACHE_DIR, {
   }
   return ymls.map((f) => parsePersonYaml(readFileFn(join(cacheDir, f), 'utf8')));
 }
+
+export async function readCachedDatasetFull(filePath, { readFileFn = readFileSync } = {}) {
+  let raw;
+  try { raw = readFileFn(filePath, 'utf8'); } catch { return { ok: false, filePath }; }
+  let envelope;
+  try { envelope = JSON.parse(raw); } catch { return { ok: false, filePath }; }
+  try {
+    const zipBuffer = decodeDatasetZip(envelope.zip);
+    const parsed = await extractDatasetFiles(zipBuffer);
+    return {
+      ok: true,
+      filePath,
+      sessionId: envelope.session_id,
+      yearStart: envelope.year_start,
+      people: parsed.people ?? [],
+      rollCalls: parsed.rollCalls ?? [],
+    };
+  } catch { return { ok: false, filePath }; }
+}
