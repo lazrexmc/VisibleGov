@@ -87,7 +87,8 @@ export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
   const entries = [];
   for (const [key, group] of groups) {
     const groupTerms = group.legislatorRows.flatMap((r) => termsByLegislatorId.get(r.id) || []);
-    const anchorTerm = mostRecentDatedTerm(groupTerms) ?? groupTerms[0] ?? null;
+    const datedAnchor = mostRecentDatedTerm(groupTerms);
+    const anchorTerm = datedAnchor ?? groupTerms[0] ?? null;
     const anchorLegislator = (anchorTerm
       && group.legislatorRows.find((r) => r.id === anchorTerm.legislator_id))
       || group.legislatorRows[0];
@@ -110,6 +111,17 @@ export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
       ? (anchorTerm.district ?? null)
       : null;
 
+    // Serving now / Past members split (2026-08-06 spec §2): an open term is the data literally
+    // saying "not ended" — that, and only that, is the serving signal. Zero terms can't prove
+    // service, so they stay out of "Serving now."
+    const servingNow = groupTerms.some((t) => t.end_date == null);
+    // The tenure fragment only ever describes the anchor term the entry displays, and only when
+    // that anchor is itself open and genuinely dated.
+    const sinceRaw = datedAnchor && datedAnchor.end_date == null
+      ? Number(String(datedAnchor.start_date).slice(0, 4))
+      : null;
+    const sinceYear = Number.isFinite(sinceRaw) ? sinceRaw : null;
+
     const href = group.personId
       ? `/person/${group.personId}/${slugify(displayName)}`
       : `/legislator/${anchorLegislator.id}/${slugify(displayName)}`;
@@ -123,6 +135,8 @@ export function buildDirectoryEntries({ legislators, persons, terms } = {}) {
       party,
       chamber,
       district,
+      servingNow,
+      sinceYear,
       href,
     });
   }

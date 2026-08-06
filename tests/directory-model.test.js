@@ -270,3 +270,76 @@ test('filterDirectory: never throws on malformed entries/queryText', () => {
   assert.doesNotThrow(() => filterDirectory(null, 'x'));
   assert.doesNotThrow(() => filterDirectory([{ }], 'x'));
 });
+
+// ---- servingNow / sinceYear (Serving now / Past members split, 2026-08-06 spec) ----
+
+test('buildDirectoryEntries: an open term (end_date null) -> servingNow true, sinceYear from its dated start', () => {
+  const entries = buildDirectoryEntries({
+    legislators: [{ id: 'L1', full_name: 'Jane Adams', surname: 'Adams', person_id: null }],
+    persons: [],
+    terms: [{ legislator_id: 'L1', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '29', start_date: '2023-01-04', end_date: null }],
+  });
+  assert.equal(entries[0].servingNow, true);
+  assert.equal(entries[0].sinceYear, 2023);
+});
+
+test('buildDirectoryEntries: every term ended -> servingNow false, sinceYear null (ended anchor never yields a fragment)', () => {
+  const entries = buildDirectoryEntries({
+    legislators: [{ id: 'L1', full_name: 'Old Timer', surname: 'Timer', person_id: null }],
+    persons: [],
+    terms: [{ legislator_id: 'L1', jurisdiction_id: 'us-congress', chamber: 'house', district: '3', start_date: '2017-01-03', end_date: '2021-01-03' }],
+  });
+  assert.equal(entries[0].servingNow, false);
+  assert.equal(entries[0].sinceYear, null);
+});
+
+test('buildDirectoryEntries: zero terms -> servingNow false (service unprovable is never promoted), sinceYear null', () => {
+  const entries = buildDirectoryEntries({
+    legislators: [{ id: 'L1', full_name: 'No Terms', surname: 'Terms', person_id: null }],
+    persons: [],
+    terms: [],
+  });
+  assert.equal(entries[0].servingNow, false);
+  assert.equal(entries[0].sinceYear, null);
+});
+
+test('buildDirectoryEntries: the Brown case — open but completely undated term -> servingNow true, sinceYear null', () => {
+  const entries = buildDirectoryEntries({
+    legislators: [{ id: 'L1', full_name: 'Galen Brown', surname: 'Brown', person_id: null }],
+    persons: [],
+    terms: [{ legislator_id: 'L1', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '149', start_date: null, end_date: null }],
+  });
+  assert.equal(entries[0].servingNow, true);
+  assert.equal(entries[0].sinceYear, null);
+});
+
+test('buildDirectoryEntries: the Onder construction (live-verified 2026-08-06) — merged person, open dated federal term + open undated MO row -> ONE serving entry anchored on the federal seat', () => {
+  const entries = buildDirectoryEntries({
+    legislators: [
+      { id: 'L-fed', full_name: 'Onder, Robert F.', surname: null, person_id: 'P1' },
+      { id: 'L-mo', full_name: 'Bob Onder', surname: 'Onder', person_id: 'P1' },
+    ],
+    persons: [{ id: 'P1', display_name: 'Bob Onder' }],
+    terms: [
+      { legislator_id: 'L-fed', jurisdiction_id: 'us-congress', chamber: 'house', district: '3', start_date: '2025-01-03', end_date: null },
+      { legislator_id: 'L-mo', jurisdiction_id: 'mo-legislature', chamber: 'senate', district: '2', start_date: null, end_date: null },
+    ],
+  });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].servingNow, true);
+  assert.equal(entries[0].sinceYear, 2025);
+  assert.equal(entries[0].chamber, 'U.S. House'); // anchor is the dated federal term, never the undated MO row
+});
+
+test('buildDirectoryEntries: merged person with one ended dated term + a DIFFERENT open undated term -> servingNow true but sinceYear null (fragment only describes the anchor)', () => {
+  const entries = buildDirectoryEntries({
+    legislators: [{ id: 'L1', full_name: 'Mixed Case', surname: 'Case', person_id: null }],
+    persons: [],
+    terms: [
+      { legislator_id: 'L1', jurisdiction_id: 'us-congress', chamber: 'house', district: '5', start_date: '2015-01-03', end_date: '2019-01-03' },
+      { legislator_id: 'L1', jurisdiction_id: 'mo-legislature', chamber: 'house', district: '12', start_date: null, end_date: null },
+    ],
+  });
+  assert.equal(entries[0].servingNow, true);
+  assert.equal(entries[0].sinceYear, null); // dated anchor (the federal term) is ENDED
+});
