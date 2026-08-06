@@ -92,7 +92,7 @@ status (`PLAYBOOK_DELTA.md` lesson 14). **Run it in a clean shell — never one 
 `source`d `.env`**: that exports the Supabase credentials into the test process and turns 2
 CORRECT tests red (`review-logic.test.js` asserts the review server degrades when no DB client is
 configured; with credentials present it correctly returns 200 where the test correctly expects
-500). Verified deterministically 2026-08-05 — see `PLAYBOOK_DELTA.md` lesson 27. Every CLI takes
+500). Verified deterministically 2026-08-05 — see `PLAYBOOK_DELTA.md` lesson 30. Every CLI takes
 `--env-file=.env` specifically so credentials never leak into the shell.
 
 **Run the site locally:** `node scripts/serve-site.js` — a zero-dependency static server (port

@@ -2956,3 +2956,59 @@ drift):**
 
 Then an independent verification pass (below) to catch any drift or cross-doc contradiction the
 writes introduced — the same never-trust-a-self-report discipline applied to my own doc edits.
+
+---
+
+## 2026-08-05 (late, continued) — the doc sync gets adversarially audited; 10 critical + 26 minor inaccuracies found and fixed
+
+**Lance:** "Systemwide documentation being 100% accurate is the goal before website filters."
+
+Ran a 9-agent Fable-5 accuracy audit: eight per-doc auditors + one cross-doc consistency check, each
+given an authoritative live-state fact sheet AND told to verify every concrete claim against the
+real repo (not the doc's own prose). This is the never-trust-a-self-report discipline applied to my
+OWN doc edits — and it earned its cost: **10 critical + 26 minor** real inaccuracies, several in
+docs I'd just "finished."
+
+**Verified each against the current files before acting — several "criticals" were false positives**
+from a subagent whose context predated my edits (the cross-doc agent flagged CLAUDE.md as saying "30
+migrations" and MEMORY.md as "deploy pending"; both were already correct on disk — that agent had
+stale context, exactly the failure mode this whole session is about). Fixing what was genuinely
+wrong:
+
+- **The root critical: PLAYBOOK_DELTA had DUPLICATE lesson numbers.** My 2026-08-05 deploy-night
+  batch was appended as "Lesson 27/28/29/30" on top of the existing 2026-08-04 "26/27/28/29" — so
+  there were two Lesson 27s, two 28s, two 29s, and every "see lesson 27" cross-reference resolved to
+  the wrong lesson. Renumbered the new batch to 30-33 (highest is now 33), then remapped every
+  external citation (CLAUDE.md ×2, README, memory, CLOUDFLARE_DEPLOY ×2) — the ".env trap" is now
+  uniformly lesson 30, the deploy-night pair lessons 32-33. Byte-verified no duplicate numbers
+  remain.
+- **DISASTER_RECOVERY (a rebuild runbook, so every literal must be right):** "apply these 29 files"
+  → 32; the quoted `.env.example` block and its "does NOT list ANTHROPIC_API_KEY" paragraph were
+  stale (the real file now lists both SUPABASE_ANON_KEY and ANTHROPIC_API_KEY — I'd added them
+  earlier this session); the correct-data.js correction list (11 values, "exactly one <which>") was
+  missing the 3 new values (sb914-reconcile, reconcile-flag, all); the SB-914 "still open" example;
+  a wrong function-def migration list (0019/0023 never touch refresh_vote_aggregates()); 0018
+  "creates two matviews" → three; the mo_house_id "see Section 12" dangling ref.
+- **ARTIFACTS.md:** "0001-0025 ... not all applied yet" → 0001-0031, all 32 applied; added an
+  approximate-count caveat to the volatile cache table.
+- **DATA_INVENTORY.md:** SB 914 described as "will NEVER resolve, needs adjudication, both rows still
+  count" — it was adjudicated 2026-08-05 (I did that reconcile-flag work this session); added a
+  dated correction line to the snapshot banner (identity flags 0 now, recon ~107, SB 914 resolved).
+- **CLOUDFLARE_DEPLOY.md:** a blockquote I'd inserted had SEVERED the settings table (orphaned the
+  Environment-variables row) — moved it above the blockquote; the "one genuinely unproven thing"
+  (cross-directory import) is now VERIFIED (Phase 2 passed) so reframed from risk to cleared;
+  suite count 2,321→2,328; noted /trust was fixed by deleting its rule, not an extensionless target.
+- **CLAUDE.md:** "59 pairs, all 2018 MO Senate" → 62 (59 backfill + 3 live); CONTROLLER_BRIEFING
+  banner date 2026-08-03 → refreshed-2026-08-05; the "30 lessons, 26/27 newest" line → "33 lessons,
+  30-33 newest."
+- **TODO.md:** strikethrough/correction markers on the three worst stale-history NOW/build-queue
+  items (the superseded "do not propose Cloudflare" entry, "4 identity flags open" now 0, the MO
+  2026 split "highest-priority open defect" that actually ran 2026-08-02); softened the RESUME hash
+  line (a doc can't contain its own latest commit hash) and marked the SB-914 sub-item resolved.
+- **SCHEDULED_INGESTION.md:** reconciled two differently-severe descriptions of the same 0027
+  exception-handler defect, deferring to the phase-2 audit's harsher (and correct) framing.
+
+Lesson 25 discipline held: the PLAYBOOK renumber and the escaping-sensitive edits went through
+byte-verified script files, and the one script that hit a bad anchor failed atomically (wrote
+nothing) — caught the un-applied "29 files" edit on the final consistency re-grep and fixed it.
+Suite 2,328/0 in a clean shell throughout. The docs now match live reality to the line.

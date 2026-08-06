@@ -574,7 +574,8 @@ function just to get a real duration reading past Supabase's dashboard/gateway c
 `pg_stat_activity` to confirm the query was genuinely still computing and not stuck — before finally
 reaching for a plain `EXPLAIN` (no `ANALYZE`), which **returns in milliseconds regardless of how long
 the real query would take to execute**, and immediately revealed the exact catastrophic misestimate
-(1 row vs. the true ~1.34M) that explained everything. Every minute spent on empirical timing before
+(1 row estimated at the anti-join node vs. the true ~10,044 there, which then cascades into a
+~1.34M-row final workload) that explained everything. Every minute spent on empirical timing before
 that point added no diagnostic value the plan itself didn't already contain for free.
 
 **Rule: for ANY unexplained query slowness, run a plain `EXPLAIN` FIRST — before `ANALYZE`, before
@@ -587,7 +588,7 @@ execution time. Reach for `EXPLAIN (ANALYZE, BUFFERS)` — which DOES execute th
 real timeout/lock risk — only once the plain plan looks sane and the question is genuinely "how long
 does this correctly-planned query take," not "why is this slow at all."
 
-## Lesson 27 — A contaminated SHELL can turn correct tests red; the failure looks exactly like a real regression (2026-08-05)
+## Lesson 30 — A contaminated SHELL can turn correct tests red; the failure looks exactly like a real regression (2026-08-05)
 
 Ran a batched health check before a documentation pass: `set -a && source .env && set +a`, then a
 few live `curl` probes, then `node --test` — all in one shell invocation, to save round trips. The
@@ -620,7 +621,7 @@ this is a bisect hunt for a break that never happened — the exact tail-chasing
 to prevent, and doubly expensive right before a machine restart when a red suite reads as "we broke
 something and don't know what."
 
-## Lesson 28 — "Relative to what?" is the question every path field in a deploy console is silently asking (2026-08-05)
+## Lesson 31 — "Relative to what?" is the question every path field in a deploy console is silently asking (2026-08-05)
 
 Wrote a Cloudflare Pages runbook specifying **Root directory: `site`** AND **Build output
 directory: `site`**. Both individually defensible, both matching how the repo is laid out — and
@@ -653,7 +654,7 @@ Two broader points this cost nothing to learn but could have cost a bad afternoo
   drifting from live DB state). Build the runbook to be checkable — exact field names, one value
   per row — so that comparison is cheap enough to actually happen.
 
-## Lesson 29 — A static host applies its OWN URL semantics before your rules run; a local dev server that skips them will pass a config that production breaks on (2026-08-05)
+## Lesson 32 — A static host applies its OWN URL semantics before your rules run; a local dev server that skips them will pass a config that production breaks on (2026-08-05)
 
 First Cloudflare Pages deploy. Every `_redirects` rewrite was broken in production, none of it
 caught locally. Two distinct failures, one root cause: **Cloudflare Pages automatically
@@ -685,12 +686,13 @@ system that happens to agree on the easy cases. And verify redirect rules by the
 `Location`, not just "does the page load" — a 308 loop and a correct 200 both eventually render
 something in a browser, so the browser is the worst place to check this; curl the chain.
 
-## Lesson 30 — When you fix a bad idiom, fix every object that carries it and extend the guard to the whole class — not just the objects currently failing (2026-08-05)
+## Lesson 33 — When you fix a bad idiom, fix every object that carries it and extend the guard to the whole class — not just the objects currently failing (2026-08-05)
 
 The `LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL` anti-join, which Postgres misestimates
 catastrophically (Lesson-class: the planner reads the IS-NULL selectivity off the joined PK's 0%
-null-fraction, estimates ~1 excluded row where ~10,000+ is true, and cascades into nested loops over
-a million-row workload), surfaced live THREE separate times before it was fully contained:
+null-fraction, estimates ~1 row SURVIVING the anti-join where the true survivor count is ~10,044
+(the ~59 rows it should EXCLUDE are the small set), and cascades into nested loops over a
+million-row workload), surfaced live TWICE before it was fully contained:
 
 1. It broke the three vote-aggregate MATVIEWS' refresh (40+ min, timeout). Fixed by migration 0029,
    rewriting them to `NOT EXISTS`. A regression test was written — but scoped to the matviews only.
@@ -716,8 +718,8 @@ red-green — so a sixth object born with the same idiom fails the suite before 
 
 Corollary on WHY it hid until production: the misplanned query is only slow when there is something
 to anti-join against. `vote_duplicates` was empty when the site was browser-verified locally on
-2026-08-03, so the bad plan had nothing to be slow about; the 62-row backfill plus cast growth to
-~1.47M pushed it past anon's budget later. A latent performance bug gated on data volume will pass
+2026-08-03, so the bad plan had nothing to be slow about; the 59-row backfill (62 now, after live ingest
+added 3) plus cast growth to ~1.47M pushed it past anon's budget later. A latent performance bug gated on data volume will pass
 every check run before the data crosses the threshold — the first check run AFTER it does (here, the
 first anon browser walk on prod) is where it surfaces. Load-bearing verification has to run under the
 real role (anon, not service_role, whose 3s-vs-longer timeout was the entire difference here) against

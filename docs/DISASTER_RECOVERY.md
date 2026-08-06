@@ -34,8 +34,10 @@ schema, infrastructure, and live data re-ingested from the original public sourc
   cannot be mechanically re-derived at all: the exact set of Lance's own manual review-queue
   decisions (glossary/summary approvals, identity-flag adjudications) made through
   `npm run review`, and any one-off, hand-adjudicated calls recorded only in `CHATLOG.md`/`TODO.md`
-  prose (e.g. the SB 914 vote-reconciliation-flag adjudication, still open as of this writing) will
-  need to be re-made by a human, not replayed by a script.
+  prose. (The SB 914 vote-reconciliation-flag adjudication that used to be the example here was
+  itself adjudicated 2026-08-05 — "trust senate journals" — and IS now replayable via
+  `correct-data.js sb914-reconcile`; but the general point stands for any FUTURE flag ruling that
+  hasn't yet been mechanized, and for the human review-queue decisions above.)
 - **Guarantee exact parity even with the corrections re-applied.** Section 7 below lists the known
   historical data corrections (`correct-data.js`) that can be re-run against the freshly re-ingested
   data to bring it closer to the state the original instance was in. This closes real, known gaps
@@ -118,10 +120,14 @@ CONGRESS_API_KEY=get-free-at-api.congress.gov/sign-up
 OPENSTATES_API_KEY=get-free-at-open.pluralpolicy.com
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_ANON_KEY=
 # LegiScan API (registered 2026-07-28; non-commercial, CC BY 4.0 attribution required on
 # every public surface showing LegiScan-derived data; binding operating terms in
 # docs/research/2026-07-28-legiscan-terms.md)
 LEGISCAN_API_KEY=your-legiscan-api-key
+# Anthropic API (optional — only needed for the summarization/glossary pipeline; ingestion and
+# vote data work without it. See CLAUDE.md "Standing policies" before spending against this key.)
+ANTHROPIC_API_KEY=get-a-key-at-console.anthropic.com
 ```
 
 Fill each in as follows (never paste a real secret into this doc or any doc — the placeholders
@@ -136,15 +142,11 @@ inside your local, gitignored `.env` file):
 | `SUPABASE_SERVICE_ROLE_KEY` | Same page, "service_role" secret key | `<YOUR_SUPABASE_SERVICE_ROLE_KEY>` — this bypasses RLS; every ingestion/write CLI in this repo uses it; never expose it publicly (it must never appear in `site/`) |
 | `LEGISCAN_API_KEY` | LegiScan's own developer signup (prerequisite 2) | `<YOUR_LEGISCAN_API_KEY>` |
 
-**One key `.env.example` does NOT currently list, but that several CLIs require and will fail
-without:** `ANTHROPIC_API_KEY`. Add this line yourself if you plan to run the summarization/glossary
-pipeline (`summarize.js`, `verify.js`, `extract-terms.js`, `gloss.js`, `golden.js` all check for it
-and print `{"mode":"blocked","reason":"ANTHROPIC_API_KEY not set"}` and exit cleanly if it's
-missing — they do not crash, but they also do nothing):
-
-```
-ANTHROPIC_API_KEY=<YOUR_ANTHROPIC_API_KEY>
-```
+`ANTHROPIC_API_KEY` (listed in `.env.example` as of 2026-08-05) is only needed if you plan to run
+the summarization/glossary pipeline — `summarize.js`, `verify.js`, `extract-terms.js`, `gloss.js`,
+`golden.js` all check for it and print `{"mode":"blocked","reason":"ANTHROPIC_API_KEY not set"}` and
+exit cleanly if it's missing (they do not crash, but they also do nothing). The ingestion and
+vote-data half of the project works without it.
 
 Every script that touches the network or the database in this repo is invoked as
 `node --env-file=.env <path>` — `package.json`'s `scripts` block already wires this in for every
@@ -159,7 +161,7 @@ Every schema change in this project lives in `supabase/migrations/*.sql` and is
 this repo. You paste each file's contents into your new Supabase project's **SQL Editor** and run
 it, **in order**, one at a time, confirming each succeeds before moving to the next.
 
-Apply these 29 files, in this exact order, by filename:
+Apply these 32 files, in this exact order, by filename:
 
 | # | File | What it does |
 |---|---|---|
@@ -180,7 +182,7 @@ Apply these 29 files, in this exact order, by filename:
 | 15 | `0015_sponsor_types.sql` | Widens `bill_sponsors.sponsor_type` to LegiScan's actual printed sponsor-type vocabulary (adds Joint Sponsor and an unspecified/generic type beyond primary/cosponsor). |
 | 16 | `0016_public_read_surface.sql` | Defines the public read surface for the site: locks down two tables, adds one column, adds four public-facing views (`public_freshness`, `public_votes`, `public_vote_feed`, and a bill-facing view) that expose only named columns to `anon`. |
 | 17 | `0017_vote_casts_legislator_index.sql` | Adds an index so a legislator-first vote-feed lookup over 1.4M+ `vote_casts` rows doesn't blow the anon role's statement timeout. |
-| 18 | `0018_vote_aggregates.sql` | Adds the vote-aggregate **materialized** views (`public_position_totals`, `public_party_alignment`) and the `refresh_vote_aggregates()` function that refreshes them. |
+| 18 | `0018_vote_aggregates.sql` | Adds the three vote-aggregate **materialized** views (`public_position_totals`, `public_party_alignment`, `public_party_position_totals`) and the `refresh_vote_aggregates()` function that refreshes them. |
 | 19 | `0018a_refresh_timeout.sql` | Sets a function-level `statement_timeout` override on `refresh_vote_aggregates()` so a full `REFRESH ... CONCURRENTLY` pass over 1.4M+ rows doesn't die at PostgREST's ~8s role-level default. |
 | 20 | `0019_view_scoping_and_freshness.sql` | Whole-branch-review fix round: recreates the public views with correct owner-bypass posture and freshness scoping. |
 | 21 | `0020_completeness_checks.sql` | Adds the second verification axis (trust model v3): a `kind='completeness'` row alongside the existing adversarial-verification rows — proves a summary *covers* the bill, not just that each claim is true. |
@@ -206,7 +208,7 @@ either via `npm run refresh:aggregates` or by running `select refresh_vote_aggre
 in the SQL editor, to confirm the `pg_cron`-plus-`PL/pgSQL`-exception-handling combination actually
 works on your project before waiting for the first real cron tick.)
 
-After applying all 29, run a quick sanity check with:
+After applying all 32, run a quick sanity check with:
 
 ```bash
 node --env-file=.env scripts/probe-public-surface.js
@@ -259,9 +261,10 @@ node --env-file=.env src/cli/ingest-mo-house.js
 
 Add `--session <session-id>` only if you need a specific non-default MO session; omit it for the
 current session. **Never pass a historical/prior-era session to this CLI** — `mo_house_id` is a
-table-wide unique constraint against the *current* roster only (a known, documented gap, see
-Section 12), and a historical backfill would silently misattribute a successor's votes to their
-predecessor.
+table-wide unique constraint against the *current* roster only (the "MO House cross-era
+misattribution trap," a known open gap tracked as TODO 31; migration 0009 fixed the identical bug
+for `mo_senate_id` but it was never applied to the house column), and a historical backfill would
+silently misattribute a successor's votes to their predecessor.
 
 **6.5 — LegiScan (the primary bulk MO source for bills, sponsors, and votes):**
 
@@ -366,8 +369,21 @@ Run these, in this order, replacing `<which>` each time:
 11. `glossary-corrupted-text` — repairs glossary entries with known text-corruption artifacts
     (undecoded unicode escapes, stray control characters) from an earlier extraction bug.
 
-Skip any correction whose target condition doesn't exist in your freshly re-ingested data — most
-will report a clean `matched: 0` and do nothing, which is expected and safe.
+Two more `<which>` values exist beyond the numbered replay list, both for adjudicated
+vote-reconciliation flags (they encode a specific human ruling, so they are NOT part of the routine
+replay and each must be named explicitly — they are excluded from the `all` sweep):
+- `sb914-reconcile` — the one-off SB 914 adjudication (Lance ruled "trust senate journals" 2026-08-05).
+- `reconcile-flag` — the GENERAL adjudication tool: `reconcile-flag --flag-id <uuid> --ruling "..."
+  --rationale "..." [--canonical-vote <uuid> --superseded-vote <uuid>]`. Supersede a losing vote
+  row (writes a `vote_duplicates` exclusion) or resolve-only (close the flag with a recorded ruling,
+  no dedup write). These are Lance's human calls, not mechanical replay — on a rebuild, the specific
+  rulings would need to be re-made, not blindly re-run.
+
+`correct-data.js` takes exactly one `<which>` positional (no default, so you can't accidentally run
+everything at once). The full set of accepted values is the 11 numbered corrections above, plus
+`sb914-reconcile`, `reconcile-flag`, and `all` (which runs only the safe, non-named-ruling
+corrections). Skip any correction whose target condition doesn't exist in your freshly re-ingested
+data — most will report a clean `matched: 0` and do nothing, which is expected and safe.
 
 ---
 
@@ -378,7 +394,7 @@ npm run refresh:aggregates
 ```
 
 This runs `scripts/refresh-aggregates.js`, which calls the `refresh_vote_aggregates()` Postgres
-function (defined by migrations 18/19/23/26/27/28/29 above) to rebuild the three public
+function (defined/modified by migrations 0018, 0018a, 0022, 0026, 0027, 0028, 0029; 0030 adjusts its grants) to rebuild the three public
 vote-aggregate materialized views (`public_position_totals`, `public_party_alignment`,
 `public_party_position_totals`) that the site's profile/party-alignment charts read.
 

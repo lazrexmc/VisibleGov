@@ -453,11 +453,16 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    migration ever reintroduces the `left join ... is null` idiom for any of the three matviews.
    **Current state: both refresh paths (the native `pg_cron` job every 30 minutes, and this
    scheduler's own post-tick call) are healthy** — full write-up in `TODO.md`'s NOW section and
-   `CHATLOG.md`'s 2026-08-04 entries. (One small, separately-tracked, low-priority item remains open,
-   not blocking: `0027`'s own exception handler can never actually leave a `'failed'` row in
-   `ingestion_runs` on a genuine error, due to how PL/pgSQL savepoints a `BEGIN...EXCEPTION` block —
-   an observability gap for a now-rare failure case, not a live issue, since the routine case
-   completes in ~19s. See `TODO.md` for the fix-later plan.)
+   `CHATLOG.md`'s 2026-08-04 entries. (One separately-tracked item remains open, not blocking:
+   `0027`'s own exception handler can never actually leave a `'failed'` row in `ingestion_runs` on a
+   genuine error, due to how PL/pgSQL savepoints a `BEGIN...EXCEPTION` block. The routine case
+   completes in ~19s so it rarely fires — but the 2026-08-05 phase-2 deep audit rated this more
+   seriously than "low-priority": the pg_cron leg is the documented *primary* freshness guarantee,
+   and this gap means a pg_cron refresh failure records NOTHING, so `public_freshness`/`npm run
+   status` would keep showing an aging "succeeded" during a failure streak — the same silent-failure
+   class that produced the earlier 14-hour outage. The honest fix (per the audit and TODO.md): drop
+   the exception handler and rely on `cron.job_run_details` for observability. See `TODO.md` for the
+   fix-later plan and the audit's fuller framing.)
 
 Manual checks any time, safe to run for real (read-only, zero writes, zero external fetches):
 

@@ -8,10 +8,11 @@ Cloudflare account.
 
 > **Two real bugs surfaced during Phase 2 — the verification earned its cost.** (1) Every
 > `_redirects` rule was broken: Pages 308-canonicalizes `.html`, so targets pointing at `.html`
-> looped `/trust` and stripped the uuid from `/person/<id>`. Fixed by making targets extensionless
-> (PLAYBOOK_DELTA lesson 29). (2) Every anonymous profile's vote list returned HTTP 500 — the
+> looped `/trust` and stripped the uuid from `/person/<id>`. Fixed by making the `/person`, `/legislator`,
+> `/bill` targets extensionless and DELETING the `/trust` rule entirely (Pages serves `trust.html`
+> at `/trust` natively — the rule was the loop) (PLAYBOOK_DELTA lesson 32). (2) Every anonymous profile's vote list returned HTTP 500 — the
 > `public_vote_feed` view's anti-join crossed anon's 3s `statement_timeout`; fixed by migration 0031
-> (lesson 30). Both are fixed, applied, and re-verified live. The lesson: a browser walk under the
+> (lesson 33). Both are fixed, applied, and re-verified live. The lesson: a browser walk under the
 > real anon role at real data volume catches what curl-the-endpoint cannot.
 
 Written 2026-08-05, replacing the half-finished deploy *spec* (the brainstorm paused 2026-08-03
@@ -35,26 +36,21 @@ result ambiguous between the deploy and the DNS.
 | `site/404.html` | ✅ built 2026-08-05, JS-free |
 | `revoke execute ... from authenticated` | ✅ migration `0030`, applied + verified live 2026-08-05 |
 | Site verified end-to-end in a real browser against live data | ✅ 2026-08-03 (Playwright, zero console errors) |
-| Suite green | ✅ 2,321 / 0 |
+| Suite green | ✅ 2,328 / 0 |
 | LegiScan CC BY 4.0 attribution present | ✅ full text + license link on `trust.html`; every page's footer links to `/trust#attribution` |
 
-### ⚠️ The one genuinely unproven thing — check it first in Phase 2
+### ✅ The one thing that had no production evidence — now VERIFIED
 
 `site/functions/geocode.js` imports `../js/security-headers.js` — a module **outside** the
-`functions/` directory. That import was added 2026-08-05 and **has never run in Cloudflare's
-environment**; it works locally only because Node resolves it directly and
-`scripts/serve-site.js` imports the same file. Cloudflare bundles Functions with esbuild and
-normally follows relative imports fine, so this is *expected* to work — but "expected" is not
-"verified," and it is the only piece of this deploy that has no prior production evidence behind it.
-
-**If it fails, `/geocode` returns 500 and address lookup breaks** — the rest of the site is
-unaffected (directory, profiles, votes, bills, trust page all work; only "find my representatives"
-goes down). Fix, if needed: move the constant into `site/functions/` and import it locally, or
-inline the three header values in `geocode.js` — then re-point the drift test in
-`tests/site-modules.test.js` at the new location so the `_headers` guard keeps working.
-
-**This is not a reason to delay the deploy.** It is a reason to run Phase 2 check #2 first and know
-what you are looking at if it errors.
+`functions/` directory. Before deploy that import had never run in Cloudflare's environment (it
+works locally only because Node resolves it directly), so it was flagged as the deploy's one
+unproven piece: if Cloudflare's esbuild bundling had not followed the cross-directory relative
+import, `/geocode` would have 500'd and address lookup would break (everything else unaffected).
+**Phase 2 confirmed it works** — `/geocode` returned 200 with real Census data and all three
+security headers on the response, on its first exposure to the live environment. Kept here as the
+record of what the risk was and that it was cleared. (If a future edit ever moves that constant and
+breaks this: move it into `site/functions/` and import locally, or inline the three header values,
+then re-point the drift test in `tests/site-modules.test.js`.)
 
 ---
 
@@ -75,22 +71,17 @@ Settings — these exact values:
 | Build command | *(empty)* | there is no build step — the site is plain HTML/CSS/ES modules |
 | **Build output directory** | **LEAVE EMPTY** | ⚠️ see below — do NOT put `site` here |
 | Root directory (advanced) → Path | `site` | **required** — Pages discovers `functions/` relative to the ROOT directory, so this is what makes `/geocode` deploy at all; `_headers`/`_redirects` are read from here too |
-
-> **⚠️ Correction, 2026-08-05 — this table previously said Build output directory = `site`, which is
-> WRONG and would have failed the build.** Caught by Lance reading the wizard against this doc
-> before clicking Save.
->
-> **Build output directory is relative to Root directory.** With Root directory = `site`, Pages is
-> already operating inside `<repo>/site/`, so an output directory of `site` resolves to
-> `<repo>/site/site/` — a path that does not exist. Leaving it empty means "this directory," which
-> is where `index.html`, `_headers`, `_redirects`, and `functions/` actually are.
->
-> The two valid configurations are: **root `site` + output empty** (what we use — required, because
-> `functions/` is only discovered under the root directory), or root empty + output `site` (would
-> serve the static files fine but would NOT deploy the geocode Function, since Pages would look for
-> `functions/` at the repo root where it does not exist). Setting both is the one combination that
-> breaks.
 | Environment variables | *(none)* | `site/config.js` carries the anon URL/key; no secrets exist in `site/` |
+
+> **⚠️ Build output directory: LEAVE EMPTY — an earlier version of this table said `site`, which is
+> WRONG and would have failed the build** (caught by Lance reading the wizard against this doc before
+> clicking Save). **Build output directory is resolved relative to Root directory.** With Root
+> directory = `site`, Pages is already inside `<repo>/site/`, so an output directory of `site`
+> resolves to `<repo>/site/site/` — a path that does not exist. Empty means "this directory," which
+> is where `index.html`, `_headers`, `_redirects`, and `functions/` actually are. The two valid
+> configurations: **root `site` + output empty** (what we use — required, because `functions/` is
+> only discovered under the root directory), or root empty + output `site` (serves the static files
+> fine but does NOT deploy the geocode Function). Setting both is the one combination that breaks.
 
 The first deploy fires automatically on project creation — it is not a separate step.
 
@@ -118,8 +109,8 @@ curl -si -X POST "$BASE/geocode" \
 curl -si -X POST "$BASE/geocode" -H 'content-type: application/json' -d '{}' | head -12
 
 # 4. _redirects rewrites survive a hard request (not just client-side routing)
-curl -sI "$BASE/trust"          # expect 200, not 404
-curl -sI "$BASE/person/whatever" # expect 200 (rewrites to person.html)
+curl -sI "$BASE/trust"           # expect 200, not 404 (Pages serves trust.html here natively; no rule)
+curl -sI "$BASE/person/whatever" # expect 200 (rewrites to the extensionless /person, uuid preserved)
 
 # 5. The new 404 page
 curl -si "$BASE/no-such-page" | head -12   # expect 404 + text/html + "Page not found"

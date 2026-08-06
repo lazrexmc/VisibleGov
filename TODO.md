@@ -14,7 +14,8 @@ check — that drift is exactly what has burned this project before.*
 - **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — verified end-to-end in a real
   browser, zero console errors: directory (1,567 links) → profile (162 vote rows + aggregate
   charts) → bill page (sponsors, summary, roll-call tallies). The full product loop works.
-- Git clean, `main` @ `6c85bd0`, everything pushed. Suite **2,328 pass / 0 fail** (in a clean
+- Git clean on `main`, everything pushed (run `git log -1` for the exact HEAD — a doc cannot
+  contain its own latest commit hash). Suite **2,328 pass / 0 fail** (in a clean
   shell — see the `.env` trap below; it fired again during this very sync).
 - Migrations: **32 files on disk (0001-0031 + 0018a), ALL applied live.** Nothing is awaiting an
   apply. `0030` (revoked a stray `authenticated` EXECUTE on `refresh_vote_aggregates()`) and `0031`
@@ -360,7 +361,7 @@ kept as the record of what had to be true:
   Lance's own call.** Full report: `docs/audits/2026-08-03-comprehensive-accuracy-audit.md`.
   **Fixed and verified live, all via tested `correct-data.js` corrections (dry-run then live) plus
   their root-cause code fixes:**
-  1. ~~SB 914 tally contradiction~~ — root-caused, not yet adjudicated (see below — needs Lance).
+  1. ~~SB 914 tally contradiction — root-caused, not yet adjudicated~~ **✅ RESOLVED 2026-08-05 (Lance: "trust senate journals"; sb914-reconcile ran live, flag resolved — see the SB 914 entry higher in NOW).**
   2. ✅ FECA/BBEDCA glossary terms no longer say what their own verification refuted
      (`correct-data.js glossary-refuted-claims`, live).
   3. ✅ All 7 corrupted glossary terms repaired, verified byte-clean (`correct-data.js
@@ -511,7 +512,7 @@ kept as the record of what had to be true:
   a keep-separate ruling recorded as `controller_automated`. Trail:
   `.superpowers/sdd/2026-07-31-identity-merge-pass/progress.md`.
 
-- [ ] **NOW — the only thing gating Cloudflare is Lance's review queue.** Lance's standing rule
+- [x] ~~**NOW — the only thing gating Cloudflare is Lance's review queue.**~~ **(SUPERSEDED 2026-08-05: site is DEPLOYED and live at visiblegov.pages.dev — see RESUME HERE at top. This entry is dated history.)** Lance's standing rule
   (2026-07-31): *"I'm only interested in starting the cloudflare portion once the entire backend
   is locked in and accurate, otherwise I'm troubleshooting two systems back and forth."* Cloudflare
   is a MILESTONE, not a task — do not propose it until Lance says the backend feels solid.
@@ -743,7 +744,7 @@ session's own direct work, not assumed.**
    severity-sorted as of 2026-08-03. Local-only (127.0.0.1) by design; no public-facing
    `/admin` route exists or is planned.
 8. [x] ~~Identity merge: link federal+MO legislator rows~~ **DONE — complete 2026-07-31.**
-   1,607 rows → 37 merged persons; 4 identity flags remain open (Lance's own decisions, not a
+   1,607 rows → 37 merged persons; ~~4 identity flags remain open~~ **(all 4 resolved 2026-08-05; 0 open now)** (Lance's own decisions, not a
    build item).
 9. [x] ~~MO individual roll-call votes (OpenStates has none)~~ **DONE — the `mo-house-xml`
    adapter this item specified was built exactly as researched** (XML action-history + linked
@@ -1014,7 +1015,7 @@ session's own direct work, not assumed.**
     session `'261'` (legiscan 2239). All 16 of `'2026'`'s bill identifiers also exist under `'261'`,
     carrying 17 roll calls / 561 casts, and it grew 15→16 bills *during* the audit: the cron is
     feeding the duplicate. Contrast MO 2018, where the same adapter's row was correctly merged.
-    **Highest-priority data defect** — it splits one session's record across two sessions on the
+    ~~**Highest-priority data defect**~~ **(RESOLVED 2026-08-02: the TODO-25 session merge ran live — see NOW section; kept here as dated history.)** — it splits one session's record across two sessions on the
     public site. Fix = merge `'2026'` into `'261'` (draft-then-apply, Lance runs it).
 
 26. ~~**2,005 bills have NULL title AND NULL canonical_url**~~ **DONE 2026-08-02.**

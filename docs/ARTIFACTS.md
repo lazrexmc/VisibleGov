@@ -8,6 +8,11 @@ Written 2026-07-31 (Lance: *"Preserve all info"*). Nothing here is irreplaceable
 reasoning is in `.superpowers/sdd/**/*.md`, which IS in git. This is all re-fetchable. Some of it is
 just expensive or rule-bound to re-fetch.
 
+*(File/size counts below are a 2026-07-31 snapshot and grow continuously as the scheduler ingests —
+treat them as "about this many," never as current fact. Spot-checked 2026-08-06, several have grown,
+e.g. `mo-senate-journals/` ~92, `scheduler-logs/` one file per day since. `ls` the directory for the
+real number.)*
+
 | Cache | Size | Files | Replaceable? |
 |---|---|---|---|
 | `legiscan-texts/` | 859 MB | 3,177 | ⚠️ **Costly + rule-bound** — see below |
@@ -107,9 +112,9 @@ rule-bound to preserve; losing it only loses the tick-history evidence trail. Se
   2026-07-31**, additions since have kept landing in the same commits as the work they document.
 - `CHATLOG.md`, `TODO.md`, `PLAYBOOK_DELTA.md`, `README.md`, `CLAUDE.md` — the decision trail.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` — the approved designs.
-- `supabase/migrations/` — the schema, 0001–0025 (plus the out-of-sequence `0018a_refresh_timeout.sql`).
-  Not all are applied to the live DB yet — file presence in git tracks the design, not deploy state;
-  `TODO.md` NOW is the source of truth for which migrations are actually live.
+- `supabase/migrations/` — the schema, 0001–0031 (plus the out-of-sequence `0018a_refresh_timeout.sql`),
+  32 files total. As of 2026-08-05 **all 32 are applied live — nothing awaits an apply**; `TODO.md`'s
+  RESUME HERE block is the live source of truth if this ever drifts again.
 - `tests/fixtures/` — captured real payloads (incl. the LegiScan API manual PDF the status codebook
   was extracted from, and the congress-legislators excerpts).
 

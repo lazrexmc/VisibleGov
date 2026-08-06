@@ -25,7 +25,7 @@ accountable with real information instead of spin.
 >    tests fail (expected-500-got-200 in `review-logic.test.js`, which assert behavior when no DB
 >    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
 >    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
->    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 27.)
+>    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
 > 2. **All 32 migrations (0001-0031 + 0018a) are APPLIED.** Nothing awaits an apply. Older text
 >    anywhere in this repo saying a migration is "drafted, awaiting Lance" is stale. `0031` was the
 >    last — it fixed a live anon-timeout on profile vote lists found on deploy night.
@@ -50,20 +50,21 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-30 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 26/27 are the two
-most recent and most expensive), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+33 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 30-33 are the
+newest — the 2026-08-05 deploy-night batch: contaminated-shell tests, deploy-console path fields,
+static-host URL canonicalization, and fix-the-whole-idiom-class), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
-own staleness banner as of 2026-08-03, defer to `TODO.md`/live checks for migration-applied state),
+own staleness banner, refreshed 2026-08-05, defer to `TODO.md`/live checks for migration-applied state),
 then the most recent `CHATLOG.md` entries (why things are the way they are).
 
 **Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not
 an open defect in the fix itself:** the cross-adapter vote-duplicate dedup (migration 0022) is
 applied and live; its backfill was itself found and fixed 2026-08-03 (a bare `.select()` had
 silently truncated the scan to 12% of its target — see
-`docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries 59 real
-matched pairs, all 2018 MO Senate. The `mo-house-xml` roll-call-PDF adapter resolves casts against
+`docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries 62 real
+matched pairs (59 from the backfill, all 2018 MO Senate; 3 more marked since by live ingest). The `mo-house-xml` roll-call-PDF adapter resolves casts against
 a roster containing exactly one real legislator, a leftover test fixture — investigated end-to-end
 2026-08-05: the dominant `legiscan` pipeline already covers 96.9% of all MO House votes with 0%
 zero-cast, and every bill `mo-house-xml` currently resolves any real cast for already has a
@@ -95,7 +96,7 @@ per-legislator vote coverage," for the full evidence trail.
   credentials into the test process, so `review-logic.test.js`'s "no DB client configured" tests
   get a real client and 2 CORRECT tests go red (expected 500, got 200). Verified deterministically
   2026-08-05. Run tests in a clean shell; batching a live `curl` check and a test run into one
-  shell invocation is how this happens. See PLAYBOOK_DELTA lesson 27.
+  shell invocation is how this happens. See PLAYBOOK_DELTA lesson 30.
 
 ## The one non-negotiable
 
