@@ -81,6 +81,8 @@ kept as the record of what had to be true:
    to the steps that trigger them. All code-side work is DONE; what remains is console work in
    Lance's own account.
 
+- **MO term-date backfill (branch `backfill-mo-term-dates`):** fills 193 current MO legislators' null `start_date` from OpenStates; cross-checked against LegiScan. Dry-run gate: `node --env-file=.env src/cli/backfill-mo-term-dates.js` (read-only plan output). Lance reviews plan/flags → `--apply` run to write the `agree` rows.
+
 **Genuinely open, NOT blocking the deploy** (details further down / in the audit sections):
 - 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
   `correct-data.js reconcile-flag` instead of one code change per flag — but each is a real human

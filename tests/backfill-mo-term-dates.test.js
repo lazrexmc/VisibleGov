@@ -90,6 +90,17 @@ test('earliestLegiscanYear returns null for an unknown people_id', () => {
   assert.equal(earliestLegiscanYear(idx, 999, 'senate'), null);
 });
 
+test('buildLegiscanPresenceIndex over the real 2018 fixture places Onder (16351) in the Senate that year', async () => {
+  const src = JSON.parse(readFileSync('tests/fixtures/research/legiscan/mo-2018-dataset-1608.json', 'utf8'));
+  const dir = mkdtempSync(join(tmpdir(), 'vg-ds2-'));
+  const path = join(dir, 'sess.json');
+  writeFileSync(path, JSON.stringify({ session_id: 1608, year_start: 2018, zip: src.dataset.zip }));
+
+  const decoded = await readCachedDatasetFull(path);
+  const idx = buildLegiscanPresenceIndex([{ yearStart: decoded.yearStart, people: decoded.people, rollCalls: decoded.rollCalls }]);
+  assert.equal(earliestLegiscanYear(idx, 16351, 'senate'), 2018);
+});
+
 const ROSTER = [
   { openstates_id: 'os-1', full_name: 'Jane Adams', family_name: 'Adams',
     roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09', end_date: null }] },
@@ -112,7 +123,7 @@ test('matchRoster joins by (chamber, district) on OPEN roles only and carries th
   assert.equal(matches[0].surnameOk, true);
 });
 
-test('matchRoster puts a term with no roster counterpart (e.g. retired Onder) in unmatchedTerms', () => {
+test('matchRoster: a seat held by a different person yields surnameOk=false (retired Onder D2 case)', () => {
   const terms = [
     { termId: 't-onder', legislatorId: 'l-onder', chamber: 'senate', district: '2', surname: 'Onder', legiscanPeopleId: 16351 },
   ];

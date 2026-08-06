@@ -162,8 +162,9 @@ his approval does an explicit `--apply` (or Lance running it himself) perform th
 
 ## 8. Provenance recorded with every filled date
 
-Each filled `start_date` carries a machine-recorded citation (same receipts pattern the project uses
-elsewhere — a source/citation column or the per-item audit log, not left implicit):
+Each filled `start_date` carries a machine-recorded citation via `ingestion_runs.detail` — no new `terms`
+column, no migration. The `run_id` is stamped on each updated row; the `citations[]` array in
+`ingestion_runs.detail` records:
 
 ```
 openstates.org /people id=<osid> current_role.start_date=<YYYY-MM-DD> (retrieved <date>);
