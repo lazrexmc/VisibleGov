@@ -365,3 +365,21 @@ test('partitionDirectory: an entry with no servingNow field lands in past (never
   assert.deepEqual(past.map((e) => e.key), ['x']);
   assert.deepEqual(partitionDirectory(undefined), { servingNow: [], past: [] });
 });
+
+// ============================================================================
+// Composition: filterDirectory over partitionDirectory output (spec §6)
+// ============================================================================
+
+test('composition: filterDirectory narrows WITHIN a partition without disturbing the other view', () => {
+  const entries = [
+    { key: 'a', displayName: 'Jane Adams', surname: 'Adams', chamber: 'MO House', party: 'D', servingNow: true },
+    { key: 'b', displayName: 'Bob Adams', surname: 'Adams', chamber: 'MO Senate', party: 'R', servingNow: false },
+    { key: 'c', displayName: 'Carol Cook', surname: 'Cook', chamber: 'MO House', party: 'R', servingNow: true },
+  ];
+  const partitions = partitionDirectory(entries);
+  const servingAdams = filterDirectory(partitions.servingNow, 'adams');
+  assert.deepEqual(servingAdams.map((e) => e.key), ['a']); // Bob Adams is in past, never leaks into the serving view
+  const pastAdams = filterDirectory(partitions.past, 'adams');
+  assert.deepEqual(pastAdams.map((e) => e.key), ['b']);
+  assert.equal(partitions.servingNow.length, 2, 'filtering never mutates the partition itself');
+});
