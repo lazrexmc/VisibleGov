@@ -45,7 +45,7 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-27 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 26/27 are the two
+28 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 26/27 are the two
 most recent and most expensive), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),

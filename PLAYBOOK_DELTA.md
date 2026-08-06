@@ -619,3 +619,36 @@ when a "no config present" test fails, suspect the harness before the code. The 
 this is a bisect hunt for a break that never happened — the exact tail-chasing this playbook exists
 to prevent, and doubly expensive right before a machine restart when a red suite reads as "we broke
 something and don't know what."
+
+## Lesson 28 — "Relative to what?" is the question every path field in a deploy console is silently asking (2026-08-05)
+
+Wrote a Cloudflare Pages runbook specifying **Root directory: `site`** AND **Build output
+directory: `site`**. Both individually defensible, both matching how the repo is laid out — and
+together, broken. Build output directory is resolved *relative to* root directory, so the pair
+resolves to `<repo>/site/site/`, which does not exist. Caught only because the owner opened the
+real wizard, compared it field-by-field against the doc, and asked "do I need any changes to this?"
+before clicking Save. The correct config leaves output EMPTY, meaning "the root directory itself."
+
+The reasoning error is worth naming precisely: I derived each field from the repo layout
+independently ("the site lives in `site/`" → true for both fields in isolation) instead of asking
+what each field is measured FROM. Two settings that are each correct against the filesystem can be
+wrong against each other the moment one is relative to the other.
+
+**Rule: for every path field in a deploy/CI console, write down what it is relative to before
+writing its value — and when two path fields appear in the same form, state their relationship
+explicitly in the doc, not just their values.** A runbook that lists `A: site` and `B: site` on
+adjacent rows looks internally consistent and reads as confirmation; it hides the composition
+entirely. The corrected table now carries the relationship and both valid combinations, because the
+alternative config (root empty + output `site`) *also* "works" for static files while silently not
+deploying the Functions directory — a failure that would have looked like a code bug in
+`geocode.js` rather than a settings mistake, and been debugged in the wrong place.
+
+Two broader points this cost nothing to learn but could have cost a bad afternoon:
+- **A doc written from the repo's structure is not the same as a doc written from the tool's
+  semantics.** The repo says where files are; the console asks how it should interpret paths. Only
+  the second one is what you are filling in.
+- **The owner reading a runbook against the real UI is a genuine review pass, not a formality.**
+  This is the second time in this project that a human comparing a document to live reality caught
+  something no amount of internal consistency-checking would have (the first: the resume docs
+  drifting from live DB state). Build the runbook to be checkable — exact field names, one value
+  per row — so that comparison is cheap enough to actually happen.

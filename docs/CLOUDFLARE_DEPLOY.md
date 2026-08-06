@@ -62,8 +62,23 @@ Settings — these exact values:
 | Production branch | `main` | |
 | Framework preset | **None** | a preset injects an assumed build command you'd then have to clear |
 | Build command | *(empty)* | there is no build step — the site is plain HTML/CSS/ES modules |
-| Build output directory | `site` | |
-| Root directory | `site` | **required** — `_headers`, `_redirects`, and `functions/` are only discovered from here |
+| **Build output directory** | **LEAVE EMPTY** | ⚠️ see below — do NOT put `site` here |
+| Root directory (advanced) → Path | `site` | **required** — Pages discovers `functions/` relative to the ROOT directory, so this is what makes `/geocode` deploy at all; `_headers`/`_redirects` are read from here too |
+
+> **⚠️ Correction, 2026-08-05 — this table previously said Build output directory = `site`, which is
+> WRONG and would have failed the build.** Caught by Lance reading the wizard against this doc
+> before clicking Save.
+>
+> **Build output directory is relative to Root directory.** With Root directory = `site`, Pages is
+> already operating inside `<repo>/site/`, so an output directory of `site` resolves to
+> `<repo>/site/site/` — a path that does not exist. Leaving it empty means "this directory," which
+> is where `index.html`, `_headers`, `_redirects`, and `functions/` actually are.
+>
+> The two valid configurations are: **root `site` + output empty** (what we use — required, because
+> `functions/` is only discovered under the root directory), or root empty + output `site` (would
+> serve the static files fine but would NOT deploy the geocode Function, since Pages would look for
+> `functions/` at the repo root where it does not exist). Setting both is the one combination that
+> breaks.
 | Environment variables | *(none)* | `site/config.js` carries the anon URL/key; no secrets exist in `site/` |
 
 The first deploy fires automatically on project creation — it is not a separate step.

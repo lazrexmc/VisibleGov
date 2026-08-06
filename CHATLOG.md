@@ -2747,3 +2747,45 @@ while the scheduler and all ingestion keep running untouched.
 Re-verified every factual claim the runbook makes against the actual code (the import path, the
 `#attribution` anchor, the footer link, the `_redirects` rule) rather than trusting the document it
 was describing. Suite still 2,321/0.
+
+---
+
+## 2026-08-05 (continued) — Lance catches a real error in my own runbook, mid-wizard
+
+**Lance**, at the Cloudflare Pages "Set up builds and deployments" screen, screenshot attached:
+"Do I need any changes to this?"
+
+His config: project name `visiblegov` → `visiblegov.pages.dev`, production branch `main`, framework
+preset **None**, build command empty, **build output directory EMPTY**, root directory `site`, no
+environment variables.
+
+**Answer: no changes — and the runbook I wrote for him was WRONG on one field.** `docs/
+CLOUDFLARE_DEPLOY.md`'s settings table said *Build output directory: `site`*. Combined with *Root
+directory: `site`* — which the same table also (correctly) requires — that resolves to
+`<repo>/site/site/`, a path that does not exist. Build output directory is measured **relative to**
+root directory. He had it right by leaving it empty; following my table literally would have failed
+the build.
+
+The reasoning error, named precisely because it is the reusable part: I derived each field
+independently from the repo layout ("the site lives in `site/`" — true for either field in
+isolation) instead of asking what each field is measured FROM. Two values that are each correct
+against the filesystem can be wrong against each other the moment one is relative to the other. And
+a table listing `Root: site` / `Output: site` on adjacent rows *looks* internally consistent — the
+composition is exactly what a consistency check cannot see.
+
+Corrected the table, and documented both valid configurations plus why we need this one
+specifically: **root `site` + output empty** is required because Pages discovers `functions/`
+relative to the ROOT directory, so it is what makes `/geocode` deploy at all. The alternative (root
+empty + output `site`) would serve the static files perfectly well while silently NOT deploying the
+Functions directory — a failure that would have looked like a bug in `geocode.js` and been debugged
+in entirely the wrong place.
+
+**PLAYBOOK_DELTA lesson 28** written from it: for every path field in a deploy console, write down
+what it is relative to before writing its value, and when two path fields share a form, state their
+relationship in the doc rather than just their values. Also recorded the meta-point — this is the
+second time in this project that a human comparing a document against live reality caught something
+no amount of internal consistency-checking would have (the first being the resume docs drifting from
+live DB state). Runbooks should be built to be *checkable* — exact field names, one value per row —
+so that comparison stays cheap enough to actually happen.
+
+Nothing was deployed yet; he asked before clicking Save and Deploy.
