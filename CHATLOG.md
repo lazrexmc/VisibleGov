@@ -3108,3 +3108,22 @@ skipped all 21 as already-dated (idempotency verified in production). Live end-s
 terms dated; Brown H-149 (no authored date) + Onder (parked) remain NULL by design; 0 end_dates
 written.** The term-date backfill sub-project is COMPLETE — the Current/Past directory UI
 (its parent project) is now unblocked with day-precision tenure display available.
+
+## 2026-08-06 (evening) — "Serving now / Past members" directory split: built, deployed, live-verified
+
+Lance: "Yes, proceed with the full build." Spec + plan written and committed (the spec bakes in
+live-verified data facts: Onder groups to one person entry anchored on his real federal seat;
+Brown H-149 serves undated). Subagent-driven execution on branch directory-serving-now-split,
+3 tasks + final Fable review (MERGE-READY; 1 spec-coverage gap fixed + re-reviewed, 3 minors
+parked with rulings). Merged fast-forward to main, pushed; Pages deployed in ~15s.
+
+Live browser walk on visiblegov.pages.dev, all green: opens on "Serving now (730)" (default,
+aria-pressed), "Past members (837)" swaps the list, byte-exact footnote, tenure fragments render
+("since 1993"... "since 2025") on serving entries only, search narrows within the active view with
+immutable badges, Onder appears ONLY as U.S. House D3 since 2025, Schroer alone holds MO Senate
+D2 since 2023, zero console errors. Suite 2367/0.
+
+This closes the original 2026-08-05 request ("filter the long ass list of names") end-to-end:
+term-date backfill (prerequisite) + the two-view directory, both live. Observed pre-existing nit
+(not a regression, logged for later): federal "Last, First 'Nick'" name formats make the surname
+fallback sort quoted nicknames first in each view.
