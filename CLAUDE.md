@@ -14,17 +14,21 @@ accountable with real information instead of spin.
 > ## ⏱ FRESH SESSION: READ `TODO.md`'s "RESUME HERE" BLOCK FIRST
 > It is at the very top of `TODO.md`, was verified against the live database on 2026-08-05, and is
 > the ONLY place that states what is actually open. Everything else — including the status
-> paragraph directly below — is a historical snapshot that goes stale. **The next thing to do is
-> the Cloudflare Pages deploy**; Lance's "backend first" gate is MET (he raised the deploy himself
-> 2026-08-05, after four audit passes produced zero criticals). Do not defer it or re-litigate it.
+> paragraph directly below — is a historical snapshot that goes stale. **The site is DEPLOYED and
+> verified live at https://visiblegov.pages.dev** (2026-08-05); the full product loop — directory →
+> profile → real votes → bill → tally — was confirmed working in a real browser with zero console
+> errors. What remains is the custom-domain phases (nameservers + attach
+> `visiblegov.helpingpeoplehelpingpeople.com`), all console work — see `docs/CLOUDFLARE_DEPLOY.md`.
 >
 > **Two traps that will cost you a session if you hit them cold:**
 > 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct
 >    tests fail (expected-500-got-200 in `review-logic.test.js`, which assert behavior when no DB
->    client is configured). Verified deterministically. Run tests in a clean shell; every CLI takes
->    `--env-file=.env` for this reason.
-> 2. **All 30 migrations (0001-0029 + 0018a) are APPLIED.** Nothing awaits an apply. Older text
->    anywhere in this repo saying a migration is "drafted, awaiting Lance" is stale.
+>    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
+>    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
+>    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 27.)
+> 2. **All 32 migrations (0001-0031 + 0018a) are APPLIED.** Nothing awaits an apply. Older text
+>    anywhere in this repo saying a migration is "drafted, awaiting Lance" is stale. `0031` was the
+>    last — it fixed a live anon-timeout on profile vote lists found on deploy night.
 
 **Status (2026-08-04): backend live and accurate — two independent audits ran end-to-end 2026-08-03
 (an 8-domain accuracy audit, then a senior-engineering-lens audit), 4 + 19 findings fixed and
@@ -32,11 +36,12 @@ verified live respectively; public site built, merged, and independently verifie
 against live data; a 3-layer `refresh_vote_aggregates()` timeout saga (a Supabase edge-gateway
 timeout, then a Postgres `statement_timeout` arm-timing trap, then a query-planner anti-join
 misestimation) was root-caused and fixed live 2026-08-04 — manual refresh now completes in ~19s and
-real scheduled `pg_cron` ticks are succeeding; the Cloudflare Pages deploy is now actively being
-spec'd (in progress — see `TODO.md` NOW).** The repo holds the ingestion CLIs and adapters (`src/`),
-the public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0029 all applied — 30
-files total including 0018a; the newest three, 0027/0028/0029, are the timeout-saga fix above, all
-verified live 2026-08-04; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
+real scheduled `pg_cron` ticks are succeeding; the site is now DEPLOYED and verified live at
+https://visiblegov.pages.dev (2026-08-05), custom domain still pending — see `TODO.md` RESUME
+HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
+the public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0031 all applied — 32
+files total including 0018a; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
+anon vote-list timeout found on deploy night, both verified live 2026-08-05; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
 missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-backed tests (`tests/`,
 2,200+ green — run `node --test` for the exact current count; a senior engineering audit,
 2026-08-03, flagged exact test-count citations in docs as needless churn — prefer magnitude language
@@ -45,7 +50,7 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-28 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 26/27 are the two
+30 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 26/27 are the two
 most recent and most expensive), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
@@ -74,14 +79,15 @@ verified there's no meaningful gap for a caveat to warn about. See `TODO.md` NOW
 per-legislator vote coverage," for the full evidence trail.
 
 **Three standing rules that are easy to violate without noticing:**
-- ~~**Cloudflare deploy is a MILESTONE, not a task**~~ **— GATE MET 2026-08-05, this rule is now
-  SATISFIED, not waived.** Lance's original ruling (2026-07-31) was: *"I'm only interested in
-  starting the cloudflare portion once the entire backend is locked in and accurate, otherwise I'm
-  troubleshooting two systems back and forth and each change takes 3 steps instead of 1."* He
-  raised the deploy himself on 2026-08-05 after four audit passes produced zero criticals, and it
-  was recommended yes. **The deploy is now the active next task** — see `TODO.md`'s RESUME HERE
-  block. Do not use the old wording to defer it. (If he ever says the backend feels shaky again,
-  believe him over this note — the instinct behind the rule is still sound.)
+- ~~**Cloudflare deploy is a MILESTONE, not a task**~~ **— DONE 2026-08-05: the site is deployed to
+  https://visiblegov.pages.dev and verified live end-to-end.** Lance's original ruling (2026-07-31,
+  *"I'm only interested in starting the cloudflare portion once the entire backend is locked in and
+  accurate"*) was satisfied — he raised the deploy himself after four audit passes produced zero
+  criticals. Only the custom-domain phases remain (his console work; `docs/CLOUDFLARE_DEPLOY.md`).
+  Two real bugs were found and fixed DURING the deploy's own verification (the browser walk earned
+  its cost): `_redirects` targets had to become extensionless (Pages 308-canonicalizes `.html`),
+  and migration 0031 fixed a live anon `statement_timeout` on profile vote lists — see
+  `CHATLOG.md` 2026-08-05 deploy-night entries.
 - **Gate commits on the extracted test fail-count, never on a pipeline's exit status.** `grep`
   exits 0 when it finds the line reading `fail 15`. This mistake shipped a red suite twice in this
   repo. See PLAYBOOK_DELTA lesson 14 for the mechanical form.

@@ -365,8 +365,11 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    configuration patch. **Fix drafted same pass: `supabase/migrations/0026_fix_refresh_aggregates_
    timeout_regression.sql`** — this time `statement_timeout` is folded directly into the function's
    own `set` clause (not a separate `ALTER FUNCTION`), so it survives any future `CREATE OR REPLACE`
-   that copies this file's header. **Draft-then-apply, awaiting Lance — until it lands, this keeps
-   failing every tick that would otherwise refresh.** Note first: `aggregatesRefreshed: true` in a
+   that copies this file's header. ~~**Draft-then-apply, awaiting Lance — until it lands, this keeps
+   failing every tick that would otherwise refresh.**~~ **(Historical: 0026 was applied 2026-08-03;
+   this whole `statement_timeout` line was later superseded by the 0027/0028/0029 saga — see the
+   top-of-file banner and item 5. All applied and live; nothing here awaits an apply.)** Note first:
+   `aggregatesRefreshed: true` in a
    log entry means the scheduler decided a refresh was warranted
    (`run.outcome.wroteRows`, i.e. the source actually wrote new rows) — it is **not** proof the
    refresh succeeded; the nested `aggregatesResult.parsed.mode` is the real outcome, and reading

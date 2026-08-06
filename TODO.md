@@ -11,23 +11,27 @@ that tells you what is actually OPEN. If the two ever disagree, re-verify live a
 check — that drift is exactly what has burned this project before.*
 
 **State, verified live 2026-08-05 (not copied from another doc):**
-- Git clean, `main` @ `9fcc555`, everything pushed. Suite **2,316 pass / 0 fail**.
-- Migrations: **31 files on disk (0001-0030 + 0018a), ALL applied live.** Nothing is awaiting an
-  apply. `0030` applied 2026-08-05 and verified via `information_schema.role_routine_grants`:
-  `service_role` + `postgres` hold EXECUTE, `authenticated` is gone. Both legitimate callers
-  re-confirmed working after the revoke (pg_cron ticks as `postgres`; the scheduler's own
-  `refresh-aggregates.js` call as `service_role`).
-  `0027`/`0028`/`0029` (the refresh-timeout saga) are applied and confirmed working.
-- Data: votes 10,119 · vote_casts 1,467,896 · bills 38,254 · legislators 1,607 ·
-  vote_duplicates **62** (was 59 — the live ingest path is now marking new duplicates on its own,
-  which is the dedup feature working end-to-end, not drift).
+- **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — verified end-to-end in a real
+  browser, zero console errors: directory (1,567 links) → profile (162 vote rows + aggregate
+  charts) → bill page (sponsors, summary, roll-call tallies). The full product loop works.
+- Git clean, `main` @ `6c85bd0`, everything pushed. Suite **2,328 pass / 0 fail** (in a clean
+  shell — see the `.env` trap below; it fired again during this very sync).
+- Migrations: **32 files on disk (0001-0031 + 0018a), ALL applied live.** Nothing is awaiting an
+  apply. `0030` (revoked a stray `authenticated` EXECUTE on `refresh_vote_aggregates()`) and `0031`
+  (rewrote `public_vote_feed`/`public_votes`' anti-join to `NOT EXISTS` — fixed a live anon
+  `statement_timeout` on every profile vote list, found on deploy night) both applied + verified
+  live 2026-08-05.
+- Data: votes 10,128 · vote_casts 1,468,297 · bills 38,255 · legislators 1,607 ·
+  vote_duplicates **62** (the live ingest path marks new duplicates on its own — the dedup feature
+  working end-to-end, not drift).
 - Published: 115 summaries · 116 glossary terms.
-- Scheduler healthy: all 5 sources ticked today; `refresh-aggregates` succeeded 15:00 UTC via
-  pg_cron. **The 3-layer timeout saga is fully closed.**
+- Scheduler healthy: all 5 sources ticking; `refresh-aggregates` succeeding via pg_cron. **The
+  3-layer timeout saga is fully closed** and has stayed closed under real load for a full day.
 - ⚠️ **Before running the suite: do NOT `source .env` in the same shell.** It makes 2 correct
   tests in `review-logic.test.js` fail (expected-500-got-200) because they assert behavior when NO
-  DB client is configured. Verified deterministically 2026-08-05. Use `node --test` in a clean
-  shell. Every CLI takes `--env-file=.env` for exactly this reason.
+  DB client is configured. Verified deterministically 2026-08-05 — and it caught me AGAIN mid-sync
+  when a live `curl` check and `node --test` shared one shell. Use `node --test` in a clean shell.
+  Every CLI takes `--env-file=.env` for exactly this reason. (PLAYBOOK_DELTA lesson 27.)
 
 ✅ **Migration 0031 APPLIED and VERIFIED LIVE 2026-08-05 (deploy night).** The anon 500 on
 profile vote lists is fixed: the exact failing query returns 200 in 0.27s as anon (was 500 timeout
@@ -37,11 +41,13 @@ zero console errors: profile renders 162 vote rows with bill links + populated a
 click-through to a bill page (HB 3080) shows sponsors, plain-language summary, and roll-call
 tallies. **The full product loop works on the live site.**
 
-**THE NEXT THING: finish the Cloudflare deploy — Phases 3 & 4 (custom domain).** Lance's own long-standing gate ("backend locked in
-and accurate first") is **MET** — he raised the deploy himself on 2026-08-05 and it was recommended
-yes. Four audit passes produced **zero criticals**. Do not defer this or re-litigate the gate.
-Resume the spec brainstorm where it paused (2026-08-03, sections 2 and 4 unpresented), not from
-scratch. Short pre-deploy list, mostly already decided:
+**THE NEXT THING: finish the Cloudflare deploy — Phases 3 & 4 (custom domain), all Lance's console
+work.** Phase 1 (create Pages project) and Phase 2 (verify on `.pages.dev`) are DONE and the site
+is live and verified. Remaining, per `docs/CLOUDFLARE_DEPLOY.md`: Phase 3 (move nameservers to
+Cloudflare — a clean sweep, no email to preserve) and Phase 4 (attach
+`visiblegov.helpingpeoplehelpingpeople.com`, then re-run the curl checks against the custom domain,
+since headers/redirects/Functions are host-sensitive). The pre-deploy list below is fully done and
+kept as the record of what had to be true:
 1. ✅ **`geocode.js` security headers — BUILT 2026-08-05.** All five response paths (incl. the
    400/502 error paths) now set them from `site/js/security-headers.js`, a shared constant the
    Function can statically import (Pages Functions have no filesystem, so they cannot read

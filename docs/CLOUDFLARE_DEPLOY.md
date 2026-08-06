@@ -1,7 +1,18 @@
 # Cloudflare Pages deploy — runbook
 
-**Status: ready to execute. All code-side pre-deploy work is done and pushed.** What remains is
-console work in Lance's own Cloudflare account, plus verification.
+**Status (2026-08-05): DEPLOYED and VERIFIED LIVE at https://visiblegov.pages.dev.** Phase 1
+(create the Pages project) and Phase 2 (verify on `.pages.dev`) are DONE — 21 mechanical curl checks
+pass and the full product loop was confirmed in a real browser with zero console errors. **What
+remains is Phase 3 (nameservers) and Phase 4 (custom domain)**, both console/DNS work in Lance's own
+Cloudflare account.
+
+> **Two real bugs surfaced during Phase 2 — the verification earned its cost.** (1) Every
+> `_redirects` rule was broken: Pages 308-canonicalizes `.html`, so targets pointing at `.html`
+> looped `/trust` and stripped the uuid from `/person/<id>`. Fixed by making targets extensionless
+> (PLAYBOOK_DELTA lesson 29). (2) Every anonymous profile's vote list returned HTTP 500 — the
+> `public_vote_feed` view's anti-join crossed anon's 3s `statement_timeout`; fixed by migration 0031
+> (lesson 30). Both are fixed, applied, and re-verified live. The lesson: a browser walk under the
+> real anon role at real data volume catches what curl-the-endpoint cannot.
 
 Written 2026-08-05, replacing the half-finished deploy *spec* (the brainstorm paused 2026-08-03
 with sections 2 and 4 unpresented). Section 2 was "implementation detail of the two fixes" — those

@@ -190,9 +190,11 @@ Apply these 29 files, in this exact order, by filename:
 | 25 | `0024_lock_down_legiscan_datasets.sql` | Revokes anon's `SELECT` on `legiscan_datasets` (an earlier migration had granted it unnecessarily — this is operational ledger data, not public-facing). |
 | 26 | `0025_scope_summaries_glossary_columns.sql` | Column-scopes anon access to `summaries` and `glossary_terms`: RLS already correctly restricted anon to *published rows*, but nothing restricted *columns* — a bare `select=*` was leaking internal pipeline metadata (`model`, `prompt_version`, `bill_text_hash`, `run_id`, `source_hash`, `needs_mapping`). Grants anon a named column list instead. **`model` deliberately stays public on `summaries`** — the site displays it as attribution. |
 | 27 | `0026_fix_refresh_aggregates_timeout_regression.sql` | Restores the `statement_timeout` override that 0022's `CREATE OR REPLACE FUNCTION` had silently dropped (Postgres resets a function's declared config on replace unless the replacing statement re-declares it) — folds it directly into the function body this time so a future replace can't drop it the same way again. |
-| 28 | `0027_pg_cron_refresh_aggregates.sql` | Moves the routine, scheduled aggregate refresh off the synchronous HTTP/RPC path entirely — schedules `refresh_vote_aggregates()` as a native `pg_cron` job every 30 minutes, directly inside Postgres (no gateway/HTTP timeout risk for the routine case). Also enables the `pg_cron` extension (`create extension if not exists pg_cron with schema cron;` — idempotent, harmless if already enabled via the dashboard). |
+| 28 | `0027_pg_cron_refresh_aggregates.sql` | Moves the routine, scheduled aggregate refresh off the synchronous HTTP/RPC path entirely — schedules `refresh_vote_aggregates()` as a native `pg_cron` job every 30 minutes, directly inside Postgres (no gateway/HTTP timeout risk for the routine case). **⚠️ FRESH-REBUILD TRAP:** this file's own text reads `create extension if not exists pg_cron with schema cron;`, which **errors on a database where pg_cron is not already enabled** — pg_cron is a non-relocatable extension pinned to `pg_catalog`, so the `with schema cron` clause is rejected. It only worked on the original apply because the extension had already been toggled on via the Supabase dashboard (`IF NOT EXISTS` then skipped the clause). On a genuine rebuild: **enable pg_cron first** in Dashboard → Database → Extensions (search `pg_cron`, toggle on), *then* apply this migration and the `IF NOT EXISTS` is a harmless no-op. If applying cold via SQL instead, use `create extension if not exists pg_cron with schema pg_catalog;` (or drop the schema clause). |
 | 29 | `0028_fix_statement_timeout_arm_timing.sql` | Fixes a Postgres semantics trap 0027 alone didn't solve: `statement_timeout` is armed once, at the start of the top-level statement, using whatever is ambient at that instant — a function's own `SET` can never retroactively extend an already-armed deadline. Fix: `alter database postgres set statement_timeout = '600s';`, raising the *ambient* default itself (Supabase's own `postgres` database ships a built-in 2-minute default that was silently capping every attempt at 120s). |
-| — | `0029_fix_vote_duplicates_antijoin_planner_misestimate.sql` | Fixes a Postgres query-planner misestimation in the three vote-aggregate matviews' anti-join (`LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL`, which the planner catastrophically misestimated as excluding ~1 row instead of the true ~10,000+) by rewriting it as `NOT EXISTS (...)` — identical semantics, correct plan (Hash Join instead of a cascading Nested Loop). Without this, `refresh_vote_aggregates()` hangs past any reasonable timeout once `vote_casts` grows into the millions. |
+| 30 | `0029_fix_vote_duplicates_antijoin_planner_misestimate.sql` | Fixes a Postgres query-planner misestimation in the three vote-aggregate MATVIEWS' anti-join (`LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL`, which the planner catastrophically misestimated as excluding ~1 row instead of the true ~10,000+) by rewriting it as `NOT EXISTS (...)` — identical semantics, correct plan (Hash Join instead of a cascading Nested Loop). Without this, `refresh_vote_aggregates()` hangs past any reasonable timeout once `vote_casts` grows into the millions. |
+| 31 | `0030_revoke_refresh_aggregates_from_authenticated.sql` | Revokes `EXECUTE` on `refresh_vote_aggregates()` from the `authenticated` role. Every prior definition (0018/0022/0026/0027) revoked PUBLIC and `anon` but never `authenticated`, so Supabase's default function grant survived on this `SECURITY DEFINER` function despite 0018's comment claiming service-role-only. One statement, safe to re-run. |
+| 32 | `0031_fix_public_views_antijoin_planner_misestimate.sql` | The SAME anti-join fix as 0029, applied to the two plain VIEWS 0029's sweep missed — `public_vote_feed` and `public_votes` (live def from 0023) still carried `LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL`. Once `vote_duplicates` had rows and `vote_casts` reached ~1.47M, the misplanned query crossed the **anon role's 3s `statement_timeout`** and every anonymous profile's vote list returned HTTP 500 — found on the first production browser walk. Rewrites both to `NOT EXISTS`, identical semantics. Without this, the deployed site's profile vote lists are broken for visitors. |
 
 **No manual/live-only SQL exists outside these files.** Every operational fix this project ever
 needed against its own schema (the `pg_cron` extension enable, the `statement_timeout` fixes, the
@@ -412,9 +414,10 @@ underlying refresh completed fine server-side.
 
 Two independent pieces of automation keep this project's data fresh without a human watching every
 invocation. **`pg_cron` should already exist and be scheduled** once you applied migration
-`0027_pg_cron_refresh_aggregates.sql` in Section 5 — that migration's `create extension if not
-exists pg_cron with schema cron;` plus its trailing `select cron.schedule(...)` statement is all
-that's needed on the database side. Verify it took effect:
+`0027_pg_cron_refresh_aggregates.sql` in Section 5 — *provided you enabled the pg_cron extension
+first* (see that migration's fresh-rebuild trap note in Section 5: enable it via Dashboard →
+Database → Extensions, or the `with schema cron` clause errors on a cold database). Its trailing
+`select cron.schedule(...)` statement does the rest on the database side. Verify it took effect:
 
 ```sql
 select * from cron.job where jobname = 'refresh-vote-aggregates';
@@ -464,10 +467,16 @@ Full detail on this scheduler's design, cadence table, and how to verify it's al
 
 ## 10. Serve and verify the site locally
 
-**Real deploy status as of this writing: Cloudflare Pages has NOT been deployed.** The public site
-(`site/`) exists as code in this repo and has been verified working end-to-end in a local browser
-against live data, but it is not live on the public internet under any domain. Do not assume or
-imply otherwise when reporting on this rebuild's completeness — see Section 12.
+**Deploy status as of 2026-08-05: the ORIGINAL instance is deployed to Cloudflare Pages** at
+`https://visiblegov.pages.dev` (custom domain still pending). A rebuild does NOT inherit that — a
+fresh rebuild produces working *code and data*, and getting it onto Cloudflare is a separate step
+(the runbook for it is `docs/CLOUDFLARE_DEPLOY.md`, and the two deploy-time gotchas it documents are
+real and will bite a rebuild too: Pages Functions do not inherit `site/_headers` — `site/functions/
+geocode.js` sets its own headers from `site/js/security-headers.js`; and `site/_redirects` targets
+MUST be extensionless — `/person/* → /person`, never `/person.html` — because Pages
+308-canonicalizes `.html` and a `.html` target produces redirect loops / stripped path segments).
+Until you complete that step, the rebuilt site is verifiable locally (below) but not on the public
+internet — do not report the rebuild as "live" before it actually is (Section 12).
 
 **Configure `site/config.js` first.** This file holds the Supabase **anon (publishable)** key and
 project URL the browser-side JS uses — it is committed to the repo and designed to be public (the
@@ -570,15 +579,16 @@ them, and you should not expect it to:
   (~3.4-day cost for confirmed-redundant output — every bill it resolves any cast for already has a
   LegiScan vote for the same bill). Decision made: ship as-is, no site caveat needed. See `TODO.md`
   NOW ("MO House per-legislator vote coverage") for the full evidence trail.
-- **Cloudflare Pages deployment has not happened.** This is a deliberate future milestone, not an
-  oversight — the project's own standing rule (Lance, project owner) is that Cloudflare deployment
-  only starts once the backend is fully locked in and accurate, specifically to avoid
-  troubleshooting two systems (backend + deploy) at once. Completing this rebuild through Section
-  11 gets you a working local instance; it does not put anything on the public internet. If/when
-  deployment resumes, the current plan (see `TODO.md`'s NOW section, "Cloudflare Pages" entry, in
-  the cloned repo) targets: project name deliberately chosen, production branch `main`, framework
-  preset **None**, empty build command, build output directory `site`, root directory `site`, zero
-  environment variables (the site's only "config" is the committed `site/config.js` anon key).
+- **Cloudflare Pages deployment: the ORIGINAL instance IS deployed (2026-08-05) at
+  `https://visiblegov.pages.dev`; a rebuild starts from un-deployed and must redo it.** The full,
+  authoritative runbook is `docs/CLOUDFLARE_DEPLOY.md` in the cloned repo — follow that, not a
+  summary. The Pages project settings that matter: production branch `main`, framework preset
+  **None**, empty build command, **root directory `site`**, and **build output directory LEFT
+  EMPTY** (it is resolved *relative to* the root directory, so `site` there would look for
+  `site/site/` and fail — root `site` + output empty is the working config, and root `site` is what
+  makes Pages discover `functions/` at all). Zero environment variables (the site's only "config" is
+  the committed `site/config.js` anon key). Completing this rebuild through Section 11 gets you a
+  working local instance; the Cloudflare step is what puts it on the public internet.
 - **Federal vote history is current-Congress only.** All federal vote casts come from the most
   recently ingested Congress — a legislator's pre-that-Congress federal record (e.g. a senator's
   earlier terms) is not in the database. Not wrong, just thin; the site labels dates honestly

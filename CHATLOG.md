@@ -2902,3 +2902,57 @@ through to its bill page (HB 3080): sponsors, plain-language summary, roll-call 
 zero errors. The full product loop — directory -> profile -> real votes -> bill -> tally — works on
 the deployed site. The deploy-night regression is fully closed; TODO RESUME HERE updated to drop
 the blocker and point at the custom-domain phases as next.
+
+---
+
+## 2026-08-05 (late) — milestone documentation sync: deployed, and every doc reconciled to live state
+
+**Lance:** "Update all documentation" / "And update them all in full detail." The site is deployed
+and verified; time to make every doc match reality before the state drifts out of anyone's memory.
+
+Method, deliberately inverted from the usual (and from the exact failure mode this project has
+been burned by): **verified live state FIRST, wrote docs against what was verified, never against
+what the docs already claimed.** Authoritative snapshot: git clean @ 6c85bd0 all pushed; 32
+migrations (0001-0031 + 0018a) ALL applied; votes 10,128 / vote_casts 1,468,297 / bills 38,255 /
+legislators 1,607 / vote_duplicates 62; 115 published summaries; 107 open recon flags; site LIVE at
+visiblegov.pages.dev (200); suite 2,328/0 in a clean shell.
+
+**Lesson 27 fired on me AGAIN, mid-sync, and I caught it in the act** — the live-count checks ran
+in a shell with `.env` sourced, and when I appended `node --test` to that same shell the suite
+reported 2 fail (the review-logic "no DB client" tests seeing a real client). Re-ran clean: 2,328/0.
+A live re-demonstration that the trap and its documentation are correct, and exactly why "run tests
+in a clean shell" is now a top-of-CLAUDE.md banner item. Left a note about this recurrence IN the
+banner.
+
+**Updated, myself, with full session context (not delegated — a context-free subagent is a worse
+writer for reasoning-dense docs, and this session's whole theme is that context-free findings
+drift):**
+- **CLAUDE.md** — fresh-session banner now leads with "site is DEPLOYED and verified live," 32
+  migrations applied, custom-domain-only remaining; the Cloudflare standing rule flipped from
+  "active next task" to "DONE," with the two deploy-night bugs named; counts corrected throughout.
+- **TODO.md RESUME HERE** — leads with the live URL and the verified product loop; migration count
+  32; "THE NEXT THING" narrowed to Phases 3 & 4 (Phase 1-2 done).
+- **README.md** — status banner rewritten to "DEPLOYED and live," including the deploy-verification
+  finding-and-fix of the redirects bug and 0031.
+- **PLAYBOOK_DELTA.md** — lessons 29 (a static host imposes its own URL semantics — `.html`
+  canonicalization — before your rules run; a dev server that skips them passes configs prod breaks
+  on) and 30 (fix EVERY object carrying a bad idiom and pin the guard to the whole class, not just
+  the objects failing today — the anti-join surfaced live three times because 0029's fix and test
+  were scoped to the matviews only).
+- **docs/DISASTER_RECOVERY.md** — added 0030/0031 to the migration table, renumbered, and — the one
+  genuinely actionable find of this pass — **fixed the fresh-rebuild pg_cron trap**: the guide (and
+  0027 itself) says `create extension pg_cron with schema cron`, which ERRORS on a cold database
+  (pg_cron is non-relocatable, pinned to pg_catalog; it only worked originally because the extension
+  was pre-enabled via the dashboard). Corrected to "enable via dashboard first, or use
+  `with schema pg_catalog`." Also corrected a stale build-output-directory instruction (it repeated
+  the `site`/`site` bug from lesson 28) and updated the deploy-status section.
+- **docs/CONTROLLER_BRIEFING.md** — staleness banner: 32 migrations, site deployed.
+- **docs/CLOUDFLARE_DEPLOY.md** — status header flipped to DEPLOYED/VERIFIED with Phases 1-2 done
+  and the two Phase-2 bugs recorded as "the verification earned its cost."
+- **docs/SCHEDULED_INGESTION.md** — struck one stale "0026 awaiting Lance" line (0026 applied
+  2026-08-03; superseded by 0027-0029).
+- **Memory** — `deploy-last-backend-first` rewritten from "gate met, active next step" to "DONE,
+  deployed; only custom domain remains"; MEMORY.md index line updated.
+
+Then an independent verification pass (below) to catch any drift or cross-doc contradiction the
+writes introduced — the same never-trust-a-self-report discipline applied to my own doc edits.

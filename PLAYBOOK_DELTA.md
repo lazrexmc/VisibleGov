@@ -652,3 +652,73 @@ Two broader points this cost nothing to learn but could have cost a bad afternoo
   something no amount of internal consistency-checking would have (the first: the resume docs
   drifting from live DB state). Build the runbook to be checkable — exact field names, one value
   per row — so that comparison is cheap enough to actually happen.
+
+## Lesson 29 — A static host applies its OWN URL semantics before your rules run; a local dev server that skips them will pass a config that production breaks on (2026-08-05)
+
+First Cloudflare Pages deploy. Every `_redirects` rewrite was broken in production, none of it
+caught locally. Two distinct failures, one root cause: **Cloudflare Pages automatically
+canonicalizes `.html` paths to their extensionless form with a 308** (`/person.html` -> 308 ->
+`/person`, `/index.html` -> `/`), and it does this BEFORE your rewrite rules resolve. Our
+`_redirects` targets pointed AT `.html` files, so:
+
+- `/trust` -> rewrite to `/trust.html` -> Pages 308s to `/trust` -> rewrite again -> **infinite
+  redirect loop**; the page was unreachable.
+- `/person/<uuid>` -> rewrite to `/person.html` -> 308 to `/person` -> **the uuid was stripped from
+  the URL**, so the page's JS (which reads the id out of `location.pathname`) had nothing to render.
+  Every deep link to a legislator or bill — the core of the product — was dead.
+
+The fix was to point rewrite targets at the EXTENSIONLESS path Pages actually serves, and to delete
+the `/trust` rule entirely (Pages serves `trust.html` at `/trust` natively — the rule was the loop).
+But the reusable lesson is why local dev never caught it: `scripts/serve-site.js` resolved a rewrite
+straight to a file on disk and never modeled the `.html` canonicalization at all. A dev server whose
+entire purpose is "behaves the same as production" silently diverged on exactly the behavior that
+broke. This was the SECOND such divergence found on this one deploy (the first: Pages Functions do
+not inherit `_headers`, Lesson-adjacent, so `/geocode` shipped bare).
+
+**Rule: a static/edge host (Pages, Netlify, S3+CloudFront, …) imposes its own path semantics —
+trailing-slash policy, `.html` canonicalization, case handling, index resolution — that run BEFORE
+your redirect/rewrite config and can invert what it does. Enumerate those semantics from the host's
+own behavior (curl the real deploy: `/foo.html`, `/foo`, `/foo/`, a missing path) before writing a
+single rule, and make the local dev server reproduce them, not just serve files.** A dev server that
+resolves paths more simply than production is not a smaller version of production; it is a different
+system that happens to agree on the easy cases. And verify redirect rules by their STATUS and
+`Location`, not just "does the page load" — a 308 loop and a correct 200 both eventually render
+something in a browser, so the browser is the worst place to check this; curl the chain.
+
+## Lesson 30 — When you fix a bad idiom, fix every object that carries it and extend the guard to the whole class — not just the objects currently failing (2026-08-05)
+
+The `LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL` anti-join, which Postgres misestimates
+catastrophically (Lesson-class: the planner reads the IS-NULL selectivity off the joined PK's 0%
+null-fraction, estimates ~1 excluded row where ~10,000+ is true, and cascades into nested loops over
+a million-row workload), surfaced live THREE separate times before it was fully contained:
+
+1. It broke the three vote-aggregate MATVIEWS' refresh (40+ min, timeout). Fixed by migration 0029,
+   rewriting them to `NOT EXISTS`. A regression test was written — but scoped to the matviews only.
+2. On the first production deploy, it broke `public_vote_feed`/`public_votes` (two plain VIEWS
+   carrying the identical idiom, untouched by 0029) — the query crossed the ANON role's 3s
+   `statement_timeout` and every anonymous profile's vote list returned HTTP 500. Fixed by 0031.
+
+The idiom was the same all three times; only the object and the timeout it blew differed. 0029 fixed
+the objects that were failing THEN and wrote a test that pinned exactly those objects — so when the
+same idiom sat in two other objects that weren't failing yet (because `vote_duplicates` was still
+empty at the time), nothing flagged them, and they shipped to production and failed there.
+
+**Rule: a fix for a bad pattern has two parts, and the second is the one that gets skipped. (a)
+Rewrite EVERY object that carries the pattern in the same pass — grep the whole schema/codebase for
+the idiom, not just the object in front of you (`grep -rl "left join vote_duplicates"` would have
+found all five in one line). (b) Write the guard test against the PATTERN across the whole object
+class, not against the specific objects that happened to fail — the test that pinned "the three
+matviews use NOT EXISTS" should have been "no view OR matview definition uses the LEFT JOIN + IS
+NULL idiom."** A regression test scoped to yesterday's failures cannot catch tomorrow's instance of
+the same bug in a sibling object; it just makes you feel covered. The corrected test now scans every
+current definition of all five objects (3 matviews + 2 views) for the forbidden idiom — proven
+red-green — so a sixth object born with the same idiom fails the suite before it can reach a deploy.
+
+Corollary on WHY it hid until production: the misplanned query is only slow when there is something
+to anti-join against. `vote_duplicates` was empty when the site was browser-verified locally on
+2026-08-03, so the bad plan had nothing to be slow about; the 62-row backfill plus cast growth to
+~1.47M pushed it past anon's budget later. A latent performance bug gated on data volume will pass
+every check run before the data crosses the threshold — the first check run AFTER it does (here, the
+first anon browser walk on prod) is where it surfaces. Load-bearing verification has to run under the
+real role (anon, not service_role, whose 3s-vs-longer timeout was the entire difference here) against
+real data volume, or it is testing a different, easier system.
