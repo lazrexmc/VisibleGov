@@ -29,7 +29,20 @@ check — that drift is exactly what has burned this project before.*
   DB client is configured. Verified deterministically 2026-08-05. Use `node --test` in a clean
   shell. Every CLI takes `--env-file=.env` for exactly this reason.
 
-**THE NEXT THING: the Cloudflare Pages deploy.** Lance's own long-standing gate ("backend locked in
+**⛔ APPLY MIGRATION 0031 FIRST — profile vote lists are BROKEN for anonymous visitors right now.**
+Found on the first production browser walk (2026-08-05, deploy night): every person/legislator
+profile's vote-list fetch (`public_vote_feed`) returns HTTP 500 `57014 statement timeout` for the
+anon role. Same planner trap 0029 fixed for the matviews — the two plain VIEWS (`public_vote_feed`,
+`public_votes`, live def = 0023) still carry the `LEFT JOIN ... WHERE x.id IS NULL` anti-join,
+which now exceeds anon's 3s `statement_timeout`. `0031_fix_public_views_antijoin_planner_
+misestimate.sql` rewrites both to `NOT EXISTS` (semantically identical — `superseded_vote_id` is
+UNIQUE). **Draft-then-apply: Lance runs it in the SQL editor, then verify with the anon curl in the
+migration's own header.** The regression test (tests/vote-duplicates-antijoin-migration.test.js)
+now covers the views too, so this idiom class can't recur silently in either object type. Nothing
+else on the site is affected — directory, identity, sponsorships, bill pages, charts all render;
+only the vote list on a profile 500s.
+
+**THE NEXT THING (after 0031 lands): the Cloudflare Pages deploy.** Lance's own long-standing gate ("backend locked in
 and accurate first") is **MET** — he raised the deploy himself on 2026-08-05 and it was recommended
 yes. Four audit passes produced **zero criticals**. Do not defer this or re-litigate the gate.
 Resume the spec brainstorm where it paused (2026-08-03, sections 2 and 4 unpresented), not from

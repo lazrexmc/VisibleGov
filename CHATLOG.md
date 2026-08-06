@@ -2833,3 +2833,60 @@ response first, not inferred from docs.
 
 Suite 2,321 → 2,325. The push auto-deploys; re-verification of the failed checks runs against the
 new build next.
+
+---
+
+## 2026-08-05 (deploy night, continued) — first real-browser walk on prod finds a live 500; a THIRD instance of the 0029 planner trap
+
+Lance moved to Fable 5 / max effort for the deploy verification: "ensure they are correct, document
+as you go so we can troubleshoot easier."
+
+**The redirect fix verified clean first.** Polled until the new build went live (signal: /trust
+flips 308 -> 200, ~30s), then ran 21 mechanical curl checks against visiblegov.pages.dev — all 21
+pass: every rewrite serves the right shell at the original URL with the uuid intact, /trust loads,
+existing .html still 308s, missing .html 404s, geocode returns real Census data with headers on
+both success and error paths, the 404 page renders, root serves the directory.
+
+**Then a real browser walk — and it caught what curl could not.** The directory rendered 1,567 real
+legislator/person links, zero console errors, privacy contract present. Clicked into a merged-person
+profile (Jason Bean) and hit a console error: `public_vote_feed` fetch -> **HTTP 500**. This is why
+the runbook insists on a browser pass beyond the curl checks: curl proved every ENDPOINT resolves;
+only actually loading a profile exercised the specific query that fails.
+
+**Root-caused against live data, not guessed.** Reproduced the exact failing query directly: as anon
+(the browser's role) it returns `57014 canceling statement due to statement timeout` after ~3.2s; as
+service_role, the identical query returns 200 in ~2.2s. anon's role-level statement_timeout is 3s
+(0028's inventory). So the query genuinely costs ~2-3s and only anon has a budget tight enough to
+cut it — every anonymous profile loses its vote list, the core surface of the product.
+
+**It is the SAME planner trap 0029 fixed, in the two objects 0029's sweep missed.** The live
+`public_vote_feed`/`public_votes` (definitions from 0023) still exclude superseded votes via
+`left join vote_duplicates vd on ... where vd.id is null` — the exact idiom 0029 proved (via EXPLAIN
+against the live DB) that Postgres misestimates as 1 row vs. ~10,044, cascading into nested loops
+over ~1.4M rows. 0029 rewrote the three MATVIEWS to NOT EXISTS; the two plain VIEWS carrying the
+identical idiom were never touched, and the regression test written with 0029 covered only the
+matviews. A scoping gap in the fix AND its test.
+
+**Why it stayed hidden until deploy night, in honest order:** when the site was browser-verified
+locally on 2026-08-03, `vote_duplicates` held 0 rows — nothing to anti-join, nothing to misplan
+slowly. The 59-pair backfill landed later that day; live ingest has since marked 3 more (62); casts
+grew to ~1.468M. Somewhere in there the query crossed anon's 3s budget. The Cloudflare deploy did not
+cause this — it was simply the first check ever run as anon against current data volume. This is the
+THIRD live surfacing of this one idiom (matview refresh timeout -> 0029; now anon view timeout ->
+0031), which is exactly why the fix this time is the idiom class, not just the instance.
+
+**Fix + the gap that let it through, both closed:**
+- `0031_fix_public_views_antijoin_planner_misestimate.sql` — byte-identical view definitions to
+  0023 (same columns, same owner-bypass no-security_invoker posture, same grants) with ONLY the
+  anti-join rewritten to NOT EXISTS. Semantically identical (`superseded_vote_id` is UNIQUE). Draft;
+  Lance applies; the migration header carries the exact anon curl to verify with.
+- The regression test now covers `public_vote_feed`/`public_votes` too, not just the matviews. Proved
+  it red-green properly: hid 0031 -> 3 fail (the views' latest def reverts to 0023's LEFT JOIN);
+  restored -> 7 pass. Along the way the test's own `create view ${name}\b` regex had a real bug — `\b`
+  in a JS template literal is a BACKSPACE escape, so the pattern matched nothing and the test was
+  vacuously green; caught it because the red-green proof did NOT flip as it should have, fixed it via
+  a script file per lesson 25 (never diagnose backslash bugs through a shell one-liner), byte-checked
+  the fix, and only then got a genuine 7/0 <-> 4-fail flip.
+
+Suite 2,325 -> 2,328. **Everything else on the deployed site is correct** — this is one broken query
+behind one fetch, not a broad failure. TODO.md RESUME HERE now leads with "apply 0031 first."

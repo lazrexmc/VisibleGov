@@ -63,3 +63,57 @@ test('sanity: as of this writing, 0029 is genuinely the file this test is exerci
     assert.equal(latest.file, '0029_fix_vote_duplicates_antijoin_planner_misestimate.sql', `expected 0029 to be the latest migration defining ${matview}`);
   }
 });
+
+// ---- 2026-08-05 (deploy night): the SAME guard, extended to the two plain VIEWS ----
+//
+// The scoping gap this closes bit in production on the first deploy: this test originally covered
+// only the three MATVIEWS 0029 fixed, while `public_vote_feed`/`public_votes` (plain views, 0023)
+// kept the LEFT JOIN + IS NULL idiom. With vote_duplicates empty that was invisible; once the
+// backfill landed 59 (now 62) rows and vote_casts reached ~1.47M, the misplanned view query
+// crossed anon's 3s statement_timeout and every anonymous profile's vote list 500'd on
+// visiblegov.pages.dev — found by the Phase 2 browser walk, minutes after first deploy. Migration
+// 0031 is the fix; this extension is what makes the whole idiom class unrepresentable in ANY
+// current definition, matview or view, instead of only the objects that had already burned us.
+
+const VIEWS = ['public_vote_feed', 'public_votes'];
+
+function findLatestViewDefinition(viewName) {
+  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
+  let latest = null;
+  // `create view <name>\b` — cannot match `create materialized view` (literal differs), and
+  // `public_votes\b` cannot match `public_vote_feed` (no 's' after 'vote' there).
+  const createPattern = new RegExp(`create view ${viewName}\\b`, 'i');
+  for (const file of files) {
+    const rawSql = readFileSync(`${MIGRATIONS_DIR}/${file}`, 'utf8');
+    if (createPattern.test(rawSql)) {
+      latest = { file, sql: stripSqlComments(rawSql) };
+    }
+  }
+  return latest;
+}
+
+for (const view of VIEWS) {
+  test(`the LATEST migration to define ${view} excludes vote_duplicates via NOT EXISTS, not the LEFT JOIN + IS NULL anti-join idiom`, () => {
+    const latest = findLatestViewDefinition(view);
+    assert.ok(latest, `no migration defines ${view} at all — the view may have been removed or renamed; update this test to match`);
+
+    assert.doesNotMatch(
+      latest.sql,
+      /left join vote_duplicates[\s\S]{0,80}where[\s\S]{0,20}\.id is null/i,
+      `${latest.file}'s definition of ${view} uses "left join vote_duplicates ... where x.id is null" — the exact planner-misestimation idiom that broke production TWICE (matview refresh timeouts, fixed by 0029; then anon 3s timeouts on every profile vote list on deploy night, fixed by 0031). Use "not exists (select 1 from vote_duplicates vd where vd.superseded_vote_id = v.id)" instead.`,
+    );
+
+    assert.match(
+      latest.sql,
+      /not exists\s*\(\s*select 1 from vote_duplicates/i,
+      `${latest.file}'s definition of ${view} has no "not exists (select 1 from vote_duplicates ...)" anti-join — if it genuinely intends to exclude superseded votes some other way, verify the plan with EXPLAIN under the ANON role's 3s statement_timeout before updating this test.`,
+    );
+  });
+}
+
+test('sanity: as of this writing, 0031 is genuinely the file this test is exercising for both views', () => {
+  for (const view of VIEWS) {
+    const latest = findLatestViewDefinition(view);
+    assert.equal(latest.file, '0031_fix_public_views_antijoin_planner_misestimate.sql', `expected 0031 to be the latest migration defining ${view}`);
+  }
+});
