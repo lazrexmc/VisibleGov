@@ -916,13 +916,15 @@ A committed-fixture test that the presence index actually resolves a known membe
 ```js
 // tests/backfill-mo-term-dates.test.js — add
 test('buildLegiscanPresenceIndex over the real 2018 fixture places Onder (16351) in the Senate that year', async () => {
-  const src = JSON.parse(readFileSync('tests/fixtures/research/legiscan/mo-2018-dataset.json', 'utf8'));
+  // Use the 1608 fixture: 189 people + 8 rollCalls (the 1579 fixture decodes to 0 rollCalls —
+  // same trap Task 3's review caught).
+  const src = JSON.parse(readFileSync('tests/fixtures/research/legiscan/mo-2018-dataset-1608.json', 'utf8'));
   const { writeFileSync, mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const dir = mkdtempSync(join(tmpdir(), 'vg-ds2-'));
   const path = join(dir, 'sess.json');
-  writeFileSync(path, JSON.stringify({ session_id: 1579, year_start: 2018, zip: src.dataset.zip }));
+  writeFileSync(path, JSON.stringify({ session_id: 1608, year_start: 2018, zip: src.dataset.zip }));
 
   const decoded = await readCachedDatasetFull(path);
   const idx = buildLegiscanPresenceIndex([{ yearStart: decoded.yearStart, people: decoded.people, rollCalls: decoded.rollCalls }]);
