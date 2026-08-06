@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile } from '../src/cli/backfill-mo-term-dates.js';
+import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile, parseArgs, runBackfillMoTermDates, citationString } from '../src/cli/backfill-mo-term-dates.js';
 
 const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
 const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
@@ -155,4 +155,68 @@ test('reconcile flags a surname mismatch (e.g. matched seat, wrong person)', () 
 test('reconcile flags when the cross-check has no year', () => {
   assert.deepEqual(reconcile({ startDate: '2019-01-09', legiscanYear: null, surnameOk: true }),
     { verdict: 'flag', reason: 'no-legiscan-year' });
+});
+
+test('parseArgs defaults apply to false and accepts --apply', () => {
+  assert.equal(parseArgs([]).apply, false);
+  assert.equal(parseArgs(['--apply']).apply, true);
+});
+test('parseArgs rejects unknown flags', () => {
+  assert.throws(() => parseArgs(['--bogus']), /unknown flag/);
+});
+
+function fakeDeps() {
+  return {
+    loadTermsFn: async () => ([
+      { termId: 't-house', legislatorId: 'l-house', chamber: 'house', district: '60' },
+      { termId: 't-onder', legislatorId: 'l-onder', chamber: 'senate', district: '2' }, // retired, not in roster
+    ]),
+    loadLegislatorsFn: async () => new Map([
+      ['l-house', { surname: 'Adams', legiscanPeopleId: 11 }],
+      ['l-onder', { surname: 'Onder', legiscanPeopleId: 16351 }],
+    ]),
+    loadRosterFn: () => ([
+      { openstates_id: 'os-1', full_name: 'Jane Adams', family_name: 'Adams',
+        roles: [{ chamber: 'house', district: '60', start_date: '2019-01-09', end_date: null }] },
+      // NOTE: no senate D2 member -> Onder's seat is unmatched
+    ]),
+    loadManifestFn: () => ({ commit: 'abc1234def', retrieved: '2026-08-06' }),
+    loadPresenceIndexFn: async () => new Map([[11, {
+      presenceYears: new Set([2019]), chamberVoteYears: { house: new Set([2019]), senate: new Set() },
+    }]]),
+  };
+}
+
+test('dry-run: an agreeing current member is planned (not written); Onder is unmatched and never written', async () => {
+  const written = [];
+  const report = await runBackfillMoTermDates(null, {
+    apply: false, ...fakeDeps(),
+    updateTermFn: async (_c, _r, row) => { written.push(row); return { written: true }; },
+  });
+  assert.equal(report.mode, 'dry-run');
+  assert.equal(written.length, 0, 'dry-run writes nothing');
+  assert.equal(report.plan.length, 1);
+  assert.equal(report.plan[0].termId, 't-house');
+  assert.equal(report.plan[0].startDate, '2019-01-09');
+  assert.equal(report.counts.agreed, 1);
+  // Onder: seat absent from roster -> unmatched flag, never planned/written
+  assert.ok(report.flags.some((f) => f.termId === 't-onder' && f.reason === 'unmatched'));
+  assert.ok(!report.plan.some((p) => p.termId === 't-onder'));
+});
+
+test('apply: an agreeing member is written via updateTermFn; end_date is never in the patch', async () => {
+  const written = [];
+  const report = await runBackfillMoTermDates(null, {
+    apply: true, runId: 'run-9', ...fakeDeps(),
+    updateTermFn: async (_c, runId, row) => { written.push({ runId, ...row }); return { written: true }; },
+  });
+  assert.equal(report.mode, 'live');
+  assert.equal(written.length, 1);
+  assert.equal(written[0].termId, 't-house');
+  assert.equal(written[0].startDate, '2019-01-09');
+  assert.equal(written[0].runId, 'run-9');
+  assert.equal('endDate' in written[0], false); // end_date is never touched
+  assert.equal(report.counts.written, 1);
+  assert.equal(report.citations.length, 1);
+  assert.match(report.citations[0].citation, /openstates\/people@abc1234def/);
 });

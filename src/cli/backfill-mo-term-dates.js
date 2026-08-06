@@ -142,3 +142,163 @@ export function reconcile({ startDate, legiscanYear, surnameOk }) {
   if (Number(String(startDate).slice(0, 4)) !== legiscanYear) return { verdict: 'flag', reason: 'year-mismatch' };
   return { verdict: 'agree', reason: null };
 }
+
+export function parseArgs(argv) {
+  const out = { apply: false };
+  for (const key of argv) {
+    if (key === '--apply') { out.apply = true; continue; }
+    throw new Error(`unknown flag: ${key}`);
+  }
+  return out;
+}
+
+export async function loadDatelessMoTerms(client) {
+  const { data, error } = await selectAll(client, 'terms', 'id,legislator_id,jurisdiction_id,chamber,district,start_date');
+  if (error) throw new Error(`backfill-mo-term-dates: terms load failed: ${error.message}`);
+  return data
+    .filter((t) => t.jurisdiction_id === MO_JURISDICTION && t.start_date == null)
+    .map((t) => ({ termId: t.id, legislatorId: t.legislator_id, chamber: t.chamber, district: t.district }));
+}
+
+export async function loadLegislatorLookup(client) {
+  const { data, error } = await selectAll(client, 'legislators', 'id,full_name,surname,legiscan_people_id');
+  if (error) throw new Error(`backfill-mo-term-dates: legislators load failed: ${error.message}`);
+  const map = new Map();
+  for (const row of data) {
+    map.set(row.id, { surname: row.surname ?? lastNameOf(row.full_name), legiscanPeopleId: row.legiscan_people_id ?? null });
+  }
+  return map;
+}
+
+export function loadRosterManifest({ readFileFn = readFileSync } = {}) {
+  try {
+    const m = JSON.parse(readFileFn('.superpowers/artifacts/openstates-people/manifest.json', 'utf8'));
+    return { commit: m.commit ?? null, retrieved: m.retrieved ?? null };
+  } catch {
+    return { commit: null, retrieved: null };
+  }
+}
+
+export async function loadLegiscanPresenceIndex(cacheDir = CACHE_DIR, {
+  listFilesFn = listCachedDatasetFiles, readFullFn = readCachedDatasetFull,
+} = {}) {
+  const sessions = [];
+  for (const filePath of listFilesFn(cacheDir)) {
+    // eslint-disable-next-line no-await-in-loop -- one-time index build over ~32 cached files
+    const decoded = await readFullFn(filePath);
+    if (decoded.ok) sessions.push({ yearStart: decoded.yearStart, people: decoded.people, rollCalls: decoded.rollCalls });
+  }
+  return buildLegiscanPresenceIndex(sessions);
+}
+
+export function citationString({ openStatesId, startDate, legiscanYear, chamber, sourceCommit }) {
+  return `openstates/people@${sourceCommit ?? 'unknown'} (CC0-1.0) data/mo/legislature `
+    + `id=${openStatesId} roles[open].start_date=${startDate}; `
+    + `verified-against legiscan-dataset earliest-qualifying-year=${legiscanYear} `
+    + `[people[] presence + roll_call.chamber=${chamber === 'senate' ? 'S' : 'H'}]`;
+}
+
+export async function updateTermStartDate(client, runId, { termId, startDate }) {
+  const { data, error } = await client
+    .from('terms')
+    .update({ start_date: startDate, run_id: runId }) // end_date intentionally absent — never touched
+    .eq('id', termId)
+    .is('start_date', null)
+    .select('id');
+  if (error) throw new Error(`backfill-mo-term-dates: start_date patch failed for terms.id=${termId}: ${error.message}`);
+  return { written: !!(data && data.length > 0) };
+}
+
+function emptyCounts() {
+  return { termsSeen: 0, matched: 0, agreed: 0, written: 0, unmatched: 0, flagged: 0 };
+}
+
+export async function runBackfillMoTermDates(client, {
+  apply = false, runId = null, cacheDir = CACHE_DIR, rosterCacheDir = ROSTER_CACHE_DIR,
+  loadTermsFn = loadDatelessMoTerms,
+  loadLegislatorsFn = loadLegislatorLookup,
+  loadRosterFn = loadCachedRoster,
+  loadManifestFn = loadRosterManifest,
+  loadPresenceIndexFn = loadLegiscanPresenceIndex,
+  updateTermFn = updateTermStartDate,
+} = {}) {
+  const counts = emptyCounts();
+  const plan = [];
+  const flags = [];
+  const citations = [];
+
+  const rawTerms = await loadTermsFn(client);
+  const legislators = await loadLegislatorsFn(client);
+  counts.termsSeen = rawTerms.length;
+
+  const datelessTerms = rawTerms.map((t) => {
+    const leg = legislators.get(t.legislatorId) ?? {};
+    return { ...t, surname: leg.surname ?? null, legiscanPeopleId: leg.legiscanPeopleId ?? null };
+  });
+
+  const rosterPeople = await loadRosterFn(rosterCacheDir);
+  const { commit: sourceCommit } = loadManifestFn();
+  const presenceIndex = await loadPresenceIndexFn(cacheDir);
+
+  const { matches, unmatchedTerms } = matchRoster(datelessTerms, rosterPeople);
+  counts.matched = matches.length;
+  for (const t of unmatchedTerms) {
+    counts.unmatched += 1;
+    flags.push({ termId: t.termId, surname: t.surname, chamber: t.chamber, district: t.district, reason: 'unmatched' });
+  }
+
+  for (const m of matches) {
+    const legiscanYear = earliestLegiscanYear(presenceIndex, m.term.legiscanPeopleId, m.term.chamber);
+    const { verdict, reason } = reconcile({ startDate: m.startDate, legiscanYear, surnameOk: m.surnameOk });
+    if (verdict === 'flag') {
+      flags.push({ termId: m.term.termId, surname: m.term.surname, chamber: m.term.chamber,
+        district: m.term.district, startDate: m.startDate, legiscanYear, reason });
+      continue;
+    }
+    counts.agreed += 1;
+    const citation = citationString({ openStatesId: m.openStatesId, startDate: m.startDate, legiscanYear, chamber: m.term.chamber, sourceCommit });
+    if (!apply) {
+      plan.push({ termId: m.term.termId, surname: m.term.surname, chamber: m.term.chamber,
+        district: m.term.district, startDate: m.startDate, legiscanYear, citation });
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop -- sequential writes, ~185 rows
+    const res = await updateTermFn(client, runId, { termId: m.term.termId, startDate: m.startDate });
+    if (res.written) {
+      counts.written += 1;
+      citations.push({ termId: m.term.termId, startDate: m.startDate, citation });
+    }
+  }
+  counts.flagged = flags.length;
+  return { mode: apply ? 'live' : 'dry-run', counts, plan, flags, citations };
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const client = getClient();
+  if (!client) {
+    console.log(JSON.stringify({ mode: 'blocked', reason: 'SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY not set' }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+  if (!args.apply) {
+    const report = await runBackfillMoTermDates(client, { apply: false });
+    console.log(JSON.stringify({ source: SOURCE, ...report }, null, 2));
+    return;
+  }
+  const runId = await openRun(client, SOURCE);
+  try {
+    const report = await runBackfillMoTermDates(client, { apply: true, runId });
+    await closeRun(client, runId, 'succeeded', { counts: report.counts, citations: report.citations, flags: report.flags });
+    console.log(JSON.stringify({ source: SOURCE, run_id: runId, ...report }, null, 2));
+  } catch (err) {
+    await closeRun(client, runId, 'failed', { error: String(err) });
+    throw err;
+  }
+}
+
+const invokedDirectly = process.argv[1]
+  && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
+if (invokedDirectly) {
+  main().catch((err) => { console.error(err); process.exitCode = 1; });
+}
