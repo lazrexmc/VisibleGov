@@ -168,6 +168,19 @@ export function filterDirectory(entries, queryText) {
   });
 }
 
+// Splits the already-sorted entry list into the two directory views (2026-08-06 spec §2). Pure,
+// order-preserving; an entry that cannot prove service (servingNow falsy/absent) is never
+// promoted into "Serving now." Never throws on malformed input.
+export function partitionDirectory(entries) {
+  const servingNow = [];
+  const past = [];
+  for (const entry of (Array.isArray(entries) ? entries : [])) {
+    if (!entry) continue;
+    (entry.servingNow ? servingNow : past).push(entry);
+  }
+  return { servingNow, past };
+}
+
 // legislator id -> its directory entry (displayName/href already resolved through the SAME
 // person-vs-legislator link logic buildDirectoryEntries used) — reused by the address-lookup
 // results below so a matched rep links exactly like their directory row does, one link-building

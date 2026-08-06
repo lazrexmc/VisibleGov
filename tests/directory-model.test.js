@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDirectoryEntries, filterDirectory } from '../site/js/directory-page.js';
+import { buildDirectoryEntries, filterDirectory, partitionDirectory } from '../site/js/directory-page.js';
 
 // ============================================================================
 // buildDirectoryEntries — fetchAllRows over legislators+persons+terms, grouped by person_id
@@ -342,4 +342,26 @@ test('buildDirectoryEntries: merged person with one ended dated term + a DIFFERE
   });
   assert.equal(entries[0].servingNow, true);
   assert.equal(entries[0].sinceYear, null); // dated anchor (the federal term) is ENDED
+});
+
+// ============================================================================
+// partitionDirectory — splits entries by servingNow, preserving order
+// ============================================================================
+
+test('partitionDirectory: splits by servingNow, preserving the surname-sorted order within each view', () => {
+  const entries = [
+    { key: 'a', surname: 'Adams', servingNow: true },
+    { key: 'b', surname: 'Baker', servingNow: false },
+    { key: 'c', surname: 'Cook', servingNow: true },
+  ];
+  const { servingNow, past } = partitionDirectory(entries);
+  assert.deepEqual(servingNow.map((e) => e.key), ['a', 'c']);
+  assert.deepEqual(past.map((e) => e.key), ['b']);
+});
+
+test('partitionDirectory: an entry with no servingNow field lands in past (never promoted), and malformed input never throws', () => {
+  const { servingNow, past } = partitionDirectory([{ key: 'x' }, null]);
+  assert.equal(servingNow.length, 0);
+  assert.deepEqual(past.map((e) => e.key), ['x']);
+  assert.deepEqual(partitionDirectory(undefined), { servingNow: [], past: [] });
 });
