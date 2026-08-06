@@ -238,6 +238,9 @@ export async function runBackfillMoTermDates(client, {
 
   const rosterPeople = await loadRosterFn(rosterCacheDir);
   const { commit: sourceCommit } = loadManifestFn();
+  if (apply && !sourceCommit) {
+    throw new Error('backfill-mo-term-dates: openstates-people manifest missing/unreadable — refusing to apply without a source commit SHA for citations');
+  }
   const presenceIndex = await loadPresenceIndexFn(cacheDir);
 
   const { matches, unmatchedTerms } = matchRoster(datelessTerms, rosterPeople);

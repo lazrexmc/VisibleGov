@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile, parseArgs, runBackfillMoTermDates, citationString } from '../src/cli/backfill-mo-term-dates.js';
+import { parsePersonYaml, loadCachedRoster, readCachedDatasetFull, buildLegiscanPresenceIndex, earliestLegiscanYear, matchRoster, lastNameOf, reconcile, parseArgs, runBackfillMoTermDates, citationString, updateTermStartDate } from '../src/cli/backfill-mo-term-dates.js';
 
 const crossleyYaml = readFileSync('tests/fixtures/openstates-people/Aaron-Crossley-ba6eb394-0402-49ba-9917-c5618d8a1589.yml', 'utf8');
 const schneltingYaml = readFileSync('tests/fixtures/openstates-people/Adam-Schnelting-f436aa10-c006-4128-9748-050bf50c4e21.yml', 'utf8');
@@ -230,4 +230,81 @@ test('apply: an agreeing member is written via updateTermFn; end_date is never i
   assert.equal(report.counts.written, 1);
   assert.equal(report.citations.length, 1);
   assert.match(report.citations[0].citation, /openstates\/people@abc1234def/);
+});
+
+// apply requires a real source-commit SHA for citations: an unreadable/missing manifest must
+// block --apply entirely rather than silently write rows citing "@unknown" (dry-run may still
+// show @unknown — it never writes).
+test('runBackfillMoTermDates: apply:true with a missing/unreadable manifest (commit:null) refuses to apply', async () => {
+  await assert.rejects(
+    () => runBackfillMoTermDates(null, {
+      apply: true, runId: 'run-9', ...fakeDeps(),
+      loadManifestFn: () => ({ commit: null, retrieved: null }),
+      updateTermFn: async () => { throw new Error('must not be called — apply should refuse before any write'); },
+    }),
+    /refusing to apply/,
+  );
+});
+
+test('runBackfillMoTermDates: dry-run proceeds even with a missing manifest (commit:null) — plan is still built, citation shows @unknown', async () => {
+  const report = await runBackfillMoTermDates(null, {
+    apply: false, ...fakeDeps(),
+    loadManifestFn: () => ({ commit: null, retrieved: null }),
+  });
+  assert.equal(report.mode, 'dry-run');
+  assert.equal(report.plan.length, 1);
+  assert.match(report.plan[0].citation, /openstates\/people@unknown/);
+});
+
+// ---- updateTermStartDate (the real writer — direct test on the query chain, not just via the
+// orchestrator's injected fake) ----
+
+function makeUpdateTermFakeClient({ data = [{ id: 'term-1' }], error = null } = {}) {
+  const calls = {
+    table: null, patch: null, eq: null, is: null, selectCol: null,
+  };
+  return {
+    calls,
+    from: (table) => {
+      calls.table = table;
+      return {
+        update: (patch) => {
+          calls.patch = patch;
+          const builder = {
+            eq: (col, val) => { calls.eq = [col, val]; return builder; },
+            is: (col, val) => { calls.is = [col, val]; return builder; },
+            select: (col) => { calls.selectCol = col; return { data, error }; },
+          };
+          return builder;
+        },
+      };
+    },
+  };
+}
+
+test('updateTermStartDate: patch is EXACTLY {start_date, run_id} (no end_date), scoped by .eq(id,termId).is(start_date,null), then .select(id); non-empty data -> written:true', async () => {
+  const client = makeUpdateTermFakeClient({ data: [{ id: 'term-1' }] });
+  const result = await updateTermStartDate(client, 'run-1', { termId: 'term-1', startDate: '2019-01-09' });
+  assert.equal(client.calls.table, 'terms');
+  assert.deepEqual(client.calls.patch, { start_date: '2019-01-09', run_id: 'run-1' });
+  assert.equal(Object.keys(client.calls.patch).length, 2, 'exactly two keys — no end_date');
+  assert.ok(!('end_date' in client.calls.patch));
+  assert.deepEqual(client.calls.eq, ['id', 'term-1']);
+  assert.deepEqual(client.calls.is, ['start_date', null]);
+  assert.equal(client.calls.selectCol, 'id');
+  assert.deepEqual(result, { written: true });
+});
+
+test('updateTermStartDate: an empty data array (row no longer matches the null-start_date scope) yields written:false', async () => {
+  const client = makeUpdateTermFakeClient({ data: [] });
+  const result = await updateTermStartDate(client, 'run-1', { termId: 'term-1', startDate: '2019-01-09' });
+  assert.deepEqual(result, { written: false });
+});
+
+test('updateTermStartDate: a DB error throws /start_date patch failed/', async () => {
+  const client = makeUpdateTermFakeClient({ data: null, error: { message: 'connection reset' } });
+  await assert.rejects(
+    () => updateTermStartDate(client, 'run-1', { termId: 'term-1', startDate: '2019-01-09' }),
+    /start_date patch failed/,
+  );
 });
