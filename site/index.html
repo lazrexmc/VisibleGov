@@ -37,7 +37,7 @@
            contract's "not stored or logged" promise even in that degraded path. The JS path above
            (wireAddressForm, site/js/directory-page.js) always preventDefault()s and never lets
            this native submission actually fire when the module loaded successfully. -->
-      <form id="address-form" method="post">
+      <form id="address-form" method="post" class="board-card">
         <label for="address-input">Street address, city, state</label>
         <input id="address-input" type="text" name="address" autocomplete="street-address" />
         <button type="submit">Find my representatives</button>
@@ -53,7 +53,9 @@
       </div>
       <p class="directory-footnote">ⓘ no recorded end date — the honest signal a term is still open</p>
       <label for="directory-filter">Filter by name, chamber, or party</label>
-      <input id="directory-filter" type="text" name="filter" />
+      <div class="directory-search">
+        <input id="directory-filter" type="text" name="filter" />
+      </div>
       <div id="directory-list" aria-live="polite"></div>
     </section>
   </main>

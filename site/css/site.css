@@ -331,11 +331,37 @@ footer#site-footer {
   font-size: 0.85em;
 }
 
+/* Address-lookup form as a .board-card (index.html gives #address-form that class BY NAME,
+   task-2-brief.md's "address-lookup form/results as .board-cards") — this block only adds the
+   internal spacing/CTA .board-card itself doesn't opine on. */
+#address-form {
+  margin: 0.5rem 0 1rem;
+}
+
+#address-form label {
+  margin-bottom: 0.4rem;
+}
+
+#address-form input[type="text"] {
+  margin-bottom: 0.65rem;
+}
+
+#address-form button[type="submit"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: 1px solid var(--accent);
+  font-weight: 600;
+  padding: 0.5rem 1.1rem;
+}
+
+#address-form button[type="submit"]:hover {
+  filter: brightness(1.08);
+}
+
 .directory-toggle {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 999px;
-  overflow: hidden;
   margin: 0.5rem 0 0.75rem;
 }
 
@@ -346,7 +372,23 @@ footer#site-footer {
   padding: 0.4rem 1.1rem;
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+}
+
+/* Rounds the pill's own end caps directly on the end buttons, deliberately INSTEAD OF the more
+   common overflow:hidden-on-the-wrapper trick — overflow:hidden would also clip a focus-visible
+   ring on either button before it could ever draw (verified live: it did). `--focus-ring` equals
+   `--accent` exactly (spec §2's table), and the pressed segment's own background IS `--accent` —
+   an inward ring on that segment would be invisible (ring color == fill color); it has to draw
+   OUTSIDE the button, against the page background, which only works if nothing clips it. */
+.directory-toggle button:first-child {
+  border-top-left-radius: 999px;
+  border-bottom-left-radius: 999px;
+}
+
+.directory-toggle button:last-child {
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
 }
 
 .directory-toggle button + button {
@@ -356,12 +398,38 @@ footer#site-footer {
 .directory-toggle button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-contrast);
+  font-weight: 600;
 }
 
 .directory-footnote {
   color: var(--faint);
-  font-size: 0.85em;
+  font-size: 11px;
   margin: 0 0 0.75rem;
+}
+
+/* Search affordance (mockup A: "⌕  Search name, chamber, or party…") — CSS/text only, no icon
+   font, no external asset (site/_headers' img-src has no data: allowance, so a background-image
+   glyph is off the table too). A wrapper is genuinely required here: ::before does not render
+   inside a replaced <input> element, so the "⌕" has to live on a positioned sibling wrapper
+   (task-2-brief.md's explicit "index.html only if a wrapper class is needed" case). */
+.directory-search {
+  position: relative;
+  max-width: 28rem;
+}
+
+.directory-search::before {
+  content: "⌕";
+  position: absolute;
+  left: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 15px;
+  pointer-events: none;
+}
+
+.directory-search input {
+  padding-left: 1.9rem;
 }
 
 .directory-list {
@@ -373,7 +441,7 @@ footer#site-footer {
 .directory-row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
   gap: 0.25rem 0.75rem;
   padding: 0.7rem 0.25rem;
@@ -384,8 +452,13 @@ footer#site-footer {
   background: var(--surface);
 }
 
+.directory-identity {
+  min-width: 0;
+}
+
 .directory-row a {
   font-weight: 600;
+  font-size: 14.5px;
   text-decoration: none;
 }
 
@@ -396,7 +469,27 @@ footer#site-footer {
 
 .directory-meta {
   color: var(--muted);
-  font-size: 0.85em;
+  font-size: 12.5px;
+}
+
+/* The tenure fragment (mockup A's "● since 2023" reading) — .mono + .lit-yea (Task 1 primitives,
+   applied by directory-page.js's renderDirectoryList) supply the monospace digits and the yea-lit
+   color/glow; this rule only adds sizing and the dot. The "●" is CSS-generated content, never a
+   real text node, so it can never change the row's actual textContent (which stays exactly what
+   it was pre-redesign — see the comment in renderDirectoryList). Generated content inherits
+   `color`/`text-shadow` from .lit-yea, so the dot glows the same amber-adjacent green as the text
+   without its own color rule. */
+.directory-since {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.directory-since::before {
+  content: "●";
+  font-size: 0.75em;
 }
 
 .reps-as-of {
@@ -404,21 +497,27 @@ footer#site-footer {
   font-size: 0.9em;
 }
 
+/* .rep-group is also .board-card now (directory-page.js's renderMatchedReps) — the amber label
+   is .board-label BY NAME (Task 1's primitive) rather than a second hand-copied "uppercase amber
+   label" rule living here; this block only adds what .board-card doesn't already cover. */
 .rep-group {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
 }
 
-.rep-group h3 {
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
+.rep-candidate-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
 .rep-candidate {
   border-bottom: 1px solid var(--border-faint);
   padding: 0.5rem 0;
+}
+
+.rep-candidate:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 .rep-party {
@@ -960,7 +1059,7 @@ button,
 .gloss-term,
 .bill-citation-toggle,
 .directory-row {
-  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, border-color 140ms ease;
+  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, border-color 140ms ease, filter 140ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

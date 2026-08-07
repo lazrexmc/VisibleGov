@@ -203,18 +203,35 @@ function renderDirectoryList(container, entries) {
   const ul = el('ul', { class: 'directory-list' });
   for (const entry of entries) {
     const li = el('li', { class: 'directory-row' });
-    li.appendChild(el('a', { href: entry.href }, entry.displayName));
-    const meta = [
+    const identity = el('span', { class: 'directory-identity' });
+    identity.appendChild(el('a', { href: entry.href }, entry.displayName));
+    const nonTenureText = [
       entry.chamber,
       entry.district ? `district ${entry.district}` : null,
       entry.party,
-      // Tenure fragment (2026-08-06 spec §2): only for a serving entry whose displayed anchor
-      // term is open AND dated — absent data renders nothing, never a guess.
-      entry.servingNow && entry.sinceYear ? `since ${entry.sinceYear}` : null,
     ]
       .filter(Boolean)
       .join(' · ');
-    if (meta) li.appendChild(el('span', { class: 'directory-meta' }, ` — ${meta}`));
+    // Tenure fragment (2026-08-06 spec §2): only for a serving entry whose displayed anchor term
+    // is open AND dated — absent data renders nothing, never a guess. Voting Board redesign
+    // (task-2-brief.md) moves it out to its own `.directory-since` element, right-aligned by
+    // `.directory-row`'s flex layout (mockup A: name+meta left, "● since YEAR" far right), so it
+    // can carry the mono/lit-yea treatment independently of the muted meta text. Every WORD stays
+    // exactly what it was pre-redesign ("since ${year}", the chamber/district/party join) — the
+    // one deliberate change from the single pre-redesign span is dropping the joining " · " that
+    // used to sit between the meta text and "since YEAR": with tenure now visually relocated to
+    // the opposite end of the row instead of trailing the meta text, that separator would dangle
+    // after "Democratic" with nothing beside it, which is a bug the mockup doesn't show — not a
+    // reworded fact. No test (grepped tests/directory-model.test.js and
+    // tests/directory-page.test.js) pins this row's exact concatenated textContent; both keep
+    // passing (node --test) after this change. The "●" the mockup shows is added purely via CSS
+    // (`.directory-since::before` in site.css) — decorative, so it never becomes real text either.
+    const tenureText = entry.servingNow && entry.sinceYear ? `since ${entry.sinceYear}` : null;
+    if (nonTenureText) {
+      identity.appendChild(el('span', { class: 'directory-meta' }, ` — ${nonTenureText}`));
+    }
+    li.appendChild(identity);
+    if (tenureText) li.appendChild(el('span', { class: 'directory-since mono lit-yea' }, tenureText));
     ul.appendChild(li);
   }
   container.appendChild(ul);
@@ -227,6 +244,14 @@ const SEAT_LABELS = {
   moHouse: 'MO House',
 };
 const SEAT_ORDER = ['usSenators', 'usHouse', 'moSenate', 'moHouse'];
+
+// Voting Board redesign (task-2-brief.md): a bare `el('ul', {})` picked up the browser default
+// bullet + indent (no site rule targets an unclassed list) — every other list on the site opts
+// out via its own class (.directory-list, .vote-list, ...), so this one gets the same class-only
+// hook rather than staying the one unstyled exception.
+function renderCandidateList() {
+  return el('ul', { class: 'rep-candidate-list' });
+}
 
 function renderCandidate(candidate, entryIndex) {
   const li = el('li', { class: 'rep-candidate' });
@@ -296,8 +321,12 @@ function renderMatchedReps(container, matched, entryIndex, geo) {
   container.appendChild(el('p', { class: 'reps-as-of' }, `Results shown ${matched.asOf}.`));
   for (const groupKey of SEAT_ORDER) {
     if (!SEAT_IN_SCOPE[groupKey](geo)) continue;
-    const section = el('section', { class: `rep-group rep-group-${groupKey}` });
-    section.appendChild(el('h3', {}, SEAT_LABELS[groupKey]));
+    // Voting Board redesign: each seat category renders as its own `.board-card` (task-2-brief.md
+    // — "address-lookup form/results restyled as cards"), reusing Task 1's primitive BY NAME
+    // rather than a lookalike card recipe under a new selector. `.board-label` likewise replaces
+    // this section's own hand-duplicated amber-label CSS.
+    const section = el('section', { class: `rep-group rep-group-${groupKey} board-card` });
+    section.appendChild(el('h3', { class: 'board-label' }, SEAT_LABELS[groupKey]));
     if (SEAT_DISTRICT_MISSING[groupKey](geo)) {
       section.appendChild(el('p', { class: 'rep-group-missing-district' }, SEAT_DISTRICT_MISSING_MESSAGE[groupKey]));
     } else {
@@ -305,7 +334,7 @@ function renderMatchedReps(container, matched, entryIndex, geo) {
       if (candidates.length === 0) {
         section.appendChild(el('p', { class: 'rep-group-empty' }, SEAT_EMPTY_MESSAGE[groupKey]));
       } else {
-        const ul = el('ul', {});
+        const ul = renderCandidateList();
         for (const candidate of candidates) ul.appendChild(renderCandidate(candidate, entryIndex));
         section.appendChild(ul);
       }
