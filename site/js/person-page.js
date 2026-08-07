@@ -220,37 +220,51 @@ export function renderIdentity(container, identity) {
   container.appendChild(info);
 }
 
+// Voting Board redesign (task-3-brief.md): card-row layout — bill+reading left, the lit mono
+// position right-aligned (mockup: "SB 727 — Third Reading" / "● YEA" on the same visual row).
+// Every child element below keeps its EXACT prior tag/class/text/href/click-handler; the only
+// structural change is grouping them into two new wrapper <div>s (`.vote-row-main` for the
+// title/meta stack, `.vote-row-side` for the position/receipt/flag column) so site.css's flex
+// layout can place them — the same class-level-restructure precedent Task 2 used for
+// `.directory-identity`/`.directory-since` (see that task's report). `vote-position` also gains a
+// `vote-position-${voteRow.position}` class hook (yea/nay get the lit-mono treatment in CSS; every
+// other position value falls through to the plain/muted default) — the rendered TEXT stays
+// exactly `Position: ${voteRow.position}`, byte-identical to before this task.
 function renderVoteRow(voteRow, oneLinerMap) {
   const li = el('li', { class: 'vote-row' });
+  const main = el('div', { class: 'vote-row-main' });
+  const side = el('div', { class: 'vote-row-side' });
 
   // A merged person (e.g. Onder's real MO-Senate-then-US-House shape) casts votes in more than
   // one chamber — label each row's own source chamber so the two careers stay distinguishable in
   // one combined vote list, rather than presenting them as an undifferentiated stream.
   if (voteRow.jurisdiction_id && voteRow.chamber) {
-    li.appendChild(el('p', { class: 'vote-chamber' }, chamberLabel(voteRow.jurisdiction_id, voteRow.chamber)));
+    main.appendChild(el('p', { class: 'vote-chamber' }, chamberLabel(voteRow.jurisdiction_id, voteRow.chamber)));
   }
 
   // votes.bill_id is nullable (schema comment: "some votes are procedural") — a procedural vote
   // has nothing to link to, so it renders the question text plainly rather than a dead
   // /bill/null/... link.
   if (voteRow.bill_id) {
-    li.appendChild(el(
+    main.appendChild(el(
       'a',
       { class: 'vote-bill-link', href: billHref(voteRow.bill_id, voteRow.bill_identifier || voteRow.bill_title || voteRow.bill_id) },
       `${voteRow.bill_identifier || '(no bill identifier)'} — ${voteRow.bill_title || '(no title)'}`,
     ));
   } else {
-    li.appendChild(el('p', { class: 'vote-procedural' }, voteRow.question || '(procedural vote, no associated bill)'));
+    main.appendChild(el('p', { class: 'vote-procedural' }, voteRow.question || '(procedural vote, no associated bill)'));
   }
 
   const oneLiner = voteRow.bill_id ? oneLinerMap.get(voteRow.bill_id) : undefined;
   if (oneLiner) {
-    li.appendChild(el('p', { class: 'vote-one-liner' }, oneLiner));
+    main.appendChild(el('p', { class: 'vote-one-liner' }, oneLiner));
   }
 
   // Position rendered EXACTLY as the source recorded it (yea/nay/not_voting/absent/present/
-  // other) — the stored token is the mechanical form; it is never reworded or reformatted.
-  li.appendChild(el('p', { class: 'vote-position' }, `Position: ${voteRow.position}`));
+  // other) — the stored token is the mechanical form; it is never reworded or reformatted. The
+  // second class is a pure CSS hook (site.css's .vote-position-yea/.vote-position-nay), never a
+  // text change.
+  side.appendChild(el('p', { class: `vote-position vote-position-${voteRow.position}` }, `Position: ${voteRow.position}`));
 
   const receiptUrl = voteReceiptUrl(voteRow);
   if (receiptUrl) {
@@ -260,16 +274,18 @@ function renderVoteRow(voteRow, oneLinerMap) {
     // page down with it (the outer containment below is the last-resort backstop, not the
     // primary mechanism, for exactly this class of fault).
     try {
-      li.appendChild(el('a', { class: 'vote-receipt-link', href: receiptUrl }, 'source'));
+      side.appendChild(el('a', { class: 'vote-receipt-link', href: receiptUrl }, 'source'));
     } catch {
-      li.appendChild(el('span', { class: 'vote-receipt-unavailable' }, 'source unavailable'));
+      side.appendChild(el('span', { class: 'vote-receipt-unavailable' }, 'source unavailable'));
     }
   }
 
   if (voteRow.flagged) {
-    li.appendChild(el('a', { class: 'flag-badge', href: '/trust#flags' }, '⚑ reconciliation flag'));
+    side.appendChild(el('a', { class: 'flag-badge', href: '/trust#flags' }, '⚑ reconciliation flag'));
   }
 
+  li.appendChild(main);
+  li.appendChild(side);
   return li;
 }
 

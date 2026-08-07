@@ -73,12 +73,34 @@
   box-sizing: border-box;
 }
 
+/* Owner-reported bug fix (2026-08-07, live, mid-Task-2): "the page doesn't always fill the
+   browser's display area" — a short page (404 is the shortest) left the browser's own canvas,
+   below/around the actual content box, showing through to whatever's behind html/body (a stark
+   white flash in dark mode) rather than the board's --bg. Root cause: only `body` carried a
+   background, and `body`'s height was purely content-driven (no explicit min-height at all), so
+   on any viewport taller than the rendered content, or during rubber-band overscroll past either
+   edge, the area beyond body's own box was unpainted. Two independent fixes, both required: (1)
+   `html` gets the SAME --bg as `body` — overscroll on macOS/iOS Safari and the sliver some
+   browsers leave at zoom/subpixel boundaries paint from `html`'s background, not `body`'s, so
+   only styling `body` leaves that specific strip uncovered even once (2) is fixed; (2) `body`
+   gets an explicit min-height spanning the full viewport (100vh first as the universal fallback,
+   100dvh immediately after so it wins in any browser that supports the dynamic-viewport unit —
+   the mobile browser-chrome-aware height that keeps the fill correct as an address bar
+   shows/hides) so a short page's body box itself always reaches the bottom of the viewport
+   instead of collapsing to its content height. Verified: no wrapper below this (`.site-header`,
+   `.board-main`, `footer#site-footer`) sets its own `background` — all three stay transparent,
+   so `body`'s --bg shows through them exactly as before; this fix cannot introduce a "different
+   full-width background band" because it adds no new painted layer, only extends the existing
+   one's box and gives `html` the same color as a backstop. */
 html {
+  background: var(--bg);
   color-scheme: dark light;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--fg);
   font-family: system-ui, "Segoe UI", -apple-system, sans-serif;
@@ -205,6 +227,27 @@ a {
   max-width: 880px;
   margin: 0 auto;
   padding: 1.25rem 1rem 2rem;
+}
+
+/* Profile (person.html/legislator.html) and bill (bill.html) page section headings ("Vote
+   aggregates", "Votes", "Sponsored bills", "Data freshness", "Sponsors", "Plain-language
+   summary", "Roll calls") are plain, unclassed <h2> elements that sit as DIRECT children of
+   <main id="app" class="board-main"> — CSS-only board-label restatement (spec's ".board-label
+   section headings" for the profile treatment), no HTML/JS edit needed since the direct-child
+   combinator alone already selects exactly this set. trust.html's and index.html's own <h2>s are
+   NOT direct children of .board-main (every one of theirs sits inside its own <section>), so this
+   rule cannot reach — and does not need to reach — either of those pages' own heading treatments
+   (trust.html's `.trust-page section h2` rule, just below, stays the page's own look; index.html's
+   plain h2s stay whatever the base `h2` rule already gives them). Verified by reading every shell:
+   only person.html/legislator.html/bill.html have a bare `<h2>` as a literal sibling of a
+   `<section>` inside `.board-main`. */
+.board-main > h2 {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin: 1.75rem 0 0.6rem;
 }
 
 /* ============================================================================
@@ -549,20 +592,29 @@ footer#site-footer {
   margin-bottom: 1.5rem;
 }
 
+/* Mockup fidelity (profile-and-light.html): a 64px rounded frame on --surface, both the real-photo
+   and no-photo cases (was 120px/150px, unstyled-background — a plain bordered <img> with no frame
+   fill behind it). object-fit: cover on the real <img> keeps a portrait headshot filling the fixed
+   square without distortion; el()'s own attrs allowlist/src guard (render.js) is untouched — this
+   is presentation-only. */
 .profile-photo-box {
   flex-shrink: 0;
+  width: 64px;
+  height: 64px;
 }
 
 .profile-photo {
-  width: 120px;
-  height: auto;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
   border-radius: 8px;
   border: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .profile-no-photo {
-  width: 120px;
-  height: 150px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -570,7 +622,8 @@ footer#site-footer {
   color: var(--faint);
   border: 1px dashed var(--border);
   border-radius: 8px;
-  font-size: 0.85em;
+  font-size: 10px;
+  line-height: 1.3;
   background: var(--surface);
 }
 
@@ -585,12 +638,35 @@ footer#site-footer {
   margin: 0 0 0.2rem;
 }
 
+/* The mockup's "lit mono tenure line" (`● serving — since 2023-01-04 (end date unrecorded)`).
+   The "●" is CSS-generated content (never a text-node change — profile-model.js's careerSpan
+   output, e.g. "2023 – (end date unrecorded)" or "2013 – 2018", stays byte-identical; the
+   examples in the mockup illustrate the visual TREATMENT, not a literal string this site emits).
+   Known, carried-forward characteristic (pre-existing since before this task, not introduced
+   here): this line renders in --yea green for EVERY legislator's career span, including one whose
+   dated range has since closed (`careerSpan`'s hasOpenEnd is only visible on the raw `terms`
+   array, which renderIdentity's `identity` object does not carry — see person-page.js; computing
+   it here would mean either duplicating careerSpan's own open-end logic in the wiring layer, a
+   drift risk this codebase explicitly avoids elsewhere, or extending profile-model.js's pure
+   function surface, both out of this task's class-hook-only scope). Flagged for a future task
+   the same way Task 1/2 flagged their own deferred items, not silently carried forward. */
 .profile-career-span {
   font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
   color: var(--yea);
   font-size: 12px;
   margin: 0.3rem 0 0;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--yea) 45%, transparent);
+}
+
+.profile-career-span::before {
+  content: "● ";
+}
+
+@media (prefers-color-scheme: light) {
+  .profile-career-span {
+    text-shadow: none;
+  }
 }
 
 .vote-filters {
@@ -607,9 +683,29 @@ footer#site-footer {
   border-top: 1px solid var(--border-faint);
 }
 
+/* Card-row layout (mockup: bill+reading left, the row's meta stacked below it, the lit position
+   right-aligned). person-page.js's renderVoteRow now groups its existing children into two
+   grouping <div>s (`.vote-row-main`, `.vote-row-side`) purely for this flex placement — same
+   class-level-restructure precedent Task 2 used for `.directory-identity`/`.directory-since`
+   (see that task's own report): every child keeps its exact tag, class, text, href, and click
+   behavior; only which wrapper groups it changed. */
 .vote-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
   padding: 0.65rem 0.25rem;
   border-bottom: 1px solid var(--border-faint);
+}
+
+.vote-row-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.vote-row-side {
+  flex-shrink: 0;
+  text-align: right;
 }
 
 .vote-chamber {
@@ -622,6 +718,7 @@ footer#site-footer {
 
 .vote-bill-link {
   font-weight: 600;
+  font-size: 13.5px;
   text-decoration: none;
 }
 
@@ -632,6 +729,7 @@ footer#site-footer {
 
 .vote-procedural {
   font-weight: 600;
+  font-size: 13.5px;
 }
 
 .vote-one-liner {
@@ -639,16 +737,52 @@ footer#site-footer {
   margin: 0.25rem 0;
 }
 
+/* Lit mono position (mockup: "● YEA"/"● NAY"). Text stays exactly `Position: ${voteRow.position}`
+   (person-page.js) — untouched, byte-identical — the ONLY JS change is the added
+   `vote-position-${voteRow.position}` class hook; the "●" is CSS-generated content on the yea/nay
+   variants only (never a text-node change). Honesty rule (spec §6): green/red apply ONLY to the
+   yea/nay facts — not_voting/absent/present/other/unrecognized positions fall through to this
+   base rule's plain --muted mono, no color, no dot. */
 .vote-position {
   font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
   font-size: 0.85em;
   margin: 0.25rem 0;
 }
 
+.vote-position-yea {
+  color: var(--yea);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--yea) 45%, transparent);
+}
+
+.vote-position-yea::before {
+  content: "● ";
+}
+
+.vote-position-nay {
+  color: var(--nay);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--nay) 45%, transparent);
+}
+
+.vote-position-nay::before {
+  content: "● ";
+}
+
+@media (prefers-color-scheme: light) {
+  .vote-position-yea,
+  .vote-position-nay {
+    text-shadow: none;
+  }
+}
+
 .vote-receipt-link,
 .vote-receipt-unavailable {
+  display: block;
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-size: 0.8em;
   color: var(--faint);
+  margin-top: 0.2rem;
 }
 
 .flag-badge {
@@ -724,10 +858,12 @@ footer#site-footer {
 }
 
 /* ============================================================================
-   9. Vote aggregate charts (design spec §3 — deliberately ONE neutral fill for
-   every bar here; per-position board-strip coloring is a Task 2/3 render-code
-   change, not a pure-CSS one, so this is a flat token-based restatement of the
-   existing neutral-fill behavior, not a new visual system.)
+   9. Vote aggregate charts (design spec §3/§4 — Task 3: the distribution bars now carry a real
+   position->class map (vote-charts.js's POSITION_MODIFIER: yea/nay get `.chart-bar-fill-yea`/
+   `.chart-bar-fill-nay`, everything else stays the flat `--neutral-bar` fill below). Party-
+   comparison and cohesion bars are NOT per-position (each is a share/match metric, not a yea/nay/
+   other bucket) and are deliberately left on the same flat neutral fill Task 1 shipped — no
+   mockup evidence covers those two bars, and this task's scope was class-hook-only.)
    ============================================================================ */
 
 .vote-charts {
@@ -814,6 +950,39 @@ button.chart-bar-row {
   height: 100%;
 }
 
+/* Board-strip position coloring (vote-charts.js's POSITION_MODIFIER hook — see that file's own
+   comment for the full honesty-rule reasoning). Row-level color applies to the label/value text
+   too (mockup: "YEA 3024 · 78.9%" in --yea, "NAY 308 · 8.0%" in --nay), scoped by the SAME
+   `chart-bar-row-yea`/`chart-bar-row-nay` class the row itself carries — placed after
+   `.chart-bar-active`'s own label/value rule above so an active yea/nay bar keeps that rule's bold
+   weight while this rule's color wins (equal selector specificity, later in the cascade). */
+.chart-bar-fill-yea {
+  background: var(--yea-bar);
+  box-shadow: inset 0 0 8px color-mix(in srgb, var(--yea) 35%, transparent);
+}
+
+.chart-bar-fill-nay {
+  background: var(--nay-bar);
+  box-shadow: inset 0 0 8px color-mix(in srgb, var(--nay) 35%, transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  .chart-bar-fill-yea,
+  .chart-bar-fill-nay {
+    box-shadow: none;
+  }
+}
+
+.chart-bar-row-yea .chart-bar-label,
+.chart-bar-row-yea .chart-bar-value {
+  color: var(--yea);
+}
+
+.chart-bar-row-nay .chart-bar-label,
+.chart-bar-row-nay .chart-bar-value {
+  color: var(--nay);
+}
+
 .chart-bar-value {
   font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
@@ -857,8 +1026,15 @@ button.chart-bar-row {
   padding: 0;
 }
 
+/* "cast rows on the same vocabulary" (task-3-brief.md) — bill.js has no per-legislator cast list
+   to loop a position over (renderVotes iterates roll-call rows, each carrying an already-mechanical
+   `formatTallyLine` string, not an array of individual casts — see bill-page.js's own comments on
+   tallyPositions), so this restates the SAME visual vocabulary as the profile's vote-row (bold
+   question, faint/mono meta beneath, tally as a mono legend "strip") on the existing per-roll-call
+   row, rather than inventing a new per-cast render the brief's "class hooks only" scope doesn't
+   cover. No JS change was needed for this section — every hook below is an existing class name. */
 .bill-vote-row {
-  padding: 0.65rem 0;
+  padding: 0.65rem 0.25rem;
   border-bottom: 1px solid var(--border-faint);
 }
 
@@ -872,24 +1048,43 @@ button.chart-bar-row {
 
 .bill-vote-question {
   font-weight: 600;
+  font-size: 13.5px;
 }
 
 .bill-vote-result {
   color: var(--muted);
   font-size: 0.9em;
+  margin: 0.25rem 0;
 }
 
+/* The "tally strip" (task-3-brief.md): the existing formatTallyLine() mono string (e.g. "Recorded
+   casts in our data — yea 5, nay 3, not voting 0, absent 1") gets a board-strip-adjacent card
+   treatment — mono tabular numerals (already true pre-redesign) plus a --surface pill so it reads
+   as a distinct legend rather than a fourth plain paragraph. It stays ONE text node (no per-position
+   color split): the string interleaves counts for positions this page's own vote_casts CHECK
+   constraint allows (yea/nay/not_voting/absent/present/other, see tallyPositions), so recoloring
+   individual counts would mean splicing that single authored string into per-position spans — a
+   render-structure change beyond this task's class-hook-only scope, not a CSS-only restyle. */
 .bill-vote-tally {
+  display: inline-block;
   font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
-  font-size: 0.9em;
+  font-size: 0.85em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  margin: 0.3rem 0;
 }
 
 .bill-vote-source-link,
 .bill-vote-source-unavailable {
+  display: block;
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-size: 0.8em;
   color: var(--faint);
+  margin-top: 0.2rem;
 }
 
 .bill-summary-none,
@@ -953,8 +1148,13 @@ main.board-main.bill-not-found section:not(#bill-identity) {
   border-top: 1px solid var(--border);
 }
 
+/* "citation receipts styled as faint mono" (task-3-brief.md) — the quoted excerpt a bullet's
+   citation toggle (or a glossary term) reveals is the site's receipt for that fact; mono matches
+   the same "receipts" vocabulary the rest of the type system already uses (spec §2's type table).
+   Font-family is the only addition — color/spacing were already correct pre-redesign. */
 .gloss-quote,
 .bill-citation-quote {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   color: var(--faint);
   margin: 0.35rem 0;
   padding-left: 0.5rem;
@@ -994,14 +1194,25 @@ main.board-main.bill-not-found section:not(#bill-identity) {
   font-size: 0.9em;
 }
 
+/* "tables/lists as --surface cards" (spec §4, trust page) — these three ARE the trust page's
+   tables/lists (freshness table, live counts, attribution); `.metric-definition` stays plain prose
+   (it's paragraphs of definition text, not a table/list the spec bullet names). */
 .counts-list {
   list-style: none;
-  padding: 0;
+  padding: 0.25rem 1rem;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .counts-list li {
-  padding: 0.3rem 0;
+  padding: 0.4rem 0;
   border-bottom: 1px solid var(--border-faint);
+}
+
+.counts-list li:last-child {
+  border-bottom: 0;
 }
 
 .counts-label {
@@ -1018,12 +1229,16 @@ main.board-main.bill-not-found section:not(#bill-identity) {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .freshness-table th,
 .freshness-table td {
   text-align: left;
-  padding: 0.4rem 0.6rem;
+  padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border-faint);
 }
 
@@ -1032,11 +1247,20 @@ main.board-main.bill-not-found section:not(#bill-identity) {
 }
 
 .attribution-list {
-  padding-left: 1.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .attribution-list li {
   margin-bottom: 0.75rem;
+}
+
+.attribution-list li:last-child {
+  margin-bottom: 0;
 }
 
 /* ============================================================================

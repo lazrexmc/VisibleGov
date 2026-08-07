@@ -334,10 +334,29 @@ export function activeFilterPositions(filters) {
   return new Set();
 }
 
+// Voting Board redesign (task-3-brief.md): "board strip" position->class map — yea and nay get
+// their own modifier class (site.css maps these to --yea-bar/--nay-bar, plus a lit label/value
+// color and a dark-only inner glow); not_voting/absent/other carry NO modifier class at all, so
+// they fall through to `.chart-bar-fill`'s existing flat `--neutral-bar` fill unchanged — exactly
+// the brief's "everything else -> --neutral-bar". This does not revisit vote-charts.js's own
+// documented no-"good"/"bad"-judgment rule (module header, above): yea/nay are colored because
+// they ARE the yea/nay fact being measured (honesty rule §6: "green/red appear only where they are
+// the fact"), the same discipline the vote-position dots on the profile page follow — never a
+// ranking of which position is "better." Deliberately scoped to buildDistributionBar ONLY: the
+// party-comparison and cohesion bars below are not per-position (each represents a share/match
+// metric, not one of yea/nay/not_voting/absent/other), so they are left as the flat neutral fill
+// Task 1 already shipped — no mockup evidence covers those two, and coloring them was out of this
+// task's scope.
+const POSITION_MODIFIER = { yea: 'yea', nay: 'nay' };
+
 function buildDistributionBar(position, count, shareString, onBarClick, isActive) {
+  const modifier = POSITION_MODIFIER[position];
+  const rowClasses = ['chart-bar-row'];
+  if (modifier) rowClasses.push(`chart-bar-row-${modifier}`);
+  if (isActive) rowClasses.push('chart-bar-active');
   // M4: a real button, not a div — natively keyboard/AT accessible.
   const row = el('button', {
-    class: isActive ? 'chart-bar-row chart-bar-active' : 'chart-bar-row',
+    class: rowClasses.join(' '),
     dataset: { bar: position },
   });
   row.type = 'button'; // `type` isn't in el()'s attrs allowlist; set directly on the returned node.
@@ -346,7 +365,8 @@ function buildDistributionBar(position, count, shareString, onBarClick, isActive
   row.setAttribute('aria-pressed', isActive ? 'true' : 'false');
   row.appendChild(el('span', { class: 'chart-bar-label' }, DISTRIBUTION_LABELS[position] || position));
   const track = el('div', { class: 'chart-bar-track' });
-  const fill = el('div', { class: 'chart-bar-fill' });
+  const fillClasses = modifier ? `chart-bar-fill chart-bar-fill-${modifier}` : 'chart-bar-fill';
+  const fill = el('div', { class: fillClasses });
   // Authored-not-DB-text width value — see the module-header comment above.
   fill.style.width = shareString;
   track.appendChild(fill);
