@@ -990,6 +990,25 @@ button.chart-bar-row {
   color: var(--muted);
 }
 
+/* Narrow-viewport fix (final-review finding): the cohesion/comparison legends' longer sentences
+   (e.g. "630 of 638 comparable roll calls (98.7%)") don't fit in the `auto` value column at
+   phone widths even with the row's `1fr` bar column at zero — `white-space: nowrap` forces the
+   grid item to its full intrinsic width, pushing the page past the viewport. Below 480px, letting
+   the value wrap alone still overflows (the label + wrapped-value's longest unbreakable run don't
+   fit alongside the bar in a 3-column grid at 380px), so the row is stacked to a single column
+   instead: label, bar, then value flow vertically, each free to use the full row width. Desktop
+   (`.chart-bar-row`'s base 3-column grid above) is untouched. */
+@media (max-width: 480px) {
+  .chart-bar-row {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+
+  .chart-bar-value {
+    white-space: normal;
+  }
+}
+
 .chart-not-computable {
   color: var(--muted);
   font-style: italic;
