@@ -3127,3 +3127,28 @@ This closes the original 2026-08-05 request ("filter the long ass list of names"
 term-date backfill (prerequisite) + the two-view directory, both live. Observed pre-existing nit
 (not a regression, logged for later): federal "Last, First 'Nick'" name formats make the surname
 fallback sort quoted nicknames first in each view.
+
+## 2026-08-07 — "The Voting Board" site-wide redesign: designed, built, deployed, live-verified
+
+Lance: current look "absolutely elementary... geocities" -> brainstormed via the visual companion
+(browser tab, 3 direction mockups on the real directory page). Lance chose "A — The Voting Board"
+(chamber tally-board identity: dark housing, lit rows, amber rostrum-light accent, mono numerals)
+and "Auto" light mode (dark = identity, light = "gallery"). Spec + plan committed; 3 SDD tasks on
+branch voting-board-redesign; suite 2367/0 throughout.
+
+Notable catches by the review machinery: (1) Task 3 shipped the lit-green serving treatment on
+EVERY profile career span — a past member (Huddleston, gone since 1985) glowed like a sitting one;
+fixed with the hasOpenTerm gate (the fix agent died mid-write on the WEEKLY API LIMIT; the
+controller completed it under documented duress, independently re-reviewed post-reset, all four
+theme/status combos verified). (2) Final Fable review found mobile horizontal overflow from chart
+legend nowrap — fixed by stacking chart rows under 480px. (3) Lance's live mid-build report ("site
+doesn't always fill the display") root-caused to unpainted canvas beyond body's content box —
+fixed with html+body backgrounds and min-height 100vh/100dvh, measured at 1600px viewport.
+
+Deployed (fast-forward 3bdbb94..1ac2cc2, Pages built in ~15s) and live-walked both themes:
+directory, serving + past profiles, bill, trust, 404 — zero console errors. Honesty audit: party
+neutral everywhere, green/red confined to Yea/Nay facts, lit treatment only on open-term facts,
+"current" appears nowhere, all strings byte-identical (one adjudicated dangling-middot drop).
+OPEN ITEM for Lance: Task 1 moved failure/quarantine indicators from red to AMBER under the
+spec's "red = Yea/Nay facts only" rule — consistently applied, trivially reversible if
+conventional error-red is preferred.
