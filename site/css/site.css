@@ -641,30 +641,29 @@ footer#site-footer {
 /* The mockup's "lit mono tenure line" (`● serving — since 2023-01-04 (end date unrecorded)`).
    The "●" is CSS-generated content (never a text-node change — profile-model.js's careerSpan
    output, e.g. "2023 – (end date unrecorded)" or "2013 – 2018", stays byte-identical; the
-   examples in the mockup illustrate the visual TREATMENT, not a literal string this site emits).
-   Known, carried-forward characteristic (pre-existing since before this task, not introduced
-   here): this line renders in --yea green for EVERY legislator's career span, including one whose
-   dated range has since closed (`careerSpan`'s hasOpenEnd is only visible on the raw `terms`
-   array, which renderIdentity's `identity` object does not carry — see person-page.js; computing
-   it here would mean either duplicating careerSpan's own open-end logic in the wiring layer, a
-   drift risk this codebase explicitly avoids elsewhere, or extending profile-model.js's pure
-   function surface, both out of this task's class-hook-only scope). Flagged for a future task
-   the same way Task 1/2 flagged their own deferred items, not silently carried forward. */
+   examples in the mockup illustrate the visual TREATMENT, not a literal string this site emits). */
 .profile-career-span {
   font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
-  color: var(--yea);
+  color: var(--muted);
   font-size: 12px;
   margin: 0.3rem 0 0;
+}
+
+/* Task 3 fix round (Important, currency-honesty): the lit-dot/glow/--yea vocabulary is spec §2's
+   SERVING-STATUS signal — it applies only via the -open modifier renderIdentity adds when the
+   member has an open (end_date-null) term. A past member's span stays muted plain text. */
+.profile-career-span-open {
+  color: var(--yea);
   text-shadow: 0 0 8px color-mix(in srgb, var(--yea) 45%, transparent);
 }
 
-.profile-career-span::before {
+.profile-career-span-open::before {
   content: "● ";
 }
 
 @media (prefers-color-scheme: light) {
-  .profile-career-span {
+  .profile-career-span-open {
     text-shadow: none;
   }
 }

@@ -197,10 +197,21 @@ export function renderPhoto(container, legislatorLike, displayName) {
   container.appendChild(el('p', { class: 'profile-no-photo' }, 'No photo on record.'));
 }
 
+// Task 3 fix round (task review, Important, currency-honesty): the lit-dot/glow/--yea treatment
+// on the career-span line is a SERVING-STATUS signal (spec §2's lit-dot vocabulary), so it must
+// only apply to a legislator with an open (still-serving) term — not unconditionally, which would
+// render a member who left in, say, 1985 with the identical lit "serving" look as a sitting
+// member (live-verified against Walter Huddleston's profile). `hasOpenTerm` is computed by the
+// caller (loadIdentitySection, below) from the SAME raw `terms` array `careerSpan()` itself reads
+// — mirrored here rather than re-derived from `identity.careerSpan`'s STRING output, which would
+// mean pattern-matching authored text, a real drift risk. This is a pure presentation modifier
+// class, same precedent as Task 2's directory page suppressing its own tenure fragment entirely
+// for a past member (`entry.servingNow`) — never a change to `careerSpan()`'s own text.
+//
 // Exported (fix round 1, finding 2) so tests/person-page.test.js can assert directly that a
 // date-unproven multi-affiliation identity (buildIdentity's joined chamberLabel, districtLabel
 // null) renders the full joined string with no redundant/duplicated district suffix.
-export function renderIdentity(container, identity) {
+export function renderIdentity(container, identity, hasOpenTerm) {
   clearChildren(container);
   const photoBox = el('div', { class: 'profile-photo-box' });
   renderPhoto(photoBox, identity.photoCandidate, identity.displayName);
@@ -216,7 +227,8 @@ export function renderIdentity(container, identity) {
       ? `${identity.chamberLabel}${identity.districtLabel ? `, district ${identity.districtLabel}` : ''}`
       : 'chamber/district unrecorded',
   ));
-  info.appendChild(el('p', { class: 'profile-career-span' }, identity.careerSpan));
+  const careerSpanClass = hasOpenTerm ? 'profile-career-span profile-career-span-open' : 'profile-career-span';
+  info.appendChild(el('p', { class: careerSpanClass }, identity.careerSpan));
   container.appendChild(info);
 }
 
@@ -407,8 +419,11 @@ async function loadIdentitySection(container, { person, legislators, legislatorI
       ? await fetchAllRows(`terms?legislator_id=in.(${legislatorIds.join(',')})`, { order: 'id' })
       : [];
     const identity = buildIdentity({ person, legislators, terms });
+    // Task 3 fix round (currency-honesty): the lit serving treatment applies only when a term is
+    // genuinely open — same one-line signal the directory's servingNow derivation uses.
+    const hasOpenTerm = (terms || []).some((t) => t && t.end_date == null);
     sectionState(container, { state: 'ready' });
-    renderIdentity(container, identity);
+    renderIdentity(container, identity, hasOpenTerm);
     return { identity, terms };
   } catch (err) {
     sectionState(container, {
