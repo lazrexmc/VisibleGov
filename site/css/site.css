@@ -1,77 +1,447 @@
-/* site/css/site.css — placeholder base styles (task 3 scaffold). Later page tasks extend this;
-   deliberately minimal here, not a design system. */
+/* Voting Board design system (2026-08-07 spec) */
+/* docs/superpowers/specs/2026-08-07-voting-board-redesign-design.md — "The Voting Board": dark
+   housing, names in lit rows, one amber "rostrum light" accent, monospace numerals for every
+   count. Dark is the :root DEFAULT (the identity); light ("the gallery") arrives ONLY via
+   `@media (prefers-color-scheme: light)` — this is a deliberate polarity flip from the previous
+   placeholder file, which defaulted light. Organized: tokens -> base -> header/main -> primitives
+   -> existing-component restatements -> focus/motion. Kept low-specificity throughout (mostly
+   single-class or bare-tag selectors) so Tasks 2-3 can layer component-specific rules on top
+   without fighting this file. */
+
+/* ============================================================================
+   1. Tokens (spec §2 table, copied — two hexes adjusted for AA, see notes below)
+   ============================================================================ */
 
 :root {
-  color-scheme: light dark;
-  --fg: #1a1a1a;
-  --bg: #ffffff;
-  --muted: #666666;
-  --link: #0b5fff;
+  color-scheme: dark light;
+
+  --bg: #14161b;
+  --surface: #1b1e25;
+  --border: #2a2e37;
+  --border-faint: #232732;
+  --fg: #e8ebf1;
+  --muted: #8b93a3;
+  /* --faint adjusted from the spec's literal #6d7484 (dark) — that hex measures ~3.86:1 against
+     --bg and ~3.56:1 against --surface, both under the 4.5:1 AA floor for the small mono
+     receipt/footnote text this token is used for. #7f8798 is the same blue-grey hue, lightened
+     just enough to clear 4.5:1 against BOTH backgrounds (~5.0:1 on --bg, ~4.6:1 on --surface,
+     the harder case since --surface is the lighter of the two dark backgrounds). */
+  --faint: #7f8798;
+  --accent: #d9a441;
+  --accent-contrast: #14161b;
+  --yea: #9fd9a3;
+  --yea-bar: #3f7d4a;
+  --nay: #d98f8f;
+  --nay-bar: #8c3b3b;
+  --neutral-bar: #3a3f4b;
+  --link: #e8ebf1;
+  --focus-ring: #d9a441;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --fg: #e8e8e8;
-    --bg: #121212;
-    --muted: #a0a0a0;
-    --link: #6ea8ff;
+    --bg: #f5f4f1;
+    --surface: #ffffff;
+    --border: #ddd9d2;
+    --border-faint: #e8e5df;
+    --fg: #23262d;
+    --muted: #5c6472;
+    /* --faint adjusted from the spec's literal #8a8f99 (light) — that hex measures ~2.95:1
+       against --bg and ~3.25:1 against --surface, both under the 4.5:1 AA floor. #656b78 is the
+       same hue, darkened enough to clear 4.5:1 against --bg (the harder case at ~4.87:1; ~5.35:1
+       against white --surface). */
+    --faint: #656b78;
+    --accent: #8a6318;
+    --accent-contrast: #ffffff;
+    --yea: #2e7d3f;
+    --yea-bar: #4c9a5f;
+    --nay: #a83c3c;
+    --nay-bar: #c25454;
+    --neutral-bar: #d5d8dd;
+    --link: #23262d;
+    --focus-ring: #8a6318;
   }
 }
 
-* {
+/* ============================================================================
+   2. Base — reset, typography, links, selection
+   ============================================================================ */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark light;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: var(--fg);
   background: var(--bg);
-  line-height: 1.5;
+  color: var(--fg);
+  font-family: system-ui, "Segoe UI", -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+h1, h2, h3, h4 {
+  margin: 0 0 0.6rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+h1 { font-size: 23px; font-weight: 650; }
+h2 { font-size: 19px; }
+h3 { font-size: 15px; }
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+ul, ol {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+blockquote {
+  margin: 0;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+label {
+  display: block;
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+
+input[type="text"] {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  width: 100%;
+  max-width: 28rem;
+}
+
+button {
+  font: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent-contrast);
 }
 
 a {
   color: var(--link);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
 }
 
-.section-state {
+/* ============================================================================
+   3. Header + main container
+   ============================================================================ */
+
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.1rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.wordmark {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--fg);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.wordmark-accent {
+  color: var(--accent);
+}
+
+.site-nav {
+  font-size: 12.5px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
-.section-state-failed {
-  color: #b00020;
+.site-nav a {
+  color: var(--muted);
+  text-decoration: none;
 }
 
-/* Task 10 — the real footer (render.js's mountFooter), same on every page. */
+.site-nav a:hover,
+.site-nav a:focus-visible {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+
+.board-main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 2rem;
+}
+
+/* ============================================================================
+   4. Primitives (produced here BY NAME for Tasks 2-3 to consume)
+   ============================================================================ */
+
+.board-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.board-label {
+  display: block;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin-bottom: 0.5rem;
+}
+
+.mono {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.lit-dot {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85em;
+}
+
+.lit-yea, .lit-nay, .lit-accent {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.lit-yea {
+  color: var(--yea);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--yea) 45%, transparent);
+}
+
+.lit-nay {
+  color: var(--nay);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--nay) 45%, transparent);
+}
+
+.lit-accent {
+  color: var(--accent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  /* Signature elements §2: "glow omitted in light" — dark-only, per spec. */
+  .lit-yea, .lit-nay, .lit-accent {
+    text-shadow: none;
+  }
+}
+
+/* ============================================================================
+   5. Footer (site/js/render.js's mountFooter — same markup on every page)
+   ============================================================================ */
 
 footer#site-footer {
-  max-width: 720px;
+  max-width: 880px;
   margin: 2rem auto 1rem;
-  padding: 0 1rem;
-  border-top: 1px solid var(--muted);
-  padding-top: 0.75rem;
+  padding: 1rem 1rem 0;
+  border-top: 1px solid var(--border);
 }
 
 .footer-tagline {
   color: var(--muted);
   font-size: 0.85em;
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.5rem;
 }
 
 .footer-links {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   font-size: 0.85em;
 }
 
-/* Task 6 — profile page (person.html / legislator.html). Functional only; a final visual polish
-   pass is later in the build order (design spec, "Build order" step 5). */
+/* ============================================================================
+   6. Section state (loading / empty / failed — render.js's sectionState)
+   ============================================================================ */
 
-main#app {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 1rem;
+.section-state {
+  color: var(--muted);
 }
+
+.section-state-empty {
+  font-style: italic;
+}
+
+/* Honesty rule (spec §6): red/green are reserved for Yea/Nay facts only, so a failed-load state
+   reads in amber (the site's one other accent, used everywhere else for "needs attention") rather
+   than reusing the Nay red for an unrelated meaning. */
+.section-state-failed {
+  color: var(--accent);
+}
+
+.section-state-retry {
+  margin-top: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.9em;
+}
+
+.section-state-retry:hover {
+  border-color: var(--accent);
+}
+
+/* ============================================================================
+   7. Directory page + address lookup (index.html)
+   ============================================================================ */
+
+.privacy-contract {
+  color: var(--faint);
+  font-size: 0.85em;
+}
+
+.directory-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.directory-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.4rem 1.1rem;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.directory-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+
+.directory-toggle button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.directory-footnote {
+  color: var(--faint);
+  font-size: 0.85em;
+  margin: 0 0 0.75rem;
+}
+
+.directory-list {
+  list-style: none;
+  padding: 0;
+  border-top: 1px solid var(--border-faint);
+}
+
+.directory-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.7rem 0.25rem;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.directory-row:hover {
+  background: var(--surface);
+}
+
+.directory-row a {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.directory-row a:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+
+.directory-meta {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.reps-as-of {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.rep-group {
+  margin-bottom: 1.25rem;
+}
+
+.rep-group h3 {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.rep-candidate {
+  border-bottom: 1px solid var(--border-faint);
+  padding: 0.5rem 0;
+}
+
+.rep-party {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.rep-date-evidence {
+  color: var(--faint);
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.8em;
+  margin: 0.2rem 0 0;
+}
+
+.rep-group-missing-district,
+.rep-group-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ============================================================================
+   8. Profile identity + votes + pagination (person.html / legislator.html)
+   ============================================================================ */
 
 .profile-identity {
   display: flex;
@@ -80,10 +450,15 @@ main#app {
   margin-bottom: 1.5rem;
 }
 
+.profile-photo-box {
+  flex-shrink: 0;
+}
+
 .profile-photo {
   width: 120px;
   height: auto;
-  border-radius: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
 }
 
 .profile-no-photo {
@@ -93,14 +468,35 @@ main#app {
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: var(--muted);
-  border: 1px dashed var(--muted);
-  border-radius: 4px;
+  color: var(--faint);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
   font-size: 0.85em;
+  background: var(--surface);
+}
+
+.profile-identity-info h1 {
+  margin-bottom: 0.2rem;
+}
+
+.profile-party,
+.profile-chamber {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 0.2rem;
+}
+
+.profile-career-span {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--yea);
+  font-size: 12px;
+  margin: 0.3rem 0 0;
 }
 
 .vote-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
   margin-bottom: 0.75rem;
@@ -109,11 +505,34 @@ main#app {
 .vote-list {
   list-style: none;
   padding: 0;
+  border-top: 1px solid var(--border-faint);
 }
 
 .vote-row {
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--muted);
+  padding: 0.65rem 0.25rem;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.vote-chamber {
+  color: var(--faint);
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.2rem;
+}
+
+.vote-bill-link {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.vote-bill-link:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+
+.vote-procedural {
+  font-weight: 600;
 }
 
 .vote-one-liner {
@@ -121,14 +540,33 @@ main#app {
   margin: 0.25rem 0;
 }
 
+.vote-position {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.85em;
+  margin: 0.25rem 0;
+}
+
+.vote-receipt-link,
+.vote-receipt-unavailable {
+  font-size: 0.8em;
+  color: var(--faint);
+}
+
 .flag-badge {
   display: inline-block;
   margin-left: 0.5rem;
-  color: #b00020;
+  color: var(--accent);
+  text-decoration: none;
 }
 
-.sponsor-group h3 {
-  margin-bottom: 0.25rem;
+.sponsor-group h3,
+.bill-sponsor-group h3 {
+  margin-bottom: 0.3rem;
+}
+
+.bill-status {
+  color: var(--muted);
+  font-size: 0.9em;
 }
 
 .freshness-list {
@@ -136,9 +574,23 @@ main#app {
   padding: 0;
 }
 
+.freshness-list li {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
+.freshness-source {
+  font-weight: 600;
+}
+
+.freshness-status {
+  color: var(--muted);
+}
+
 .freshness-quarantine {
-  color: #b00020;
+  color: var(--accent);
   margin: 0.15rem 0 0.5rem;
+  font-size: 0.9em;
 }
 
 .vote-pagination {
@@ -153,11 +605,31 @@ main#app {
   font-size: 0.9em;
 }
 
-/* Task 6b — vote aggregate charts (design spec §3, "Vote aggregates"). Deliberately ONE neutral
-   fill color for every bar, regardless of which position/side it represents — color-coding
-   "yea=good/nay=bad" (or a party color) would read as a value judgment, which the neutrality wall
-   forbids. Bar widths are set via element.style.width in JS (see vote-charts.js), never inline in
-   this file — this stylesheet only owns the static box/track look. */
+.vote-pagination-prev,
+.vote-pagination-next {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.9em;
+}
+
+.vote-pagination-prev:hover:not(:disabled),
+.vote-pagination-next:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.flags-unavailable-notice {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ============================================================================
+   9. Vote aggregate charts (design spec §3 — deliberately ONE neutral fill for
+   every bar here; per-position board-strip coloring is a Task 2/3 render-code
+   change, not a pure-CSS one, so this is a flat token-based restatement of the
+   existing neutral-fill behavior, not a new visual system.)
+   ============================================================================ */
 
 .vote-charts {
   display: flex;
@@ -166,25 +638,28 @@ main#app {
   margin-bottom: 1.5rem;
 }
 
-.chart-section h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1em;
+.chart-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
 }
 
-/* M4 (task 6b review, fix round 1): the clickable distribution bars are real <button> elements
-   (site/js/vote-charts.js) for native keyboard/AT accessibility — this class is shared with the
-   plain-div, non-interactive party-comparison/cohesion bars, so the browser's default button
-   chrome (border, background, font, full-width text alignment) is reset back to look identical
-   to those plain rows; only :focus-visible gets a visible outline back, for keyboard users.
-   N-H(e) (task 6b review, fix round 2): `cursor: pointer` moved OFF this shared base rule and onto
-   a `button.chart-bar-row` selector below — the decorative party-comparison/cohesion rows (plain
-   divs, never clickable) no longer imply interactivity they don't have. */
+.chart-section h3 {
+  margin: 0 0 0.6rem;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
 .chart-bar-row {
   display: grid;
   grid-template-columns: 7rem 1fr auto;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.15rem 0;
+  padding: 0.2rem 0;
   width: 100%;
   border: none;
   background: none;
@@ -198,23 +673,13 @@ button.chart-bar-row {
   cursor: pointer;
 }
 
-.chart-bar-row:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 2px;
-}
-
-/* N-C (task 6b review, fix round 2): the bar-driven vote-list filter (position=eq.yea, or the
-   missed-only bucket) was invisible once applied — no color implies "good/bad" here, only that
-   THIS bar is the one currently narrowing the vote list below. Bold label + a track outline, never
-   a fill-color change (that would drift toward the same good/bad implication the neutral fill
-   color everywhere else in this file exists to avoid). */
 .chart-bar-active .chart-bar-label {
   font-weight: 700;
-  color: inherit;
+  color: var(--fg);
 }
 
 .chart-bar-active .chart-bar-track {
-  outline: 1px solid var(--link);
+  outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -222,17 +687,14 @@ button.chart-bar-row {
   margin: 0.35rem 0 0;
   font-size: 0.85em;
   background: none;
-  border: 1px solid var(--muted);
-  border-radius: 3px;
-  padding: 0.15rem 0.5rem;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.6rem;
+  color: var(--fg);
 }
 
 .chart-definitions-link {
   display: inline-block;
-  margin-top: 0.25rem;
+  margin-top: 0.35rem;
   font-size: 0.85em;
 }
 
@@ -243,19 +705,22 @@ button.chart-bar-row {
 
 .chart-bar-track {
   background: color-mix(in srgb, var(--muted) 25%, transparent);
-  border-radius: 2px;
+  border-radius: 3px;
   height: 0.6rem;
   overflow: hidden;
 }
 
 .chart-bar-fill {
-  background: var(--link);
+  background: var(--neutral-bar);
   height: 100%;
 }
 
 .chart-bar-value {
-  font-size: 0.85em;
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8em;
   white-space: nowrap;
+  color: var(--muted);
 }
 
 .chart-not-computable {
@@ -263,12 +728,28 @@ button.chart-bar-row {
   font-style: italic;
 }
 
-/* Task 9 — bill page (site/bill.html). Functional only, same minimal-polish level as the profile
-   page's own first pass (final visual polish is a later step, design spec's own "Build order"). */
+/* ============================================================================
+   10. Bill page (site/bill.html)
+   ============================================================================ */
+
+.bill-title {
+  color: var(--muted);
+  font-size: 15px;
+}
 
 .bill-mo-disclaimer {
+  color: var(--faint);
+  font-size: 0.85em;
+}
+
+.bill-session {
   color: var(--muted);
   font-size: 0.9em;
+}
+
+.bill-official-link-unavailable {
+  color: var(--faint);
+  font-size: 0.85em;
 }
 
 .bill-vote-list,
@@ -278,60 +759,88 @@ button.chart-bar-row {
 }
 
 .bill-vote-row {
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--muted);
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border-faint);
 }
 
-.bill-vote-tally {
+.bill-vote-chamber {
+  color: var(--faint);
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.2rem;
+}
+
+.bill-vote-question {
+  font-weight: 600;
+}
+
+.bill-vote-result {
   color: var(--muted);
   font-size: 0.9em;
 }
 
-.bill-summary-fallback-note {
+.bill-vote-tally {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
-  font-style: italic;
+  font-size: 0.9em;
 }
 
-.bill-verification-note {
-  color: var(--muted);
-  font-size: 0.85em;
-  margin-top: 0.75rem;
+.bill-vote-source-link,
+.bill-vote-source-unavailable {
+  font-size: 0.8em;
+  color: var(--faint);
 }
 
+.bill-summary-none,
+.bill-summary-fallback-note,
 .bill-glossary-unavailable {
   color: var(--muted);
   font-style: italic;
 }
 
-/* Fix round 1, LOW-7 (task-9 review) — a not-found bill (site/js/bill-page.js's
-   setNotFoundLayout) hides the static section headings/containers so they never imply sections
-   exist for a bill that doesn't. #bill-identity (the not-found message itself) stays visible. */
-main#app.bill-not-found h2,
-main#app.bill-not-found section:not(#bill-identity) {
+.bill-summary-purpose {
+  font-weight: 600;
+}
+
+.bill-summary-plain-line {
+  margin: 0.25rem 0;
+}
+
+.bill-verification-note {
+  color: var(--faint);
+  font-size: 0.85em;
+  margin-top: 0.75rem;
+}
+
+/* Fix round 1, LOW-7 (task-9 review) — a not-found bill hides the static section headings/
+   containers so they never imply sections exist for a bill that doesn't. #bill-identity (the
+   not-found message itself) stays visible. Preserved verbatim from the previous stylesheet. */
+main.board-main.bill-not-found h2,
+main.board-main.bill-not-found section:not(#bill-identity) {
   display: none;
 }
 
-/* Glossary inline (site/js/glossary-inline.js) — a matched term reads as an underlined, focusable
-   inline element (native <dfn> semantics kept; interactivity layered on top via tabIndex/role, not
-   a real <button>, since a term-in-running-text is a definition reference first). Same "no
-   good/bad implication" color discipline site.css already applies to the vote-chart bars: one
-   neutral treatment for every term, never anything party- or valence-coded. */
-.gloss-term {
-  cursor: pointer;
-  border-bottom: 1px dotted var(--link);
-  font-style: normal;
-}
+/* ============================================================================
+   11. Glossary inline + bullet citation toggles (site/js/glossary-inline.js,
+   the citation half of site/js/bill-page.js) — same "click for the receipt"
+   affordance, styled identically on purpose.
+   ============================================================================ */
 
-.gloss-term:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 2px;
+.gloss-term,
+.bill-citation-toggle {
+  cursor: pointer;
+  border-bottom: 1px dotted var(--accent);
+  font-style: normal;
 }
 
 .gloss-detail {
   margin: 0.35rem 0 0.75rem;
   padding: 0.5rem 0.75rem;
-  border-left: 2px solid var(--muted);
+  border-left: 2px solid var(--accent);
   font-size: 0.9em;
+  background: var(--surface);
 }
 
 .gloss-detail-heading {
@@ -339,57 +848,37 @@ main#app.bill-not-found section:not(#bill-identity) {
   margin: 0 0 0.25rem;
 }
 
-/* MED-1 (task-9 review) — a single gloss-detail block can hold MULTIPLE entries (duplicate term
-   text, different citations); each gets its own heading, so a visible gap keeps them from reading
-   as one run-on block. */
 .gloss-detail-entry + .gloss-detail-entry {
   margin-top: 0.6rem;
   padding-top: 0.6rem;
-  border-top: 1px solid var(--muted);
+  border-top: 1px solid var(--border);
 }
 
-.gloss-quote {
-  color: var(--muted);
-  margin: 0.35rem 0;
-  padding-left: 0.5rem;
-  border-left: 2px solid var(--muted);
-}
-
-/* Bullet-citation-exposure design (2026-08-02) — same treatment as .gloss-term/.gloss-quote above,
-   deliberately: both are "click to see the receipt behind this claim" affordances, so they should
-   look and behave the same way. A bullet with no citation on file keeps the old plain, unstyled
-   .bill-summary-bullet-section span — this rule only applies to the interactive variant. */
-.bill-citation-toggle {
-  cursor: pointer;
-  border-bottom: 1px dotted var(--link);
-}
-
-.bill-citation-toggle:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 2px;
-}
-
+.gloss-quote,
 .bill-citation-quote {
-  color: var(--muted);
+  color: var(--faint);
   margin: 0.35rem 0;
   padding-left: 0.5rem;
-  border-left: 2px solid var(--muted);
+  border-left: 2px solid var(--border);
 }
 
-/* Task 10 — the trust page (site/trust.html / site/js/trust-page.js). Functional only, same
-   minimal-polish level as every other page's first pass. */
-
-main#app.trust-page {
-  max-width: 720px;
+.gloss-source-link,
+.gloss-source-unavailable {
+  font-size: 0.85em;
+  color: var(--faint);
 }
+
+/* ============================================================================
+   12. Trust page (site/trust.html / site/js/trust-page.js)
+   ============================================================================ */
 
 .trust-page section {
   margin-bottom: 2rem;
 }
 
 .trust-page section h2 {
-  border-bottom: 1px solid var(--muted);
-  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
 }
 
 .metric-definition {
@@ -411,8 +900,19 @@ main#app.trust-page {
   padding: 0;
 }
 
+.counts-list li {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+
 .counts-label {
   font-weight: 600;
+}
+
+.counts-value {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 .freshness-table {
@@ -424,12 +924,12 @@ main#app.trust-page {
 .freshness-table th,
 .freshness-table td {
   text-align: left;
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--muted);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border-faint);
 }
 
 .freshness-row-quarantine td {
-  color: #b00020;
+  color: var(--accent);
 }
 
 .attribution-list {
@@ -440,36 +940,31 @@ main#app.trust-page {
   margin-bottom: 0.75rem;
 }
 
-/* Directory "Serving now / Past members" toggle (2026-08-06 spec). */
+/* ============================================================================
+   13. Focus + motion (last — applies across every component above)
+   ============================================================================ */
 
-.directory-toggle {
-  display: inline-flex;
-  border: 1px solid var(--muted);
-  border-radius: 6px;
-  overflow: hidden;
-  margin: 0.5rem 0 0.25rem;
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
-.directory-toggle button {
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  padding: 0.4rem 0.9rem;
-  font: inherit;
-  cursor: pointer;
+a,
+button,
+.chart-bar-row,
+.directory-toggle button,
+.gloss-term,
+.bill-citation-toggle,
+.directory-row {
+  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
-.directory-toggle button + button {
-  border-left: 1px solid var(--muted);
-}
-
-.directory-toggle button[aria-pressed="true"] {
-  background: var(--link);
-  color: var(--bg);
-}
-
-.directory-footnote {
-  color: var(--muted);
-  font-size: 0.85em;
-  margin: 0.25rem 0 0.75rem;
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }

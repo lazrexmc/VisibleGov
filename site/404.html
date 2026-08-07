@@ -8,6 +8,12 @@
   <link rel="stylesheet" href="/css/site.css" />
 </head>
 <body>
+  <header class="site-header">
+    <a class="wordmark" href="/">VISIBLE<span class="wordmark-accent">GOV</span></a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/">Directory</a> · <a href="/trust">Trust</a>
+    </nav>
+  </header>
   <!-- site/404.html — Cloudflare Pages serves this automatically for any path that matches no
        static asset and no _redirects rule. Decided in the 2026-08-03 deploy-spec brainstorm
        (section 1), built 2026-08-05 as a pre-deploy item.
@@ -18,12 +24,13 @@
        working data layer is a 404 page that can show a blank screen at the exact moment someone
        needs an explanation. Static markup only, no fetch, no module script.
 
-       No nav element is included because the site has no persistent nav bar — index.html is the
-       directory and the only hub, so a plain link back to it IS the navigation. The footer is
-       likewise omitted rather than faked: site/js/render.js's mountFooter fills #site-footer with
-       real source attribution at runtime, and hand-copying a static lookalike here would create
+       The shared site-header above (2026-08-07 Voting Board redesign, Task 1) is static markup
+       only — a wordmark link and two plain <a> tags, no script, so it costs nothing toward the
+       "must render with zero JS" contract this page exists to satisfy. The footer is still
+       omitted rather than faked: site/js/render.js's mountFooter fills #site-footer with real
+       source attribution at runtime, and hand-copying a static lookalike here would create
        exactly the kind of second, drifting copy this project keeps getting bitten by. -->
-  <main id="app">
+  <main id="app" class="board-main">
     <h1>VisibleGov</h1>
     <section aria-label="Page not found">
       <h2>Page not found</h2>
