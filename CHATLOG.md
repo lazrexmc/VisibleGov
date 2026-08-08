@@ -3255,3 +3255,20 @@ largest single wave yet. Cumulative fresh-opus waves E+F+G: 44 published of 80 a
 Live: 211 published, 266 drafts. Lance called a pause to survey. Session total across all engines
 (waves 3/A-G + API runs): 96 net new published summaries; every one adversarially verified,
 completeness-checked, hash-pinned, and publicly bylined with its true author/verifier models.
+
+## 2026-08-08 — wave H proves the completeness-floor fix live: 12/12 tiny bills published, a first
+
+Lance picked "1" from the survey (fix the tiny-bill catch-22) then "proceed with small wave over
+fresh tiny bills." The fix (shipped earlier today, TDD + independent review): the completeness
+gate's provision floor is now length-scaled — 1 provision for bills under 2,500 chars, 2 under
+5,000, 3 otherwise — derived from the hash-pinned stored text, with all three checker dispatch
+prompts realigned to say "list only the real provisions; never pad with enactment boilerplate."
+
+Wave H: 12 fresh sub-1,200-char bills (memorial-highway designations, Jackie Robinson Day, powdered
+alcohol ban, World Cup ticket tax exemption, three federal CRA disapproval resolutions...), 48
+agents, 0 errors, ~1.9M tokens, ~4 minutes. Result: **12/12 published, 0 flagged, 0 rejects — the
+first perfect wave.** Live: 211 -> 223 published. The floor fix did exactly what it was built for:
+checkers emitted 1-2 honest provisions on genuinely tiny bills (HB 1552's checker listed exactly ONE
+provision — the military-spouse licensure priority — and the gate accepted it; under the old fixed
+floor of 3 that same envelope was structurally unpublishable, which is why wave C went 0-for-20 on
+this exact class). ~24 fresh tiny bills remain in the current manifest for future waves.
