@@ -3401,3 +3401,6 @@ memory written).
   **3 published, 9 flagged, 0 rejects** (25% — reported the worsening tokens-per-publish economics
   to Lance mid-campaign with a pivot offer; continuing per his standing directive unless he
   redirects). Live: 312 -> 315 published. Budget: 9.58M / 18M.
+- **Wave W** (12 bills, 104-125k chars: congressional redistricting, three taxation omnibuses,
+  911 services, workplace retirement plans): 48 agents, 0 errors, 3.74M tokens. **4 published,
+  8 flagged, 0 rejects.** Live: 315 -> 319 published. Budget: 13.32M / 18M.
