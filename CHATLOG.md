@@ -3288,3 +3288,20 @@ repeals-and-replaces 565.003), and SCR 37's bullet said "Army Corps of Engineers
 clause prints only "the Corps." The verifier holding that line on 2,000-char bills is the trust
 model working, not friction. The fresh-tiny manifest class is now EMPTY — next waves draw from the
 mid-size fresh pool (~55-75% measured publish rate).
+
+## 2026-08-08 — wave J (minimal batch, first read on the mid-size pool): 5/8 published, live at 247
+
+Lance: "Proceed with a minimal sized batch of the next wave." The fresh pool jumps straight from
+2.5k to ~9k chars (everything between was already summarized or banked), so wave J = the 8 smallest
+mid-size bills (8,895-9,922 chars: Article V convention commissioners, trust instruments,
+promoting-prostitution penalties, speed limits, orders-of-protection age change, a facilities
+appropriation, whistle-blower protection, water-district dissolution). 32 agents, 0 errors, ~1.5M
+tokens, ~11.5 min. Gates: **5 published, 3 flagged, 0 rejects** (62% — inside the measured 55-75%
+band). Live: 242 -> 247 published, 274 drafts.
+
+The three flags, each naming its exact defect: HB 736 failed COMPLETENESS — the summary omitted 3
+real provisions (the new "abusing a pet" / "pet" definitions in 455.010 and pet-danger as ex parte
+good cause in 455.513 — the pet-protection half of the bill); HB 18's bullet 0 over-paraphrased the
+appropriation's AN ACT paragraph; SB 786's bullet 11 said "the employer's action" where the cited
+text prints "the agency's action" — a single-word substitution the adversarial verifier caught and
+refused. 189 fresh bills remain in the manifest (~9.9k chars and up).
