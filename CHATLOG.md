@@ -3371,7 +3371,7 @@ shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
   nursing licensure compact): 36 agents, 0 errors, 2.16M tokens. **5 published, 4 flagged,
   0 rejects.** Live: 296 -> 301 published.
 
-**CAMPAIGN CLOSED at 17.65M / 18M tokens.** Seven waves (M-S), 81 envelopes through the gates,
+**CAMPAIGN 1 CLOSED at 17.65M / 18M tokens.** Seven waves (M-S), 81 envelopes through the gates,
 **44 published / 35 flagged / 2 rejects (both the HB 2465 re-enactment edge case), 0 failures,
 0 agent errors across 328 agents.** Publish rate fell with bill size exactly as the earlier
 measurements predicted (75% at 16-19k chars down to ~45% at 36-46k) — the flags are almost all
@@ -3380,3 +3380,14 @@ future re-author-with-objections pass. Full-day total (2026-08-08): **211 -> 301
 drafts 266 -> 315. Fresh manifest remaining: 93 bills (45.6k chars and up). Shutdown was clean:
 every wave recorded, live counts verified after each, all artifacts on disk
 (records-wave-{h..s}.json), CHATLOG current, everything pushed.
+
+## 2026-08-08 — campaign 2 (Lance: "we can use another 18M credits, proceed")
+
+Same machine, second 18M budget. Also noted mid-campaign: Lance has a parallel VS Code window
+building "Duarte-izer" with Claude (folder linked here; this window stays on VisibleGov —
+memory written).
+
+- **Wave T** (12 bills, 46.5-53.7k chars: prevailing-wage repeal, PT scope of practice,
+  judiciary/public-defender appropriation, abortion-facility funding/MO HealthNet, student
+  transfers): 48 agents, 0 errors, 2.93M tokens. **7 published, 5 flagged, 0 rejects.** Live:
+  301 -> 308 published. Budget: 2.93M / 18M.
