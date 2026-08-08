@@ -3321,3 +3321,17 @@ and miscounted a 13-paragraph membership list; SB 623's bullet dropped an explic
 out-of-state decal fee. Two-day identifier-collision note verified pre-launch: this wave's "HB 18"
 is a DIFFERENT bill (different bill_id/hash) than wave J's flagged HB 18 — MO reuses bill numbers
 across sessions; bill_id is the only key. 181 fresh bills remain (~13.2k chars and up).
+
+## 2026-08-08 — wave L: 5/8 published, live at 257; 62% holds for the third straight wave
+
+Lance: "Continue." Wave L = next 8 (13.2-15.8k chars: license-office bidding, civil proceedings,
+lobbyists, student transportation, LAGERS retirement coverage, trust companies, lagoon wastewater,
+protective orders). 32 agents, 0 errors, ~1.6M tokens, ~13 min. Gates: **5 published, 3 flagged,
+0 rejects** — 62% for the third consecutive mid-size wave. Live: 252 -> 257 published, 280 drafts.
+
+Flags: HB 1098 and HB 1713 both failed COMPLETENESS by exactly one omitted provision each (the
+certificate-of-reciprocity fiduciary-authorization statement; the Clean Water Commission
+re-establishment tucked into the lagoon bill — the completeness checker catching a rider the title
+never mentions is precisely the mechanism working); HB 137's bullet 5 dropped a precondition on
+when negotiated contracts are allowed. Day total: 46 published (211 -> 257). 173 fresh bills remain
+(~15.9k chars and up).
