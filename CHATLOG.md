@@ -3247,3 +3247,11 @@ yield: ~1 publish per ~3M subscription tokens. Fresh opus-authored waves yield ~
 future re-author-with-objections pass), not direct publishes. Live: 167 published, 230 drafts.
 Paused the drain to put the numbers in front of Lance rather than burn his weekly tokens at 1/15th
 efficiency against his own stated goal.
+
+## 2026-08-08 — pause point after wave G: 211 published (115 -> 211 in three days)
+
+Wave G (40 fresh bills, 160 agents, 7.2M tokens): 23 published, 17 flagged, 0 failures — the
+largest single wave yet. Cumulative fresh-opus waves E+F+G: 44 published of 80 attempted (55%).
+Live: 211 published, 266 drafts. Lance called a pause to survey. Session total across all engines
+(waves 3/A-G + API runs): 96 net new published summaries; every one adversarially verified,
+completeness-checked, hash-pinned, and publicly bylined with its true author/verifier models.
