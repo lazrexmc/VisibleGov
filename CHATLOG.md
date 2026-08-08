@@ -3335,3 +3335,14 @@ re-establishment tucked into the lagoon bill — the completeness checker catchi
 never mentions is precisely the mechanism working); HB 137's bullet 5 dropped a precondition on
 when negotiated contracts are allowed. Day total: 46 published (211 -> 257). 173 fresh bills remain
 (~15.9k chars and up).
+
+## 2026-08-08 — the 18M-token campaign (Lance: "Spend 18,000,000 tokens... then shut down safely")
+
+Autonomous wave campaign, batches of 12, recording each wave through the gates as it lands;
+shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
+
+- **Wave M** (12 bills, 15.9-19.3k chars): 48 agents, 0 errors, 2.40M tokens. **9 published,
+  2 flagged, 1 rejected** — the reject is HB 2465, whose checker honestly listed only 2 provisions
+  on a full-size (15.9k) definitions-rewrite bill; the >=5k floor of 3 bound, envelope refused,
+  bill stays fresh for a future retry. Flags: HB 112 omitted boards' rulemaking authority; one
+  verifier catch. Live: 257 -> 266 published. Budget: 2.40M / 18M.
