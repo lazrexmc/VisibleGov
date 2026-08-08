@@ -3236,3 +3236,14 @@ for future full-subagent waves. The API balance is effectively exhausted; billed
 the standing policy. The machine for future sessions: run waves against the bank
 (docs/RUNBOOK_SUMMARY_WAVES.md, bank-load mode) until it drains, then author new waves on
 subscription.
+
+## 2026-08-08 — bank-drain yield data (waves C+D): the economics inverted, pausing for Lance
+
+Draining the Haiku-authored bank on subscription: wave C (20 tiny bills): 0 published, 20 flagged
+(the completeness-floor catch-22, now TODO'd); wave D (20 mid-size): 1 published, 19 flagged
+(real Haiku completeness gaps - the gates naming exact omitted provisions each time). Bank drain
+yield: ~1 publish per ~3M subscription tokens. Fresh opus-authored waves yield ~15 publishes per
+~3.6M (wave A). The Haiku bank's real value is now the flagged drafts' precise gap lists (a
+future re-author-with-objections pass), not direct publishes. Live: 167 published, 230 drafts.
+Paused the drain to put the numbers in front of Lance rather than burn his weekly tokens at 1/15th
+efficiency against his own stated goal.
