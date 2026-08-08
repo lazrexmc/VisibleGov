@@ -36,9 +36,11 @@ const VERIFY_SCHEMA = {
   },
 }
 
+// minItems 1, not 3: the gate's length-scaled floor (verifier.js minKeyProvisionsFor) is the real
+// bound — a schema floor of 3 forced tiny-bill checkers to pad with boilerplate (wave-C catch-22).
 const PROVISIONS_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['key_provisions'],
-  properties: { key_provisions: { type: 'array', minItems: 3, maxItems: 7, items: { type: 'object', additionalProperties: false, required: ['section', 'provision'], properties: { section: { type: 'string' }, provision: { type: 'string' } } } } },
+  properties: { key_provisions: { type: 'array', minItems: 1, maxItems: 7, items: { type: 'object', additionalProperties: false, required: ['section', 'provision'], properties: { section: { type: 'string' }, provision: { type: 'string' } } } } },
 }
 
 const COVERAGE_SCHEMA = {
@@ -58,7 +60,12 @@ const results = await pipeline(
   // The item should also carry author_model/author_provenance for the record envelope.
   (bill) => (bill.preAuthored
     ? Promise.resolve({ summary: bill.preAuthored })
-    : agent(
+    : bill.checkpoint_file
+      ? agent(
+        `Read the JSON file at ${REPO}/${bill.checkpoint_file}. Return EXACTLY the object stored under its "summary" key — a verbatim transcription, no edits, no additions, no reformatting of any string. If the file or key is missing, return {"what_it_does":[],"stated_purpose":"","classification":"other","referenced_terms":[]}.`,
+        { label: `bank-load:${bill.identifier}`, phase: 'Summarize', model: 'haiku', effort: 'low', schema: SUMMARY_SCHEMA }
+      ).then((summary) => ({ summary }))
+      : agent(
     `You are the AUTHOR stage of VisibleGov's trust-model-v3 summary chain. Read the system-prompt contract in ${REPO}/src/lib/summarizer.js (the SYSTEM_PROMPT constant, around line 68) and follow it EXACTLY — it is your authoring law (facts only, every point cites its section, no party framing, plain language, stated_purpose ONLY from the bill's own purpose/findings language else empty string, referenced_terms only what the text itself names).\n\nThen Read the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier} — ${JSON.stringify(bill.title)}). If that file is missing or empty, DO NOT summarize anything else — return an empty what_it_does (the gate will reject it, which is correct).\n\nADDITIONAL MECHANICAL RULES the code gates enforce:\n- stated_purpose, when non-empty, must be a VERBATIM substring of the bill text (whitespace may collapse; words/characters may not change). If the bill's purpose language cannot be quoted verbatim, return "".\n- Every field is SINGLE-LINE: no newline characters inside point/section/stated_purpose/term/citation_raw.\n- ${VERBATIM_RULE}\n\nProduce the summary per the schema.`,
     { label: `author:${bill.identifier}`, phase: 'Summarize', model: 'opus', schema: SUMMARY_SCHEMA }
     ).then((summary) => ({ summary }))),

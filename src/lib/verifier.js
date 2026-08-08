@@ -127,7 +127,7 @@ export const COMPLETENESS_SYSTEM_PROMPT = [
   'You are a completeness checker for a plain-language bill summary written by another model. Your job is to catch omissions, not to fact-check claims already made — a different pass already does that.',
   'You work in two separate phases, dispatched to you as two separate messages. Only do the phase named in the CURRENT message; do not anticipate the other phase.',
   'PHASE 1 — key provisions (you will be given ONLY the bill text for this phase; you have not been shown any summary and must not assume one, guess one, or write as if you have seen one):',
-  '- Read the bill text and list the provisions a reader must know to understand what this bill actually does — bounded to between 3 and 7 of the most consequential provisions.',
+  '- Read the bill text and list the provisions a reader must know to understand what this bill actually does — bounded to between 3 and 7 of the most consequential provisions for a full-size bill. If the bill genuinely contains fewer than 3 substantive provisions (common in very short bills), list ONLY the real ones — never pad with enactment or codification boilerplate ("Chapter X is amended by adding section Y" is the vehicle, not a provision).',
   '- For each provision, name the section it lives in, copied from the bill text, and give a short, factual statement of what it does.',
   '- Facts only: state what the text does, nothing more. No significance language beyond what the text itself supports — write "bars judicial review of the reissuance," never "an alarming limitation on judicial review."',
   'PHASE 2 — coverage (you will be given your own phase 1 key_provisions list back, plus the summary\'s bullets, in a later message):',
@@ -144,6 +144,21 @@ export const COMPLETENESS_SYSTEM_PROMPT = [
 export const MIN_KEY_PROVISIONS = 3;
 export const MAX_KEY_PROVISIONS = 7;
 
+// Length-scaled mechanical floor (2026-08-08, the wave-C tiny-bill catch-22 fix): a sub-2,500-char
+// bill (a day designation, a single-section fee change) genuinely carries 1-2 substantive
+// provisions, and a fixed floor of 3 forced checkers to pad with enactment boilerplate the AUTHOR
+// contract rightly omits — making every tiny bill structurally unpublishable (20 support-clean
+// bills flagged in one wave). The floor derives from billText.length — an objective input the gate
+// already holds — never from the checker's self-report. Garbage input falls back to the
+// conservative standard floor; the floor never reaches 0 (assessCompleteness rejects zero
+// provisions unconditionally before this bound is consulted).
+export function minKeyProvisionsFor(billTextLength) {
+  if (!Number.isFinite(billTextLength) || billTextLength < 0) return MIN_KEY_PROVISIONS;
+  if (billTextLength < 2500) return 1;
+  if (billTextLength < 5000) return 2;
+  return MIN_KEY_PROVISIONS;
+}
+
 export const COMPLETENESS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -151,9 +166,12 @@ export const COMPLETENESS_SCHEMA = {
   properties: {
     key_provisions: {
       type: 'array',
-      minItems: MIN_KEY_PROVISIONS,
+      // minItems is deliberately 1, NOT MIN_KEY_PROVISIONS: a schema floor of 3 forced checkers
+      // on genuinely-tiny bills to pad with enactment boilerplate (the wave-C catch-22). The gate
+      // (assessCompleteness + minKeyProvisionsFor) enforces the real, length-scaled floor.
+      minItems: 1,
       maxItems: MAX_KEY_PROVISIONS,
-      description: 'Phase 1 output: the 3-7 provisions a reader must know, formed from the bill text ONLY, without reference to the summary',
+      description: 'Phase 1 output: the provisions a reader must know (up to 7; at least 1, and at least 3 for a full-size bill), formed from the bill text ONLY, without reference to the summary',
       items: {
         type: 'object',
         additionalProperties: false,
@@ -226,15 +244,17 @@ export function assessCompleteness(completeness, bulletCount, billText) {
   if (keyProvisions.length === 0) {
     return { overall: 'malformed', missing: [], reasons: ['zero key_provisions — a checker that finds no provisions has not checked anything'] };
   }
-  // The schema asks for MIN..MAX provisions; this enforces it. Below the floor the check is too
-  // thin to support the receipt it would earn (one covered provision is not evidence a summary
-  // covers the bill); above the ceiling the checker ignored its instructions, so its output is
-  // not the artifact this gate was designed to assess. Either way: malformed, never publishable.
-  if (keyProvisions.length < MIN_KEY_PROVISIONS || keyProvisions.length > MAX_KEY_PROVISIONS) {
+  // The floor scales with the bill's own length (minKeyProvisionsFor — the wave-C tiny-bill fix);
+  // the ceiling stays fixed. Below the floor the check is too thin to support the receipt it
+  // would earn (for a full-size bill, one covered provision is not evidence a summary covers it);
+  // above the ceiling the checker ignored its instructions, so its output is not the artifact
+  // this gate was designed to assess. Either way: malformed, never publishable.
+  const minRequired = minKeyProvisionsFor(typeof billText === 'string' ? billText.length : NaN);
+  if (keyProvisions.length < minRequired || keyProvisions.length > MAX_KEY_PROVISIONS) {
     return {
       overall: 'malformed',
       missing: [],
-      reasons: [`key_provisions has ${keyProvisions.length} entries, outside the required ${MIN_KEY_PROVISIONS}-${MAX_KEY_PROVISIONS} — the check does not meet the standard its verdict would claim`],
+      reasons: [`key_provisions has ${keyProvisions.length} entries, outside the required ${minRequired}-${MAX_KEY_PROVISIONS} — the check does not meet the standard its verdict would claim`],
     };
   }
 

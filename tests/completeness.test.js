@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   COMPLETENESS_SCHEMA, COMPLETENESS_SYSTEM_PROMPT, COMPLETENESS_PROMPT_VERSION,
   buildProvisionsMessage, buildCoverageMessage, assessCompleteness,
-  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS,
+  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS, minKeyProvisionsFor,
 } from '../src/lib/verifier.js';
 
 // ---- COMPLETENESS_PROMPT_VERSION ----
@@ -27,8 +27,12 @@ test('COMPLETENESS_SCHEMA.key_provisions items require section + provision, addi
   assert.ok(item.properties.provision);
 });
 
-test('COMPLETENESS_SCHEMA.key_provisions is bounded to 3-7 entries', () => {
-  assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.minItems, 3);
+test('COMPLETENESS_SCHEMA.key_provisions allows down to 1 entry (the gate enforces the REAL, length-scaled floor); ceiling stays 7', () => {
+  // 2026-08-08 (wave-C catch-22 fix): a schema minItems of 3 FORCED checkers on sub-3-provision
+  // bills to pad with enactment boilerplate the author contract rightly omits, making tiny bills
+  // structurally unpublishable. The schema now permits 1+; minKeyProvisionsFor(billText.length)
+  // is the mechanical floor assessCompleteness actually enforces.
+  assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.minItems, 1);
   assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.maxItems, 7);
 });
 
@@ -241,12 +245,13 @@ test('assessCompleteness: a non-empty billText argument of "" cannot ground anyt
 // verdict — and the same public "covers the bill's key provisions" receipt — as a real check.
 // A schema bound is a request to the checker; trust model v3 says never assume compliance.
 
-test('assessCompleteness: fewer than MIN_KEY_PROVISIONS -> malformed (a thin check cannot earn the receipt)', () => {
+test('assessCompleteness: fewer than the floor on a FULL-SIZE bill -> malformed (a thin check cannot earn the receipt; the scaled floor only relaxes for genuinely tiny bills)', () => {
+  const fullSizeText = `${BILL_TEXT}${'x '.repeat(3000)}`; // >=5000 chars -> floor is the standard 3
   const thin = {
     key_provisions: [{ section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' }],
     coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'covered' }],
   };
-  const result = assessCompleteness(thin, 3, BILL_TEXT);
+  const result = assessCompleteness(thin, 3, fullSizeText);
   assert.equal(result.overall, 'malformed');
   assert.match(result.reasons[0], /1 entries, outside the required 3-7/);
 });
@@ -264,10 +269,79 @@ test('assessCompleteness: more than MAX_KEY_PROVISIONS -> malformed (the checker
   }
   const result = assessCompleteness({ key_provisions: provisions, coverage }, 3, BILL_TEXT);
   assert.equal(result.overall, 'malformed');
-  assert.match(result.reasons[0], /8 entries, outside the required 3-7/);
+  assert.match(result.reasons[0], /8 entries, outside the required 1-7/);
 });
 
-test('MIN/MAX_KEY_PROVISIONS are the same values the schema declares (no drift between the ask and the enforcement)', () => {
-  assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.minItems, MIN_KEY_PROVISIONS);
+test('MAX_KEY_PROVISIONS matches the schema ceiling; the schema FLOOR is deliberately 1 (the gate scales the real floor by bill length)', () => {
   assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.maxItems, MAX_KEY_PROVISIONS);
+  assert.equal(COMPLETENESS_SCHEMA.properties.key_provisions.minItems, 1);
+  assert.equal(MIN_KEY_PROVISIONS, 3); // the standard floor for full-size bills, unchanged
+});
+
+// ---- length-scaled mechanical floor (2026-08-08, the wave-C tiny-bill catch-22 fix) ----
+
+test('minKeyProvisionsFor: <2500 chars -> 1; <5000 -> 2; >=5000 -> 3; garbage input -> the conservative 3', () => {
+  assert.equal(minKeyProvisionsFor(0), 1);
+  assert.equal(minKeyProvisionsFor(2499), 1);
+  assert.equal(minKeyProvisionsFor(2500), 2);
+  assert.equal(minKeyProvisionsFor(4999), 2);
+  assert.equal(minKeyProvisionsFor(5000), 3);
+  assert.equal(minKeyProvisionsFor(400000), 3);
+  assert.equal(minKeyProvisionsFor(NaN), 3);
+  assert.equal(minKeyProvisionsFor(undefined), 3);
+  assert.equal(minKeyProvisionsFor(-1), 3);
+});
+
+test('assessCompleteness: ONE grounded, covered provision on a tiny bill (<2500 chars) -> complete (no boilerplate padding required)', () => {
+  // BILL_TEXT is ~150 chars — a genuinely tiny bill. One real provision is a real check.
+  const payload = {
+    key_provisions: [{ section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'covered' }],
+  };
+  const result = assessCompleteness(payload, 1, BILL_TEXT);
+  assert.equal(result.overall, 'complete');
+});
+
+test('assessCompleteness: TWO provisions on a mid-tiny bill (2500-4999 chars) -> complete; ONE on the same bill -> malformed (below its floor of 2)', () => {
+  const midText = `${BILL_TEXT}${'x '.repeat(1600)}`; // ~3350 chars
+  const two = {
+    key_provisions: [
+      { section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' },
+      { section: 'SEC. 2.', provision: 'Establishes a grant program.' },
+    ],
+    coverage: [
+      { provision_index: 0, covered: true, bullet_index: 0, note: 'covered' },
+      { provision_index: 1, covered: true, bullet_index: 1, note: 'covered' },
+    ],
+  };
+  assert.equal(assessCompleteness(two, 2, midText).overall, 'complete');
+
+  const one = {
+    key_provisions: [{ section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'covered' }],
+  };
+  const result = assessCompleteness(one, 1, midText);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons[0], /outside the required 2-7/);
+});
+
+test('assessCompleteness: TWO provisions on a full-size bill (>=5000 chars) -> malformed (the standard floor of 3 still binds)', () => {
+  const bigText = `${BILL_TEXT}${'x '.repeat(3000)}`; // ~6150 chars
+  const two = {
+    key_provisions: [
+      { section: 'SEC. 1.', provision: 'Bars judicial review of the reissuance.' },
+      { section: 'SEC. 2.', provision: 'Establishes a grant program.' },
+    ],
+    coverage: [
+      { provision_index: 0, covered: true, bullet_index: 0, note: 'covered' },
+      { provision_index: 1, covered: true, bullet_index: 1, note: 'covered' },
+    ],
+  };
+  const result = assessCompleteness(two, 2, bigText);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons[0], /outside the required 3-7/);
+});
+
+test('assessCompleteness: zero provisions stays malformed at EVERY size — the scaled floor never reaches 0', () => {
+  assert.equal(assessCompleteness({ key_provisions: [], coverage: [] }, 3, 'x').overall, 'malformed');
 });
