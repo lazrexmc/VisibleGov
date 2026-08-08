@@ -3404,3 +3404,17 @@ memory written).
 - **Wave W** (12 bills, 104-125k chars: congressional redistricting, three taxation omnibuses,
   911 services, workplace retirement plans): 48 agents, 0 errors, 3.74M tokens. **4 published,
   8 flagged, 0 rejects.** Live: 315 -> 319 published. Budget: 13.32M / 18M.
+- **Wave X** (FINAL — 11 bills, 125.5-141k chars: controlled substances/medical marijuana,
+  insurance, criminal offenses, workforce development, notaries): 44 agents, 0 errors, 3.88M
+  tokens. **3 published, 8 flagged, 0 rejects.** Live: 319 -> 322 published.
+
+**CAMPAIGN 2 CLOSED at 17.20M / 18M tokens.** Five waves (T-X), 59 envelopes, **21 published /
+38 flagged / 0 rejects, 0 failures, 0 agent errors across 236 agents.** The size-vs-publish-rate
+curve completed its arc: 58% at 46-54k chars down to 27% at 125-141k — flags on big omnibuses are
+overwhelmingly completeness omissions, each carrying its exact gap list. Combined two-campaign day
+(2026-08-08, campaigns 1+2 plus waves H-L before them): **211 -> 322 published (+111), drafts
+266 -> 353.** Fresh manifest remaining: 34 bills (141k+ chars — the true monster tail). The
+highest-value next engine move is no longer bigger fresh bills; it is the re-author-with-objections
+pass over the 353 drafts, whose flags now hold precise, mechanical gap lists (standing backlog
+item). Shutdown clean: all waves recorded, counts live-verified after each, artifacts on disk
+(records-wave-{h..x}.json), pushed.
