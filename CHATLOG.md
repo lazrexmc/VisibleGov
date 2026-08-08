@@ -3391,3 +3391,8 @@ memory written).
   judiciary/public-defender appropriation, abortion-facility funding/MO HealthNet, student
   transfers): 48 agents, 0 errors, 2.93M tokens. **7 published, 5 flagged, 0 rejects.** Live:
   301 -> 308 published. Budget: 2.93M / 18M.
+- **Wave U** (12 bills, 55.8-76k chars: bank filing modernization, video lottery terminals, the
+  marriage-age/sex-offender bill, Fiduciary Access to Digital Assets, a 71k transportation/public-
+  safety appropriation): 48 agents, 0 errors, 3.10M tokens. **4 published, 8 flagged, 0 rejects**
+  (33% — the size trend continues; 3 of 8 were completeness). Live: 308 -> 312 published.
+  Budget: 6.03M / 18M.
