@@ -3357,3 +3357,6 @@ shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
   6 flagged, 0 rejects** (50% — bigger bills flag more, as expected). Completeness caught another
   buried rename (the "Missouri public services fund"); one more verifier parenthesis-binding
   catch. Live: 273 -> 279 published. Budget: 7.45M / 18M.
+- **Wave P** (12 bills, 27.7-31.9k chars): 48 agents, 0 errors, 2.61M tokens. **6 published,
+  6 flagged, 0 rejects.** Completeness flags incl. the Address Confidentiality Program expansion
+  bill omitting 2 provisions. Live: 279 -> 285 published. Budget: 10.06M / 18M.
