@@ -3346,3 +3346,10 @@ shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
   on a full-size (15.9k) definitions-rewrite bill; the >=5k floor of 3 bound, envelope refused,
   bill stays fresh for a future retry. Flags: HB 112 omitted boards' rulemaking authority; one
   verifier catch. Live: 257 -> 266 published. Budget: 2.40M / 18M.
+- **Wave N** (12 bills, 15.9-22.7k chars): 48 agents, 0 errors, 2.52M tokens. **7 published,
+  4 flagged, 1 rejected** — HB 2465's RETRY failed identically (fresh checker, same honest
+  2-provision count): the bill is a repeal-and-re-enact where length >> substance, so it
+  structurally cannot pass the full-size floor; EXCLUDED from further waves this campaign (a
+  known-limitation class: re-enactment bills whose new matter is under 3 provisions). Flags incl.
+  SB 655's summary omitting fertilizer-deficiency penalties and a verdict-binding parenthesis
+  mismatch. Live: 266 -> 273 published. Budget: 4.92M / 18M.
