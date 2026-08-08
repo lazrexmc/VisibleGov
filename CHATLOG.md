@@ -3206,3 +3206,25 @@ sonnet (~$0.10).
 ~$0.04-0.06 small bills, ~$0.08-0.10 queue average with batch pricing -> whole queue ~$200-250,
 $7 ~ 80-100 bills. Awaiting Lance's next move (salvage the 8 + production runs vs plan-token
 waves only).
+
+## 2026-08-08 (overnight) — the two-lane engine: 115 -> 166 published; colorblind fix; exhaust-everything mode
+
+Lance (AFK, sequential directives): use subscription + API until exhausted -> dollars frugally,
+subscription for setup -> and the disclosure that he is red/green colorblind. Executed:
+
+- **API lane:** run 1 (full-chain, stopped mid-flight when frugality directive landed - but it had
+  already fully processed 112 bills): 28 published, 74 flagged, 10 checker-rejects banked. The $2
+  Haiku probe's lessons held: Haiku authors pass gates at ~27% publish; sonnet-authored waves at
+  ~75%. Author-only banking run launched on the remaining balance (in flight).
+- **Subscription lane:** wave A (20 bills, opus-authored): 15 published, 5 flagged, 0 failures.
+  Wave B (the 10 banked rejects via the new bank-load transcription stage): 1 published, 9 flagged
+  - fresh sonnet verification caught real Haiku section-binding errors (HCR 58: facts pulled from
+  adjacent clauses). The hybrid per-stage provenance labels each stage truthfully
+  (api:claude-haiku-4-5 author / subagent:claude-sonnet-5 verifier).
+- **Colorblind accessibility (Lance: "colorblind AF... red/green/brown"):** the amber-vs-red
+  question self-resolved (amber IS the colorblind-safe choice); bigger: the site's yea/nay was
+  pure red/green. Shipped color-independence: Nay = hollow dot, Yea = filled; Nay chart segments
+  hatched. Deployed + live-verified. Suite 2373/0 throughout.
+
+Totals since 2026-08-06 morning: published 115 -> 166 (+51), drafts 98 -> 191 (flags are Lance's
+optional reading, never a backlog). All spend authorized: $2 probe + $7.50 run + author banking.
