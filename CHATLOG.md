@@ -3305,3 +3305,19 @@ good cause in 455.513 — the pet-protection half of the bill); HB 18's bullet 0
 appropriation's AN ACT paragraph; SB 786's bullet 11 said "the employer's action" where the cited
 text prints "the agency's action" — a single-word substitution the adversarial verifier caught and
 refused. 189 fresh bills remain in the manifest (~9.9k chars and up).
+
+## 2026-08-08 — wave K: 5/8 published, live at 252; the gates keep earning their keep
+
+Lance: "Continue." Wave K = the next 8 smallest fresh bills (10.3-13.2k chars: a supplemental
+facilities appropriation, residency-requirement preemption, school-board recall elections, a health
+care omnibus, the Missouri ABLE Program, fuel-tax increases, pharmacist vaccine administration,
+FRA extensions). 32 agents, 0 errors, ~1.7M tokens, ~15 min. Gates: **5 published, 3 flagged,
+0 rejects** — 62% again, matching wave J exactly. Live: 247 -> 252 published, 277 drafts.
+
+The flags: SB 41 failed COMPLETENESS (summary omitted the vaccine-authority core of the bill — the
+FDA-approved-vaccine list with its enumerated exclusions and the ShowMeVax notification/report
+duty); SB 275's bullet called a "premium tax" an "insurance tax" (a word the section never prints)
+and miscounted a 13-paragraph membership list; SB 623's bullet dropped an explicit carve-out on the
+out-of-state decal fee. Two-day identifier-collision note verified pre-launch: this wave's "HB 18"
+is a DIFFERENT bill (different bill_id/hash) than wave J's flagged HB 18 — MO reuses bill numbers
+across sessions; bill_id is the only key. 181 fresh bills remain (~13.2k chars and up).
