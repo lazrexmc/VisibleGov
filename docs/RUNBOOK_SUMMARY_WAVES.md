@@ -50,8 +50,13 @@ Division of labor that minimizes $ per published bill:
 - **Full-API runs** (`scripts/summary-probe-api.mjs` without `--author-only`, Sonnet checker
   default) remain for when Lance wants throughput beyond what the week's subscription can drain
   (~$0.04-0.10/bill smallest-first).
-- Every session with idle capacity should drain the bank: saturating the weekly limit IS the
-  strategy, per Lance.
+- Drain the bank with subscription waves ONLY when Lance has spare weekly capacity — ASK before
+  saturating (2026-08-07 refinement: *"I really dont want to burn it out already this week, I have
+  more to do"* — his other work owns the weekly tokens; waves take the leftovers).
+- **The final ~$2 platform balance (Lance, 2026-08-07): allocated to full-chain API runs on the
+  smallest queued bills** — the config that publishes with ZERO subscription draw (~$0.03-0.05/
+  bill). Cap actual runs at $1.85 to leave a payment-failure buffer. After it's gone, the billed
+  path is closed until Lance adds funds.
 
 ## Standing traps
 
