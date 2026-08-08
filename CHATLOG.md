@@ -3272,3 +3272,19 @@ checkers emitted 1-2 honest provisions on genuinely tiny bills (HB 1552's checke
 provision — the military-spouse licensure priority — and the gate accepted it; under the old fixed
 floor of 3 that same envelope was structurally unpublishable, which is why wave C went 0-for-20 on
 this exact class). ~24 fresh tiny bills remain in the current manifest for future waves.
+
+## 2026-08-08 — wave I clears the fresh-tiny class: 19/24 published, live at 242
+
+Lance: "next wave please." Wave I took ALL 24 remaining fresh sub-2,500-char bills (1,240-2,496
+chars — awareness-month designations, Senate concurrent resolutions, small substantive bills like
+animal-abuse penalties and inmate medical copays, two tiny appropriations, the Gulf of America Act):
+96 agents, 0 errors, ~4.0M tokens, ~9 minutes. Gates: **19 published, 5 flagged, 0 rejects.** Live:
+223 -> 242 published, 271 drafts. Combined tiny-bill record since the floor fix: 31/36 published
+(86%) vs 0% for this class before it.
+
+All 5 flags came from the adversarial verifier's section-binding rule, not completeness — e.g.
+SB 227's bullet cited "Section A" for a claim Section A alone doesn't prove (it only
+repeals-and-replaces 565.003), and SCR 37's bullet said "Army Corps of Engineers" where the cited
+clause prints only "the Corps." The verifier holding that line on 2,000-char bills is the trust
+model working, not friction. The fresh-tiny manifest class is now EMPTY — next waves draw from the
+mid-size fresh pool (~55-75% measured publish rate).
