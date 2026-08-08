@@ -3366,3 +3366,17 @@ shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
 - **Wave R** (12 bills, 36.5-41k chars: sunshine law, employment security, vaccine
   discrimination/workers' comp, education choice, child protection): 48 agents, 0 errors, 2.73M
   tokens. **6 published, 6 flagged, 0 rejects.** Live: 290 -> 296 published. Budget: 15.49M / 18M.
+- **Wave S** (FINAL — 9 bills sized to the remaining budget, 41.7-45.6k chars: two education
+  appropriations, Uniform Powers of Appointment, an abortion-law bill, banks/trust companies, the
+  nursing licensure compact): 36 agents, 0 errors, 2.16M tokens. **5 published, 4 flagged,
+  0 rejects.** Live: 296 -> 301 published.
+
+**CAMPAIGN CLOSED at 17.65M / 18M tokens.** Seven waves (M-S), 81 envelopes through the gates,
+**44 published / 35 flagged / 2 rejects (both the HB 2465 re-enactment edge case), 0 failures,
+0 agent errors across 328 agents.** Publish rate fell with bill size exactly as the earlier
+measurements predicted (75% at 16-19k chars down to ~45% at 36-46k) — the flags are almost all
+completeness omissions on many-provision bills, each one carrying its exact gap list for the
+future re-author-with-objections pass. Full-day total (2026-08-08): **211 -> 301 published (+90)**,
+drafts 266 -> 315. Fresh manifest remaining: 93 bills (45.6k chars and up). Shutdown was clean:
+every wave recorded, live counts verified after each, all artifacts on disk
+(records-wave-{h..s}.json), CHATLOG current, everything pushed.
