@@ -3178,3 +3178,31 @@ a JSON-array parameter - the script now tolerates both.
 scripts/export-summary-wave.mjs (code-generated batches), docs/RUNBOOK_SUMMARY_WAVES.md. Any
 future session runs a wave from Lance's one line ("run a summary wave of N"); his only role ever
 is the optional flag reading he has explicitly declined.
+
+## 2026-08-07 (night) — the $2 Haiku probe: authoring holds, checking does not; per-bill floor found at $0.026
+
+Lance: "I think you can do a lot more for a lot less and aren't trying hard enough" -> revised cost
+model (Batch API 50%, Sonnet intro pricing, Haiku on mechanical stages, monster-bill routing) ->
+Lance: "Proceed with a $2 haiku probe."
+
+Built: record's provenance channel (api:/subagent: labels, typed rejects on unknown values —
+TDD'd, suite 2371/0) + scripts/summary-probe-api.mjs (budget-capped, spend-tracked, per-stage
+checkpointing, smallest-first). Three paid lessons, each now encoded in the driver: (1) the SDK
+REQUIRES streaming at 16k-32k max_tokens ($0.29 learned); (2) API structured outputs reject array
+minItems>1 — and stage-3 400s were discarding PAID author+verify outputs before checkpointing
+existed ($1.43 learned, the expensive one); (3) smallest-first probing: 9 bills through all 4
+stages for $0.24 (avg $0.026/bill).
+
+**The quality verdict ($1.96 total):** Haiku AUTHORING survived — 9/9 schema-valid, and the one
+bill whose checker output was well-formed sailed through sonnet's adversarial support check
+(flagged only for a genuinely-omitted provision). Haiku CHECKING failed 8/9 — invented normalized
+citations ("115.295(2)" where the text prints none; wave-2's exact checker-invention class),
+under-count provisions, coverage/provision count mismatch. Every failure was caught by the
+mechanical gates pre-write; zero bad content touched the DB. The 8 bills' paid author+verify
+outputs are CHECKPOINTED on disk — salvageable by re-running only the two checker stages on
+sonnet (~$0.10).
+
+**Proven config for the billed path:** Haiku authors / Sonnet verifies / Sonnet checks ->
+~$0.04-0.06 small bills, ~$0.08-0.10 queue average with batch pricing -> whole queue ~$200-250,
+$7 ~ 80-100 bills. Awaiting Lance's next move (salvage the 8 + production runs vs plan-token
+waves only).

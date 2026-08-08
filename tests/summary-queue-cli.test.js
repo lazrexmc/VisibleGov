@@ -557,6 +557,48 @@ test('classifyRecordItem: rejects a verifier_model already carrying the \'subage
   );
 });
 
+// ---- provenance channel (2026-08-07, Lance's $2 Haiku API probe): a record item may declare how
+// its model calls were made — 'subagent' (the default, unchanged) or 'api' (billed Anthropic API
+// calls). The prefix is still applied exactly once, by this code; the stored label must never
+// claim a subagent ran when the API did. ----
+
+test('classifyRecordItem: provenance "api" labels both models api:, not subagent:', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const d = await classifyRecordItem(client, baseItem({
+    provenance: 'api', author_model: 'claude-haiku-4-5', verifier_model: 'claude-sonnet-5',
+  }));
+  assert.equal(d.authorModelLabel, 'api:claude-haiku-4-5');
+  assert.equal(d.verifierModelLabel, 'api:claude-sonnet-5');
+});
+
+test('classifyRecordItem: provenance omitted stays subagent: (back-compat, the wave path)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const d = await classifyRecordItem(client, baseItem());
+  assert.equal(d.authorModelLabel, 'subagent:claude-opus-5');
+});
+
+test('classifyRecordItem: rejects an unknown provenance value (never an unvetted label channel)', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ provenance: 'human' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /provenance/); return true; },
+  );
+});
+
+test('classifyRecordItem: rejects a model already carrying the \'api:\' prefix (prefix is applied once, by this code)', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ provenance: 'api', author_model: 'api:claude-haiku-4-5' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /author_model/); assert.match(err.message, /prefix/); return true; },
+  );
+});
+
 // ---- applyRecordDecision: write shapes ----
 
 test('applyRecordDecision: alreadySummarized performs no writes', async () => {

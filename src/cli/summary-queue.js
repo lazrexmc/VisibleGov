@@ -445,17 +445,26 @@ export function checkCitationsPresent(whatItDoes) {
 function validateModelLabel(value, fieldName) {
   if (value === undefined) return null;
   if (typeof value !== 'string' || value.trim() === '') return `record item's ${fieldName} must be a non-empty string when provided`;
-  if (value.startsWith('subagent:')) {
-    return `record item's ${fieldName} must be the bare model id — the 'subagent:' provenance prefix is applied by this code, never supplied by the caller`;
+  if (value.startsWith('subagent:') || value.startsWith('api:')) {
+    return `record item's ${fieldName} must be the bare model id — the provenance prefix is applied by this code, never supplied by the caller`;
   }
   return null;
 }
+
+// Provenance channel (2026-08-07, the $2 Haiku API probe): how the item's model calls were made.
+// 'subagent' = Claude Code subagents (the wave path, the default); 'api' = billed Anthropic API
+// calls. The stored label must never claim a subagent ran when the API did (or vice versa), and
+// there is no free-text channel — an unknown value is a typed pre-write reject.
+const PROVENANCE_VALUES = new Set(['subagent', 'api']);
 
 function validateEnvelope(item) {
   if (!item || typeof item !== 'object') return 'record item must be an object';
   if (typeof item.bill_id !== 'string' || !item.bill_id) return 'record item requires a non-empty bill_id';
   if (typeof item.bill_text_hash !== 'string' || !item.bill_text_hash) return 'record item requires a non-empty bill_text_hash';
   if (!item.summary || typeof item.summary !== 'object') return 'record item requires a summary object';
+  if (item.provenance !== undefined && !PROVENANCE_VALUES.has(item.provenance)) {
+    return `record item's provenance must be one of: ${[...PROVENANCE_VALUES].join(', ')}`;
+  }
   const authorModelError = validateModelLabel(item.author_model, 'author_model');
   if (authorModelError) return authorModelError;
   const verifierModelError = validateModelLabel(item.verifier_model, 'verifier_model');
@@ -507,13 +516,14 @@ export async function classifyRecordItem(client, item) {
   const already = (existingSummaries ?? []).find((s) => s.bill_text_hash === claimedHash && ALREADY_SUMMARIZED_STATUSES.has(s.status));
   if (already) return { action: 'alreadySummarized', billId, identifier, summaryId: already.id };
 
+  const provenance = item.provenance ?? 'subagent';
   const base = {
     billId,
     identifier,
     claimedHash,
     markdown: renderMarkdown(summary),
-    authorModelLabel: `subagent:${item.author_model ?? MODEL}`,
-    verifierModelLabel: `subagent:${item.verifier_model ?? VERIFIER_MODEL}`,
+    authorModelLabel: `${provenance}:${item.author_model ?? MODEL}`,
+    verifierModelLabel: `${provenance}:${item.verifier_model ?? VERIFIER_MODEL}`,
     referencedTerms: summary.referenced_terms ?? [],
   };
 
