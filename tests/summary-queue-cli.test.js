@@ -599,6 +599,27 @@ test('classifyRecordItem: rejects a model already carrying the \'api:\' prefix (
   );
 });
 
+test('classifyRecordItem: per-stage provenance — API-authored, subagent-verified labels each stage honestly (the hybrid pipeline)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const d = await classifyRecordItem(client, baseItem({
+    author_provenance: 'api', author_model: 'claude-haiku-4-5',
+    verifier_provenance: 'subagent', verifier_model: 'claude-sonnet-5',
+  }));
+  assert.equal(d.authorModelLabel, 'api:claude-haiku-4-5');
+  assert.equal(d.verifierModelLabel, 'subagent:claude-sonnet-5');
+});
+
+test('classifyRecordItem: rejects an unknown per-stage provenance value', async () => {
+  const client = fakeClient({}, () => assert.fail('no DB call should happen for a malformed envelope'));
+  await assert.rejects(
+    () => classifyRecordItem(client, baseItem({ author_provenance: 'vibes' })),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /provenance/); return true; },
+  );
+});
+
 // ---- applyRecordDecision: write shapes ----
 
 test('applyRecordDecision: alreadySummarized performs no writes', async () => {

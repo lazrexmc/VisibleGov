@@ -465,6 +465,14 @@ function validateEnvelope(item) {
   if (item.provenance !== undefined && !PROVENANCE_VALUES.has(item.provenance)) {
     return `record item's provenance must be one of: ${[...PROVENANCE_VALUES].join(', ')}`;
   }
+  // Per-stage overrides (the hybrid pipeline: API-authored, subagent-verified — each stage's
+  // label must state how ITS call was actually made, never a single blanket claim).
+  if (item.author_provenance !== undefined && !PROVENANCE_VALUES.has(item.author_provenance)) {
+    return `record item's author_provenance must be one of: ${[...PROVENANCE_VALUES].join(', ')}`;
+  }
+  if (item.verifier_provenance !== undefined && !PROVENANCE_VALUES.has(item.verifier_provenance)) {
+    return `record item's verifier_provenance must be one of: ${[...PROVENANCE_VALUES].join(', ')}`;
+  }
   const authorModelError = validateModelLabel(item.author_model, 'author_model');
   if (authorModelError) return authorModelError;
   const verifierModelError = validateModelLabel(item.verifier_model, 'verifier_model');
@@ -517,13 +525,15 @@ export async function classifyRecordItem(client, item) {
   if (already) return { action: 'alreadySummarized', billId, identifier, summaryId: already.id };
 
   const provenance = item.provenance ?? 'subagent';
+  const authorProvenance = item.author_provenance ?? provenance;
+  const verifierProvenance = item.verifier_provenance ?? provenance;
   const base = {
     billId,
     identifier,
     claimedHash,
     markdown: renderMarkdown(summary),
-    authorModelLabel: `${provenance}:${item.author_model ?? MODEL}`,
-    verifierModelLabel: `${provenance}:${item.verifier_model ?? VERIFIER_MODEL}`,
+    authorModelLabel: `${authorProvenance}:${item.author_model ?? MODEL}`,
+    verifierModelLabel: `${verifierProvenance}:${item.verifier_model ?? VERIFIER_MODEL}`,
     referencedTerms: summary.referenced_terms ?? [],
   };
 

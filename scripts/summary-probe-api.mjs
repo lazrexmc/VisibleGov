@@ -34,14 +34,19 @@ const PRICES = {
 
 function parseArgs(argv) {
   const out = {
-    budgetUsd: 2, authorModel: 'claude-haiku-4-5', checkerModel: 'claude-haiku-4-5', maxChars: 100000,
+    // Proven config (the $2 probe, 2026-08-07): Haiku authors survived the gates 9/9; Haiku
+    // CHECKERS failed 8/9 (invented normalized citations, under-counts) — checking defaults to
+    // Sonnet, the config that ran wave 3's checks with zero grounding rejects.
+    budgetUsd: 2, authorModel: 'claude-haiku-4-5', checkerModel: 'claude-sonnet-5', maxChars: 100000,
   };
+  out.authorOnly = false;
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i]; const value = argv[i + 1];
     if (key === '--budget-usd') out.budgetUsd = Number(value);
     else if (key === '--author-model') out.authorModel = value;
     else if (key === '--checker-model') out.checkerModel = value;
     else if (key === '--max-chars') out.maxChars = Number(value);
+    else if (key === '--author-only') { out.authorOnly = true; i -= 1; } // boolean flag, no value
     else throw new Error(`unknown flag: ${key}`);
   }
   if (!(out.budgetUsd > 0)) throw new Error('--budget-usd must be > 0');
@@ -123,6 +128,10 @@ for (const bill of manifest) {
     }
     const summary = cp.summary;
     if (!summary.what_it_does || summary.what_it_does.length === 0) throw new Error('author produced zero bullets');
+    // Author-bank mode (Lance, 2026-08-07: "spend the weekly subscription tokens to prep... to
+    // lower the spend"): dollars buy ONLY the Haiku authoring; the Sonnet-priced stages drain
+    // from these checkpoints later on subscription-token subagent waves.
+    if (args.authorOnly) { skipped.push({ identifier: bill.identifier, reason: 'banked (author-only mode)' }); worstBillUsd = Math.max(0.02, (spentUsd - startSpend) * 1.5); continue; }
     const bulletsJson = JSON.stringify(summary.what_it_does);
     if (!cp.verify) {
       cp.verify = await call(VERIFIER_MODEL, VERIFY_SYSTEM_PROMPT, buildVerifyMessage(bill.identifier, bulletsJson, text), VERIFY_SCHEMA, VERIFY_MAX_OUTPUT_TOKENS, `verify:${bill.identifier}`);
@@ -130,7 +139,10 @@ for (const bill of manifest) {
     }
     const verify = cp.verify;
     if (!cp.provisions) {
-      const prov = await call(args.checkerModel, COMPLETENESS_SYSTEM_PROMPT, buildProvisionsMessage(bill.identifier, text), { type: 'object', additionalProperties: false, required: ['key_provisions'], properties: { key_provisions: API_PROVISIONS_ITEMS } }, 4000, `provisions:${bill.identifier}`);
+      // Wave-2's hard-won reinforcement (its absence is exactly what the Haiku checkers tripped
+      // on): the grounding gate rejects any section string that is not a verbatim substring.
+      const provisionsMsg = `${buildProvisionsMessage(bill.identifier, text)}\n\nMECHANICAL GROUNDING RULE (a code gate rejects violations whole): every \`section\` string you emit MUST appear VERBATIM as a substring of the bill text — never invent, normalize, or reformat a citation (no "115.295(2)" unless the text prints exactly that; no dotted ranges the text does not print). List between 3 and 7 provisions — never fewer.`;
+      const prov = await call(args.checkerModel, COMPLETENESS_SYSTEM_PROMPT, provisionsMsg, { type: 'object', additionalProperties: false, required: ['key_provisions'], properties: { key_provisions: API_PROVISIONS_ITEMS } }, 4000, `provisions:${bill.identifier}`);
       cp.provisions = prov.key_provisions;
       saveCheckpoint(bill.bill_id, cp);
     }

@@ -52,11 +52,16 @@ phase('Summarize')
 
 const results = await pipeline(
   BILLS,
-  // Stage 1: opus authors from official text only
-  (bill) => agent(
+  // Stage 1: author. A manifest item may carry `preAuthored` (a SUMMARY_SCHEMA object banked by
+  // the API author-only mode's checkpoint — see docs/RUNBOOK_SUMMARY_WAVES.md); then the author
+  // stage is a no-op and the wave spends its subscription tokens ONLY on the verification stages.
+  // The item should also carry author_model/author_provenance for the record envelope.
+  (bill) => (bill.preAuthored
+    ? Promise.resolve({ summary: bill.preAuthored })
+    : agent(
     `You are the AUTHOR stage of VisibleGov's trust-model-v3 summary chain. Read the system-prompt contract in ${REPO}/src/lib/summarizer.js (the SYSTEM_PROMPT constant, around line 68) and follow it EXACTLY — it is your authoring law (facts only, every point cites its section, no party framing, plain language, stated_purpose ONLY from the bill's own purpose/findings language else empty string, referenced_terms only what the text itself names).\n\nThen Read the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier} — ${JSON.stringify(bill.title)}). If that file is missing or empty, DO NOT summarize anything else — return an empty what_it_does (the gate will reject it, which is correct).\n\nADDITIONAL MECHANICAL RULES the code gates enforce:\n- stated_purpose, when non-empty, must be a VERBATIM substring of the bill text (whitespace may collapse; words/characters may not change). If the bill's purpose language cannot be quoted verbatim, return "".\n- Every field is SINGLE-LINE: no newline characters inside point/section/stated_purpose/term/citation_raw.\n- ${VERBATIM_RULE}\n\nProduce the summary per the schema.`,
     { label: `author:${bill.identifier}`, phase: 'Summarize', model: 'opus', schema: SUMMARY_SCHEMA }
-  ).then((summary) => ({ summary })),
+    ).then((summary) => ({ summary }))),
   // Stage 2: sonnet adversarially verifies every bullet
   (acc, bill) => (acc && acc.summary && Array.isArray(acc.summary.what_it_does) && acc.summary.what_it_does.length > 0
     ? agent(
@@ -86,9 +91,12 @@ const results = await pipeline(
       identifier: bill.identifier,
       bill_text_hash: bill.bill_text_hash,
       summary: acc.summary,
-      author_model: 'claude-opus-5',
+      // A banked (preAuthored) bill carries its true author identity from the manifest item;
+      // a wave-authored bill is the opus subagent. Verification is always this wave's subagents.
+      author_model: bill.author_model ?? 'claude-opus-5',
       verifier_model: 'claude-sonnet-5',
     }
+    if (bill.author_provenance) envelope.author_provenance = bill.author_provenance
     if (acc.verify) envelope.verdicts = acc.verify.verdicts
     if (acc.provisions && acc.coverage) envelope.completeness = { key_provisions: acc.provisions, coverage: acc.coverage }
     return envelope

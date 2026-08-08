@@ -34,6 +34,25 @@ ruling): 12 bills → 7 auto-published + 5 flagged, 0 rejects, ~2.8M subagent to
    note; anything else lands as a flagged/unverified draft.
 4. **Verify + log**: live summary counts by status; append the wave's numbers to `CHATLOG.md`.
 
+## The hybrid pipeline (Lance's ruling, 2026-08-07 night: saturate the weekly subscription tokens; dollars only buy what subscription capacity can't)
+
+Division of labor that minimizes $ per published bill:
+- **Dollars buy Haiku authoring only** (~$0.01-0.03/bill): `node --env-file=.env
+  scripts/summary-probe-api.mjs --budget-usd <N> --author-only` banks author checkpoints under
+  `.superpowers/artifacts/wave3/api-stages/<bill_id>.json`. (The $2 probe proved Haiku authoring
+  survives the gates; Haiku CHECKING does not — never assign checking to Haiku.)
+- **Subscription tokens buy all Sonnet-priced verification**: build wave args where each banked
+  item carries `preAuthored` (the checkpoint's `summary`), `author_model: 'claude-haiku-4-5'`,
+  `author_provenance: 'api'` — the wave skips its author stage (pure code, zero agents) and
+  spends every subagent on verify/provisions/coverage. `record` labels each stage honestly
+  (`api:claude-haiku-4-5` author, `subagent:claude-sonnet-5` verifier — per-stage provenance
+  fields, TDD'd).
+- **Full-API runs** (`scripts/summary-probe-api.mjs` without `--author-only`, Sonnet checker
+  default) remain for when Lance wants throughput beyond what the week's subscription can drain
+  (~$0.04-0.10/bill smallest-first).
+- Every session with idle capacity should drain the bank: saturating the weekly limit IS the
+  strategy, per Lance.
+
 ## Standing traps
 
 - Never hand-type or "reconstruct" any part of the manifest — read the file, pass it verbatim.
