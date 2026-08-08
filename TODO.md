@@ -1089,3 +1089,5 @@ Multi-faceted per Lance: (1) plain-language bill/law breakdowns, (2) purpose/int
 clearly, (3) voting-record tracking tied to individual legislators, (4) accountability - making the
 above easy enough that regular people actually use it. Decomposed 2026-07-27 into the MVP design
 draft — see NOW.
+
+- **Completeness-floor catch-22 (found 2026-08-08, wave C):** bills with fewer than 3 substantive provisions can NEVER publish - MIN_KEY_PROVISIONS=3 forces checkers to pad with enactment boilerplate the author contract rightly omits, so every tiny bill flags on 'omitted' boilerplate. 20 support-clean tiny bills sit flagged from wave C (reviewable/approvable by hand meanwhile). Proper fix: length-scaled mechanical floor in verifier.js assessCompleteness (e.g. <2.5k chars -> min 1; <5k -> min 2; else 3) + tests; a spec-level trust-machinery change - do it TDD with review, not inline.
