@@ -201,7 +201,7 @@ export const COMPLETENESS_SCHEMA = {
 };
 
 export function buildProvisionsMessage(identifier, billText) {
-  return `Bill ${identifier}\n\n<bill_text>\n${billText}\n</bill_text>\n\nPHASE 1 ONLY. List the 3-7 key provisions a reader must know, per your schema's key_provisions shape. Do not reference any summary — none has been shown to you.`;
+  return `Bill ${identifier}\n\n<bill_text>\n${billText}\n</bill_text>\n\nPHASE 1 ONLY. List the key provisions a reader must know, per your schema's key_provisions shape — 3 to 7 for a full-size bill, but if this bill genuinely contains fewer than 3 substantive provisions, list ONLY the real ones (never pad with enactment/codification boilerplate). Do not reference any summary — none has been shown to you.`;
 }
 
 export function buildCoverageMessage(identifier, provisionsJson, bulletsJson) {

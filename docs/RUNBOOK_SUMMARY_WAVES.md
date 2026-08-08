@@ -30,8 +30,9 @@ ruling): 12 bills → 7 auto-published + 5 flagged, 0 rejects, ~2.8M subagent to
    `node --env-file=.env src/cli/summary-queue.js record --file <records.json> --dry-run` →
    inspect counts → re-run without `--dry-run`. Gates: schema shape, single-line fields,
    hash-provenance vs the stored text, verdict binding, stated-purpose verbatim grounding,
-   completeness (3-7 provisions, grounded sections). CLEAN auto-publishes with the trust-model-v3
-   note; anything else lands as a flagged/unverified draft.
+   completeness (length-scaled provision floor: 1 for <2.5k-char bills, 2 for <5k, 3 otherwise;
+   ceiling 7 — the 2026-08-08 wave-C catch-22 fix; grounded sections). CLEAN auto-publishes with
+   the trust-model-v3 note; anything else lands as a flagged/unverified draft.
 4. **Verify + log**: live summary counts by status; append the wave's numbers to `CHATLOG.md`.
 
 ## The hybrid pipeline (Lance's ruling, 2026-08-07 night: saturate the weekly subscription tokens; dollars only buy what subscription capacity can't)
@@ -47,23 +48,30 @@ Division of labor that minimizes $ per published bill:
   spends every subagent on verify/provisions/coverage. `record` labels each stage honestly
   (`api:claude-haiku-4-5` author, `subagent:claude-sonnet-5` verifier — per-stage provenance
   fields, TDD'd).
+- **Yield reality (measured 2026-08-08, waves C+D):** draining Haiku-authored banked bills on
+  subscription publishes at ~1 in 20 (completeness gaps); fresh opus-authored waves publish at
+  ~55-75%. Lance's standing call: fresh opus waves first; the ~87 banked bills wait for a
+  re-author-with-objections enhancement.
 - **Full-API runs** (`scripts/summary-probe-api.mjs` without `--author-only`, Sonnet checker
   default) remain for when Lance wants throughput beyond what the week's subscription can drain
   (~$0.04-0.10/bill smallest-first).
-- Drain the bank with subscription waves ONLY when Lance has spare weekly capacity — ASK before
-  saturating (2026-08-07 refinement: *"I really dont want to burn it out already this week, I have
-  more to do"* — his other work owns the weekly tokens; waves take the leftovers).
-- **The final ~$2 platform balance (Lance, 2026-08-07): allocated to full-chain API runs on the
-  smallest queued bills** — the config that publishes with ZERO subscription draw (~$0.03-0.05/
-  bill). Cap actual runs at $1.85 to leave a payment-failure buffer. After it's gone, the billed
-  path is closed until Lance adds funds.
+- Drain waves ONLY when Lance has spare weekly capacity — ASK before saturating (2026-08-07
+  refinement: *"I really dont want to burn it out already this week, I have more to do"* — his
+  other work owns the weekly tokens; waves take the leftovers). Superseded 2026-08-07 late by
+  "use both until exhausted" for that night; check the CHATLOG for the latest standing state.
+- **The API platform balance is EXHAUSTED (2026-08-08)** — the billed path is closed until Lance
+  adds funds and gives a per-run yes.
 
 ## Standing traps
 
 - Never hand-type or "reconstruct" any part of the manifest — read the file, pass it verbatim.
 - `record`'s file wants `{results: [...]}`; envelope model labels are BARE ids
-  (`claude-opus-5` / `claude-sonnet-5`) — `record` adds the `subagent:` prefix itself.
-- Oversize bills (>400k chars) are excluded by the planner; don't override.
+  (`claude-opus-5` / `claude-sonnet-5`) — `record` adds the provenance prefix itself
+  (per-stage `author_provenance`/`verifier_provenance` for hybrid items).
+- Oversize bills (>400k chars) are excluded by the planner; don't override. Bills >100k chars are
+  routed away from API runs by the driver's `--max-chars`.
 - Never `source .env` in a shell that then runs `node --test` (repo standing rule).
 - The flagged-draft pile growing is EXPECTED and harmless — it is Lance's optional reading, not
   anyone's backlog.
+- PowerShell `Set-Content`/`-replace` round-trips MANGLE this repo's UTF-8 em-dashes — edit docs
+  with the Write/Edit tools, never shell string-replacement.

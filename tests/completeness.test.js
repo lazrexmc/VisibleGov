@@ -256,8 +256,13 @@ test('assessCompleteness: fewer than the floor on a FULL-SIZE bill -> malformed 
   assert.match(result.reasons[0], /1 entries, outside the required 3-7/);
 });
 
-test('assessCompleteness: exactly MIN_KEY_PROVISIONS is accepted (the bound is inclusive)', () => {
-  assert.equal(assessCompleteness(goodPayload(), 3, BILL_TEXT).overall, 'complete');
+test('assessCompleteness: exactly MIN_KEY_PROVISIONS is accepted (the bound is inclusive) — on a FULL-SIZE bill where the standard floor of 3 actually binds', () => {
+  // goodPayload() carries exactly 3 provisions grounded in BILL_TEXT; padding the text past 5000
+  // chars makes the standard floor apply, so this genuinely exercises the floor=3 accept boundary
+  // (against the tiny fixture alone the real floor would be 1 and the title would overclaim).
+  const fullSizeText = `${BILL_TEXT}${'x '.repeat(3000)}`;
+  assert.equal(assessCompleteness(goodPayload(), 3, fullSizeText).overall, 'complete');
+  assert.equal(assessCompleteness(goodPayload(), 3, BILL_TEXT).overall, 'complete'); // and tiny still accepts 3
 });
 
 test('assessCompleteness: more than MAX_KEY_PROVISIONS -> malformed (the checker ignored its instructions)', () => {

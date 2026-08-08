@@ -47,6 +47,7 @@ function parseArgs(argv) {
     else if (key === '--checker-model') out.checkerModel = value;
     else if (key === '--max-chars') out.maxChars = Number(value);
     else if (key === '--author-only') { out.authorOnly = true; i -= 1; } // boolean flag, no value
+    else if (key === '--skip-file') out.skipFile = value; // JSON array of bill_ids another lane owns
     else throw new Error(`unknown flag: ${key}`);
   }
   if (!(out.budgetUsd > 0)) throw new Error('--budget-usd must be > 0');
@@ -109,7 +110,9 @@ function saveCheckpoint(billId, data) {
   writeFileSync(`${STAGE_DIR}/${billId}.json`, JSON.stringify(data), 'utf8');
 }
 
+const skipIds = new Set(args.skipFile ? JSON.parse(readFileSync(args.skipFile, 'utf8')) : []);
 const manifest = JSON.parse(readFileSync('.superpowers/artifacts/wave3/manifest.json', 'utf8'))
+  .filter((b) => !skipIds.has(b.bill_id)) // bills another lane (a subscription wave) owns
   .sort((a, b) => a.text_length - b.text_length); // smallest first: cheapest signal per dollar
 const results = [];
 const skipped = [];
@@ -141,7 +144,7 @@ for (const bill of manifest) {
     if (!cp.provisions) {
       // Wave-2's hard-won reinforcement (its absence is exactly what the Haiku checkers tripped
       // on): the grounding gate rejects any section string that is not a verbatim substring.
-      const provisionsMsg = `${buildProvisionsMessage(bill.identifier, text)}\n\nMECHANICAL GROUNDING RULE (a code gate rejects violations whole): every \`section\` string you emit MUST appear VERBATIM as a substring of the bill text — never invent, normalize, or reformat a citation (no "115.295(2)" unless the text prints exactly that; no dotted ranges the text does not print). List between 3 and 7 provisions — never fewer.`;
+      const provisionsMsg = `${buildProvisionsMessage(bill.identifier, text)}\n\nMECHANICAL GROUNDING RULE (a code gate rejects violations whole): every \`section\` string you emit MUST appear VERBATIM as a substring of the bill text — never invent, normalize, or reformat a citation (no "115.295(2)" unless the text prints exactly that; no dotted ranges the text does not print).`;
       const prov = await call(args.checkerModel, COMPLETENESS_SYSTEM_PROMPT, provisionsMsg, { type: 'object', additionalProperties: false, required: ['key_provisions'], properties: { key_provisions: API_PROVISIONS_ITEMS } }, 4000, `provisions:${bill.identifier}`);
       cp.provisions = prov.key_provisions;
       saveCheckpoint(bill.bill_id, cp);
