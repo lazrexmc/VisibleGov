@@ -3228,3 +3228,11 @@ subscription for setup -> and the disclosure that he is red/green colorblind. Ex
 
 Totals since 2026-08-06 morning: published 115 -> 166 (+51), drafts 98 -> 191 (flags are Lance's
 optional reading, never a backlog). All spend authorized: $2 probe + $7.50 run + author banking.
+
+**Banking run complete (2026-08-08):** $1.96 spent, 124 bills newly authored at $0.0158/bill —
+**239 total author checkpoints now banked** awaiting subscription verification (3 subagents/bill,
+no authoring cost, ~12-20 per wave session). 36 oversize monsters (>100k chars) deliberately left
+for future full-subagent waves. The API balance is effectively exhausted; billed path closed per
+the standing policy. The machine for future sessions: run waves against the bank
+(docs/RUNBOOK_SUMMARY_WAVES.md, bank-load mode) until it drains, then author new waves on
+subscription.
