@@ -764,8 +764,11 @@ footer#site-footer {
   text-shadow: 0 0 8px color-mix(in srgb, var(--nay) 45%, transparent);
 }
 
+/* Color-independence (2026-08-07, Lance: red/green colorblind — WCAG 1.4.1 in spirit): Nay is a
+   HOLLOW dot, Yea stays filled, so the yea/nay distinction never rides on hue alone. The text
+   labels always carried the fact; the glyphs now do too. */
 .vote-position-nay::before {
-  content: "● ";
+  content: "○ ";
 }
 
 @media (prefers-color-scheme: light) {
@@ -961,7 +964,15 @@ button.chart-bar-row {
 }
 
 .chart-bar-fill-nay {
-  background: var(--nay-bar);
+  /* Color-independence: Nay segments carry a diagonal hatch over the base color, so bar charts
+     read by pattern (solid = yea, hatched = nay, flat = neutral) even when the hues don't. */
+  background: repeating-linear-gradient(
+    135deg,
+    var(--nay-bar) 0,
+    var(--nay-bar) 5px,
+    color-mix(in srgb, var(--nay-bar) 55%, var(--bg)) 5px,
+    color-mix(in srgb, var(--nay-bar) 55%, var(--bg)) 8px
+  );
   box-shadow: inset 0 0 8px color-mix(in srgb, var(--nay) 35%, transparent);
 }
 
