@@ -3363,3 +3363,6 @@ shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
 - **Wave Q** (12 bills, 32.1-36.4k chars): 48 agents, 0 errors, 2.70M tokens. **5 published,
   7 flagged, 0 rejects** (42% — flag rate keeps climbing with bill size; 4 of 7 were completeness
   omissions). Live: 285 -> 290 published. Budget: 12.76M / 18M.
+- **Wave R** (12 bills, 36.5-41k chars: sunshine law, employment security, vaccine
+  discrimination/workers' comp, education choice, child protection): 48 agents, 0 errors, 2.73M
+  tokens. **6 published, 6 flagged, 0 rejects.** Live: 290 -> 296 published. Budget: 15.49M / 18M.
