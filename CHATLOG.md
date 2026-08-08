@@ -3360,3 +3360,6 @@ shutdown = everything recorded, counts live-verified, CHATLOG'd, pushed.
 - **Wave P** (12 bills, 27.7-31.9k chars): 48 agents, 0 errors, 2.61M tokens. **6 published,
   6 flagged, 0 rejects.** Completeness flags incl. the Address Confidentiality Program expansion
   bill omitting 2 provisions. Live: 279 -> 285 published. Budget: 10.06M / 18M.
+- **Wave Q** (12 bills, 32.1-36.4k chars): 48 agents, 0 errors, 2.70M tokens. **5 published,
+  7 flagged, 0 rejects** (42% — flag rate keeps climbing with bill size; 4 of 7 were completeness
+  omissions). Live: 285 -> 290 published. Budget: 12.76M / 18M.
