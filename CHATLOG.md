@@ -3396,3 +3396,8 @@ memory written).
   safety appropriation): 48 agents, 0 errors, 3.10M tokens. **4 published, 8 flagged, 0 rejects**
   (33% — the size trend continues; 3 of 8 were completeness). Live: 308 -> 312 published.
   Budget: 6.03M / 18M.
+- **Wave V** (12 bills, 76.8-101.6k chars: two transportation omnibuses, an abortion-law bill,
+  three appropriations, ballot summary language, veterans): 48 agents, 0 errors, 3.55M tokens.
+  **3 published, 9 flagged, 0 rejects** (25% — reported the worsening tokens-per-publish economics
+  to Lance mid-campaign with a pivot offer; continuing per his standing directive unless he
+  redirects). Live: 312 -> 315 published. Budget: 9.58M / 18M.
