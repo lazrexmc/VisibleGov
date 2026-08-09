@@ -3529,3 +3529,16 @@ proving the sort. Waves now walk the current session smallest-first.
   `npm run status`'s "summaries draft/flagged" line counts `status=neq.published`, which since
   the drain campaign includes the 106 superseded drafts retired to 'rejected' — it reads 395
   when actual open drafts are 289. Logged to TODO inbox, not chased.
+
+**2026-08-09 — billed-lane pivot (Lance):** *"I have a $1 or $2 left in the platform to use API
+calls, let's save tokens and use the dollars for now. Once depleted, pause waves as I do not
+auto reload credits."* Subagent wave lane stays paused; the remaining API balance runs through
+`scripts/summary-probe-api.mjs` (proven 08-07 config: Haiku authors, Sonnet verify/check, per-stage
+checkpoints, budget guard) with a skip-file over the 72 wave-owned manifest bills so dollars never
+touch the AI-AN slices. Depletion signal = credit errors → PAUSE ALL waves. Memory updated.
+- **Billed run 1** ($1.00 cap): **$0.9336 real spend, 39 bills full-chain (156 calls, 0 API
+  errors) → 29 published, 8 flagged, 2 rejects (MalformedSummaryError).** Live: 458 -> 487
+  published, drafts 289 -> 297. ~$0.024/bill, **~$0.032/publish** — ~4x cheaper than estimated
+  (Haiku authoring is ~$0.002/bill; Sonnet check stages dominate). Only non-budget skips: 11
+  oversize (>100k chars) monsters that belong to the $0 lane. Records preserved at
+  records-api-2026-08-09-run1.json. Run 2 launched with the remaining authorized budget.
