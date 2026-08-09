@@ -3502,3 +3502,7 @@ proving the sort. Waves now walk the current session smallest-first.
   disapprovals of CFPB digital-payments, IRS digital-asset-broker, EPA tire-emissions, DOE
   appliance standards, ANWR leasing; Protecting American Energy Production Act): 48 agents,
   0 errors, 1.99M tokens. **9 published, 3 flagged, 0 rejects.** Live: 405 -> 414.
+- **Wave AJ** (12, 1.3-1.8k chars: NPR-A and Central Yukon BLM disapprovals, DC noncitizen-voting
+  prohibition, Haiti TPS, CA clean-trucks waiver disapproval, CEASE Act, Cashless Bail Reporting
+  Act): 48 agents, 0 errors, 1.95M tokens. **11 published, 1 flagged, 0 rejects (92%).** Live:
+  414 -> 425.
