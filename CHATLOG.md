@@ -3506,3 +3506,7 @@ proving the sort. Waves now walk the current session smallest-first.
   prohibition, Haiti TPS, CA clean-trucks waiver disapproval, CEASE Act, Cashless Bail Reporting
   Act): 48 agents, 0 errors, 1.95M tokens. **11 published, 1 flagged, 0 rejects (92%).** Live:
   414 -> 425.
+- **Wave AK** (12, 1.8-2.7k chars: DC juvenile prosecution age, pregnancy-center TANF funds,
+  working-animal protection, Miccosukee amendments, REFINER Act, service-weapon purchases,
+  Arkansas Valley Conduit): 48 agents, 0 errors, 1.97M tokens. **8 published, 4 flagged,
+  0 rejects.** Live: 425 -> 433. Campaign: 28/36 (78%).
