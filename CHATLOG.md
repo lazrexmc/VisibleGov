@@ -3490,3 +3490,15 @@ drafts 337 -> 270, 106 superseded drafts retired with audit notes, ~14.2M subscr
 (~212k/publish). Remaining inventory: 270 drafts (163 immediately re-authorable; 103 need the
 drainer's DB-objections upgrade to unlock; ~4 parked/no-objections), 2,661 fresh never-attempted.
 The drain machine resumes with one line; nothing mid-flight.
+
+## 2026-08-09 — current-session campaign (Lance: "I like the recency idea and hitting the current session bills first")
+
+Shipped the recency-first exporter (newest legislative session first; planner passage-priority as
+tiebreak; smallest-within-session): `scripts/export-summary-wave.mjs`, commit 3db07ad. The
+400-bill export came back ENTIRELY from the 2025-01-03 session — the current 119th Congress —
+proving the sort. Waves now walk the current session smallest-first.
+
+- **Wave AI** (12 smallest, 937-1,296 chars: EO 14193 national-emergency termination, CRA
+  disapprovals of CFPB digital-payments, IRS digital-asset-broker, EPA tire-emissions, DOE
+  appliance standards, ANWR leasing; Protecting American Energy Production Act): 48 agents,
+  0 errors, 1.99M tokens. **9 published, 3 flagged, 0 rejects.** Live: 405 -> 414.
