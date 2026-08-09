@@ -3471,3 +3471,6 @@ disk — pre-records-file waves; 2 no computable objection).
   0 rejects.** Live: 368 -> 376; drafts 307 -> 299. (A duplicate re-delivery of wave AC's
   completion notification was identified by run-id and skipped — DB arithmetic confirmed nothing
   was double-recorded.) Campaign: 38/48 (79%).
+- **Wave AE** (12, 2.7-3.6k chars, incl. all 4 AD re-flags on attempt 2): 48 agents, 0 errors,
+  2.03M tokens. **11 published, 1 flagged, 0 rejects** (92%) — every second-attempt bill
+  converged again. Live: 376 -> 387; drafts 299 -> 288. Campaign: 49/60 (82%).
