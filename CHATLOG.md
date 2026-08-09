@@ -3480,3 +3480,13 @@ disk — pre-records-file waves; 2 no computable objection).
   Mid-campaign census for Lance ("how many bills are left?"): 2,949 unpublished with text —
   288 drafts + 2,661 never-attempted; published 11.6% of the 3,343-bill accountability set,
   up from 3.4% three days ago.
+- **Wave AG** (12, 3.7-4.5k chars, incl. AF re-flags on attempt 2 + HJR 59's 6-objection bingo
+  amendment): 48 agents, 0 errors, 2.12M tokens. **10 published, 2 flagged, 0 rejects.** Live:
+  395 -> 405; drafts 280 -> 270.
+
+**DRAIN CAMPAIGN PAUSED per Lance ("pause runs after AG finishes").** Session totals for the
+2026-08-09 drain: waves AA-AG, 84 attempts, **67 published (80%)**, live 338 -> 405 (+67 today),
+drafts 337 -> 270, 106 superseded drafts retired with audit notes, ~14.2M subscription tokens
+(~212k/publish). Remaining inventory: 270 drafts (163 immediately re-authorable; 103 need the
+drainer's DB-objections upgrade to unlock; ~4 parked/no-objections), 2,661 fresh never-attempted.
+The drain machine resumes with one line; nothing mid-flight.
