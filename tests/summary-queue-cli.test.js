@@ -1334,3 +1334,95 @@ test('parseArgs: FINAL REVIEW FINDING 6 — a real positive integer --limit stil
   assert.equal(parseArgs(['plan', '--limit', '12']).limit, 12);
   assert.equal(parseArgs(['record', '--file', 'x.json', '--limit', '3']).limit, 3);
 });
+
+// ---- --replace-drafts: re-record a bill whose only same-hash summary is a DRAFT (the re-check /
+// re-author lane over flagged drafts). approved/published NEVER replaceable; default behavior
+// (drafts block) unchanged unless the flag is passed. ----
+
+test('parseArgs: record mode accepts --replace-drafts; default is false', () => {
+  assert.equal(parseArgs(['record', '--file', 'x.json']).replaceDrafts, false);
+  assert.equal(parseArgs(['record', '--file', 'x.json', '--replace-drafts']).replaceDrafts, true);
+});
+
+test('classifyRecordItem: WITHOUT replaceDrafts a same-hash draft still short-circuits alreadySummarized (unchanged default)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [{ id: 'sum-draft', status: 'draft', bill_text_hash: 'h1' }], error: null },
+  });
+  const decision = await classifyRecordItem(client, baseItem());
+  assert.equal(decision.action, 'alreadySummarized');
+  assert.equal(decision.summaryId, 'sum-draft');
+});
+
+test('classifyRecordItem: replaceDrafts lets a same-hash DRAFT-only bill proceed, carrying supersedes ids', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [{ id: 'sum-draft', status: 'draft', bill_text_hash: 'h1' }], error: null },
+  });
+  const decision = await classifyRecordItem(client, baseItem(), { replaceDrafts: true });
+  assert.equal(decision.action, 'publish');
+  assert.deepEqual(decision.supersedes, ['sum-draft']);
+});
+
+test('classifyRecordItem: replaceDrafts NEVER replaces an approved or published summary — still alreadySummarized', async () => {
+  for (const status of ['approved', 'published']) {
+    const client = fakeClient({
+      bill_texts: { data: [textRow()], error: null },
+      summaries: { data: [{ id: 'sum-locked', status, bill_text_hash: 'h1' }], error: null },
+    });
+    const decision = await classifyRecordItem(client, baseItem(), { replaceDrafts: true });
+    assert.equal(decision.action, 'alreadySummarized', `status ${status} must stay blocking`);
+  }
+});
+
+test('classifyRecordItem: replaceDrafts with BOTH a draft and a published row at the same hash stays alreadySummarized (the published row wins)', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: {
+      data: [
+        { id: 'sum-draft', status: 'draft', bill_text_hash: 'h1' },
+        { id: 'sum-pub', status: 'published', bill_text_hash: 'h1' },
+      ],
+      error: null,
+    },
+  });
+  const decision = await classifyRecordItem(client, baseItem(), { replaceDrafts: true });
+  assert.equal(decision.action, 'alreadySummarized');
+});
+
+test('applyRecordDecision: a decision carrying supersedes marks the old drafts rejected (with a note) AFTER the new row is written', async () => {
+  const calls = [];
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-new' }, error: null },
+  }, (table, method, args) => calls.push({ table, method, args }));
+
+  const result = await applyRecordDecision(client, 'run-1', writeDecision('publish', { supersedes: ['sum-old'] }));
+  assert.equal(result.outcome, 'published');
+  assert.equal(result.summaryId, 'sum-new');
+
+  const rejectedUpdate = calls.find((c) => c.table === 'summaries' && c.method === 'update' && c.args[0].status === 'rejected');
+  assert.ok(rejectedUpdate, 'expected the superseded draft to be marked rejected');
+  const inCall = calls.find((c) => c.table === 'summaries' && c.method === 'in');
+  assert.deepEqual(inCall.args, ['id', ['sum-old']]);
+
+  const supersedeNote = calls.find((c) => c.table === 'summary_notes' && c.method === 'insert' && c.args[0].action === 'rejected');
+  assert.ok(supersedeNote, 'expected a rejected-action note on the superseded draft');
+  assert.match(supersedeNote.args[0].note, /superseded/);
+
+  // ordering: the new summary insert happens BEFORE the old draft is rejected
+  const insertIdx = calls.findIndex((c) => c.table === 'summaries' && c.method === 'insert');
+  const rejectIdx = calls.indexOf(rejectedUpdate);
+  assert.ok(insertIdx < rejectIdx, 'new row must exist before the old draft is retired');
+});
+
+test('applyRecordDecision: flagDraft with supersedes also retires the old draft — the NEW flagged draft replaces it in the review queue', async () => {
+  const calls = [];
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-new' }, error: null },
+  }, (table, method, args) => calls.push({ table, method, args }));
+
+  const result = await applyRecordDecision(client, 'run-1', writeDecision('flagDraft', { supersedes: ['sum-old'] }));
+  assert.equal(result.outcome, 'flaggedDraft');
+  const rejectedUpdate = calls.find((c) => c.table === 'summaries' && c.method === 'update' && c.args[0].status === 'rejected');
+  assert.ok(rejectedUpdate, 'flagDraft must also retire the superseded draft');
+});

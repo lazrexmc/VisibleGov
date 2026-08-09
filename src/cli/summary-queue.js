@@ -77,12 +77,16 @@ export function parseArgs(argv) {
     throw new Error(`unknown mode: ${mode ?? '(none)'} — expected 'plan' or 'record'`);
   }
   const out = {
-    mode, dryRun: false, limit: null, file: null, bill: null,
+    mode, dryRun: false, limit: null, file: null, bill: null, replaceDrafts: false,
   };
   let i = 0;
   while (i < rest.length) {
     const key = rest[i];
     if (key === '--dry-run') { out.dryRun = true; i += 1; continue; }
+    // --replace-drafts (re-check/re-author lane): lets record supersede a bill's existing DRAFT at
+    // the same hash — the old draft is retired to 'rejected' with a note AFTER the new row lands.
+    // approved/published rows are never replaceable, flag or no flag.
+    if (key === '--replace-drafts') { out.replaceDrafts = true; i += 1; continue; }
     // Final whole-branch review, finding 6: same class, same shared guard as
     // enrich-federal-bills.js's own --limit — plan mode's `args.limit ? queue.slice(...) : queue`
     // reads NaN/0 as "emit the whole queue", so a typo silently defeats the operator's chunking.
@@ -487,7 +491,7 @@ function validateEnvelope(item) {
 // a decision object describing what applyRecordDecision should do. Deliberately performs NO
 // writes itself — this is what --dry-run runs standalone, and what recordOne runs before writing,
 // so the two paths can never drift apart.
-export async function classifyRecordItem(client, item) {
+export async function classifyRecordItem(client, item, options = {}) {
   const envelopeError = validateEnvelope(item);
   if (envelopeError) throw new MalformedSummaryError(envelopeError, { billId: item?.bill_id ?? null });
 
@@ -521,13 +525,23 @@ export async function classifyRecordItem(client, item) {
   // either has written, both proceeding to insert a duplicate draft. Accepted: this file's whole
   // design (see the header comment) is a single controller session dispatching subagents and
   // feeding `record` serially, never two concurrent record processes racing the same bill.
-  const already = (existingSummaries ?? []).find((s) => s.bill_text_hash === claimedHash && ALREADY_SUMMARIZED_STATUSES.has(s.status));
+  const sameHashBlocking = (existingSummaries ?? []).filter((s) => s.bill_text_hash === claimedHash && ALREADY_SUMMARIZED_STATUSES.has(s.status));
+  // --replace-drafts: a DRAFT-only blocker is exactly the re-check/re-author case — carry the old
+  // draft ids so applyRecordDecision retires them once the new row exists. Any approved/published
+  // row at this hash remains an absolute block: human-touched or live output is never replaced by
+  // a re-run, flag or no flag.
+  const supersedes = (options.replaceDrafts && sameHashBlocking.length > 0
+    && sameHashBlocking.every((s) => s.status === 'draft'))
+    ? sameHashBlocking.map((s) => s.id)
+    : null;
+  const already = supersedes ? null : sameHashBlocking[0];
   if (already) return { action: 'alreadySummarized', billId, identifier, summaryId: already.id };
 
   const provenance = item.provenance ?? 'subagent';
   const authorProvenance = item.author_provenance ?? provenance;
   const verifierProvenance = item.verifier_provenance ?? provenance;
   const base = {
+    ...(supersedes ? { supersedes } : {}),
     billId,
     identifier,
     claimedHash,
@@ -705,6 +719,7 @@ export async function applyRecordDecision(client, runId, decision) {
   }
 
   if (decision.action === 'flagDraft') {
+    await retireSupersededDrafts(client, decision, summaryId);
     return {
       // gateReason (final whole-branch review, findings 4 & 5): non-null only when a MECHANICAL
       // gate — not the verifier's own verdicts — is what refused publication. Carried out of here
@@ -714,16 +729,38 @@ export async function applyRecordDecision(client, runId, decision) {
   }
 
   await autoPublishSummary(client, summaryId, verifierModelLabel);
+  await retireSupersededDrafts(client, decision, summaryId);
   return {
     outcome: 'published', billId, summaryId, termsUpserted, warning,
   };
 }
 
+// retireSupersededDrafts (--replace-drafts lane): once the replacement row exists, the old drafts
+// move to 'rejected' — the status that already means "redo the prose; re-eligible" — with a note
+// naming the replacement. Runs strictly AFTER the new row (and its verification rows) are
+// committed, so a failure here can only ever leave a redundant-but-honest extra draft behind,
+// never a bill with no summary at all.
+async function retireSupersededDrafts(client, decision, newSummaryId) {
+  const ids = decision.supersedes;
+  if (!ids || ids.length === 0) return;
+  const { error: updErr } = await client.from('summaries')
+    .update({ status: 'rejected' })
+    .in('id', ids)
+    .eq('status', 'draft'); // only ever retire what is STILL a draft — never race a human decision
+  if (updErr) throw new Error(`superseded-draft retire failed for bill ${decision.identifier}: ${updErr.message}`);
+  for (const oldId of ids) {
+    const { error: noteErr } = await client.from('summary_notes').insert({
+      summary_id: oldId, action: mapNoteAction('reject'), note: `superseded by re-recorded summary ${newSummaryId} (--replace-drafts)`,
+    });
+    if (noteErr) throw new Error(`superseded-draft note failed for summary ${oldId}: ${noteErr.message}`);
+  }
+}
+
 // recordOne: classify then apply — the live (non-dry-run) path for a single record item.
 // --dry-run runs classifyRecordItem alone (see main() below) so preview and live can never
 // silently drift apart; there is exactly one decision function, not two.
-export async function recordOne(client, runId, item) {
-  const decision = await classifyRecordItem(client, item);
+export async function recordOne(client, runId, item, options = {}) {
+  const decision = await classifyRecordItem(client, item, options);
   return applyRecordDecision(client, runId, decision);
 }
 
@@ -794,7 +831,7 @@ async function main() {
     const rejects = [];
     for (const item of results) {
       try {
-        preview.push(describeDecision(await classifyRecordItem(client, item)));
+        preview.push(describeDecision(await classifyRecordItem(client, item, { replaceDrafts: args.replaceDrafts })));
       } catch (err) {
         if (isTypedFailure(err)) rejects.push({ bill_id: item?.bill_id ?? null, error: err.name, message: err.message });
         else throw err;
@@ -821,7 +858,7 @@ async function main() {
   try {
     for (const item of results) {
       try {
-        const result = await recordOne(client, runId, item);
+        const result = await recordOne(client, runId, item, { replaceDrafts: args.replaceDrafts });
         outcomes[result.outcome] += 1;
         if (result.gateReason) gated.push({ bill_id: result.billId, summary_id: result.summaryId, reason: result.gateReason });
       } catch (err) {
