@@ -69,12 +69,17 @@ const results = await pipeline(
     `You are the AUTHOR stage of VisibleGov's trust-model-v3 summary chain. Read the system-prompt contract in ${REPO}/src/lib/summarizer.js (the SYSTEM_PROMPT constant, around line 68) and follow it EXACTLY — it is your authoring law (facts only, every point cites its section, no party framing, plain language, stated_purpose ONLY from the bill's own purpose/findings language else empty string, referenced_terms only what the text itself names).\n\nThen Read the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier} — ${JSON.stringify(bill.title)}). If that file is missing or empty, DO NOT summarize anything else — return an empty what_it_does (the gate will reject it, which is correct).\n\nADDITIONAL MECHANICAL RULES the code gates enforce:\n- stated_purpose, when non-empty, must be a VERBATIM substring of the bill text (whitespace may collapse; words/characters may not change). If the bill's purpose language cannot be quoted verbatim, return "".\n- Every field is SINGLE-LINE: no newline characters inside point/section/stated_purpose/term/citation_raw.\n- ${VERBATIM_RULE}\n\nProduce the summary per the schema.`,
     { label: `author:${bill.identifier}`, phase: 'Summarize', model: 'opus', schema: SUMMARY_SCHEMA }
     ).then((summary) => ({ summary }))),
-  // Stage 2: sonnet adversarially verifies every bullet
+  // Stage 2: sonnet adversarially verifies every bullet. A manifest item may carry `preVerified`
+  // (a prior wave's sonnet verdicts for the SAME summary at the SAME hash — the re-check lane over
+  // flagged drafts): the stage is then a code no-op reusing those verdicts verbatim; the record
+  // gates re-derive overall from them mechanically either way, so nothing trusts a self-report.
   (acc, bill) => (acc && acc.summary && Array.isArray(acc.summary.what_it_does) && acc.summary.what_it_does.length > 0
-    ? agent(
+    ? (bill.preVerified
+      ? Promise.resolve({ ...acc, verify: { verdicts: bill.preVerified } })
+      : agent(
       `You are the ADVERSARIAL VERIFIER stage of VisibleGov's trust-model-v3 chain. Read the verifier contract in ${REPO}/src/lib/verifier.js (its VERIFY system prompt + VERIFY_SCHEMA) and follow it exactly: for EVERY bullet, decide whether the cited section, read on its own in the bill text, FULLY supports the bullet. Your default posture is refutation — supported:true only when the text genuinely proves it.\n\nRead the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier}).\n\nThe summary's bullets (index: point (section)):\n${acc.summary.what_it_does.map((b, i) => `${i}: ${b.point} (${b.section})`).join('\n')}\n\nMECHANICAL RULES the code gates enforce:\n- Emit EXACTLY one verdict per bullet, bullet_index 0..${acc.summary.what_it_does.length - 1}, no gaps, no duplicates.\n- Each verdict's \`section\` must be COPIED CHARACTER-FOR-CHARACTER from that bullet's own (section) shown above — never re-derived from the text.\n- evidence_quote: an EXACT verbatim quote from the bill text.\n- overall: 'clean' only if every verdict is supported:true, else 'flagged'.`,
-      { label: `verify:${bill.identifier}`, phase: 'Summarize', model: 'sonnet', schema: VERIFY_SCHEMA }
-    ).then((verify) => ({ ...acc, verify }))
+        { label: `verify:${bill.identifier}`, phase: 'Summarize', model: 'sonnet', schema: VERIFY_SCHEMA }
+      ).then((verify) => ({ ...acc, verify })))
     : acc),
   // Stage 3: BLIND provisions list — bill text only, never sees the summary
   (acc, bill) => (acc && acc.summary

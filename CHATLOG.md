@@ -3418,3 +3418,19 @@ highest-value next engine move is no longer bigger fresh bills; it is the re-aut
 pass over the 353 drafts, whose flags now hold precise, mechanical gap lists (standing backlog
 item). Shutdown clean: all waves recorded, counts live-verified after each, artifacts on disk
 (records-wave-{h..x}.json), pushed.
+
+## 2026-08-08 — efficiency mode (Lance: "minimum tokens, maximum productive"): the draft re-check lane
+
+Built and proven in one pass, all on subscription:
+- **`--replace-drafts`** shipped in `summary-queue record` (TDD, suite 2,385/0): record can now
+  supersede a bill's existing DRAFT at the same hash — old draft retires to 'rejected' with an
+  audit note AFTER the replacement lands; approved/published rows are never replaceable.
+- **`preVerified`** added to the wave workflow: reuse a prior wave's sonnet verdicts for the same
+  summary+hash (the gates re-derive overall mechanically regardless), so a re-check spends agents
+  ONLY on the two completeness stages.
+- **Wave Y** (the 11 support-clean tiny drafts from wave C — blocked originally by the
+  completeness-floor bug, since fixed): 22 agents, 0 errors, **0.93M tokens -> 8 published,
+  3 flagged** (~116k tokens/publish vs ~0.8-1.3M/publish at campaign 2's tail — ~7x). Live:
+  322 -> 330 published; drafts 353 -> 345; the 11 superseded wave-C drafts retired. The 3
+  remaining flags are Haiku-invented stated_purpose strings — an authoring flaw, the re-AUTHOR
+  lane's job, not the re-check lane's.
