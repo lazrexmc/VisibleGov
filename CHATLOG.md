@@ -3542,3 +3542,18 @@ touch the AI-AN slices. Depletion signal = credit errors → PAUSE ALL waves. Me
   (Haiku authoring is ~$0.002/bill; Sonnet check stages dominate). Only non-budget skips: 11
   oversize (>100k chars) monsters that belong to the $0 lane. Records preserved at
   records-api-2026-08-09-run1.json. Run 2 launched with the remaining authorized budget.
+- **Billed run 2** ($1.00 cap): **$0.9111, 28 new bills (112 calls, 0 credit errors) → 17
+  published, 11 flagged.** Live: 487 -> 504 — **the site crossed 500 published summaries.**
+- **Billed run 3, tail** ($0.20 cap): **$0.1351, 5 new bills (20 calls, 0 credit errors) → 2
+  published, 3 flagged** (both non-publishes are coverage-miss gates, honestly flagged). Live:
+  504 -> 506 published, 311 drafts. Records preserved per-run (run2/run3 audit copies).
+- **CAMPAIGN CLOSE + FULL PAUSE (2026-08-09):** total **$1.9798 of the ~$2 balance spent — 72
+  bills full-chain, 48 published, 22 flagged, 2 Malformed rejects, $0.041/publish, zero API/credit
+  errors across 288 calls.** The balance is functionally depleted; per Lance ("Once depleted,
+  pause waves as I do not auto reload credits") **ALL lanes are now paused** — no wave AO, no
+  further billed runs, nothing in flight. Session arc today: 442 -> 506 published (+64: waves
+  AM/AN +16, billed +48). Manifest remaining: ~250 unattempted 2025-session bills (mostly mid-to-
+  large) + 11 oversize monsters; drafts at 311 (22 fresh billed flags are prime re-check fodder,
+  4 of the AN flags are the trivial parens-binding class). Resume options when Lance is ready:
+  subscription waves ("continue" -> wave AO), draft drain ("keep draining drafts"), or new API
+  funds (his call only).
