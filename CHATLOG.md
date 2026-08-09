@@ -3474,3 +3474,9 @@ disk — pre-records-file waves; 2 no computable objection).
 - **Wave AE** (12, 2.7-3.6k chars, incl. all 4 AD re-flags on attempt 2): 48 agents, 0 errors,
   2.03M tokens. **11 published, 1 flagged, 0 rejects** (92%) — every second-attempt bill
   converged again. Live: 376 -> 387; drafts 299 -> 288. Campaign: 49/60 (82%).
+- **Wave AF** (12, 3.1-4k chars): 48 agents, 0 errors, 2.11M tokens. **8 published, 3 flagged,
+  1 rejected** (SB 396's checker emitted 1 provision where the >=2.5k floor requires 2 — a lazy
+  checker, retryable). Live: 387 -> 395; drafts 288 -> 280. Campaign: 57/72 (79%).
+  Mid-campaign census for Lance ("how many bills are left?"): 2,949 unpublished with text —
+  288 drafts + 2,661 never-attempted; published 11.6% of the 3,343-bill accountability set,
+  up from 3.4% three days ago.
