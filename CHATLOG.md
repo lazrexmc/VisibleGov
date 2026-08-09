@@ -3460,3 +3460,7 @@ disk — pre-records-file waves; 2 no computable objection).
   4 flagged, 0 rejects.** Live: 338 -> 346 published; drafts 337 -> 329. (Two agents carried a
   "safety classifier unavailable" platform note — outputs verified by the mechanical gates like
   every envelope, which is the design.)
+- **Wave AB** (12, 1.3-2k chars, incl. 3 wave-AA re-flags on attempt 2): 48 agents, 0 errors,
+  1.95M tokens. **10 published, 2 flagged, 0 rejects** — best drain rate yet (83%); all three
+  second-attempt bills PUBLISHED (the sharper objections converged). Live: 346 -> 356; drafts
+  329 -> 319. The 2 new flags (HB 751, HR 4593) are first-attempt, queued for one retry.
