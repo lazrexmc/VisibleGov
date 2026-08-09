@@ -3447,3 +3447,16 @@ Day grand total 2026-08-08 across all engines: **211 -> 338 published (+127)**. 
 lanes are now permanent machinery: any future session can convert flagged drafts via
 `preVerified`/`reAuthor` wave items + `record --replace-drafts` (see the runbook + this entry).
 Session paused here per Lance ("take a break once this wave finish") — nothing mid-flight.
+
+## 2026-08-09 — drain-drafts campaign (Lance: "Keep draining drafts")
+
+Built the general drainer (scratchpad `build-drain-wave.mjs`): scans the LIVE draft pile, pairs
+each draft-only bill with its latest stored envelope, reconstructs the gates' objections in code
+(refuted verdicts + coverage-missed provisions + ungrounded stated_purpose), batches smallest-first
+for the reAuthor lane. Census at start: 337 drafts; **232 re-authorable** (103 lack envelopes on
+disk — pre-records-file waves; 2 no computable objection).
+
+- **Wave AA** (12 smallest, 960-1,449 chars): 48 agents, 0 errors, 1.91M tokens. **8 published,
+  4 flagged, 0 rejects.** Live: 338 -> 346 published; drafts 337 -> 329. (Two agents carried a
+  "safety classifier unavailable" platform note — outputs verified by the mechanical gates like
+  every envelope, which is the design.)
