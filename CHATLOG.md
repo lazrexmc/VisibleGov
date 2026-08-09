@@ -3467,3 +3467,7 @@ disk — pre-records-file waves; 2 no computable objection).
 - **Wave AC** (12, 1.5-2.6k chars, incl. both AB retries + two 5-objection bills): 48 agents,
   0 errors, 2.02M tokens. **12 published, 0 flagged, 0 rejects — a PERFECT drain wave.** Live:
   356 -> 368; drafts 319 -> 307. Campaign: 30/36 converted (83%).
+- **Wave AD** (12, 2.6-3.1k chars): 48 agents, 0 errors, 2.01M tokens. **8 published, 4 flagged,
+  0 rejects.** Live: 368 -> 376; drafts 307 -> 299. (A duplicate re-delivery of wave AC's
+  completion notification was identified by run-id and skipped — DB arithmetic confirmed nothing
+  was double-recorded.) Campaign: 38/48 (79%).
