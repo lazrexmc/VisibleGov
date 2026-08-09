@@ -3510,3 +3510,6 @@ proving the sort. Waves now walk the current session smallest-first.
   working-animal protection, Miccosukee amendments, REFINER Act, service-weapon purchases,
   Arkansas Valley Conduit): 48 agents, 0 errors, 1.97M tokens. **8 published, 4 flagged,
   0 rejects.** Live: 425 -> 433. Campaign: 28/36 (78%).
+- **Wave AL** (12, 2.8-3.8k chars: Affordable HOMES Act, Special Interest Alien Reporting,
+  Women and Girls in Sports Act, DC Policing Protection, DUMP Red Tape Act): 48 agents, 0 errors,
+  2.03M tokens. **9 published, 3 flagged, 0 rejects.** Live: 433 -> 442. Campaign: 37/48 (77%).
