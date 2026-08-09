@@ -60,6 +60,15 @@ const results = await pipeline(
   // The item should also carry author_model/author_provenance for the record envelope.
   (bill) => (bill.preAuthored
     ? Promise.resolve({ summary: bill.preAuthored })
+    : bill.reAuthor
+      // Re-author-with-objections lane: a prior draft failed named mechanical gates. Opus authors
+      // FRESH from the official text (the prior draft is reference material, never ground truth),
+      // with the exact objections to fix. Envelope author becomes opus/subagent — honest, since
+      // this is a new authorship.
+      ? agent(
+        `You are the AUTHOR stage of VisibleGov's trust-model-v3 summary chain, RE-AUTHORING a summary whose previous draft failed mechanical verification gates. Read the system-prompt contract in ${REPO}/src/lib/summarizer.js (the SYSTEM_PROMPT constant, around line 68) and follow it EXACTLY (facts only, every point cites its section, no party framing, plain language, stated_purpose ONLY verbatim from the bill's own purpose/findings language else empty string, referenced_terms only what the text itself names).\n\nRead the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier} — ${JSON.stringify(bill.title)}). The text is your ONLY source of truth.\n\nA PRIOR DRAFT of this summary exists (below) with SPECIFIC OBJECTIONS from the verification gates. Author a corrected summary: keep what the text genuinely supports, fix every objection. Never copy a prior claim without re-checking it against the text yourself.\n\nPRIOR DRAFT:\n${JSON.stringify(bill.reAuthor.prior_summary)}\n\nOBJECTIONS TO FIX (each MUST be resolved):\n${bill.reAuthor.objections.map((o, i) => `${i + 1}. ${o}`).join('\n')}\n\nADDITIONAL MECHANICAL RULES the code gates enforce:\n- stated_purpose, when non-empty, must be a VERBATIM substring of the bill text (whitespace may collapse; words/characters may not change). If the bill's purpose language cannot be quoted verbatim, return "".\n- Every field is SINGLE-LINE: no newline characters inside point/section/stated_purpose/term/citation_raw.\n- ${VERBATIM_RULE}\n\nProduce the corrected summary per the schema.`,
+        { label: `reauthor:${bill.identifier}`, phase: 'Summarize', model: 'opus', schema: SUMMARY_SCHEMA }
+      ).then((summary) => ({ summary }))
     : bill.checkpoint_file
       ? agent(
         `Read the JSON file at ${REPO}/${bill.checkpoint_file}. Return EXACTLY the object stored under its "summary" key — a verbatim transcription, no edits, no additions, no reformatting of any string. If the file or key is missing, return {"what_it_does":[],"stated_purpose":"","classification":"other","referenced_terms":[]}.`,

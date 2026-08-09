@@ -3434,3 +3434,16 @@ Built and proven in one pass, all on subscription:
   322 -> 330 published; drafts 353 -> 345; the 11 superseded wave-C drafts retired. The 3
   remaining flags are Haiku-invented stated_purpose strings — an authoring flaw, the re-AUTHOR
   lane's job, not the re-check lane's.
+- **The re-author lane (`reAuthor` workflow mode)**: opus authors FRESH from the official text
+  with the prior draft as reference and the gates' exact objections as must-fixes; full
+  verify/provisions/coverage always re-runs (a changed summary never reuses old verification).
+  **Wave Z pilot** (12 tiny drafts, 1 named objection each — 9 wave-C refuted-verdict bills + 3
+  wave-Y stated_purpose flaws): 48 agents, 0 errors, 2.10M tokens -> **8 published, 4 flagged,
+  0 rejects** (~262k/publish — the objections got FIXED; the 4 new flags are fresh completeness
+  catches on other provisions, e.g. an omitted Section B effective date). Live: 330 -> 338
+  published; drafts 345 -> 337; rejected (retired drafts) now 23.
+
+Day grand total 2026-08-08 across all engines: **211 -> 338 published (+127)**. The efficiency
+lanes are now permanent machinery: any future session can convert flagged drafts via
+`preVerified`/`reAuthor` wave items + `record --replace-drafts` (see the runbook + this entry).
+Session paused here per Lance ("take a break once this wave finish") — nothing mid-flight.
