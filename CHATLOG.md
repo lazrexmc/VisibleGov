@@ -3513,3 +3513,7 @@ proving the sort. Waves now walk the current session smallest-first.
 - **Wave AL** (12, 2.8-3.8k chars: Affordable HOMES Act, Special Interest Alien Reporting,
   Women and Girls in Sports Act, DC Policing Protection, DUMP Red Tape Act): 48 agents, 0 errors,
   2.03M tokens. **9 published, 3 flagged, 0 rejects.** Live: 433 -> 442. Campaign: 37/48 (77%).
+- **Wave AM** (12, 3.8-5.4k chars: Anti-CBDC Surveillance State Act, Veterans 2nd Amendment
+  Protection, LNG export permitting, Pregnant Students' Rights, critical minerals, LEOSA Reform):
+  48 agents, 0 errors, 2.10M tokens. **9 published, 3 flagged, 0 rejects.** Live: 442 -> 451.
+  Campaign: 46/60 (77%).
