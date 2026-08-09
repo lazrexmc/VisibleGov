@@ -3517,3 +3517,15 @@ proving the sort. Waves now walk the current session smallest-first.
   Protection, LNG export permitting, Pregnant Students' Rights, critical minerals, LEOSA Reform):
   48 agents, 0 errors, 2.10M tokens. **9 published, 3 flagged, 0 rejects.** Live: 442 -> 451.
   Campaign: 46/60 (77%).
+- **Wave AN** (12, 5.5-8.5k chars: GRID Power Act, Born-Alive Abortion Survivors Protection,
+  both Laken Riley Act versions (S 5 + HR 29), Rescissions Act of 2025, Faster Labor Contracts):
+  48 agents, 0 errors, 2.12M tokens. **7 published, 5 flagged, 0 rejects.** Live: 451 -> 458
+  (draft 284 -> 289). Campaign: 53/72 (74%). Notable: 4 of the 5 flags are ONE trivial gate
+  class — the verifier wrote the section citation as "(SEC. 2)" with parentheses while the
+  bullet says "SEC. 2", so the verdict-binding check refused to bind (HR 3628, S 5, HR 4,
+  HR 29 — i.e. both Laken Riley versions and the Rescissions Act, content otherwise verified).
+  Prime re-check-lane conversions next drain pass. **Paused here per Lance ("Pause after this
+  wave completes") — no wave AO launched.** Bookkeeping note found while reconciling counts:
+  `npm run status`'s "summaries draft/flagged" line counts `status=neq.published`, which since
+  the drain campaign includes the 106 superseded drafts retired to 'rejected' — it reads 395
+  when actual open drafts are 289. Logged to TODO inbox, not chased.
