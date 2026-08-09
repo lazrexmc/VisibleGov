@@ -3464,3 +3464,6 @@ disk — pre-records-file waves; 2 no computable objection).
   1.95M tokens. **10 published, 2 flagged, 0 rejects** — best drain rate yet (83%); all three
   second-attempt bills PUBLISHED (the sharper objections converged). Live: 346 -> 356; drafts
   329 -> 319. The 2 new flags (HB 751, HR 4593) are first-attempt, queued for one retry.
+- **Wave AC** (12, 1.5-2.6k chars, incl. both AB retries + two 5-objection bills): 48 agents,
+  0 errors, 2.02M tokens. **12 published, 0 flagged, 0 rejects — a PERFECT drain wave.** Live:
+  356 -> 368; drafts 319 -> 307. Campaign: 30/36 converted (83%).
