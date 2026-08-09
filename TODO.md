@@ -4,30 +4,44 @@
 
 ---
 
-## ⏱ RESUME HERE — verified live 2026-08-05, read this block first
+## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
 *Everything below this block is a historical record, mostly resolved. This block is the only part
 that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
 check — that drift is exactly what has burned this project before.*
 
-**State, verified live 2026-08-05 (not copied from another doc):**
-- **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — verified end-to-end in a real
-  browser, zero console errors: directory (1,567 links) → profile (162 vote rows + aggregate
-  charts) → bill page (sponsors, summary, roll-call tallies). The full product loop works.
+**⛔ STANDING STATE (2026-08-09, evening): ALL SUMMARY LANES ARE PAUSED.** Lance authorized
+spending the platform's last ~$2 of API balance ("Once depleted, pause waves as I do not auto
+reload credits"); it is now spent ($1.9798 across three budget-capped runs, zero credit errors).
+**Nothing — subagent waves, billed runs, drains — resumes without Lance's explicit go.** Never
+assume a credit reload. Resume options, his call only: (a) "continue" → subscription wave AO over
+the ~250 remaining 2025-session manifest bills; (b) "keep draining drafts" → 311 open drafts,
+including 22 fresh billed-run flags and 4 trivial parens-binding flags (S 5 + HR 29 Laken Riley,
+HR 4 Rescissions, HR 3628); (c) new API funds (at the observed $0.041/publish, $5 ≈ ~120 more).
+
+**State, verified live 2026-08-09 (not copied from another doc):**
+- **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — full product loop verified
+  in a real browser 2026-08-05 (directory → profile → bill → tallies), zero console errors.
+- **Summaries: 506 published · 311 open drafts · 106 retired-superseded ('rejected').** Counted
+  directly from the `summaries` table 2026-08-09 evening. Arc: 115 published (2026-08-06) → 506.
+  ⚠️ `npm run status`'s "draft/flagged" line reads high — it counts `neq.published`, which
+  includes the 106 retirees (see INBOX note).
+- Glossary: 116 published (unchanged; the campaign has been summaries-only).
+- Summary-campaign ledger: 400-bill 2025-session recency manifest
+  (`.superpowers/artifacts/wave3/manifest.json`); subagent waves AI–AN consumed slices 0–72
+  (53 published); billed lane (skip-file `api-skip-owned.json`) consumed the next ~77 smallest
+  (48 published, 22 flagged, 2 structural Malformed rejects); ~250 mid-to-large manifest bills
+  + 11 oversize (>100k chars) monsters remain; beyond the manifest, ~2,100 more fresh bills
+  with text need future exports (exporter is recency-first now).
 - Git clean on `main`, everything pushed (run `git log -1` for the exact HEAD — a doc cannot
-  contain its own latest commit hash). Suite **2,328 pass / 0 fail** (in a clean
-  shell — see the `.env` trap below; it fired again during this very sync).
+  contain its own latest commit hash). Suite 2,300+ green (`node --test` in a clean shell for
+  the exact count — see the `.env` trap below).
 - Migrations: **32 files on disk (0001-0031 + 0018a), ALL applied live.** Nothing is awaiting an
-  apply. `0030` (revoked a stray `authenticated` EXECUTE on `refresh_vote_aggregates()`) and `0031`
-  (rewrote `public_vote_feed`/`public_votes`' anti-join to `NOT EXISTS` — fixed a live anon
-  `statement_timeout` on every profile vote list, found on deploy night) both applied + verified
-  live 2026-08-05.
-- Data: votes 10,128 · vote_casts 1,468,297 · bills 38,255 · legislators 1,607 ·
-  vote_duplicates **62** (the live ingest path marks new duplicates on its own — the dedup feature
-  working end-to-end, not drift).
-- Published: 115 summaries · 116 glossary terms.
-- Scheduler healthy: all 5 sources ticking; `refresh-aggregates` succeeding via pg_cron. **The
-  3-layer timeout saga is fully closed** and has stayed closed under real load for a full day.
+  apply (0030/0031 verified live 2026-08-05).
+- Data (2026-08-09 `npm run status`): votes 10,248 · vote_casts 1,470,566 · bills 38,256 ·
+  legislators 1,607.
+- Scheduler healthy: sources ticking through 2026-08-08+ (us-congress and mo-legislature both
+  show current coverage); `refresh-aggregates` on pg_cron. The 3-layer timeout saga stays closed.
 - ⚠️ **Before running the suite: do NOT `source .env` in the same shell.** It makes 2 correct
   tests in `review-logic.test.js` fail (expected-500-got-200) because they assert behavior when NO
   DB client is configured. Verified deterministically 2026-08-05 — and it caught me AGAIN mid-sync
@@ -103,7 +117,8 @@ kept as the record of what had to be true:
 - 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
   `correct-data.js reconcile-flag` instead of one code change per flag — but each is a real human
   ruling about a real legislator's record, so it is Lance's work, not an agent's.
-- 98 draft summaries + 2,103 draft glossary terms in the review queue.
+- 311 draft summaries (see the paused-lanes block above for what they are) + ~2,100 draft
+  glossary terms in the review queue.
 - ~19 known unbounded-`.select()` sites across 8 files, grandfathered in
   `tests/select-pagination-enforcement.test.js`'s dated allowlist. `ingest.js` is closest to
   actually tripping (legislators at ~940 of the 1,000 cap on a live-scheduled path).

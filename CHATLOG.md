@@ -3557,3 +3557,27 @@ touch the AI-AN slices. Depletion signal = credit errors → PAUSE ALL waves. Me
   4 of the AN flags are the trivial parens-binding class). Resume options when Lance is ready:
   subscription waves ("continue" -> wave AO), draft drain ("keep draining drafts"), or new API
   funds (his call only).
+
+**2026-08-09 — pre-shutdown full doc sync (Lance):** *"Update all documentation, readme, todo,
+playbook, manual, all documents in the system as I need to shutdown the PC again."* then mid-sync:
+*"ensure all chatlogs and context are part of the docu-update-sync."* Synced in this pass, all
+against the live DB numbers verified above (506 published / 311 drafts / 106 retired):
+- `TODO.md` — RESUME HERE block rewritten to 2026-08-09: the ALL-LANES-PAUSED standing state up
+  top with the three resume options, live counts, campaign ledger (manifest slices consumed by
+  waves vs billed lane), stale 115/98 numbers replaced; the "genuinely open" drafts line updated.
+- `README.md` — status line, trust-model bullet (both lanes + $0.041/publish + 506/311), and the
+  spend-policy bullet (balance depleted, all paused) updated.
+- `PLAYBOOK_DELTA.md` — lessons 35 (quote-bearing text for native exes goes through a FILE —
+  `git commit -F`; PS5.1 native-arg marshalling mangles embedded quotes even from here-strings)
+  and 36 (negative-predicate gauges silently absorb later-invented status values — the
+  `neq.published` drift) added; 36 lessons total.
+- `CLAUDE.md` — fresh-session banner (506 published, all lanes paused, custom domain still open),
+  read-first list (36 lessons, briefing refreshed 2026-08-09), and the API-spend standing policy
+  (depletion supersedes the 2026-08-03 suspension in practice) updated.
+- `docs/CONTROLLER_BRIEFING.md` — staleness banner refreshed 2026-08-09 (now names the whole
+  summary-campaign era it predates).
+- Memory (`no-api-spend-hold.md` + `MEMORY.md`) — already updated at campaign close: depleted,
+  all paused, never assume a reload.
+- `CHATLOG.md` — this entry; today's decision trail (wave AM close, wave AN + pause, billed runs
+  1-3 + campaign close) was already committed as it happened (1514175, a62354c, 0ef7bf8, f390755).
+Shutdown-safe: nothing in flight, git clean after this commit, everything pushed.

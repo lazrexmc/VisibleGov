@@ -12,13 +12,18 @@ and why, and surface how legislators voted on it - so people can hold their own 
 accountable with real information instead of spin.
 
 > ## ⏱ FRESH SESSION: READ `TODO.md`'s "RESUME HERE" BLOCK FIRST
-> It is at the very top of `TODO.md`, was verified against the live database on 2026-08-05, and is
+> It is at the very top of `TODO.md`, was verified against the live database on 2026-08-09, and is
 > the ONLY place that states what is actually open. Everything else — including the status
 > paragraph directly below — is a historical snapshot that goes stale. **The site is DEPLOYED and
 > verified live at https://visiblegov.pages.dev** (2026-08-05); the full product loop — directory →
 > profile → real votes → bill → tally — was confirmed working in a real browser with zero console
-> errors. What remains is the custom-domain phases (nameservers + attach
-> `visiblegov.helpingpeoplehelpingpeople.com`), all console work — see `docs/CLOUDFLARE_DEPLOY.md`.
+> errors. **506 plain-language summaries are published (2026-08-09, up from 115 on 2026-08-06)**
+> via subagent wave campaigns + a billed Haiku-author lane. What remains: the custom-domain phases
+> (nameservers + attach `visiblegov.helpingpeoplehelpingpeople.com`, Lance's console work — see
+> `docs/CLOUDFLARE_DEPLOY.md`) and the summary backlog, **whose every lane is PAUSED as of
+> 2026-08-09 evening: the API balance is spent ($1.98) and Lance's standing instruction is "Once
+> depleted, pause waves as I do not auto reload credits" — nothing resumes without his explicit
+> go.**
 >
 > **Two traps that will cost you a session if you hit them cold:**
 > 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct
@@ -50,13 +55,13 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-33 lessons as of 2026-08-05, several earned the hard way in THIS repo; lessons 30-33 are the
-newest — the 2026-08-05 deploy-night batch: contaminated-shell tests, deploy-console path fields,
-static-host URL canonicalization, and fix-the-whole-idiom-class), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+36 lessons as of 2026-08-09, several earned the hard way in THIS repo; lessons 35-36 are the
+newest: quote-bearing text for native exes goes through a file (`git commit -F`), and
+negative-predicate gauges silently absorb later-invented status values), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
-own staleness banner, refreshed 2026-08-05, defer to `TODO.md`/live checks for migration-applied state),
+own staleness banner, refreshed 2026-08-09, defer to `TODO.md`/live checks for migration-applied state),
 then the most recent `CHATLOG.md` entries (why things are the way they are).
 
 **Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not
@@ -136,6 +141,12 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   a repeal — the rule text above stays in place so reinstating it is a one-line revert of this
   note, not a rewrite. Treat this as still in effect until Lance says otherwise; do not assume it
   has lapsed just because time has passed or the session has changed.
+  **SUPERSEDED IN PRACTICE by depletion (2026-08-09): the API balance is SPENT.** Lance's final
+  authorization ("I have a $1 or $2 left... use the dollars... Once depleted, pause waves as I do
+  not auto reload credits") was executed the same day — $1.98 across three budget-capped
+  `scripts/summary-probe-api.mjs` runs, zero credit errors, then full stop. **All summary lanes
+  (billed AND subagent) are paused; any new billed call now requires Lance to add funds AND give
+  an explicit go.** See the memory file `no-api-spend-hold.md` and CHATLOG 2026-08-09.
 - **Trust model v3 (adopted 2026-07-28 for glossary, 2026-07-31 for summaries — fully live, not
   pending; spec: docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from
   official text only → sonnet-5 adversarially verifies (mechanically completeness-gated - never

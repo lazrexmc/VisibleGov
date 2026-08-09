@@ -752,3 +752,28 @@ Two corollaries that cost real time here:
    `us-congress` rows and MUST be reflected when the UI renders the federal delegation — but it is
    irrelevant to any `mo-legislature` row. Don't let a congressional-map caveat leak into state-seat
    logic (or vice-versa); the `jurisdiction_id` tells you which map even applies.
+
+## Lesson 35 — Quote-bearing text for a native exe goes through a FILE, never an argument (Windows PowerShell 5.1) (2026-08-09)
+
+Lesson 25 caught PowerShell mangling `node -e` one-liners; the same failure has a second face:
+**any argument containing embedded double quotes gets re-tokenized when PowerShell 5.1 hands it to
+a native executable** — even from inside a single-quoted here-string, which protects the text from
+PowerShell's *parser* but not from its broken native-argument *marshalling*. Live failure: a
+`git commit -m @'...'@` whose message quoted a gate reason (`"(SEC. 2)" vs "SEC. 2"`) exploded into
+multiple arguments; git treated the fragments as pathspecs and the commit failed. The general rule:
+prose destined for a native tool — commit messages, PR bodies, JSON payloads — gets WRITTEN TO A
+FILE (with the Write tool, not `Set-Content`, per lesson 25) and passed by path: `git commit -F
+<file>`, `--body-file`, `--file`. Arguments are for identifiers; files are for text.
+
+## Lesson 36 — A negative-predicate gauge silently absorbs every status value invented after it (2026-08-09)
+
+`data-status.js` reported "summaries draft/flagged" as `count(status neq. 'published')` — correct
+when the only statuses were published/draft. Months later a new mechanism (`--replace-drafts`)
+began retiring superseded drafts to `'rejected'`, and the gauge silently swallowed all 106 of
+them: it read 395 while actual open drafts were 289. Nothing errored; the number just quietly
+stopped meaning what its label said. The class: **any aggregate written as "everything except X"
+(neq / NOT IN / `!=`) auto-absorbs every enum value added after it, with no failing test to tell
+you.** Write gauges as positive enumerations (`status = 'draft'`) so a new status shows up as a
+VISIBLE gap (totals stop adding up) instead of an invisible inflation — and when you introduce a
+new status value anywhere, grep the codebase for negative predicates over that column before
+calling the change done.

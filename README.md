@@ -5,8 +5,9 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-05): DEPLOYED and live at https://visiblegov.pages.dev — back end locked in,
-front end shipped.** *(Fresh session? Read the RESUME HERE block at the top of `TODO.md` — it is
+**Status (2026-08-09): DEPLOYED and live at https://visiblegov.pages.dev — 506 plain-language
+summaries published; all summary lanes currently PAUSED (API balance depleted, Lance's
+instruction).** *(Fresh session? Read the RESUME HERE block at the top of `TODO.md` — it is
 verified against the live database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,
 zero console errors): directory → legislator profile with real recorded votes and mechanical
@@ -42,16 +43,18 @@ RESUME HERE block.
   coverage is deliberately targeted, not broad: **99.3% of the bills that got a passage vote**
   (3,319 of 3,341) have their official text — that passage-vote set is itself only ~9% of all bills,
   because most bills die in committee without a recorded vote.
-- **Plain-language pipeline live under trust model v3, with two independent trust axes**: opus-5
-  authors facts-only summaries from official text only; sonnet-5 adversarially refutes each claim
-  (*nothing false*); a second checker independently lists the bill's key provisions **before seeing
-  the summary** and verifies coverage (*nothing important missing*). Both axes must pass
-  mechanically for auto-publish; anything short of that goes to the owner. Runs on the flat-rate
-  subagent path — $0 in API spend. **115 summaries published, 98 held in the review queue by the
-  mechanical trust gate** out of ~3,300 eligible bills — each held-back item failed a specific,
-  named check (a missing citation, an omitted provision), not a backlog nobody looked at. The votes
-  are still the strong part; the plain-language layer is still early relative to the ~3,300
-  eligible, but no longer thin in absolute terms.
+- **Plain-language pipeline live under trust model v3, with two independent trust axes**: an
+  author model writes facts-only summaries from official text only; sonnet-5 adversarially refutes
+  each claim (*nothing false*); a second checker independently lists the bill's key provisions
+  **before seeing the summary** and verifies coverage (*nothing important missing*). Both axes
+  must pass mechanically for auto-publish; anything short of that goes to the owner. Two proven
+  lanes: the flat-rate subagent path ($0 API spend, opus-5 authors) and a budget-capped billed
+  path (`scripts/summary-probe-api.mjs`, Haiku authors + Sonnet checks — measured **$0.041 per
+  published summary** on 2026-08-09). **506 summaries published, 311 held in the review queue by
+  the mechanical trust gate** (live-counted 2026-08-09; up from 115 on 2026-08-06 via wave
+  campaigns + a draft-conversion drain + the billed runs) out of ~3,300 eligible bills — each
+  held-back item failed a specific, named check (a missing citation, an omitted provision), not a
+  backlog nobody looked at.
 - **The public site is built and merged** (`site/`): directory with address lookup, legislator
   profiles with vote records and mechanical vote-aggregate charts, bill pages, and a trust page
   whose prose was fact-checked against the code. Independently verified end-to-end in a real
@@ -62,11 +65,12 @@ RESUME HERE block.
   See `docs/CLOUDFLARE_DEPLOY.md` for the runbook and `TODO.md`'s RESUME HERE block for current
   status.
 - **Standing policy: every model-calling run is mechanically gated on explicit per-run owner
-  approval with cost stated** — currently under Lance's own explicit, active suspension (2026-08-03,
-  "temporarily remove the usage and credit usage restrictions... until I reinstate them"; the rule
-  text stays in place in `CLAUDE.md` so reinstating it is a one-line revert, not a rewrite). Treat
-  the suspension as still in effect until Lance says otherwise. See `TODO.md` and `CHATLOG.md` for
-  the live trail.
+  approval with cost stated.** Current spend state (2026-08-09): the platform API balance is
+  **depleted** — Lance authorized spending the final ~$2 that day ($1.98 across three
+  budget-capped runs) with the instruction *"Once depleted, pause waves as I do not auto reload
+  credits"* — so **every summary lane (billed and subagent alike) is paused**, and nothing
+  resumes, no new funds get spent, without Lance's explicit go. See `TODO.md`'s RESUME HERE block
+  and `CHATLOG.md` 2026-08-09 for the live trail.
 
 ## The one non-negotiable
 

@@ -1,14 +1,20 @@
-> # ⏱ STOP — READ THIS FIRST (banner refreshed 2026-08-05)
+> # ⏱ STOP — READ THIS FIRST (banner refreshed 2026-08-09)
 > **This document is a dated palimpsest and is NOT the place to learn current state.** Go to the
 > `⏱ RESUME HERE` block at the top of `TODO.md` — it was verified against the live database on
-> 2026-08-05 and is the only doc in this repo that claims to be current.
+> 2026-08-09 and is the only doc in this repo that claims to be current.
 >
-> Specifically, as of 2026-08-05 this file is stale on: migration counts (there are now **32**
+> Specifically, as of 2026-08-09 this file is stale on: migration counts (there are now **32**
 > files, 0001-0031 + 0018a, **ALL applied** — nothing awaits an apply anywhere in this repo), test
-> counts, open-queue counts, and the Cloudflare deploy status (**the site is DEPLOYED and verified
-> live at https://visiblegov.pages.dev; only the custom domain remains**). This file remains
-> genuinely useful for one thing only: the deep narrative history of WHY the project is shaped the
-> way it is. Read it for reasoning, never for state.
+> counts, open-queue counts, the Cloudflare deploy status (**the site is DEPLOYED and verified
+> live at https://visiblegov.pages.dev; only the custom domain remains**), and the entire
+> summary-campaign era this file predates: **506 summaries are published as of 2026-08-09** (this
+> file's body knows a far smaller number) via subagent wave campaigns (trust model v3 on the $0
+> subagent path), a draft-conversion drain lane (`--replace-drafts`), and a billed Haiku-author
+> lane (`scripts/summary-probe-api.mjs`, $0.041/publish measured). **All summary lanes are PAUSED
+> as of 2026-08-09 evening — the API balance is spent and Lance's standing instruction ("Once
+> depleted, pause waves as I do not auto reload credits") means nothing resumes without his
+> explicit go.** This file remains genuinely useful for one thing only: the deep narrative history
+> of WHY the project is shaped the way it is. Read it for reasoning, never for state.
 
 # VisibleGov — Controller Catch-Up Briefing
 
