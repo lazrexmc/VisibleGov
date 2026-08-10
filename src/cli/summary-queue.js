@@ -365,11 +365,24 @@ export function validateVerdictBinding(verdicts, whatItDoes) {
     if (typeof v.evidence_quote !== 'string') return `verdicts[${i}].evidence_quote must be a string`;
     const bullet = whatItDoes[v.bullet_index];
     if (!bullet) return `verdicts[${i}].bullet_index ${v.bullet_index} names no bullet in this summary`;
-    if (v.section !== bullet.section) {
+    if (stripSurroundingParens(v.section) !== stripSurroundingParens(bullet.section)) {
       return `verdicts[${i}] cites section "${v.section}" but what_it_does[${v.bullet_index}] cites "${bullet.section}" — this verdict is not bound to THIS summary's bullet`;
     }
   }
   return null;
+}
+
+// stripSurroundingParens — the ONLY normalization the binding comparison applies, on BOTH sides.
+// Verifier agents intermittently echo a bullet's section wrapped in parentheses ("(Sec. 2)" for a
+// bullet citing "Sec. 2"); this flagged 13 otherwise-clean bills across waves AN/AO/AP. The
+// section value is the verifier's statement of WHICH bullet it verified — not bill content, so
+// facts-only verbatim discipline does not apply to it — and removing one complete surrounding
+// pair cannot mask a real cross-section mismatch. Anything short of a complete pair (unbalanced,
+// nested-only-on-one-side) is left untouched and fails binding as before.
+function stripSurroundingParens(section) {
+  const s = String(section).trim();
+  if (s.startsWith('(') && s.endsWith(')')) return s.slice(1, -1).trim();
+  return s;
 }
 
 // collapseWhitespace — the ONLY normalization checkStatedPurposeGrounding applies, on BOTH sides.

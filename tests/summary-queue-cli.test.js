@@ -1038,6 +1038,67 @@ test('classifyRecordItem: FINAL REVIEW FINDING 4 — a verdict set whose section
   assert.match(decision.gateReason, /Sec\. 402/);
 });
 
+// ---- Parens-binding normalization (2026-08-10) ----
+// Live campaign data: verifier agents intermittently copy a bullet's section wrapped in
+// parentheses — "(Sec. 2)" for a bullet citing "Sec. 2" — and the strict-equality binding check
+// flagged 13 otherwise-clean bills across waves AN/AO/AP (7 in wave AP alone, including both
+// HALT Fentanyl versions and the SAVE Act). The section value is the verifier's echo of WHICH
+// bullet it verified, not bill content, so stripping ONE surrounding paren pair from each side
+// before comparing loses nothing the binding exists to catch: a verdict citing a genuinely
+// different section still fails, parenthesized or not.
+
+test('classifyRecordItem: a verdict section wrapped in parentheses — "(Sec. 1)" for a bullet citing "Sec. 1" — still binds and publishes', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const parenVerdicts = [
+    { bullet_index: 0, section: '(Sec. 1)', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: '(Sec. 2)', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: parenVerdicts }));
+  assert.equal(decision.action, 'publish', 'surrounding parens are verifier formatting, not a binding failure');
+  assert.equal(decision.overall, 'clean');
+});
+
+test('classifyRecordItem: the parens normalization is symmetric — bullet "(Sec. 1)" binds a verdict citing "Sec. 1"', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const summary = goodSummary();
+  summary.what_it_does = [{ point: 'Does X.', section: '(Sec. 1)' }, { point: 'Does Y.', section: 'Sec. 2' }];
+  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  assert.equal(decision.action, 'publish');
+});
+
+test('classifyRecordItem: parens never excuse a REAL section mismatch — "(Sec. 402)" against a bullet citing "Sec. 1" is still flagged', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const crossVerdicts = [
+    { bullet_index: 0, section: '(Sec. 402)', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: crossVerdicts }));
+  assert.equal(decision.action, 'flagDraft');
+  assert.match(decision.gateReason, /Sec\. 402/);
+});
+
+test('classifyRecordItem: an UNBALANCED paren — "(Sec. 1" — is not normalized away and still fails binding', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const lopsided = [
+    { bullet_index: 0, section: '(Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: lopsided }));
+  assert.equal(decision.action, 'flagDraft', 'only a complete surrounding pair is formatting; anything else is a real discrepancy');
+});
+
 test('classifyRecordItem: FINAL REVIEW FINDING 4 — a hollow verdict carrying only bullet_index+supported (no section/reason/evidence_quote) is flagged, never published, even though assessVerdicts alone reads it as complete and clean', async () => {
   const client = fakeClient({
     bill_texts: { data: [textRow()], error: null },
