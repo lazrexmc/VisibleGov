@@ -3627,6 +3627,19 @@ already in flight throughout.
   plus the first 8 'other'-priority tinies (1.1-2.2k), including the billed campaign's two
   Malformed rejects (HRES 518, HRES 436 — never wrote rows, legitimately fresh; opus may
   succeed where Haiku's structure failed). 222 manifest bills remain fresh after AR.
+- **Wave AR interruption + resume:** the original AR run died silently ~09:20 (PC sleep or
+  harness restart — task vanished from the tracker, no notification; found when Lance asked "is
+  AR running?"). 45/48 agents had journaled results; **resumed via resumeFromRunId with
+  identical args** — 45 replayed from cache, 3 ran live (the mega tails, 2.18M fresh tokens),
+  0 errors. The resume machinery works exactly as designed after a mid-wave death.
+- **Wave AR** (4 mega-monsters 175k-377k + 8 tinies 1.1-2.2k): **7 published, 5 flagged, 0
+  rejects.** All 4 megas flagged honestly (3 on single-provision coverage misses — e.g. DoD
+  approps omitting Sec. 8124 — 1 on unsupported verdicts; drain-lane material, and expected at
+  these sizes). **Both former billed-lane Malformed rejects PUBLISHED (HRES 518, HRES 436)** —
+  the opus author cleared the structure Haiku couldn't, validating the reject class as
+  author-strength-dependent rather than unpublishable. 7 of 8 tinies published (HR 5348 flagged
+  on an effective-date coverage miss). Live: 529 -> 536 published, drafts 329. Manifest: 222
+  fresh remain, all 'other'-priority small/mid bills from here.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
