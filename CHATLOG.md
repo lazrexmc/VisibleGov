@@ -3710,6 +3710,12 @@ already in flight throughout.
   **Wave BE launched** (12, 6.0-7.2k chars: IRS Whistleblower Program, Stop Chinese Fentanyl,
   DOE/USDA research, general war-powers SJRES 83, several dense multi-measure rule
   resolutions). 67 fresh remain (55 after BE).
+- **Wave BE** (12, 6.0-7.2k chars): 48 agents, 0 errors, 2.04M tokens. **10 published, 1
+  flagged, 1 Malformed** (HRES 1182 rural-communities sense-of-House — long whereas preamble,
+  checker under-split; gets its one retry in BF). Live: 662 -> 672 published, drafts 346.
+  **Wave BF launched** (12, 6.4-7.9k chars: HRES 1182 retry, a SECOND Trump impeachment
+  resolution HRES 939, S 6 Born-Alive Senate version, ANCHOR Act, Sanction Sea Pirates,
+  TRUE Accountability, dense rule resolutions). 56 fresh remain (44 after BF).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
