@@ -3730,6 +3730,13 @@ already in flight throughout.
   launched** (12, 9.3-10.9k chars: Mills censure, Stop Forced Organ Harvesting, Eliminate
   Shutdowns, Strengthening the Quad, fallen-officers memorial resolution, dense rule
   resolutions). 33 fresh remain (21 after BH).
+- **Wave BH** (12, 9.3-10.9k chars): 48 agents, 0 errors, 2.12M tokens. **9 published, 3
+  flagged** (Eliminate Shutdowns among the flags, coverage miss). Live: 690 -> 699 published,
+  drafts 352. Building BI surfaced THREE more SRES en-bloc nomination lists (520, 532, 412) —
+  **proactively class-parked** (park set now 6: HR 3095 + 5 SRES). **Wave BI launched** — the
+  FINAL 12 fresh manifest bills (11.0-31.2k chars: TICKET Act, TAKE IT DOWN Act, MEGOBARI Act,
+  Combating Organized Retail Crime, Tribal Trust Land Homeownership, Cyber Resilience). After
+  BI: manifest EXHAUSTED except 6 parked.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
