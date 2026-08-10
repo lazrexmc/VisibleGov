@@ -3606,6 +3606,17 @@ Smithsonian Women's History Museum).
 - **Wave AP** (12, 14.4-57.7k chars): 48 agents, 0 errors, 2.44M tokens. **2 published, 10
   flagged, 0 rejects** — but 7 of the 10 flags were the parens-binding class in ONE wave (the
   verifier cohort systematically wrote "(Sec. X)"), which forced the queued TODO-inbox fix.
+
+**2026-08-10 — autonomy design session (Lance):** *"I'd like to move away from the system and
+let it become more autonomous and get real OS-level scheduling like the ingest does."* Ran the
+brainstorming flow; Lance chose each fork explicitly: billed-API engine (not headless/cloud),
+**$5/ISO-week hard cap**, all three lanes (fresh backlog recency-first, draft conversion from
+DB objections, ≤1 monster/tick). Design approved; spec written to
+`docs/superpowers/specs/2026-08-10-scheduled-summaries-design.md`. Then Lance, before
+implementation: *"But our focus right now is what we've been doing, I have no credits loaded at
+the moment so we should proceed how have been after the spec is written."* → **spec PARKED with
+his words in its status block; no implementation, campaign continues.** Wave AQ (monsters) was
+already in flight throughout.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

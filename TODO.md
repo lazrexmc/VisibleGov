@@ -19,9 +19,15 @@ reload.** The drain lane (b) stays parked until asked. Current lane state: (a) s
 waves — ACTIVE, wave AO+ over the ~250 remaining 2025-session manifest bills, waves built from
 LIVE unattempted state (billed lane took bills out of manifest-slice order — never build a wave
 by slicing the manifest anymore; see `build-wave-ao.mjs` pattern: zero summary rows = fresh);
-(b) draft drain — paused: 311 open drafts, including 22 fresh billed-run flags and 4 trivial
-parens-binding flags (S 5 + HR 29 Laken Riley, HR 4 Rescissions, HR 3628); (c) new API funds —
-Lance's call only (observed $0.041/publish; $5 ≈ ~120 more).
+(b) draft drain — paused: ~316 open drafts (the 13 parens-class flags were converted 2026-08-10
+after the gate fix, commit 92816ff — 8 published incl. both Laken Rileys + Rescissions; 5
+re-flagged on real second issues); (c) new API funds — Lance's call only (observed
+$0.041/publish; $5 ≈ ~120 more). **(d) NEW, PARKED: autonomous scheduled-summaries runner —
+full design approved and spec'd 2026-08-10
+(`docs/superpowers/specs/2026-08-10-scheduled-summaries-design.md`: Task-Scheduler sibling of
+scheduled-ingest.js, billed Haiku/Sonnet chain, $5/ISO-week code-enforced cap via
+ingestion_runs ledger, fresh→drafts→1-monster lanes, gates untouched). Implementation starts
+ONLY when Lance loads credits and says go — his words in the spec's status block.**
 
 **State, verified live 2026-08-09 (not copied from another doc):**
 - **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — full product loop verified
