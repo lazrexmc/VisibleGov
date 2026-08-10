@@ -17,12 +17,14 @@ accountable with real information instead of spin.
 > paragraph directly below — is a historical snapshot that goes stale. **The site is DEPLOYED and
 > verified live at https://visiblegov.pages.dev** (2026-08-05); the full product loop — directory →
 > profile → real votes → bill → tally — was confirmed working in a real browser with zero console
-> errors. **506 plain-language summaries are published (2026-08-09, up from 115 on 2026-08-06)**
-> via subagent wave campaigns + a billed Haiku-author lane. What remains: the custom-domain phases
+> errors. **710 plain-language summaries are published (2026-08-10, up from 115 on 2026-08-06)**
+> — the 400-bill 2025-session recency manifest campaign is **COMPLETE** (394 attempted, 6
+> class-parked with documented structural reasons). What remains: the custom-domain phases
 > (nameservers + attach `visiblegov.helpingpeoplehelpingpeople.com`, Lance's console work — see
-> `docs/CLOUDFLARE_DEPLOY.md`) and the summary backlog. **Lane state (2026-08-10): the subagent
-> wave lane is RESUMED per Lance ("Proceed with wave AO"); the BILLED path stays CLOSED — the API
-> balance is spent ($1.98, 2026-08-09) and his standing instruction is "Once depleted, pause
+> `docs/CLOUDFLARE_DEPLOY.md`), the 359-draft drain lane, the next recency-first export (~2,500
+> eligible bills with text), and the parked autonomy build. **Lane state (2026-08-10 evening):
+> NO summary lane is running — the campaign finished; the BILLED path stays CLOSED — the API
+> balance is spent ($1.98, 2026-08-09) and Lance's standing instruction is "Once depleted, pause
 > waves as I do not auto reload credits" — no billed call without new funds AND his explicit
 > go.**
 >
@@ -56,13 +58,14 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-36 lessons as of 2026-08-09, several earned the hard way in THIS repo; lessons 35-36 are the
-newest: quote-bearing text for native exes goes through a file (`git commit -F`), and
-negative-predicate gauges silently absorb later-invented status values), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+38 lessons as of 2026-08-10, several earned the hard way in THIS repo; lessons 37-38 are the
+newest: diagnose a silently-dead background task from its on-disk artifacts and resume from
+journaled state, and park a failing structural CLASS with written reasons rather than paying
+per-instance retries), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
-own staleness banner, refreshed 2026-08-09, defer to `TODO.md`/live checks for migration-applied state),
+own staleness banner, refreshed 2026-08-10, defer to `TODO.md`/live checks for migration-applied state),
 then the most recent `CHATLOG.md` entries (why things are the way they are).
 
 **Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not

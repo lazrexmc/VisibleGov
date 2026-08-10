@@ -777,3 +777,33 @@ you.** Write gauges as positive enumerations (`status = 'draft'`) so a new statu
 VISIBLE gap (totals stop adding up) instead of an invisible inflation — and when you introduce a
 new status value anywhere, grep the codebase for negative predicates over that column before
 calling the change done.
+
+## Lesson 37 — A silently-dead background task is indistinguishable from a slow one until you check its artifacts; diagnose liveness from disk, then resume from journaled state (2026-08-10)
+
+A 12-bill wave (48 subagents) died mid-run — PC sleep or harness restart — with NO failure
+notification: the task simply vanished from the tracker while looking, from the conversation's
+view, exactly like a long-running job. It surfaced only because the operator asked "is it
+running?" and the answer was checked rather than assumed. The diagnostic that works: **look at
+the work's own artifacts on disk** (transcript/journal file mtimes) — activity that stopped
+hours ago plus a task ID the tracker no longer knows = dead, not slow. The recovery that works:
+the workflow journal held 45/48 completed agent results, so resuming with the SAME inputs
+(`resumeFromRunId` + verbatim args) replayed 45 from cache and ran only the 3 stragglers live —
+minutes instead of a full re-run. Two rules: (1) never relaunch a dead background job from
+scratch before checking what its journal/checkpoints already hold; (2) when reporting on
+long-running background work, verify liveness from artifacts rather than asserting it from
+memory — "I launched it" is not evidence it is still running.
+
+## Lesson 38 — Park a failing STRUCTURAL CLASS, not one instance at a time — and sweep for siblings the moment the second instance fails (2026-08-10)
+
+A completeness gate kept structurally-unpublishable documents honest: single-provision "list"
+documents (a bill that is one list of 66 ZIP-code communities; Senate en-bloc nomination
+resolutions that are one list of 48 nominees) can never meet a size-scaled minimum-provisions
+floor. The retry policy that wasted the least work: first structural failure → one retry (a
+different checker sometimes legitimately splits differently — one retry DID convert two such
+bills); second identical failure → park the bill with the reason written next to the park entry.
+The step that saved the most work: when the SECOND instance of the same shape failed (twin
+en-bloc resolutions), the remaining queue was swept for siblings of that shape and three more
+were parked proactively — before paying a full author/verify/check cycle each to learn what the
+class already proved. Corollary: a parked list without written reasons becomes a mystery
+blocklist in a month; every entry carries its why, and unparking is deliberately a one-line
+human edit.

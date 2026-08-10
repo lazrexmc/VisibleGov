@@ -30,27 +30,25 @@ old-manifest monster bills + ~23 passage bills missing text (ingestion) remain f
 inventories. Waves are built from LIVE unattempted state (zero summaries rows = fresh), never
 manifest slices.
 
-**State, verified live 2026-08-09 (not copied from another doc):**
+**State, verified live 2026-08-10 evening (not copied from another doc):**
 - **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — full product loop verified
   in a real browser 2026-08-05 (directory → profile → bill → tallies), zero console errors.
-- **Summaries: 506 published · 311 open drafts · 106 retired-superseded ('rejected').** Counted
-  directly from the `summaries` table 2026-08-09 evening. Arc: 115 published (2026-08-06) → 506.
-  ⚠️ `npm run status`'s "draft/flagged" line reads high — it counts `neq.published`, which
-  includes the 106 retirees (see INBOX note).
-- Glossary: 116 published (unchanged; the campaign has been summaries-only).
-- Summary-campaign ledger: 400-bill 2025-session recency manifest
-  (`.superpowers/artifacts/wave3/manifest.json`); subagent waves AI–AN consumed slices 0–72
-  (53 published); billed lane (skip-file `api-skip-owned.json`) attempted the next 72 smallest
-  (48 published, 22 flagged, 2 structural Malformed rejects; 142 manifest bills carry summary
-  rows, live-verified 2026-08-10); 258 manifest bills remain fresh (247 mid-to-large + 11
-  oversize >100k-char monsters); beyond the manifest, ~2,100 more fresh bills with text need
-  future exports (exporter is recency-first now).
+- **Summaries: 710 published · 359 open drafts · 119 retired-superseded ('rejected').** Counted
+  directly from the `summaries` table at campaign close. Arc: 115 published (2026-08-06) → 442
+  (2026-08-10 morning) → 710 (evening, +268 in the final day). Of the 3,343-bill accountability
+  set (passage vote + text), 473 now carry a published summary; the other published summaries
+  are 'other'-priority resolutions from the 2025-session manifest. 2,549 eligible bills with
+  text remain unsummarized overall. ⚠️ `npm run status`'s "draft/flagged" line reads 478 — it
+  counts `neq.published`, which includes the 119 retirees (INBOX note, still unfixed).
+- Glossary: 116 published of 6,743 terms (extraction backlog grew with ingest: 5,995
+  needs_mapping, 632 draft-mappable; the campaign has been summaries-only).
 - Git clean on `main`, everything pushed (run `git log -1` for the exact HEAD — a doc cannot
   contain its own latest commit hash). Suite 2,300+ green (`node --test` in a clean shell for
-  the exact count — see the `.env` trap below).
+  the exact count — see the `.env` trap below; last full run 2,389/0 after the parens-gate fix,
+  commit 92816ff).
 - Migrations: **32 files on disk (0001-0031 + 0018a), ALL applied live.** Nothing is awaiting an
   apply (0030/0031 verified live 2026-08-05).
-- Data (2026-08-09 `npm run status`): votes 10,248 · vote_casts 1,470,566 · bills 38,256 ·
+- Data (2026-08-10 `npm run status`): votes 10,266 · vote_casts 1,470,602 · bills 38,256 ·
   legislators 1,607.
 - Scheduler healthy: sources ticking through 2026-08-08+ (us-congress and mo-legislature both
   show current coverage); `refresh-aggregates` on pg_cron. The 3-layer timeout saga stays closed.
@@ -129,8 +127,9 @@ kept as the record of what had to be true:
 - 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
   `correct-data.js reconcile-flag` instead of one code change per flag — but each is a real human
   ruling about a real legislator's record, so it is Lance's work, not an agent's.
-- 311 draft summaries (see the paused-lanes block above for what they are) + ~2,100 draft
-  glossary terms in the review queue.
+- 359 draft summaries (see the RESUME HERE block for what they are — verified-flagged,
+  drain-lane fodder) + 632 draft-mappable glossary terms (plus 5,995 needs_mapping) in the
+  review queue.
 - ~19 known unbounded-`.select()` sites across 8 files, grandfathered in
   `tests/select-pagination-enforcement.test.js`'s dated allowlist. `ingest.js` is closest to
   actually tripping (legislators at ~940 of the 1,000 cap on a live-scheduled path).
@@ -1118,5 +1117,11 @@ above easy enough that regular people actually use it. Decomposed 2026-07-27 int
 draft — see NOW.
 
 - **Completeness-floor catch-22 (found 2026-08-08, wave C):** bills with fewer than 3 substantive provisions can NEVER publish - MIN_KEY_PROVISIONS=3 forces checkers to pad with enactment boilerplate the author contract rightly omits, so every tiny bill flags on 'omitted' boilerplate. 20 support-clean tiny bills sit flagged from wave C (reviewable/approvable by hand meanwhile). Proper fix: length-scaled mechanical floor in verifier.js assessCompleteness (e.g. <2.5k chars -> min 1; <5k -> min 2; else 3) + tests; a spec-level trust-machinery change - do it TDD with review, not inline.
-- **Verdict-binding parens mismatch class (found 2026-08-09, wave AN):** verifier writes section as "(SEC. 2)" while the bullet says "SEC. 2" and the mechanical binding check refuses — 4 of wave AN's 5 flags are exactly this (HR 3628, S 5, HR 4, HR 29 — both Laken Riley versions + the Rescissions Act, content otherwise verified). Options: normalize surrounding parens in the binding comparison (small trust-machinery change, TDD like the floor fix), or just convert via the re-check lane next drain pass. Bills sit as flagged drafts meanwhile.
-- **`npm run status` "summaries draft/flagged" gauge misleading since drain campaign (2026-08-09):** it counts `summaries?status=neq.published`, which includes the 106 superseded drafts retired to 'rejected' by --replace-drafts — reads 395 when actual open drafts are 289. Fix: count `status=eq.draft` (and maybe show rejected separately). One-line change in scripts/data-status.js.
+- ~~**Verdict-binding parens mismatch class (found 2026-08-09, wave AN)**~~ **RESOLVED
+  2026-08-10, commit 92816ff:** `validateVerdictBinding` now strips ONE complete surrounding
+  paren pair from each side before comparing (4 TDD tests incl. real-mismatch and
+  unbalanced-paren guards; suite 2,389/0). All 13 accumulated parens-class flags were
+  re-recorded with --replace-drafts: 8 published (both Laken Rileys, Rescissions, DETERRENT
+  among them), 5 re-flagged on real second issues the parens failure had masked. Zero
+  gate-mechanics flags in the 9 waves after the fix.
+- **`npm run status` "summaries draft/flagged" gauge misleading since drain campaign (2026-08-09, STILL OPEN):** it counts `summaries?status=neq.published`, which includes the drafts retired to 'rejected' by --replace-drafts — reads 478 when actual open drafts are 359 (as of 2026-08-10). Fix: count `status=eq.draft` (and maybe show rejected separately). One-line change in scripts/data-status.js; PLAYBOOK lesson 36 documents the class.

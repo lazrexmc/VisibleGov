@@ -3,6 +3,25 @@
 **Status of this document:** source of truth for **structure and meaning**.
 **Not** the source of truth for live numbers — see the box below.
 
+> **⚠️ SEMANTICS CHANGED SINCE THIS DOC'S LAST FULL PASS (banner added 2026-08-10).** The
+> summary-campaign era (2026-08-06 → 2026-08-10, ending at 710 published / 359 drafts / 119
+> retired) invalidated three of this document's structural claims, corrected here rather than
+> rewritten in place:
+> 1. **"Exactly one summary row per bill" is no longer true.** The drain lane's
+>    `--replace-drafts` mechanism supersedes a bill's draft with a re-authored row: the OLD row
+>    is retired to `status='rejected'` with an audit note naming its replacement, and a NEW row
+>    is written. A bill that went through conversion carries 2+ rows; exactly one is live
+>    (published or draft).
+> 2. **`status` is not just `draft`/`published`.** The live enum in use:
+>    `published` (public), `draft` (held by the trust gate — every one carries a specific
+>    adverse verdict or coverage miss), `rejected` (retired-superseded rows kept as audit
+>    trail — NOT quality judgments about the bill), and `approved` (defined, currently unused).
+> 3. **The "draft/flagged" line printed by `data-status.js` currently over-counts** — it counts
+>    `status neq 'published'`, which absorbs the retirees (PLAYBOOK lesson 36; TODO INBOX has
+>    the one-line fix). Open drafts = `status = 'draft'` only.
+> The dated snapshot counts below (115-published era) are otherwise left as the historical
+> ratios they were always framed as; run `data-status.js` for anything current.
+
 ---
 
 ## READ THIS FIRST: counts go stale, structure does not

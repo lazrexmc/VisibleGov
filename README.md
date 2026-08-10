@@ -5,10 +5,11 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-09): DEPLOYED and live at https://visiblegov.pages.dev — 506 plain-language
-summaries published; all summary lanes currently PAUSED (API balance depleted, Lance's
-instruction).** *(Fresh session? Read the RESUME HERE block at the top of `TODO.md` — it is
-verified against the live database and outranks this paragraph, which is a dated snapshot.)* The
+**Status (2026-08-10): DEPLOYED and live at https://visiblegov.pages.dev — 710 plain-language
+summaries published; the 400-bill 2025-session manifest campaign is COMPLETE (394 attempted,
+6 class-parked with documented reasons), and no summary lane is currently running.** *(Fresh
+session? Read the RESUME HERE block at the top of `TODO.md` — it is verified against the live
+database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,
 zero console errors): directory → legislator profile with real recorded votes and mechanical
 vote-aggregate charts → click through to a bill page with sponsors, plain-language summary, and the
@@ -50,11 +51,13 @@ RESUME HERE block.
   must pass mechanically for auto-publish; anything short of that goes to the owner. Two proven
   lanes: the flat-rate subagent path ($0 API spend, opus-5 authors) and a budget-capped billed
   path (`scripts/summary-probe-api.mjs`, Haiku authors + Sonnet checks — measured **$0.041 per
-  published summary** on 2026-08-09). **506 summaries published, 311 held in the review queue by
-  the mechanical trust gate** (live-counted 2026-08-09; up from 115 on 2026-08-06 via wave
-  campaigns + a draft-conversion drain + the billed runs) out of ~3,300 eligible bills — each
-  held-back item failed a specific, named check (a missing citation, an omitted provision), not a
-  backlog nobody looked at.
+  published summary** on 2026-08-09). **710 summaries published, 359 held in the review queue by
+  the mechanical trust gate** (live-counted 2026-08-10 at the close of the 2025-session manifest
+  campaign; up from 115 on 2026-08-06 via wave campaigns, a draft-conversion drain, the billed
+  runs, and a verdict-binding gate fix) — each held-back item failed a specific, named check (a
+  missing citation, an omitted provision), not a backlog nobody looked at. Roughly 2,500 eligible
+  bills with text remain for future campaigns; 6 bills are parked as structurally unpublishable
+  under the completeness floor (single-provision list documents), each with its reason recorded.
 - **The public site is built and merged** (`site/`): directory with address lookup, legislator
   profiles with vote records and mechanical vote-aggregate charts, bill pages, and a trust page
   whose prose was fact-checked against the code. Independently verified end-to-end in a real
@@ -65,11 +68,12 @@ RESUME HERE block.
   See `docs/CLOUDFLARE_DEPLOY.md` for the runbook and `TODO.md`'s RESUME HERE block for current
   status.
 - **Standing policy: every model-calling run is mechanically gated on explicit per-run owner
-  approval with cost stated.** Current spend state (2026-08-09): the platform API balance is
-  **depleted** — Lance authorized spending the final ~$2 that day ($1.98 across three
+  approval with cost stated.** Current spend state (2026-08-10): the platform API balance is
+  **depleted** — Lance authorized spending the final ~$2 on 2026-08-09 ($1.98 across three
   budget-capped runs) with the instruction *"Once depleted, pause waves as I do not auto reload
-  credits"* — so **every summary lane (billed and subagent alike) is paused**, and nothing
-  resumes, no new funds get spent, without Lance's explicit go. See `TODO.md`'s RESUME HERE block
+  credits"* — so the billed path is CLOSED. The subagent wave lane ran its authorized campaign
+  to completion on 2026-08-10 and is now idle; nothing new runs, and no new funds get spent,
+  without Lance's explicit go. See `TODO.md`'s RESUME HERE block
   and `CHATLOG.md` 2026-08-09 for the live trail.
 
 ## The one non-negotiable

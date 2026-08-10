@@ -3758,6 +3758,34 @@ agent errors across ~1,050 subagents today; the parens fix held from wave AQ onw
 gate-mechanics flags after it). What remains for the summary product: the 359-draft drain,
 the next recency-first export (~2,100 eligible bills with text beyond this manifest), and the
 parked autonomy build (spec ready, needs credits + Lance's go).
+
+**2026-08-10 — post-campaign full doc sync (Lance: "review all documentation in detail, update
+all documentation, commit and push").** Fresh `data-status.js` run taken first (710 published;
+the gauge's 478 "draft/flagged" = 359 drafts + 119 retirees, lesson-36 bug still open; glossary
+backlog grew to 6,743 terms with ingest — 5,995 needs_mapping / 632 mappable; accountability-set
+coverage now 473 of 3,343). Synced against it:
+- `TODO.md` — RESUME HERE state bullets rewritten to the 2026-08-10-evening close (710/359/119,
+  campaign-complete ledger, fresh data-status numbers); INBOX parens-binding item marked
+  RESOLVED (92816ff) with its outcome; the status-gauge item updated to current numbers and
+  STILL OPEN; "genuinely open" drafts line 311→359 + real glossary breakdown.
+- `README.md` — status line (710, campaign complete, no lane running), trust-model bullet
+  (710/359, ~2,500 remaining, 6 parked with reasons), spend-policy bullet (campaign ran to
+  completion and is idle; billed path closed).
+- `CLAUDE.md` — fresh-session banner (campaign COMPLETE, lane state: nothing running) and
+  read-first list (38 lessons, briefing refreshed 2026-08-10).
+- `PLAYBOOK_DELTA.md` — lessons 37 (silently-dead background task: diagnose liveness from
+  on-disk artifacts, resume from journaled state — the wave-AR death/resume) and 38 (park a
+  failing structural CLASS with written reasons and sweep for siblings on the second instance —
+  the en-bloc-list saga) added; 38 total.
+- `docs/CONTROLLER_BRIEFING.md` — staleness banner refreshed to the campaign-complete state.
+- `docs/DATA_INVENTORY.md` — NEW semantics-drift banner correcting three now-false structural
+  claims from the 115-published era: one-row-per-bill (superseded rows exist), the
+  draft/published-only status enum (rejected + approved exist), and the gauge over-count.
+- Memory (`no-api-spend-hold.md` + `MEMORY.md`) — campaign-complete, no lane running, billed
+  closed, next work on Lance's pick only.
+Docs deliberately NOT rewritten: CHATLOG history (append-only trail), dated audit/spec/plan
+docs (historical records under their own dates), `docs/CLOUDFLARE_DEPLOY.md` and
+`docs/SCHEDULED_INGESTION.md` (still-accurate runbooks in their domains).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
