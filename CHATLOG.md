@@ -3603,3 +3603,18 @@ Smithsonian Women's History Museum).
   after AO: 154 attempted, 246 fresh. Wave AP built from live state (14.4-57.7k chars — the
   size ramp begins: S 1318, HR 3668, HR 2988, HR 4626, HR 27, S 331, HR 22, HR 4776, S 1383,
   HR 33, HR 3898, HR 1048) and launched.
+- **Wave AP** (12, 14.4-57.7k chars): 48 agents, 0 errors, 2.44M tokens. **2 published, 10
+  flagged, 0 rejects** — but 7 of the 10 flags were the parens-binding class in ONE wave (the
+  verifier cohort systematically wrote "(Sec. X)"), which forced the queued TODO-inbox fix.
+- **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
+  strips ONE complete surrounding paren pair from each side before comparing (the section value
+  is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
+  discipline doesn't apply to it). 4 new tests: bind, symmetric, real-mismatch-still-fails,
+  unbalanced-paren-still-fails. Full suite 2,389/0 in a clean shell (one unrelated documented
+  periodic bump rode along: the weekly-growing legiscan cache snapshot 32 -> 33, new 2239
+  dataset landed 2026-08-09). **Re-recorded all 13 parens-class flags (AN:4, AO:2, AP:7) with
+  --replace-drafts: 8 PUBLISHED** — S 5 + HR 29 (both Laken Riley versions), HR 4 (Rescissions),
+  HR 3628, HR 23, HR 8464, HR 2988, HR 1048 (DETERRENT) — **5 re-flagged honestly** (HR 4626,
+  S 331, HR 22 SAVE, S 1383, HR 33: the parens failure had short-circuited the gate and masked a
+  second, real issue on each; drain-lane work). Live verified: **published 525**, drafts 316,
+  retired 119. Old flagged drafts retired with audit notes via the existing supersede path.
