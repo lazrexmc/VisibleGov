@@ -3743,6 +3743,21 @@ already in flight throughout.
   fresh wave**: 6 bills, 36.9-49.4k chars (S 3971 small-business, HRES 5 House Rules adoption,
   ROTOR Act, and all THREE Senate budget concurrent resolutions SCONRES 7/22/33). After BJ the
   400-bill manifest is fully consumed: every bill published, flagged, or parked-with-reason.
+- **Wave BJ** (6, 36.9-49.4k chars): 24 agents, 0 errors, 1.37M tokens. **2 published, 4
+  flagged** (monster-class rate, all honest verifier/coverage flags). Live: 708 -> 710
+  published, drafts 359.
+
+**2026-08-10 — 2025-SESSION MANIFEST CAMPAIGN COMPLETE.** The 400-bill recency-first manifest
+is fully consumed: **394 attempted (0 fresh remaining) + 6 class-parked with documented
+structural reasons** (HR 3095 ZIP-code list + 5 SRES en-bloc nomination lists — single-provision
+structures the completeness floor rightly refuses). Day totals: **442 -> 710 published (+268 in
+one day)** across the billed campaign close ($1.98 -> 48), the parens gate fix + re-record
+(+8), and 22 subagent waves AO-BJ. Grand arc: 115 published (2026-08-06) -> 710. Drafts stand
+at 359 (all verified-flagged with receipts, drain-lane fodder); retired-superseded 119. Zero
+agent errors across ~1,050 subagents today; the parens fix held from wave AQ onward (zero
+gate-mechanics flags after it). What remains for the summary product: the 359-draft drain,
+the next recency-first export (~2,100 eligible bills with text beyond this manifest), and the
+parked autonomy build (spec ready, needs credits + Lance's go).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

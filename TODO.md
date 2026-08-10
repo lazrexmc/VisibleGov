@@ -10,24 +10,25 @@
 that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
 check — that drift is exactly what has burned this project before.*
 
-**⛔ STANDING STATE (updated 2026-08-10): SUBAGENT WAVE LANE RESUMED per Lance ("Proceed with
-wave AO"); BILLED PATH REMAINS CLOSED.** Background (2026-08-09 evening): Lance authorized
-spending the platform's last ~$2 of API balance ("Once depleted, pause waves as I do not auto
-reload credits"); it is spent ($1.9798 across three budget-capped runs, zero credit errors), so
-**no billed call runs unless Lance adds funds AND gives an explicit go — never assume a credit
-reload.** The drain lane (b) stays parked until asked. Current lane state: (a) subscription
-waves — ACTIVE, wave AO+ over the ~250 remaining 2025-session manifest bills, waves built from
-LIVE unattempted state (billed lane took bills out of manifest-slice order — never build a wave
-by slicing the manifest anymore; see `build-wave-ao.mjs` pattern: zero summary rows = fresh);
-(b) draft drain — paused: ~316 open drafts (the 13 parens-class flags were converted 2026-08-10
-after the gate fix, commit 92816ff — 8 published incl. both Laken Rileys + Rescissions; 5
-re-flagged on real second issues); (c) new API funds — Lance's call only (observed
-$0.041/publish; $5 ≈ ~120 more). **(d) NEW, PARKED: autonomous scheduled-summaries runner —
-full design approved and spec'd 2026-08-10
+**✅ STANDING STATE (updated 2026-08-10 evening): THE 2025-SESSION MANIFEST CAMPAIGN IS
+COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
+with documented structural reasons (HR 3095 ZIP-code list + 5 SRES en-bloc nomination lists —
+single-provision structures the completeness floor rightly refuses; park set lives in the
+session build script, reasons in CHATLOG 2026-08-10). **Live: 710 published / 359 drafts / 119
+retired** (counted directly at close). Day arc 442 -> 710; grand arc 115 (08-06) -> 710.
+**No lane is currently running.** BILLED PATH REMAINS CLOSED (balance spent 2026-08-09; no
+billed call without new funds AND Lance's explicit go — never assume a reload). Next-work menu,
+Lance's call: (a) **draft drain** — 359 verified-flagged drafts, historically ~80% convert via
+re-author-with-objections ("keep draining drafts" resumes it; the 103-no-envelope-drafts
+DB-objections upgrade is still owed); (b) **next manifest export** — ~2,100 eligible bills with
+text beyond this manifest, exporter is recency-first (`scripts/export-summary-wave.mjs`);
+(c) **autonomous scheduled-summaries runner** — design approved + spec'd
 (`docs/superpowers/specs/2026-08-10-scheduled-summaries-design.md`: Task-Scheduler sibling of
-scheduled-ingest.js, billed Haiku/Sonnet chain, $5/ISO-week code-enforced cap via
-ingestion_runs ledger, fresh→drafts→1-monster lanes, gates untouched). Implementation starts
-ONLY when Lance loads credits and says go — his words in the spec's status block.**
+scheduled-ingest.js, billed Haiku/Sonnet chain, $5/ISO-week code-enforced cap, gates
+untouched); implementation starts ONLY when Lance loads credits and says go; (d) 34
+old-manifest monster bills + ~23 passage bills missing text (ingestion) remain from earlier
+inventories. Waves are built from LIVE unattempted state (zero summaries rows = fresh), never
+manifest slices.
 
 **State, verified live 2026-08-09 (not copied from another doc):**
 - **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — full product loop verified
