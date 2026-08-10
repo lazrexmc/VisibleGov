@@ -3652,6 +3652,13 @@ already in flight throughout.
   333. **Wave AU launched** (12 more, 2.6-2.9k chars: S 9 Women and Girls in Sports Senate
   version, CMS Marketplace Integrity CRA, Tipped Employee Protection, AI for Main Street,
   two condemnation resolutions incl. the Minnesota lawmaker attacks). 186 fresh remain.
+- **Wave AU** (12, 2.6-2.9k chars): 48 agents, 0 errors, 1.94M tokens. **9 published, 3
+  flagged.** Notable flag: S 9 (Women and Girls in Sports, Senate version) — the verifier
+  correctly refused a bullet characterizing Title IX with background not in the cited section
+  (cited-section-alone discipline working as designed; House version HR 28 already published).
+  Live: 556 -> 565 published, drafts 336. **Wave AV launched** (12 more, 2.9-3.0k chars:
+  balanced-budget constitutional amendment HJRES 139, PROTECT Taiwan Act, ZIP Code
+  designations, sodium nitrite sale ban, Boulder attack resolution). 174 fresh remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
