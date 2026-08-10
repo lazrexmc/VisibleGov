@@ -3695,6 +3695,11 @@ already in flight throughout.
   launched** (12, 4.7-5.1k chars: Trump impeachment resolution HRES 537, El Salvador
   human-rights request, China-detainees resolution, Made-in-America Defense Act, Haiti
   Economic Lift extension, Communications Security Act). 103 fresh remain (91 after BB).
+- **Wave BB** (12, 4.7-5.1k chars, incl. the Trump impeachment resolution HRES 537 — same
+  mechanical treatment as every other bill): 48 agents, 0 errors, 1.97M tokens. **11 published,
+  1 flagged.** Live: 631 -> 642 published, drafts 341. **Wave BC launched** (12, 5.2-5.4k
+  chars: Plaskett censure, Epstein Files Transparency Act, four more Iran war-powers
+  resolutions, Alaska Native lands, smart-device disclosure). 91 fresh remain (79 after BC).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
