@@ -3716,6 +3716,13 @@ already in flight throughout.
   **Wave BF launched** (12, 6.4-7.9k chars: HRES 1182 retry, a SECOND Trump impeachment
   resolution HRES 939, S 6 Born-Alive Senate version, ANCHOR Act, Sanction Sea Pirates,
   TRUE Accountability, dense rule resolutions). 56 fresh remain (44 after BF).
+- **Wave BF** (12, 6.4-7.9k chars): 48 agents, 0 errors, 2.10M tokens. **11 published, 0
+  flagged, 1 Malformed** — the HRES 1182 retry PUBLISHED (retry lane works), HRES 939 (second
+  impeachment resolution) and S 6 published; SRES 377 Malformed (an en-bloc nominations LIST,
+  single-provision class like HR 3095 — one retry in BG, then park). Live: 672 -> 683
+  published, drafts 346. **Wave BG launched** (12, 7.6-9.2k chars: SRES 377 retry + its twin
+  SRES 690, Remote Access Security, American Access to Banking, MAPWaters, 9/11 commemorative
+  coin, border tech). 45 fresh remain (33 after BG).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
