@@ -3647,6 +3647,11 @@ already in flight throughout.
   gate mechanics). Live: 536 -> 545 published, drafts 332. **Wave AT launched** (12 more
   small 'other'-priority, 2.4-2.6k chars: American Cargo for American Ships, Barred Owl CRA,
   wind/solar credit-termination CRA, hydropower deadline extension). 198 fresh remain.
+- **Wave AT** (12 small, 2.4-2.6k chars): 48 agents, 0 errors, 1.93M tokens. **11 published, 1
+  flagged, 0 rejects — the campaign's best rate (92%).** Live: 545 -> 556 published, drafts
+  333. **Wave AU launched** (12 more, 2.6-2.9k chars: S 9 Women and Girls in Sports Senate
+  version, CMS Marketplace Integrity CRA, Tipped Employee Protection, AI for Main Street,
+  two condemnation resolutions incl. the Minnesota lawmaker attacks). 186 fresh remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
