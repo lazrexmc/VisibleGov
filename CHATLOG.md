@@ -3700,6 +3700,11 @@ already in flight throughout.
   1 flagged.** Live: 631 -> 642 published, drafts 341. **Wave BC launched** (12, 5.2-5.4k
   chars: Plaskett censure, Epstein Files Transparency Act, four more Iran war-powers
   resolutions, Alaska Native lands, smart-device disclosure). 91 fresh remain (79 after BC).
+- **Wave BC** (12, 5.2-5.4k chars): 48 agents, 0 errors, 2.03M tokens. **9 published, 3
+  flagged** (Plaskett censure + Epstein Files Transparency both published with receipts).
+  Live: 642 -> 651 published, drafts 344. **Wave BD launched** (12, 5.4-5.9k chars: Secure
+  Rural Schools reauth, TRIA reauth, ARTIST Act, another Iran SJRES, DHS-support resolution,
+  fraud-prevention workforce). 79 fresh remain (67 after BD).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
