@@ -3659,6 +3659,13 @@ already in flight throughout.
   Live: 556 -> 565 published, drafts 336. **Wave AV launched** (12 more, 2.9-3.0k chars:
   balanced-budget constitutional amendment HJRES 139, PROTECT Taiwan Act, ZIP Code
   designations, sodium nitrite sale ban, Boulder attack resolution). 174 fresh remain.
+- **Wave AV** (12, 2.9-3.0k chars): 48 agents, 0 errors, 2.00M tokens. **11 published, 0
+  flagged, 1 structural reject** — HR 3095 (ZIP Codes) hit MalformedSummaryError: the checker
+  found 1 provision (the bill is genuinely a list of 66 communities) vs the size-2 floor.
+  No row written, so it stays fresh; retrying ONCE in wave AW, park if it repeats. Live:
+  565 -> 576 published, drafts 336. **Wave AW launched** (12, 2.9-3.4k chars: HR 3095 retry,
+  McIver censure, Cuba + Iran war-powers resolutions, Medal of Honor Act, veterans-claims
+  bills, "Denouncing the horrors of socialism"). 163 fresh remain (151 after AW).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
