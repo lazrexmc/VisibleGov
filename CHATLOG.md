@@ -3666,6 +3666,14 @@ already in flight throughout.
   565 -> 576 published, drafts 336. **Wave AW launched** (12, 2.9-3.4k chars: HR 3095 retry,
   McIver censure, Cuba + Iran war-powers resolutions, Medal of Honor Act, veterans-claims
   bills, "Denouncing the horrors of socialism"). 163 fresh remain (151 after AW).
+- **Wave AW** (12, 2.9-3.4k chars): 48 agents, 0 errors, 1.98M tokens. **10 published, 1
+  flagged, 1 reject — HR 3095 Malformed a SECOND time, now PARKED** (builder skip set; the
+  bill's one-list structure genuinely cannot meet the size-2 completeness floor — HB 2465
+  class; unparking documented in the builder). Live: 576 -> 586 published, drafts 337.
+  **Wave AX launched** (12, 3.4-3.6k chars: three more Iran war-powers resolutions + the
+  HCONRES 38 War Powers directive, UAE arms-sale disapproval, Honduras human-rights request,
+  Vietnam Veterans Liver Fluke study, both Emergency Conservation Program versions). 151
+  fresh remain (139 after AX).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
