@@ -3640,6 +3640,13 @@ already in flight throughout.
   author-strength-dependent rather than unpublishable. 7 of 8 tinies published (HR 5348 flagged
   on an effective-date coverage miss). Live: 529 -> 536 published, drafts 329. Manifest: 222
   fresh remain, all 'other'-priority small/mid bills from here.
+- **Wave AS** (12 tiny resolutions, 2.2-2.3k chars: CRA disapprovals — EPA emissions/NESHAP,
+  USCIS EAD extension, BLM Coastal Plain, CFPB withdrawals, VA Reproductive Health Services —
+  plus the Israel arms-sale disapproval and Lower Health Care Costs Act): 48 agents, 0 errors,
+  1.92M tokens. **9 published, 3 flagged, 0 rejects** (flags are unsupported-verdict class, no
+  gate mechanics). Live: 536 -> 545 published, drafts 332. **Wave AT launched** (12 more
+  small 'other'-priority, 2.4-2.6k chars: American Cargo for American Ships, Barred Owl CRA,
+  wind/solar credit-termination CRA, hydropower deadline extension). 198 fresh remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
