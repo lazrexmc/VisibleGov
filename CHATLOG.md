@@ -3674,6 +3674,11 @@ already in flight throughout.
   HCONRES 38 War Powers directive, UAE arms-sale disapproval, Honduras human-rights request,
   Vietnam Veterans Liver Fluke study, both Emergency Conservation Program versions). 151
   fresh remain (139 after AX).
+- **Wave AX** (12, 3.4-3.6k chars): 48 agents, 0 errors, 1.96M tokens. **12/12 PUBLISHED — the
+  campaign's first perfect wave since wave H.** Live: 586 -> 598 published, drafts 337 (two shy
+  of 600). **Wave AY launched** (12, 3.7-3.9k chars: Venezuela war-powers pair SJRES 90/98,
+  another Iran SJRES 114, LA riots condemnation, several multi-measure rule resolutions).
+  139 fresh remain (127 after AY).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
