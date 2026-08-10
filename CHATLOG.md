@@ -3737,6 +3737,12 @@ already in flight throughout.
   FINAL 12 fresh manifest bills (11.0-31.2k chars: TICKET Act, TAKE IT DOWN Act, MEGOBARI Act,
   Combating Organized Retail Crime, Tribal Trust Land Homeownership, Cyber Resilience). After
   BI: manifest EXHAUSTED except 6 parked.
+- **Wave BI** (12, 11.0-31.2k chars): 48 agents, 0 errors, 2.23M tokens. **9 published, 3
+  flagged.** Live: 699 -> 708 published, drafts 355. "Final wave" was one early — the SRES
+  parking shrank BI's slice, leaving a true tail of 6. **Wave BJ launched — the ACTUAL final
+  fresh wave**: 6 bills, 36.9-49.4k chars (S 3971 small-business, HRES 5 House Rules adoption,
+  ROTOR Act, and all THREE Senate budget concurrent resolutions SCONRES 7/22/33). After BJ the
+  400-bill manifest is fully consumed: every bill published, flagged, or parked-with-reason.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
