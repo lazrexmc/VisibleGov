@@ -3689,6 +3689,12 @@ already in flight throughout.
   Wounded Knee Memorial, Charlie Kirk memorial resolution, Shutdown Fairness Act, China
   Exchange Rate Transparency, Qatar arms-sale disapproval, lithium-ion battery standards).
   115 fresh remain (103 after BA).
+- **Wave BA** (12, 4.2-4.6k chars): 48 agents, 0 errors, 2.00M tokens. **10 published, 2
+  flagged** (one is the Charlie Kirk memorial resolution HRES 719, gated on an omitted
+  provision — honest coverage miss). Live: 621 -> 631 published, drafts 340. **Wave BB
+  launched** (12, 4.7-5.1k chars: Trump impeachment resolution HRES 537, El Salvador
+  human-rights request, China-detainees resolution, Made-in-America Defense Act, Haiti
+  Economic Lift extension, Communications Security Act). 103 fresh remain (91 after BB).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
