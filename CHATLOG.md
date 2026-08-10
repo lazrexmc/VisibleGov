@@ -3617,6 +3617,16 @@ implementation: *"But our focus right now is what we've been doing, I have no cr
 the moment so we should proceed how have been after the spec is written."* → **spec PARKED with
 his words in its status block; no implementation, campaign continues.** Wave AQ (monsters) was
 already in flight throughout.
+- **Wave AQ** (12 monsters, 58.5-125k chars: five appropriations bills, Ukraine Support Act,
+  SUPPORT Act reauth, Fix Our Forests): 48 agents, 0 errors, 3.70M tokens (biggest wave yet;
+  S 2882 alone drew 113 verdicts). **4 published, 8 flagged, 0 rejects** — 33%, inside the
+  historical monster band, and ZERO gate-mechanics flags (parens fix holding; all 8 are genuine
+  verifier refutations on giant bills — drain-lane material). Live: 525 -> 529 published,
+  drafts 324. **Wave AR launched** — the passage-priority tail: the 4 final mega-monsters
+  (175k/200k/324k/377k chars — HR 3944 and HR 6644 are the biggest bills ever attempted here)
+  plus the first 8 'other'-priority tinies (1.1-2.2k), including the billed campaign's two
+  Malformed rejects (HRES 518, HRES 436 — never wrote rows, legitimately fresh; opus may
+  succeed where Haiku's structure failed). 222 manifest bills remain fresh after AR.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
