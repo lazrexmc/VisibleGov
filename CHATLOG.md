@@ -3723,6 +3723,13 @@ already in flight throughout.
   published, drafts 346. **Wave BG launched** (12, 7.6-9.2k chars: SRES 377 retry + its twin
   SRES 690, Remote Access Security, American Access to Banking, MAPWaters, 9/11 commemorative
   coin, border tech). 45 fresh remain (33 after BG).
+- **Wave BG** (12, 7.6-9.2k chars): 48 agents, 0 errors, 2.00M tokens. **7 published, 3
+  flagged, 2 Malformed — both en-bloc nomination lists (SRES 377 second failure, SRES 690
+  identical first): CLASS-PARKED** in the builder (a 48-item nominations list is one provision;
+  the floor cannot be met honestly). Live: 683 -> 690 published, drafts 349. **Wave BH
+  launched** (12, 9.3-10.9k chars: Mills censure, Stop Forced Organ Harvesting, Eliminate
+  Shutdowns, Strengthening the Quad, fallen-officers memorial resolution, dense rule
+  resolutions). 33 fresh remain (21 after BH).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
