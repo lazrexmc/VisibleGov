@@ -3595,3 +3595,11 @@ also tightened the ledger's "~77 smallest" billed figure to the exact 72 attempt
 launched: 12 bills, 8.8-13.7k chars (Veterans Benefits Expansion, DC Safe and Beautiful, Cash
 Bail Reform, Protect Children's Innocence, Kayla Hamilton Act, Illegitimate Court Counteraction,
 Smithsonian Women's History Museum).
+- **Wave AO** (12, 8.8-13.7k chars): 48 agents, 0 errors, 2.20M tokens. **9 published, 3
+  flagged, 0 rejects.** Live: 506 -> 515 published, drafts 314. 2 of the 3 flags are the
+  parens-binding class AGAIN (HR 23 Illegitimate Court Counteraction, HR 8464 Stopping
+  Fraudulent Payments) — that class has now flagged 6 bills across two waves; the TODO-inbox fix
+  (normalize surrounding parens in the binding comparison) is earning its priority. Manifest
+  after AO: 154 attempted, 246 fresh. Wave AP built from live state (14.4-57.7k chars — the
+  size ramp begins: S 1318, HR 3668, HR 2988, HR 4626, HR 27, S 331, HR 22, HR 4776, S 1383,
+  HR 33, HR 3898, HR 1048) and launched.
