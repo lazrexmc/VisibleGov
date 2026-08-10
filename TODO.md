@@ -10,14 +10,18 @@
 that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
 check — that drift is exactly what has burned this project before.*
 
-**⛔ STANDING STATE (2026-08-09, evening): ALL SUMMARY LANES ARE PAUSED.** Lance authorized
+**⛔ STANDING STATE (updated 2026-08-10): SUBAGENT WAVE LANE RESUMED per Lance ("Proceed with
+wave AO"); BILLED PATH REMAINS CLOSED.** Background (2026-08-09 evening): Lance authorized
 spending the platform's last ~$2 of API balance ("Once depleted, pause waves as I do not auto
-reload credits"); it is now spent ($1.9798 across three budget-capped runs, zero credit errors).
-**Nothing — subagent waves, billed runs, drains — resumes without Lance's explicit go.** Never
-assume a credit reload. Resume options, his call only: (a) "continue" → subscription wave AO over
-the ~250 remaining 2025-session manifest bills; (b) "keep draining drafts" → 311 open drafts,
-including 22 fresh billed-run flags and 4 trivial parens-binding flags (S 5 + HR 29 Laken Riley,
-HR 4 Rescissions, HR 3628); (c) new API funds (at the observed $0.041/publish, $5 ≈ ~120 more).
+reload credits"); it is spent ($1.9798 across three budget-capped runs, zero credit errors), so
+**no billed call runs unless Lance adds funds AND gives an explicit go — never assume a credit
+reload.** The drain lane (b) stays parked until asked. Current lane state: (a) subscription
+waves — ACTIVE, wave AO+ over the ~250 remaining 2025-session manifest bills, waves built from
+LIVE unattempted state (billed lane took bills out of manifest-slice order — never build a wave
+by slicing the manifest anymore; see `build-wave-ao.mjs` pattern: zero summary rows = fresh);
+(b) draft drain — paused: 311 open drafts, including 22 fresh billed-run flags and 4 trivial
+parens-binding flags (S 5 + HR 29 Laken Riley, HR 4 Rescissions, HR 3628); (c) new API funds —
+Lance's call only (observed $0.041/publish; $5 ≈ ~120 more).
 
 **State, verified live 2026-08-09 (not copied from another doc):**
 - **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — full product loop verified
@@ -29,10 +33,11 @@ HR 4 Rescissions, HR 3628); (c) new API funds (at the observed $0.041/publish, $
 - Glossary: 116 published (unchanged; the campaign has been summaries-only).
 - Summary-campaign ledger: 400-bill 2025-session recency manifest
   (`.superpowers/artifacts/wave3/manifest.json`); subagent waves AI–AN consumed slices 0–72
-  (53 published); billed lane (skip-file `api-skip-owned.json`) consumed the next ~77 smallest
-  (48 published, 22 flagged, 2 structural Malformed rejects); ~250 mid-to-large manifest bills
-  + 11 oversize (>100k chars) monsters remain; beyond the manifest, ~2,100 more fresh bills
-  with text need future exports (exporter is recency-first now).
+  (53 published); billed lane (skip-file `api-skip-owned.json`) attempted the next 72 smallest
+  (48 published, 22 flagged, 2 structural Malformed rejects; 142 manifest bills carry summary
+  rows, live-verified 2026-08-10); 258 manifest bills remain fresh (247 mid-to-large + 11
+  oversize >100k-char monsters); beyond the manifest, ~2,100 more fresh bills with text need
+  future exports (exporter is recency-first now).
 - Git clean on `main`, everything pushed (run `git log -1` for the exact HEAD — a doc cannot
   contain its own latest commit hash). Suite 2,300+ green (`node --test` in a clean shell for
   the exact count — see the `.env` trap below).

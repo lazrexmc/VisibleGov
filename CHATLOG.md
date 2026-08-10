@@ -3581,3 +3581,17 @@ against the live DB numbers verified above (506 published / 311 drafts / 106 ret
 - `CHATLOG.md` — this entry; today's decision trail (wave AM close, wave AN + pause, billed runs
   1-3 + campaign close) was already committed as it happened (1514175, a62354c, 0ef7bf8, f390755).
 Shutdown-safe: nothing in flight, git clean after this commit, everything pushed.
+
+**2026-08-10 — wave lane RESUMED (Lance):** *"Proceed with wave AO"*, then *"review all
+documentation we left for ourselves prior to starting the run."* Doc review ran clean: the
+RESUME HERE block, CLAUDE.md banner, memory, and README all matched live state and the resume
+followed the documented option (a); the three "ALL LANES PAUSED" standing-state texts were
+updated to the new truth (wave lane ACTIVE, billed path still CLOSED without funds + explicit
+go, drain lane parked). One material process change discovered while building the wave: **the
+billed lane consumed manifest bills smallest-first across the whole remaining pool, so
+manifest-slice wave building is DEAD** — wave AO was built from live state instead (a manifest
+bill is fresh iff it has zero `summaries` rows; live-verified 142 attempted / 258 fresh, which
+also tightened the ledger's "~77 smallest" billed figure to the exact 72 attempted). Wave AO
+launched: 12 bills, 8.8-13.7k chars (Veterans Benefits Expansion, DC Safe and Beautiful, Cash
+Bail Reform, Protect Children's Innocence, Kayla Hamilton Act, Illegitimate Court Counteraction,
+Smithsonian Women's History Museum).

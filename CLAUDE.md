@@ -20,9 +20,10 @@ accountable with real information instead of spin.
 > errors. **506 plain-language summaries are published (2026-08-09, up from 115 on 2026-08-06)**
 > via subagent wave campaigns + a billed Haiku-author lane. What remains: the custom-domain phases
 > (nameservers + attach `visiblegov.helpingpeoplehelpingpeople.com`, Lance's console work — see
-> `docs/CLOUDFLARE_DEPLOY.md`) and the summary backlog, **whose every lane is PAUSED as of
-> 2026-08-09 evening: the API balance is spent ($1.98) and Lance's standing instruction is "Once
-> depleted, pause waves as I do not auto reload credits" — nothing resumes without his explicit
+> `docs/CLOUDFLARE_DEPLOY.md`) and the summary backlog. **Lane state (2026-08-10): the subagent
+> wave lane is RESUMED per Lance ("Proceed with wave AO"); the BILLED path stays CLOSED — the API
+> balance is spent ($1.98, 2026-08-09) and his standing instruction is "Once depleted, pause
+> waves as I do not auto reload credits" — no billed call without new funds AND his explicit
 > go.**
 >
 > **Two traps that will cost you a session if you hit them cold:**
