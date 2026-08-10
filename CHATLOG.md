@@ -3679,6 +3679,11 @@ already in flight throughout.
   of 600). **Wave AY launched** (12, 3.7-3.9k chars: Venezuela war-powers pair SJRES 90/98,
   another Iran SJRES 114, LA riots condemnation, several multi-measure rule resolutions).
   139 fresh remain (127 after AY).
+- **Wave AY** (12, 3.7-3.9k chars): 48 agents, 0 errors, 1.96M tokens. **12/12 PUBLISHED —
+  SECOND consecutive perfect wave, and the site crossed 600.** Live: 598 -> 610 published,
+  drafts 337. **Wave AZ launched** (12, 3.9-4.2k chars: Omar censure, Ethics-records
+  resolution, Clergy Act, Pregnant Students' Rights Senate version, two more Iran war-powers,
+  antisemitism-education resolution). 127 fresh remain (115 after AZ).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
