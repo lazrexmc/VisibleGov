@@ -3705,6 +3705,11 @@ already in flight throughout.
   Live: 642 -> 651 published, drafts 344. **Wave BD launched** (12, 5.4-5.9k chars: Secure
   Rural Schools reauth, TRIA reauth, ARTIST Act, another Iran SJRES, DHS-support resolution,
   fraud-prevention workforce). 79 fresh remain (67 after BD).
+- **Wave BD** (12, 5.4-5.9k chars): 48 agents, 0 errors, 2.05M tokens. **11 published, 1
+  flagged** (HR 8428 fraud-workforce, coverage miss). Live: 651 -> 662 published, drafts 345.
+  **Wave BE launched** (12, 6.0-7.2k chars: IRS Whistleblower Program, Stop Chinese Fentanyl,
+  DOE/USDA research, general war-powers SJRES 83, several dense multi-measure rule
+  resolutions). 67 fresh remain (55 after BE).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
