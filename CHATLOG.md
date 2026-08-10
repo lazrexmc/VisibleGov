@@ -3684,6 +3684,11 @@ already in flight throughout.
   drafts 337. **Wave AZ launched** (12, 3.9-4.2k chars: Omar censure, Ethics-records
   resolution, Clergy Act, Pregnant Students' Rights Senate version, two more Iran war-powers,
   antisemitism-education resolution). 127 fresh remain (115 after AZ).
+- **Wave AZ** (12, 3.9-4.2k chars): 48 agents, 0 errors, 1.95M tokens. **11 published, 1
+  flagged.** Live: 610 -> 621 published, drafts 338. **Wave BA launched** (12, 4.2-4.6k chars:
+  Wounded Knee Memorial, Charlie Kirk memorial resolution, Shutdown Fairness Act, China
+  Exchange Rate Transparency, Qatar arms-sale disapproval, lithium-ion battery standards).
+  115 fresh remain (103 after BA).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
