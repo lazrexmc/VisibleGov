@@ -3833,6 +3833,17 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   cemetery trusts, HB 636 Senior Savings), plus HB 825 telehealth, HB 1542 PBM, HR 6500 AGOA,
   SJRES 172, HRES 672. Live: 756 -> 765 published, drafts 304, retired 187. Drain total:
   55/68 (81%).
+- **Drain wave BQ** (2026-08-11; 12, 5.0-5.9k chars): 48 agents, 0 errors, 2.12M tokens. **11
+  published, 1 failed.** Converted: FOUR of five 3rd-attempt bills — HCR 4 Dred Scott
+  renunciation, HB 958 min-wage exemptions, HB 471 incentive pay, HB 50 GIS fees — plus HRES
+  1032 rule, HR 1958 Deporting Fraudsters, HB 1856 Extended Learning, HR 3486 reentry
+  penalties, HB 210 college police, SB 725 ambulance districts, HR 8428 fraud training. The
+  one failure: **HB 606 (529 loan definitions), 3rd attempt, MalformedSummaryError** — the
+  completeness checker found only 2 key provisions (the bill genuinely only changes two
+  definitions), below the mechanical 3-7 floor. Same structural Malformed class as HR 3095;
+  **PARKED** in the drain builder with a written reason (no 4th attempt; its draft stays for
+  human review). Live: 765 -> 776 published, drafts 293, retired 198. Drain total: 66/80
+  (83%).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
