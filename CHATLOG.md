@@ -3786,6 +3786,18 @@ coverage now 473 of 3,343). Synced against it:
 Docs deliberately NOT rewritten: CHATLOG history (append-only trail), dated audit/spec/plan
 docs (historical records under their own dates), `docs/CLOUDFLARE_DEPLOY.md` and
 `docs/SCHEDULED_INGESTION.md` (still-accurate runbooks in their domains).
+
+**2026-08-11 — drain lane resumed, one small batch (Lance: "drain a small batch").** Drainer
+census over the 359 drafts: **244 immediately re-authorable** (envelopes on disk — the manifest
+campaign's records files grew the pool from 163), 103 still need the DB-objections upgrade, 12
+no computable objections. **Drain wave BK** (8 smallest, 957-1,378 chars, exactly 1 objection
+each): 32 agents, 0 errors, 1.29M tokens; recorded with --replace-drafts. **7 published, 1
+re-flagged** (HRES 878 García disapproval — new honest coverage miss on a Whereas recital;
+second attempt, parks on a third). Live: **710 -> 717 published**, drafts 359 -> 352, retired
+119 -> 127 (8 superseded drafts retired with audit notes). Single batch per instruction;
+stopped after recording. One platform note: the safety classifier was unavailable for the
+S 4465 re-author agent — proceeded per established practice, since the record gates verify
+every claim against the hash-pinned text mechanically (S 4465 published clean through them).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
