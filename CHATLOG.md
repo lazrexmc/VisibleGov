@@ -3827,6 +3827,12 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   719 Charlie Kirk memorial, HB 1251 foreclosure surplus, HB 493 jury age, SB 213 settlement
   demands, HR 1717 Communications Security. Live: 748 -> 756 published, drafts 313, retired
   175. Drain total: 46/56 (82%).
+- **Drain wave BP** (12, 4.5-5.3k chars): 48 agents, 0 errors, 2.06M tokens. **9 published, 3
+  re-flagged** (HCR 4 Dred Scott, HB 958 min-wage, HB 606 529s — all to 3rd attempts in BQ).
+  Converted: ALL FOUR 3rd-attempt bills (SB 856 ESOP, HCR 26 Women Veterans Month, HB 443
+  cemetery trusts, HB 636 Senior Savings), plus HB 825 telehealth, HB 1542 PBM, HR 6500 AGOA,
+  SJRES 172, HRES 672. Live: 756 -> 765 published, drafts 304, retired 187. Drain total:
+  55/68 (81%).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
