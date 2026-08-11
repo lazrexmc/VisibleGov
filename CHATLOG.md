@@ -3798,6 +3798,15 @@ second attempt, parks on a third). Live: **710 -> 717 published**, drafts 359 ->
 stopped after recording. One platform note: the safety classifier was unavailable for the
 S 4465 re-author agent — proceeded per established practice, since the record gates verify
 every claim against the hash-pinned text mechanically (S 4465 published clean through them).
+
+**2026-08-11 — CONTINUOUS DRAIN (Lance: "keep draining, start with the lowest token usage items
+first than move towards the expensive items").** Drainer already orders by text_length (≈ token
+cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lance pauses.
+- **Drain wave BL** (12, 1.2-2.0k chars): 48 agents, 0 errors, 1.93M tokens. **11 published, 1
+  re-flagged** (HRES 405 — new coverage miss, 2nd attempt). HRES 878 PUBLISHED on its 3rd
+  attempt; both Israel arms disapprovals, HCONRES 40, the fentanyl rule resolution, and SRES 526
+  (with the disburse-and-hold contradiction fixed) all converted. Live: 717 -> 728 published,
+  drafts 341, retired 139.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
