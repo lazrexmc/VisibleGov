@@ -3821,6 +3821,12 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   748 published, drafts 321, retired 163. Drain running total: 38/44 (86%). *(Correction note:
   this entry initially listed HR 1919 and HB 746 as converted — the next wave's builder showed
   them still draft-only; corrected same pass before launching BO.)*
+- **Drain wave BO** (12, 3.6-5.0k chars, MO-heavy): 48 agents, 0 errors, 2.07M tokens. **8
+  published, 4 re-flagged** (SB 856, HCR 26, HB 443, HB 636 — all on 2nd attempt, 3rd in BP).
+  Converted: the whole 3rd-attempt cluster — HR 1919 Anti-CBDC, HR 2966, HB 746 — plus HRES
+  719 Charlie Kirk memorial, HB 1251 foreclosure surplus, HB 493 jury age, SB 213 settlement
+  demands, HR 1717 Communications Security. Live: 748 -> 756 published, drafts 313, retired
+  175. Drain total: 46/56 (82%).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
