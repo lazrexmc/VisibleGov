@@ -3813,6 +3813,12 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   inadmissibility/deportability bill (clause asymmetry fixed), all three CRA disapprovals
   (CFPB x2, VA Reproductive Health), Kari's Law Reporting, and the FERC hydropower extension
   all published. Live: 728 -> 739 published, drafts 330, retired 151.
+- **Drain wave BN** (12, 2.1-4.3k chars): 48 agents, 0 errors, 1.97M tokens. **9 published, 3
+  re-flagged** (HR 2966 American Entrepreneurs First on coverage again + 2 others). Converted:
+  HR 915 (3rd attempt), S 9 Women and Girls in Sports Senate version, HR 1919 Anti-CBDC, HRES
+  519 Minnesota lawmakers, SJRES 84 CMS Marketplace CRA, and the FIRST MO drain publishes (HJR
+  59 bingo amendment, HB 746 mortgage brokers — subsection-scope overreach fixed). Live: 739 ->
+  748 published, drafts 321, retired 163. Drain running total: 38/44 (86%).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
