@@ -3807,6 +3807,12 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   attempt; both Israel arms disapprovals, HCONRES 40, the fentanyl rule resolution, and SRES 526
   (with the disburse-and-hold contradiction fixed) all converted. Live: 717 -> 728 published,
   drafts 341, retired 139.
+- **Drain wave BM** (12, 1.7-2.6k chars): 48 agents, 0 errors, 1.97M tokens. **11 published, 1
+  re-flagged** (HR 915 — re-author still missed the Rule of Construction; 2nd attempt). HRES
+  405 converted on its 3rd attempt; TVA Salary Transparency, the DUI
+  inadmissibility/deportability bill (clause asymmetry fixed), all three CRA disapprovals
+  (CFPB x2, VA Reproductive Health), Kari's Law Reporting, and the FERC hydropower extension
+  all published. Live: 728 -> 739 published, drafts 330, retired 151.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
