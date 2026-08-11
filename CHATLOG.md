@@ -3844,6 +3844,15 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   **PARKED** in the drain builder with a written reason (no 4th attempt; its draft stays for
   human review). Live: 765 -> 776 published, drafts 293, retired 198. Drain total: 66/80
   (83%).
+- **Drain wave BR** (2026-08-11; 12, 5.9-6.5k chars): 48 agents, 0 errors, 2.15M tokens. **8
+  published, 3 re-flagged, 1 failed.** Converted: HB 1646 brush control, HB 994 petition
+  audits, SB 938 recording fees, HB 2102 sawmill zoning, HB 486 self-defense/stand-your-
+  ground, SB 1388 nuclear-enterprise sales tax, HR 2189 less-than-lethal devices, SB 293
+  explosives fees. Re-flagged to 3rd attempts: HB 1137 (independent contractor), HB 2163
+  (right of sepulcher), HB 569 (gated: omitted the Section B emergency clause). SB 973 (KC
+  police salaries) failed MalformedSummaryError — checker returned 1 key provision on a
+  many-provision bill, a checker fluke NOT the structural class; old draft intact, still
+  retryable. Live: 776 -> 784 published, drafts 285, retired 209. Drain total: 74/92 (80%).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
