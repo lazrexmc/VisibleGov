@@ -3853,6 +3853,26 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   police salaries) failed MalformedSummaryError — checker returned 1 key provision on a
   many-provision bill, a checker fluke NOT the structural class; old draft intact, still
   retryable. Live: 776 -> 784 published, drafts 285, retired 209. Drain total: 74/92 (80%).
+- **Drain wave BS — FINAL wave of this run (Lance: "make this the last wave, we will hit usage
+  limit"), killed by the weekly limit 2026-08-11, recovered and completed 2026-08-14:** the
+  original launch died mid-flight when the Claude weekly usage limit hit (23/48 agents done, 15
+  limit-errored, 0 envelopes, nothing recorded) — second real-world save by the
+  resume-from-journal pattern (PLAYBOOK lesson 37): after the Aug 14 noon reset, relaunched with
+  resumeFromRunId + identical verbatim args; 23 agents replayed from cache, 25 ran live, 48/48,
+  0 errors, 12 envelopes. (A separate partial retry by another LLM session the morning of
+  2026-08-14 left 2 bills of stage checkpoints in bs-stages/ — correct shape, honest verdicts,
+  never recorded, harmless.) **Recorded: 9 published, 1 re-flagged, 2 failed.** Converted: 3rd-
+  attempts HB 1137 (independent contractor) and HB 2163 (right of sepulcher), plus HB 1214
+  filing dates, HR 1326 DOE/USDA, HB 9 abortion preemption, HR 21 Born-Alive, SB 264 arts
+  council transfer, HCR 7 Falun Gong, HR 3632 power-plant reliability. HB 569 flagged on its
+  3rd attempt with a NEW honest miss (short-title provision) — per the retry discipline no 4th
+  attempt; it joins the human-review bucket. HB 64 and HB 1588 failed MalformedSummaryError
+  (completeness checker returned 1 and 2 key provisions — the same checker-fluke mode as SB
+  973, NOT the structural class; old drafts intact, all three retryable via a fresh-mode
+  re-run whenever a lane reopens). Live verified: **784 -> 793 published**, drafts 276,
+  retired 219. Continuous-drain final ledger: **83/104 drafts converted (80%)** across waves
+  BK-BS; published grew 710 -> 793 in the drain run. **ALL SUMMARY LANES NOW PAUSED per
+  Lance's instruction — next wave only on his explicit go.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
