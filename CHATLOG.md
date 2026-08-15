@@ -3975,6 +3975,18 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   The DB-objections reconstruction held up end-to-end: prior summaries parsed from body_md
   re-authored cleanly and passed fresh verification. Live: 830 -> 841 published, drafts 228,
   retired 280.
+- **Drain wave CB — 12/12 PUBLISHED, first clean sweep of the drain lane** (2026-08-15, 12
+  bills 2.5-4.0k chars, 48 agents 0 errors, 2.06M tokens): HB 935 Patients First (published on
+  3rd attempt — the CA re-flag's nonseverability omission was fixed by covering the clause under
+  its true home 376.1583), HCR 53 Ghost Army gold medal, HR 261 Undersea Cable Protection,
+  SCR 11 American History and Founders Month, HR 139 Sunshine Protection, HB 1606 First
+  Informer Broadcasters, SJRES 198 WISeR-model disapproval (added the 802(c) discharge-petition
+  provision the checker had found), HCR 4 salary-commission disapproval 2016, HCR 49 California
+  egg-law repeal urging, SJR 50 income-tax-cap ballot measure, HR 3106 WINTER Act, HB 1 Fund
+  Commissioners appropriation. record run e08955eb: published 12, gated 0, failures 0. Live
+  verified: **853 published**, 508 draft/flagged (228 real drafts + 280 retired under the
+  known neq.published gauge, lesson 36). Meanwhile the autonomy build started: plan committed
+  759df01, Task 1 (billed-summary-chain lib) implementer dispatched subagent-driven.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
