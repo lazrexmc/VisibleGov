@@ -4011,6 +4011,17 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   OAuth stall). Live: 861 -> 866 published, drafts 511 (gauge counts rejected, lesson 36).
   Autonomy build: Task 3 pure core complete after 1 fix round (54ac3af + b3b2fee header);
   Task 4 runTick orchestration implemented (da71760, 2419/0), review in flight.
+- **Drain wave CE — 6/6 PUBLISHED, clean sweep** (2026-08-15, 24 agents 0 errors, 1.11M tokens,
+  record run a1652e63): HB 19 capital-improvements appropriation (published on retry after the
+  OAuth casualty — the wave's deepest verification yet at 21-26 verdicts/bill), HB 1945 animal
+  confiscation, HB 385 real-estate correspondence definitions, HB 2180 road-district
+  consolidation, SB 1135 Bentley and Mason's Law, HB 188 Narcotics Control Act. Live: 866 ->
+  872 published. Autonomy build: Task 4 review verified all money paths correct (allowance ->
+  openRun -> first-paid-call ordering, balance-depleted break, lock release, exact helper
+  signatures); 2 Important test-coverage gaps (monster-gate untested, billing-error test can't
+  catch a loop-didn't-break regression) in fix round 1. Controller ruling: the ~2.25x effective
+  monster margin (1.5x gate atop 1.5x-padded worstBillUsd) stands — brief-literal, errs toward
+  spending less.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
