@@ -4031,6 +4031,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   failed Malformed (checker returned 2 key_provisions — 1st Malformed strike; its wave-d
   attempt had a valid 5-provision check, so no 2-strikes park yet). Live: 872 -> 876
   published, ~170 re-authorable remain.
+- **Drain wave CG — 5/6 published** (2026-08-15, 24 agents 0 errors, 1.07M tokens, record run
+  36ee21fe "partial"): HB 452 tort-caps (published on retry — picked up the equitable-share
+  definition), HB 2018 facilities-maintenance appropriation, HB 571 CCR/explosives, SB 275
+  health-care omnibus (32 verdicts), SB 623 fuel taxes/decals. **HB 1607 natural-resources
+  funds failed Malformed IDENTICALLY a second time (key_provisions=2 in both CF and CG) —
+  PARKED per the 2-strikes rule** (now 11 parked total). Live: 876 -> 881 published, ~165
+  re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
