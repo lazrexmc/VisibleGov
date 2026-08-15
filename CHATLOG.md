@@ -3888,6 +3888,16 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   drafts 268, retired 228. Fresh-retry mechanics: `append-fresh-retries.mjs` (scratchpad)
   strips reAuthor from a bill's latest args entry so the wave runs it fresh — the wave script
   already branches per-bill.
+- **Drain wave BU** (2026-08-14; 10 bills 7.3-8.6k): 40 agents, 0 errors, 1.79M tokens. **8
+  published, 1 re-flagged, 1 parked.** Converted: HB 651 video-service definitions (the
+  drainer had re-queued it with an honest objection mined from its failed-BT envelope — that
+  path works), **HB 1558 nonconsensual-images on its 3rd attempt**, HB 161 school calendar,
+  HB 183 credit transfer, HB 269 boat safety, HR 5200 FCC outage reporting, HB 1473 license
+  plates, HB 1086 short-term rentals. HR 2683 (Remote Access Security Act) re-flagged
+  honestly (2nd attempt; 3rd allowed). **SB 626 PARKED** — second identical Malformed
+  (key_provisions=1 in both BT and BU; the checker keeps collapsing this single-section fee
+  rewrite to one provision); joins HB 606/HB 569/HB 64 in human review. Live: 801 -> 809
+  published, drafts 260, retired 237.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
