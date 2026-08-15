@@ -3914,6 +3914,11 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   135.690.1 definitions provision) — same masked-issue pattern as the parens re-records; it
   re-enters the drainer pool with that objection. Live: 809 -> 813 published, drafts 256,
   retired 244.
+- **Drain wave BW — first PERFECT drain wave** (2026-08-14; 6 bills 9.1-9.6k): 24 agents, 0
+  errors, 1.05M tokens. **6/6 published, zero flags**: HB 689 preceptor tax credit on its 3rd
+  attempt (the section-word gate fix cleared its path), HB 736 protection-orders age, HRES
+  893 Cory Mills censure, HB 1905 abandoned aircraft, SB 363 elder-abuse reporting, HB 18
+  facilities appropriations. Live: 813 -> 819 published, drafts 250, retired 250.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
