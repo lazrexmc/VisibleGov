@@ -3926,6 +3926,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   clause the bill text never actually reworded) and SB 650 A+ Schools (coverage misses on the
   retained program-framework provisions). Live: 819 -> 823 published, drafts 246, retired
   256.
+- **Drain wave BY** (2026-08-14; 6 bills 9.9-10.8k): 24 agents, 0 errors, 1.15M tokens. **3
+  published, 3 re-flagged.** Converted: **SB 650 A+ Schools on its 3rd attempt**, S 2806
+  Eliminate Shutdowns Act, HB 258 animal trespass. **SB 786 whistleblower PARKED** — 3
+  attempts exhausted; the redline's unbracketed civil-action language keeps defeating every
+  characterization of the terminology swap's reach. SB 644 service dogs and HRES 936
+  six-bill rule re-flagged honestly (2nd attempts; 3rd allowed). Live: 823 -> 826 published,
+  drafts 243, retired 262.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
