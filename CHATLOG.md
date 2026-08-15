@@ -4000,6 +4000,17 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   the known fluke class — attempt 2 stays in pool). Live: 853 -> 861 published. Autonomy build:
   Task 1 complete + reviewed clean (bb0969a); Task 2 draft-objections lib complete (a8fe1d0,
   drainer verified byte-identical pre/post refactor), review in flight.
+- **Drain wave CD — 5/5 recordable published, clean sweep** (2026-08-15, run 13db0f7e): the
+  12-bill build's args file (81.7KB) exceeded the single-Read cap so the wave was rebuilt at
+  the proven 6-bill size. HR 5362 Boyce clinic (published on reattempt), SJR 87 sheriffs
+  (reattempt), SB 1119 Article V convention commissioners, HRES 1438 six-bill House rule
+  (reattempt), HB 204 animal confiscation (reattempt). **HB 19 (capital-improvements
+  appropriation) was the wave's only casualty — its re-author agent died on an expired OAuth
+  session** ("could not be refreshed", 1 of 21 agents; infrastructure, not content), envelope
+  stripped before record, bill stays in pool for the next wave. Wave ran 4.7h wall-clock (the
+  OAuth stall). Live: 861 -> 866 published, drafts 511 (gauge counts rejected, lesson 36).
+  Autonomy build: Task 3 pure core complete after 1 fix round (54ac3af + b3b2fee header);
+  Task 4 runTick orchestration implemented (da71760, 2419/0), review in flight.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
