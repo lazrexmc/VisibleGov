@@ -4038,6 +4038,18 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   funds failed Malformed IDENTICALLY a second time (key_provisions=2 in both CF and CG) —
   PARKED per the 2-strikes rule** (now 11 parked total). Live: 876 -> 881 published, ~165
   re-authorable remain.
+- **Autonomy build PAUSED after Task 4 (Lance, 2026-08-15: "pause the autonomous build once
+  this task completes").** Tasks 1-4 of 7 are complete, reviewed, and pushed (through 372afa2):
+  billed-summary-chain lib (bb0969a), draft-objections lib (a8fe1d0), scheduler pure core
+  (54ac3af + b3b2fee), runTick orchestration (da71760 + 372afa2 — fix round added monster-gate
+  headroom tests both sides of the threshold and pinned the billing-error break with a
+  chainCalls===1 assertion; re-review clean, suite 2420/0). The scheduler is now functionally
+  buildable end-to-end but NOT registered and NOT documented — remaining on resume: Task 5
+  (data-status scheduler block + lesson-36 gauge fix), Task 6 (runbook + CLAUDE.md carve-out),
+  Task 7 (full-suite gate + memory), final whole-branch review. Resume point recorded in
+  .superpowers/sdd/2026-08-15-scheduled-summaries/progress.md. Zero billed calls were made at
+  any point — building was $0; the billed path stays CLOSED. Drain lane continues (wave CH in
+  flight).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
