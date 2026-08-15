@@ -3933,6 +3933,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   characterization of the terminology swap's reach. SB 644 service dogs and HRES 936
   six-bill rule re-flagged honestly (2nd attempts; 3rd allowed). Live: 823 -> 826 published,
   drafts 243, retired 262.
+- **Drain wave BZ — final wave of this run (Lance: "take a break and pause after this wave
+  completes")** (2026-08-14; 6 bills 10.3-11.4k): 24 agents, 0 errors, 1.06M tokens. **4
+  published, 1 parked, 1 re-flagged.** Converted: **HRES 936 six-bill rule on its 3rd
+  attempt**, HB 1859 ballot naming, SB 54 county right-to-work option, HR 4294 MAWS
+  blue-catfish pilot. **SB 644 service dogs PARKED** — 3 attempts exhausted, each fixing the
+  prior miss while the checker honestly found a different one. HB 452 damages caps
+  re-flagged (2nd attempt; stays in the pool). Live: 826 -> 830 published, drafts 239,
+  retired 268. **Reopened-lane ledger (BT-BZ, all 2026-08-14 afternoon): 7 waves, 37
+  published (793 -> 830), 5 bills parked with written reasons (HB 64, SB 626, HR 2683, SB
+  786, SB 644), one gate-mechanics fix landed (section-word binding, e4f4915), 0 agent
+  errors in ~230 subagents.** Full-day total including the BS morning recovery: 784 -> 830
+  (+46). Remaining pool: ~116 re-authorable drafts (next sizes ~10.5k+), 103 no-envelope
+  drafts (need the DB-objections drainer upgrade), 12 no-objection drafts, 9 parked bills
+  for human review. **ALL SUMMARY LANES PAUSED per Lance — next wave only on his explicit
+  go.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
