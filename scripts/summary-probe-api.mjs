@@ -9,6 +9,10 @@
 // Emits the summary-queue `record` envelope with provenance:'api'; every publish/flag decision
 // stays with src/cli/summary-queue.js's mechanical gates — this script never writes the DB.
 //
+// The 4-stage chain itself lives in src/lib/billed-summary-chain.js (shared with
+// scripts/scheduled-summaries.js) — this script owns only CLI parsing, the manifest/skip-file
+// input, the budget guard, and the output files/terminal JSON.
+//
 // Budget: tracks REAL usage from every response at current per-Mtok prices and HARD-STOPS before
 // starting any bill once remaining budget < the batch's own worst-observed per-bill cost (or the
 // conservative floor before any bill has finished). Skips bills > --max-chars (omnibus monsters
@@ -20,17 +24,8 @@ import {
   SUMMARY_SCHEMA, SYSTEM_PROMPT, buildUserMessage, MAX_OUTPUT_TOKENS,
 } from '../src/lib/summarizer.js';
 import {
-  VERIFY_SCHEMA, VERIFY_SYSTEM_PROMPT, buildVerifyMessage, VERIFY_MAX_OUTPUT_TOKENS,
-  COMPLETENESS_SCHEMA, COMPLETENESS_SYSTEM_PROMPT, buildProvisionsMessage, buildCoverageMessage,
-  VERIFIER_MODEL,
-} from '../src/lib/verifier.js';
-
-// USD per Mtok, interactive tier (batch pricing comes with the full runner if the probe passes).
-const PRICES = {
-  'claude-haiku-4-5': { in: 1.0, out: 5.0 },
-  'claude-sonnet-5': { in: 2.0, out: 10.0 }, // intro pricing through 2026-08-31
-  'claude-opus-5': { in: 5.0, out: 25.0 },
-};
+  createCostTracker, callStructured, runBillChain, loadCheckpoint, saveCheckpoint,
+} from '../src/lib/billed-summary-chain.js';
 
 function parseArgs(argv) {
   const out = {
@@ -57,58 +52,13 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not set');
 const client = new Anthropic();
-
-let spentUsd = 0;
-const callLog = [];
-function priceOf(model) {
-  const p = PRICES[model];
-  if (!p) throw new Error(`no price entry for model ${model} — add it before spending`);
-  return p;
-}
-async function call(model, system, userContent, schema, maxTokens, label) {
-  // Streaming is mandatory for high-max_tokens requests (the SDK refuses non-streaming calls
-  // that could run >10 min — hit live on the first probe run); finalMessage() gives the same
-  // complete response object.
-  const stream = client.messages.stream({
-    model,
-    max_tokens: maxTokens,
-    system,
-    output_config: { format: { type: 'json_schema', schema } },
-    messages: [{ role: 'user', content: userContent }],
-  });
-  const response = await stream.finalMessage();
-  const p = priceOf(model);
-  const cost = (response.usage.input_tokens * p.in + response.usage.output_tokens * p.out) / 1e6;
-  spentUsd += cost;
-  callLog.push({ label, model, in: response.usage.input_tokens, out: response.usage.output_tokens, usd: Number(cost.toFixed(4)) });
-  if (response.stop_reason === 'refusal') throw new Error(`${label}: model refused`);
-  if (response.stop_reason === 'max_tokens') throw new Error(`${label}: hit max_tokens`);
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock) throw new Error(`${label}: no text content`);
-  return JSON.parse(textBlock.text);
-}
-
-// The API's structured-output mode rejects array minItems > 1 (live-diagnosed 400: "For 'array'
-// type, 'minItems' values other than 0 or 1 are not supported"). The 3-7 provisions bound is a
-// REQUEST at the schema layer anyway — assessCompleteness enforces it mechanically at the record
-// gate — so the API-facing copy strips the unsupported constraints and keeps everything else.
-const API_PROVISIONS_ITEMS = { ...COMPLETENESS_SCHEMA.properties.key_provisions };
-delete API_PROVISIONS_ITEMS.minItems;
-delete API_PROVISIONS_ITEMS.maxItems;
+const tracker = createCostTracker();
 
 // Per-stage checkpointing (live-learned the expensive way: a stage-3 failure used to discard the
 // PAID author+verify outputs of the same bill). Every completed stage persists immediately; a
-// re-run loads the checkpoint and never re-pays for a stage it already has.
-import { existsSync, mkdirSync } from 'node:fs';
+// re-run loads the checkpoint and never re-pays for a stage it already has. Plain bill_id keys
+// (unchanged) so checkpoints from before this refactor stay valid.
 const STAGE_DIR = '.superpowers/artifacts/wave3/api-stages';
-mkdirSync(STAGE_DIR, { recursive: true });
-function loadCheckpoint(billId) {
-  const p = `${STAGE_DIR}/${billId}.json`;
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : {};
-}
-function saveCheckpoint(billId, data) {
-  writeFileSync(`${STAGE_DIR}/${billId}.json`, JSON.stringify(data), 'utf8');
-}
 
 const skipIds = new Set(args.skipFile ? JSON.parse(readFileSync(args.skipFile, 'utf8')) : []);
 const manifest = JSON.parse(readFileSync('.superpowers/artifacts/wave3/manifest.json', 'utf8'))
@@ -120,54 +70,36 @@ let worstBillUsd = 0.05; // floor for small-bill probing; grows with observed re
 
 for (const bill of manifest) {
   if (bill.text_length > args.maxChars) { skipped.push({ identifier: bill.identifier, reason: `oversize ${bill.text_length} > ${args.maxChars}` }); continue; }
-  if (args.budgetUsd - spentUsd < worstBillUsd) { skipped.push({ identifier: bill.identifier, reason: 'budget guard' }); continue; }
-  const startSpend = spentUsd;
+  if (args.budgetUsd - tracker.spentUsd() < worstBillUsd) { skipped.push({ identifier: bill.identifier, reason: 'budget guard' }); continue; }
+  const startSpend = tracker.spentUsd();
   try {
     const text = readFileSync(bill.text_file, 'utf8');
-    const cp = loadCheckpoint(bill.bill_id);
-    if (!cp.summary) {
-      cp.summary = await call(args.authorModel, SYSTEM_PROMPT, buildUserMessage(bill.identifier, bill.title ?? '', text), SUMMARY_SCHEMA, MAX_OUTPUT_TOKENS, `author:${bill.identifier}`);
-      saveCheckpoint(bill.bill_id, cp);
-    }
-    const summary = cp.summary;
-    if (!summary.what_it_does || summary.what_it_does.length === 0) throw new Error('author produced zero bullets');
     // Author-bank mode (Lance, 2026-08-07: "spend the weekly subscription tokens to prep... to
     // lower the spend"): dollars buy ONLY the Haiku authoring; the Sonnet-priced stages drain
     // from these checkpoints later on subscription-token subagent waves.
-    if (args.authorOnly) { skipped.push({ identifier: bill.identifier, reason: 'banked (author-only mode)' }); worstBillUsd = Math.max(0.02, (spentUsd - startSpend) * 1.5); continue; }
-    const bulletsJson = JSON.stringify(summary.what_it_does);
-    if (!cp.verify) {
-      cp.verify = await call(VERIFIER_MODEL, VERIFY_SYSTEM_PROMPT, buildVerifyMessage(bill.identifier, bulletsJson, text), VERIFY_SCHEMA, VERIFY_MAX_OUTPUT_TOKENS, `verify:${bill.identifier}`);
-      saveCheckpoint(bill.bill_id, cp);
+    if (args.authorOnly) {
+      const cp = loadCheckpoint(STAGE_DIR, bill.bill_id);
+      if (!cp.summary) {
+        cp.summary = await callStructured(client, tracker, {
+          model: args.authorModel, system: SYSTEM_PROMPT, userContent: buildUserMessage(bill.identifier, bill.title ?? '', text),
+          schema: SUMMARY_SCHEMA, maxTokens: MAX_OUTPUT_TOKENS, label: `author:${bill.identifier}`,
+        });
+        saveCheckpoint(STAGE_DIR, bill.bill_id, cp);
+      }
+      if (!cp.summary.what_it_does || cp.summary.what_it_does.length === 0) throw new Error('author produced zero bullets');
+      skipped.push({ identifier: bill.identifier, reason: 'banked (author-only mode)' });
+      worstBillUsd = Math.max(0.02, (tracker.spentUsd() - startSpend) * 1.5);
+      continue;
     }
-    const verify = cp.verify;
-    if (!cp.provisions) {
-      // Wave-2's hard-won reinforcement (its absence is exactly what the Haiku checkers tripped
-      // on): the grounding gate rejects any section string that is not a verbatim substring.
-      const provisionsMsg = `${buildProvisionsMessage(bill.identifier, text)}\n\nMECHANICAL GROUNDING RULE (a code gate rejects violations whole): every \`section\` string you emit MUST appear VERBATIM as a substring of the bill text — never invent, normalize, or reformat a citation (no "115.295(2)" unless the text prints exactly that; no dotted ranges the text does not print).`;
-      const prov = await call(args.checkerModel, COMPLETENESS_SYSTEM_PROMPT, provisionsMsg, { type: 'object', additionalProperties: false, required: ['key_provisions'], properties: { key_provisions: API_PROVISIONS_ITEMS } }, 4000, `provisions:${bill.identifier}`);
-      cp.provisions = prov.key_provisions;
-      saveCheckpoint(bill.bill_id, cp);
-    }
-    const provisions = { key_provisions: cp.provisions };
-    if (!cp.coverage) {
-      const cov = await call(args.checkerModel, COMPLETENESS_SYSTEM_PROMPT, buildCoverageMessage(bill.identifier, JSON.stringify(provisions.key_provisions), bulletsJson), { type: 'object', additionalProperties: false, required: ['coverage'], properties: { coverage: COMPLETENESS_SCHEMA.properties.coverage } }, 3000, `coverage:${bill.identifier}`);
-      cp.coverage = cov.coverage;
-      saveCheckpoint(bill.bill_id, cp);
-    }
-    const coverage = { coverage: cp.coverage };
-    results.push({
-      bill_id: bill.bill_id,
-      identifier: bill.identifier,
-      bill_text_hash: bill.bill_text_hash,
-      summary,
-      verdicts: verify.verdicts,
-      completeness: { key_provisions: provisions.key_provisions, coverage: coverage.coverage },
-      provenance: 'api',
-      author_model: args.authorModel,
-      verifier_model: VERIFIER_MODEL,
+    const { envelope } = await runBillChain(client, tracker, {
+      bill: {
+        bill_id: bill.bill_id, identifier: bill.identifier, title: bill.title, bill_text_hash: bill.bill_text_hash,
+      },
+      text, stageDir: STAGE_DIR, checkpointKey: bill.bill_id,
+      authorModel: args.authorModel, checkerModel: args.checkerModel,
     });
-    worstBillUsd = Math.max(worstBillUsd, (spentUsd - startSpend) * 1.5);
+    results.push(envelope);
+    worstBillUsd = Math.max(worstBillUsd, (tracker.spentUsd() - startSpend) * 1.5);
   } catch (err) {
     skipped.push({ identifier: bill.identifier, reason: String(err.message ?? err) });
   }
@@ -175,9 +107,9 @@ for (const bill of manifest) {
 
 writeFileSync('.superpowers/artifacts/wave3/records-api.json', JSON.stringify({ results }, null, 1), 'utf8');
 console.log(JSON.stringify({
-  spent_usd: Number(spentUsd.toFixed(4)),
+  spent_usd: Number(tracker.spentUsd().toFixed(4)),
   budget_usd: args.budgetUsd,
   bills_completed: results.length,
   skipped,
-  per_call: callLog,
+  per_call: tracker.callLog,
 }, null, 1));
