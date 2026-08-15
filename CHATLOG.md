@@ -3919,6 +3919,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   attempt (the section-word gate fix cleared its path), HB 736 protection-orders age, HRES
   893 Cory Mills censure, HB 1905 abandoned aircraft, SB 363 elder-abuse reporting, HB 18
   facilities appropriations. Live: 813 -> 819 published, drafts 250, retired 250.
+- **Drain wave BX** (2026-08-14; 6 bills 9.7-10.2k): 24 agents, 0 errors, 1.10M tokens. **4
+  published, 2 re-flagged.** Converted: HB 1797 nuclear-plant guards, HB 2150 Death Master
+  File checks, HR 5214 DC cash-bail reform, HB 2216 private water rights. Re-flagged on
+  honest 2nd-attempt refutations (3rd allowed): SB 786 whistleblower (an "agency's action"
+  clause the bill text never actually reworded) and SB 650 A+ Schools (coverage misses on the
+  retained program-framework provisions). Live: 819 -> 823 published, drafts 246, retired
+  256.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
