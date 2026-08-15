@@ -151,6 +151,7 @@ test('runTick: a fresh bill flows plan → chain → records file → record CLI
 });
 
 test('runTick: billing error stops the tick, marks balance_depleted, logs BALANCE DEPLETED', async () => {
+  let chainCalls = 0;
   const { deps, calls } = fakeDeps({
     queue: [
       { bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' },
@@ -158,13 +159,70 @@ test('runTick: billing error stops the tick, marks balance_depleted, logs BALANC
     ],
     texts: { f1: { content: 't', content_hash: 'h1' }, f2: { content: 't', content_hash: 'h2' } },
     deps: {
-      runBillChainFn: async () => { const e = new Error('Your credit balance is too low'); e.status = 400; throw e; },
+      runBillChainFn: async () => {
+        chainCalls += 1;
+        const e = new Error('Your credit balance is too low'); e.status = 400; throw e;
+      },
     },
   });
   const report = await runTick(deps);
   assert.equal(report.balanceDepleted, true);
   assert.equal(calls.closed[0].detail.balance_depleted, true);
   assert.ok(calls.logs.some((l) => /BALANCE DEPLETED/.test(l)));
+  // Regression guard (task-4 review, finding 2): the assertions above would still pass even if
+  // the loop continued past the billing error to bill f2 — pin the actual `break` behavior so a
+  // future regression (the loop no longer stopping after a billing error) fails loudly. Only ONE
+  // chain call ever fires (f1's), f2 is never attempted, and f1's own failed attempt is recorded
+  // as a balance-depleted stop, not a generic skip.
+  assert.equal(chainCalls, 1);
+  assert.equal(calls.closed[0].detail.lanes.fresh, 0);
+  assert.equal(calls.closed[0].detail.skipped.length, 0);
+});
+
+test('runTick: monster-lane 1.5x-allowance headroom gate — attempted with ample headroom, excluded (skipped, no chain call) without it', async () => {
+  const monsterQueue = [{
+    bill_id: 'm1', identifier: 'HB 9', title: 'T', bill_text_hash: 'hm', text_length: 200000, priority: 'other',
+  }];
+  const monsterTexts = { m1: { content: 't', content_hash: 'hm' } };
+
+  // Sub-case A: default allowance ($1.00, no prior spend this week) is comfortably above the gate
+  // (1.5 * the 0.05 worst-bill floor = $0.075) — the monster is attempted and its chain call fires.
+  let ampleChainCalls = 0;
+  const ample = fakeDeps({
+    queue: monsterQueue,
+    texts: monsterTexts,
+    deps: {
+      runBillChainFn: async (a, tracker, { bill }) => {
+        ampleChainCalls += 1;
+        tracker.record('claude-haiku-4-5', { input_tokens: 10000, output_tokens: 1000 }, `author:${bill.identifier}`);
+        return {
+          envelope: {
+            bill_id: bill.bill_id, identifier: bill.identifier, bill_text_hash: bill.bill_text_hash, summary: {}, verdicts: [], completeness: {}, provenance: 'api', author_model: 'claude-haiku-4-5', verifier_model: 'claude-sonnet-5',
+          },
+        };
+      },
+    },
+  });
+  await runTick(ample.deps);
+  assert.equal(ampleChainCalls, 1);
+  assert.equal(ample.calls.closed[0].detail.lanes.monster, 1);
+  assert.equal(ample.calls.closed[0].detail.skipped.length, 0);
+
+  // Sub-case B: prior spend this week ($4.94) leaves only a $0.06 tick allowance — at-or-below the
+  // same 1.5x gate ($0.075) — the monster is excluded BEFORE any chain call and lands as a skip.
+  let tightChainCalls = 0;
+  const tight = fakeDeps({
+    queue: monsterQueue,
+    texts: monsterTexts,
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: 4.94 } }],
+    deps: {
+      runBillChainFn: async () => { tightChainCalls += 1; throw new Error('must not be called — gate should exclude this bill first'); },
+    },
+  });
+  await runTick(tight.deps);
+  assert.equal(tightChainCalls, 0);
+  assert.equal(tight.calls.closed[0].detail.lanes.monster, 0);
+  assert.equal(tight.calls.closed[0].detail.skipped.length, 1);
 });
 
 test('runTick: MalformedSummaryError from record parks the bill durably', async () => {
