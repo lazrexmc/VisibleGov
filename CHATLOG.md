@@ -4057,6 +4057,18 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   allowed attempt**, S 723 Tribal Trust Land Homeownership. HB 1014 child-tax-credit
   re-flagged honestly (rulemaking-subsection miscitation; attempt 2 next). Live: 881 -> 886
   published, ~160 re-authorable remain.
+- **Drain wave CI — 5/6 published, then ALL LANES PAUSED (Lance, 2026-08-15: "pause after this
+  wave")** (24 agents 0 errors, 1.11M tokens, record run 42101b5d): HB 1014 Missouri Child Tax
+  Credit (published on retry — picked up the bear-a-relationship qualifier), SB 30 street
+  lighting/road districts, S 1318 FISA-accountability/Anti-CBDC House amendment, SB 981
+  workers' comp notices/surcharges, HR 1346 Clean Air Act ethanol RVP. HB 656 ballot-photo
+  offenses failed Malformed (checker returned 2 key_provisions — 1st Malformed strike; its
+  prior attempt was a regular content flag, so no 2-strikes park; stays in pool). **Live
+  verified: 891 published** (up from 830 at this session's "resume draining" — waves CA-CI:
+  61 published, 3 parked with written reasons, ~155 re-authorable remain, 11 parked total).
+  State at pause: drain lane IDLE (next wave CJ builds from the 155-bill pool on Lance's go);
+  autonomy build parked after Task 4 (resume at Task 5, see the SDD ledger); billed path
+  CLOSED as always.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
