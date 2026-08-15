@@ -3873,6 +3873,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   retired 219. Continuous-drain final ledger: **83/104 drafts converted (80%)** across waves
   BK-BS; published grew 710 -> 793 in the drain run. **ALL SUMMARY LANES NOW PAUSED per
   Lance's instruction — next wave only on his explicit go.**
+- **Lane REOPENED same day (Lance: "proceed as you see best fit") — drain wave BT**
+  (2026-08-14; 9 re-author 7.0-7.7k + 3 FRESH-mode checker-fluke retries): 48 agents, 0
+  errors, 2.14M tokens. **8 published, 1 re-flagged, 3 failed.** The fresh-mode retry lane
+  works: SB 973 (KC police salaries) and HB 1588 (farm corp registration) both PUBLISHED on
+  their fresh re-runs — the prior Malformed failures were checker flukes as diagnosed. Also
+  converted: HB 134 nonprofit-security task force, HB 3308 sales-tax exemptions, HJR 44
+  veterans-home bonds, HB 2384 permit deadlines, SB 235 elections sovereignty, HB 1867 Joplin
+  guest tax. HB 1558 (nonconsensual images) re-flagged: omitted the 513.600-513.660
+  forfeiture cross-reference (2nd attempt; 3rd allowed). New Malformed failures: HB 651 and
+  SB 626 (1st occurrence each, retryable fresh next wave) and **HB 64 — second identical
+  Malformed in a row (key_provisions=1 in both BS and the BT fresh run) → PARKED per the
+  2-strikes rule**, joining HB 606/HB 569 in human review. Live: 793 -> 801 published,
+  drafts 268, retired 228. Fresh-retry mechanics: `append-fresh-retries.mjs` (scratchpad)
+  strips reAuthor from a bill's latest args entry so the wave runs it fresh — the wave script
+  already branches per-bill.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
