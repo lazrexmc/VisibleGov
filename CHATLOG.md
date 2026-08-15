@@ -4050,6 +4050,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   .superpowers/sdd/2026-08-15-scheduled-summaries/progress.md. Zero billed calls were made at
   any point — building was $0; the billed path stays CLOSED. Drain lane continues (wave CH in
   flight).
+- **Drain wave CH — 5/6 published** (2026-08-15, "continue draining" per Lance; 24 agents 0
+  errors, 1.12M tokens, record run cf1c5356): SB 41 pharmacist medications (28 verdicts),
+  HB 137 license-office bidding (34), HB 2387 presidential-preference primary (35 — new
+  deepest single-bill verification), **HB 2436 animal offenses published on its 3rd and final
+  allowed attempt**, S 723 Tribal Trust Land Homeownership. HB 1014 child-tax-credit
+  re-flagged honestly (rulemaking-subsection miscitation; attempt 2 next). Live: 881 -> 886
+  published, ~160 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
