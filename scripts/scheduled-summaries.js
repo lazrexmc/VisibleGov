@@ -1,3 +1,35 @@
+// scripts/scheduled-summaries.js — pure decision core of the scheduled billed-summary pipeline.
+// This script never calls the Anthropic API directly; it only computes which bills to summarize
+// and in what order, based on weekly budget constraints, lane prioritization (fresh, conversions,
+// monsters), and rejected-attempt tracking. The actual bill summarization (which DOES call the
+// API) happens in a separate orchestration layer (main() and runTick(), added in Task 4).
+//
+// SAFETY DISCIPLINE — BILLED-CALLS CARVE-OUT:
+//   - This file is PURE FUNCTIONS ONLY. No I/O, no state mutations, no side effects. All
+//     business logic (budget math, queue ordering, lane assembly, draft tracking) is
+//     deterministic and testable without a database or network.
+//   - BILLED-CALLS CAP DISCIPLINE: The scheduler operates under two hard caps:
+//     * WEEKLY_CAP_USD = 5.00 — maximum spend per ISO week (UTC, Thursday-anchored)
+//     * PER_TICK_CAP_USD = 1.00 — maximum spend per tick (individual orchestration loop run)
+//   - The caps are env-overridable via envCapUsd(), but DOWNWARD ONLY — a typo'd environment
+//     variable can shrink spend, never grow it. This mirrors envIntervalMs's floor-only
+//     discipline in scheduled-ingest.js, inverted: the env can only constrain, never relax.
+//   - Crashed ticks (status='running' in ingestion_runs) are counted as full spend
+//     (conservatively assume the worst), preventing budget bleed from stranded processes.
+//
+// WHAT BELONGS IN main()/runTick() (TASK 4):
+//   - Lock file acquisition and release (single-instance guarantee, like scheduled-ingest.js)
+//   - Reading live data from ingestion_runs and summary_queue tables
+//   - Writing run rows to ingestion_runs (opening and closing them honestly)
+//   - Invoking the billed summarizer for each bill in the assembled tick
+//   - Honesty logging and error handling
+//
+// This pure-functions-first design makes the logic testable without hitting the database or API,
+// and makes the orchestration layer (Task 4) a thin I/O wrapper around these decisions.
+//
+// Entry (Task 4): node --env-file=.env scripts/scheduled-summaries.js main
+//                 (orchestration layer not yet implemented; pure functions available for import)
+
 export const WEEKLY_CAP_USD = 5.00;
 export const PER_TICK_CAP_USD = 1.00;
 export const MONSTER_THRESHOLD_CHARS = 100000;
