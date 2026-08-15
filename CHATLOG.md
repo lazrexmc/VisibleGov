@@ -4022,6 +4022,15 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   catch a loop-didn't-break regression) in fix round 1. Controller ruling: the ~2.25x effective
   monster margin (1.5x gate atop 1.5x-padded worstBillUsd) stands — brief-literal, errs toward
   spending less.
+- **Drain wave CF — 4/6 published** (2026-08-15, 24 agents 0 errors, 1.11M tokens, record run
+  4a3f723c "partial"): **HB 1605 Capitol Commission published on its 3rd and final allowed
+  attempt**, plus HB 1044 PSC/nuclear-power, HB 336 election challengers/e-signatures (41
+  verdicts — deepest single-bill verification to date), HB 1934 school-retirement governance.
+  HB 452 tort-caps re-flagged honestly (gated: omitted the new "equitable share" definition — a
+  DIFFERENT omission than its prior flag; attempt 2 next). HB 1607 natural-resources funds
+  failed Malformed (checker returned 2 key_provisions — 1st Malformed strike; its wave-d
+  attempt had a valid 5-provision check, so no 2-strikes park yet). Live: 872 -> 876
+  published, ~170 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
