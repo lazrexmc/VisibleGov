@@ -3898,6 +3898,22 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (key_provisions=1 in both BT and BU; the checker keeps collapsing this single-section fee
   rewrite to one provision); joins HB 606/HB 569/HB 64 in human review. Live: 801 -> 809
   published, drafts 260, retired 237.
+- **Drain wave BV + section-word binding gate fix** (2026-08-14; 6 bills 8.0-9.2k — waves
+  dropped from 12 to 6 bills because the args files hit the single-Read token limit at these
+  draft sizes): 24 agents, 0 errors, 1.07M tokens. **4 published** — HB 19 capital-improvement
+  appropriations, HB 1413 ethanol incentive, HR 187 MAPWaters, HB 1953 rare-disease council.
+  **HR 2683 PARKED** — 3 attempts exhausted; each re-author fixed the prior refutation and the
+  verifier honestly found a different overstatement in the amendment-mapping bullets. **HB 689
+  exposed a SECOND binding-echo gate class** (sibling of the parens class, commit 92816ff): the
+  verifier cited "135.690" for a bullet citing "section 135.690" — same reference, bare
+  leading section-word difference. Fixed TDD in `validateVerdictBinding`: new
+  `stripLeadingSectionWord` drops repeated leading "section"/"sec." tokens from BOTH sides
+  (mid-string "subsection" untouched; real cross-section mismatches still fail); 4 new tests,
+  full suite 2,393/0 clean-shell. Re-recorded HB 689 through the fixed gate: the binding
+  false-positive is gone and it now flags honestly on a masked second issue (omits the
+  135.690.1 definitions provision) — same masked-issue pattern as the parens re-records; it
+  re-enters the drainer pool with that objection. Live: 809 -> 813 published, drafts 256,
+  retired 244.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

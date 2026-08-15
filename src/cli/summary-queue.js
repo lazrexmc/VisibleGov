@@ -365,14 +365,15 @@ export function validateVerdictBinding(verdicts, whatItDoes) {
     if (typeof v.evidence_quote !== 'string') return `verdicts[${i}].evidence_quote must be a string`;
     const bullet = whatItDoes[v.bullet_index];
     if (!bullet) return `verdicts[${i}].bullet_index ${v.bullet_index} names no bullet in this summary`;
-    if (stripSurroundingParens(v.section) !== stripSurroundingParens(bullet.section)) {
+    if (stripLeadingSectionWord(stripSurroundingParens(v.section)) !== stripLeadingSectionWord(stripSurroundingParens(bullet.section))) {
       return `verdicts[${i}] cites section "${v.section}" but what_it_does[${v.bullet_index}] cites "${bullet.section}" — this verdict is not bound to THIS summary's bullet`;
     }
   }
   return null;
 }
 
-// stripSurroundingParens — the ONLY normalization the binding comparison applies, on BOTH sides.
+// stripSurroundingParens — with stripLeadingSectionWord below, the ONLY normalization the binding
+// comparison applies, on BOTH sides.
 // Verifier agents intermittently echo a bullet's section wrapped in parentheses ("(Sec. 2)" for a
 // bullet citing "Sec. 2"); this flagged 13 otherwise-clean bills across waves AN/AO/AP. The
 // section value is the verifier's statement of WHICH bullet it verified — not bill content, so
@@ -383,6 +384,16 @@ function stripSurroundingParens(section) {
   const s = String(section).trim();
   if (s.startsWith('(') && s.endsWith(')')) return s.slice(1, -1).trim();
   return s;
+}
+
+// stripLeadingSectionWord — same class of verifier-echo drift as the parens case (wave BV, HB 689):
+// the verifier cited "135.690" for a bullet citing "section 135.690". A bare leading "section"/
+// "sec." token carries no identifying content — the number after it does — so dropping it from
+// BOTH sides cannot bind a verdict to the wrong bullet; "section 135.690" vs "135.680" still
+// fails. Only the exact leading word (case-insensitive, with optional period, followed by
+// whitespace) is dropped; everything else is untouched.
+function stripLeadingSectionWord(section) {
+  return String(section).replace(/^(?:(?:section|sec\.?)\s+)+/i, '');
 }
 
 // collapseWhitespace — the ONLY normalization checkStatedPurposeGrounding applies, on BOTH sides.

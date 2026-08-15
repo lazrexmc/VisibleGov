@@ -1099,6 +1099,62 @@ test('classifyRecordItem: an UNBALANCED paren — "(Sec. 1" — is not normalize
   assert.equal(decision.action, 'flagDraft', 'only a complete surrounding pair is formatting; anything else is a real discrepancy');
 });
 
+// Live campaign data, second binding-echo class (wave BV, HB 689): the verifier cited "135.690"
+// for a bullet citing "section 135.690". The bare leading "section"/"sec." word carries no
+// identifying content — the number after it does — so it is dropped from BOTH sides before
+// comparing. A real cross-section mismatch still fails with or without the word.
+test('classifyRecordItem: a verdict citing "135.690" for a bullet citing "section 135.690" still binds and publishes', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const summary = goodSummary();
+  summary.what_it_does[0].section = 'section Sec. 1';
+  const decision = await classifyRecordItem(client, baseItem({ summary }));
+  assert.equal(decision.action, 'publish', 'a bare leading "section" word is verifier formatting, not a binding failure');
+  assert.equal(decision.overall, 'clean');
+});
+
+test('classifyRecordItem: the section-word normalization is symmetric — a verdict citing "Section Sec. 2" binds a bullet citing "Sec. 2"', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const prefixed = [
+    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Section Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: prefixed }));
+  assert.equal(decision.action, 'publish');
+});
+
+test('classifyRecordItem: the section word never excuses a REAL mismatch — "section Sec. 402" against a bullet citing "Sec. 1" is still flagged', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const crossVerdicts = [
+    { bullet_index: 0, section: 'section Sec. 402', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: crossVerdicts }));
+  assert.equal(decision.action, 'flagDraft');
+  assert.match(decision.gateReason, /Sec\. 402/);
+});
+
+test('classifyRecordItem: "section" embedded mid-string is NOT normalized — "subsection Sec. 1" against "Sec. 1" still fails binding', async () => {
+  const client = fakeClient({
+    bill_texts: { data: [textRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const midWord = [
+    { bullet_index: 0, section: 'subsection Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+  ];
+  const decision = await classifyRecordItem(client, baseItem({ verdicts: midWord }));
+  assert.equal(decision.action, 'flagDraft', 'only the exact leading word is formatting; "subsection" changes the reference');
+});
+
 test('classifyRecordItem: FINAL REVIEW FINDING 4 — a hollow verdict carrying only bullet_index+supported (no section/reason/evidence_quote) is flagged, never published, even though assessVerdicts alone reads it as complete and clean', async () => {
   const client = fakeClient({
     bill_texts: { data: [textRow()], error: null },
