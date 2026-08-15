@@ -22,6 +22,7 @@
 // path so it survives scratchpad cleanup. History: CHATLOG 2026-08-14 drain-wave entries.
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { getClient } from '../src/lib/db.js';
+import { parseBodyMd, computeObjections } from '../src/lib/draft-objections.js';
 
 const waveName = process.argv[2];
 const batchSize = Number(process.argv[3] ?? 12);
@@ -40,60 +41,6 @@ const PARKED = new Set([
   '374bfa04-a3ef-4b1a-afe7-dbd6b74bde52', // SB 786 — 3 attempts exhausted 2026-08-14 (unbracketed civil-action redline language)
   '0df013ec-35f6-4166-9d64-3b00ca375e83', // SB 644 — 3 attempts exhausted 2026-08-14 (service-dog category definitions last)
 ]);
-
-const collapse = (s) => s.replace(/\s+/g, ' ').trim();
-
-// parseBodyMd — inverse of src/lib/summarizer.js renderMarkdown ("**What it does:**\n- point
-// (section)\n...\n\n**Stated purpose (from the bill):** ..."). The trailing (section) is found by
-// balanced-paren scan from the end, since both points and sections may contain parentheses.
-export function parseBodyMd(md) {
-  const whatItDoes = [];
-  let statedPurpose = '';
-  const PURPOSE_PREFIX = '**Stated purpose (from the bill):**';
-  for (const raw of String(md ?? '').split('\n')) {
-    const line = raw.trim();
-    if (line.startsWith('- ')) {
-      const item = line.slice(2).trim();
-      let parsed = null;
-      if (item.endsWith(')')) {
-        let depth = 0;
-        let i = item.length - 1;
-        for (; i >= 0; i -= 1) {
-          if (item[i] === ')') depth += 1;
-          else if (item[i] === '(') { depth -= 1; if (depth === 0) break; }
-        }
-        if (i > 0 && item[i - 1] === ' ') {
-          parsed = { point: item.slice(0, i - 1).trim(), section: item.slice(i + 1, -1) };
-        }
-      }
-      whatItDoes.push(parsed ?? { point: item, section: '' });
-    } else if (line.startsWith(PURPOSE_PREFIX)) {
-      statedPurpose = line.slice(PURPOSE_PREFIX.length).trim();
-    }
-  }
-  return { what_it_does: whatItDoes, stated_purpose: statedPurpose };
-}
-
-// computeObjections — the single objection derivation both sources feed. Mirrors the mechanical
-// gates in src/cli/summary-queue.js: refuted support verdicts, completeness coverage misses, and
-// a non-empty stated_purpose that is not a verbatim (whitespace-collapsed) substring of the text.
-function computeObjections({ verdicts, completeness, statedPurpose, text }) {
-  const objections = [];
-  for (const v of verdicts ?? []) {
-    if (!v.supported) objections.push(`Bullet ${v.bullet_index} (cited ${v.section}) was REFUTED by the verifier: ${v.reason}`);
-  }
-  const kp = completeness?.key_provisions ?? [];
-  for (const c of completeness?.coverage ?? []) {
-    if (c.covered === false && kp[c.provision_index]) {
-      const p = kp[c.provision_index];
-      objections.push(`The summary OMITS a key provision the completeness checker found in the text — add a bullet covering it: [${p.section}] ${p.provision}`);
-    }
-  }
-  if (statedPurpose && !collapse(text).includes(collapse(statedPurpose))) {
-    objections.push('stated_purpose is NOT a verbatim substring of the bill text. Either quote the bill\'s own purpose language exactly (verbatim, whitespace may collapse) or return an empty string for stated_purpose.');
-  }
-  return objections;
-}
 
 async function selectAllPaged(client, table, columns, applyFilters) {
   const rows = [];
