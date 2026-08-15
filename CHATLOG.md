@@ -3966,6 +3966,15 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   unlocked bills are SMALL (the ladder restarts at ~950 chars). The 7-bill PARKED set is
   encoded in the script with per-bill reasons. Lanes remain PAUSED — no wave launched; the
   next wave on Lance's go picks up the new pool smallest-first.
+- **Draining RESUMED (Lance, 2026-08-15: "resume draining") — wave CA, first over the unlocked
+  DB pool** (12 bills 953-2,636 chars): 48 agents, 0 errors, 1.94M tokens. **11/12 published**
+  — SJRES 18 overdraft-rule disapproval, HR 1118 Value Over Cost, SCR 8 Peach Capital, SR 640
+  Senate rules, HB 75 religious freedom, HCR 48 voter ID, SCR 26 auditor audit, HR 8823 FECA
+  fraud, SB 573 terror-state divestment, HB 665 elemental formulas, HR 1526 NORRA. HB 935
+  (Patients First) re-flagged honestly on a nonseverability omission (2nd attempt, leads CB).
+  The DB-objections reconstruction held up end-to-end: prior summaries parsed from body_md
+  re-authored cleanly and passed fresh verification. Live: 830 -> 841 published, drafts 228,
+  retired 280.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
