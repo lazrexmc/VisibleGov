@@ -3948,6 +3948,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   drafts (need the DB-objections drainer upgrade), 12 no-objection drafts, 9 parked bills
   for human review. **ALL SUMMARY LANES PAUSED per Lance — next wave only on his explicit
   go.**
+- **DB-objections drainer upgrade (2026-08-15, Lance: "proceed with the DB-objections drainer
+  upgrade that would unlock 103"):** the drain-wave builder was promoted from the session
+  scratchpad into the repo as `scripts/build-drain-wave.mjs` and taught a second objection
+  source — THE DATABASE. Drafts with no on-disk records-file envelope (the 103 leftovers from
+  waves that predate the records-file convention) carry the same evidence in Supabase: the
+  draft row's `body_md` is parsed back to {what_it_does, stated_purpose} (a balanced-paren
+  inverse of renderMarkdown, since points and sections both contain parens),
+  `summary_verifications` supplies refuted verdicts (kind='support') and coverage misses
+  (kind='completeness'), and the hash-pinned text comes from `bill_texts` and is materialized
+  into the artifacts bills/ dir for the wave agents. Both sources feed one shared
+  computeObjections that mirrors record's gates exactly. **Validated end-to-end: pool jumped
+  117 -> 220 re-authorable (all 103 unlocked — zero db-path skips: every one had
+  verifications, a matching hash, and computable objections), reconstruction spot-checked on
+  SJRES 18 / HR 1118 / SCR 8 (paren-in-point parsing correct, objections mirror the gate
+  messages), and a materialized text file sha256-matches its draft's pinned hash.** The
+  unlocked bills are SMALL (the ladder restarts at ~950 chars). The 7-bill PARKED set is
+  encoded in the script with per-bill reasons. Lanes remain PAUSED — no wave launched; the
+  next wave on Lance's go picks up the new pool smallest-first.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
