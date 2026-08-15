@@ -3987,6 +3987,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   verified: **853 published**, 508 draft/flagged (228 real drafts + 280 retired under the
   known neq.published gauge, lesson 36). Meanwhile the autonomy build started: plan committed
   759df01, Task 1 (billed-summary-chain lib) implementer dispatched subagent-driven.
+- **Drain wave CC — 8/12 published** (2026-08-15, 12 bills 4.0-8.6k chars, 48 agents 0 errors,
+  2.17M tokens, record run 7537ceb5 "partial"): HCR 66 meningococcal-info urging (2nd att),
+  HR 4541 breast-health reauthorization, HJR 154 MO HealthNet work requirements (2nd att),
+  HB 72 sports-official special victim, HJR 173 income-tax-elimination amendment, HB 1983
+  paid-political-consultant ban, HCR 21 radioactive-waste compensation urging, HB 2587 drone
+  interception. 3 re-flagged honestly: HR 5362 Boyce clinic (gated: omitted the findings
+  provision), SJR 87 sheriffs amendment (voting-threshold overstatement), and **HRES 1423
+  (4-bill House rule) on its 3rd attempt — PARKED** with reason in the drainer's PARKED set
+  (completeness checker demands per-bill Sec. 2/7/8 bullets; author kept condensing; now 10
+  parked total). HB 930 reverse-auction failed Malformed (checker returned 2 key_provisions,
+  the known fluke class — attempt 2 stays in pool). Live: 853 -> 861 published. Autonomy build:
+  Task 1 complete + reviewed clean (bb0969a); Task 2 draft-objections lib complete (a8fe1d0,
+  drainer verified byte-identical pre/post refactor), review in flight.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

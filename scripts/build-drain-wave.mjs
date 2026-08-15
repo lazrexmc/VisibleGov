@@ -40,6 +40,7 @@ const PARKED = new Set([
   '92ea0b8d-6383-47df-b7cd-1a8f46ece4e8', // HR 2683 — 3 attempts exhausted 2026-08-14 (amendment-mapping overstatements)
   '374bfa04-a3ef-4b1a-afe7-dbd6b74bde52', // SB 786 — 3 attempts exhausted 2026-08-14 (unbracketed civil-action redline language)
   '0df013ec-35f6-4166-9d64-3b00ca375e83', // SB 644 — 3 attempts exhausted 2026-08-14 (service-dog category definitions last)
+  '05304e79-e520-4b3e-a833-db73e46d74e0', // HRES 1423 — 3 attempts exhausted 2026-08-15 (4-bill House rule: completeness checker demands per-bill Sec. 2/7/8 bullets the author keeps condensing)
 ]);
 
 async function selectAllPaged(client, table, columns, applyFilters) {
