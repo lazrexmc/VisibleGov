@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   WEEKLY_CAP_USD, PER_TICK_CAP_USD, MONSTER_THRESHOLD_CHARS, envCapUsd, currentWeekKey,
   summarizeWeekSpend, tickAllowance, sortQueueRecencyFirst, computeDraftOnly, assembleTick,
+  runTick,
 } from '../scripts/scheduled-summaries.js';
 
 test('caps: constants match the spec', () => {
@@ -86,4 +87,116 @@ test('assembleTick: fresh → conversions → at most ONE monster; parked and �
     parkedIds: new Set(['c3', 'f2']),
   });
   assert.deepEqual(out.map((e) => `${e.lane}:${e.item.bill_id}`), ['fresh:f1', 'conversion:c1', 'monster:m1']);
+});
+
+function fakeDeps(overrides = {}) {
+  const calls = {
+    childCli: [], closed: [], logs: [], records: [],
+  };
+  return {
+    calls,
+    deps: {
+      client: {},
+      anthropic: {},
+      now: () => new Date('2026-08-15T12:00:00Z'),
+      acquireLockFn: () => ({ acquired: true, nonce: 'n1', reason: 'fresh' }),
+      releaseLockFn: () => {},
+      selectRecentRuns: async () => overrides.recentRuns ?? [],
+      openRunFn: async () => 'run-1',
+      closeRunFn: async (client, runId, status, detail) => { calls.closed.push({ runId, status, detail }); },
+      runChildCliFn: (script, args) => {
+        calls.childCli.push({ script, args });
+        if (args[0] === 'plan') return { parsed: { queue: overrides.queue ?? [] } };
+        return { parsed: overrides.recordResult ?? { counts: { published: 1, gated: 0, failures: 0 }, gated: [], failures: [] } };
+      },
+      loadSessionStartByBill: async () => overrides.sessionStart ?? new Map(),
+      loadSummaryRows: async () => overrides.summaryRows ?? [],
+      loadTextRow: async (billId) => (overrides.texts ?? {})[billId] ?? null,
+      loadDraftObjectionsFn: async () => overrides.draftObjections ?? { priorSummary: { what_it_does: [{ point: 'p', section: 's' }], stated_purpose: '' }, objections: ['fix it'], hasVerifications: true },
+      runBillChainFn: async (a, tracker, { bill }) => {
+        tracker.record('claude-haiku-4-5', { input_tokens: 10000, output_tokens: 1000 }, `author:${bill.identifier}`);
+        return { envelope: { bill_id: bill.bill_id, identifier: bill.identifier, bill_text_hash: bill.bill_text_hash, summary: {}, verdicts: [], completeness: {}, provenance: 'api', author_model: 'claude-haiku-4-5', verifier_model: 'claude-sonnet-5' } };
+      },
+      writeRecordsFile: (p, payload) => { calls.records.push({ p, payload }); },
+      appendLog: (line) => { calls.logs.push(line); },
+      readParked: () => overrides.parked ?? {},
+      writeParked: () => {},
+      dryRun: overrides.dryRun ?? false,
+      ...overrides.deps,
+    },
+  };
+}
+
+test('runTick: budget-exhausted week opens NO run row and spends nothing', async () => {
+  const { deps, calls } = fakeDeps({
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: 5.0 } }],
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'budget-exhausted');
+  assert.equal(calls.closed.length, 0);
+});
+
+test('runTick: a fresh bill flows plan → chain → records file → record CLI → closed run with honest detail', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 'text', content_hash: 'h1' } },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'ok');
+  assert.equal(calls.records.length, 1); // fresh records file only (no conversions this tick)
+  assert.equal(calls.closed[0].status, 'succeeded');
+  assert.equal(calls.closed[0].detail.week_key, '2026-W33');
+  assert.ok(calls.closed[0].detail.spent_usd > 0);
+  assert.equal(calls.closed[0].detail.lanes.fresh, 1);
+});
+
+test('runTick: billing error stops the tick, marks balance_depleted, logs BALANCE DEPLETED', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [
+      { bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' },
+      { bill_id: 'f2', identifier: 'HB 2', title: 'T', bill_text_hash: 'h2', text_length: 600, priority: 'other' },
+    ],
+    texts: { f1: { content: 't', content_hash: 'h1' }, f2: { content: 't', content_hash: 'h2' } },
+    deps: {
+      runBillChainFn: async () => { const e = new Error('Your credit balance is too low'); e.status = 400; throw e; },
+    },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.balanceDepleted, true);
+  assert.equal(calls.closed[0].detail.balance_depleted, true);
+  assert.ok(calls.logs.some((l) => /BALANCE DEPLETED/.test(l)));
+});
+
+test('runTick: MalformedSummaryError from record parks the bill durably', async () => {
+  const parkedWrites = [];
+  const { deps } = fakeDeps({
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 't', content_hash: 'h1' } },
+    recordResult: { counts: { published: 0 }, gated: [], failures: [{ bill_id: 'f1', error: 'MalformedSummaryError', message: 'checker floor' }] },
+    deps: { writeParked: (obj) => parkedWrites.push(obj) },
+  });
+  await runTick(deps);
+  assert.equal(parkedWrites.length, 1);
+  assert.ok(parkedWrites[0].f1);
+  assert.match(parkedWrites[0].f1.reason, /checker floor/);
+});
+
+test('runTick: dry-run assembles lanes but never opens a run, spends, or records', async () => {
+  const { deps, calls } = fakeDeps({
+    dryRun: true,
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 't', content_hash: 'h1' } },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'dry-run');
+  assert.equal(report.lanes.length, 1);
+  assert.equal(calls.closed.length, 0);
+  assert.equal(calls.records.length, 0);
+});
+
+test('runTick: lock not acquired exits quietly without touching anything', async () => {
+  const { deps, calls } = fakeDeps({ deps: { acquireLockFn: () => ({ acquired: false, reason: 'already-running' }) } });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'already-running');
+  assert.equal(calls.closed.length, 0);
 });
