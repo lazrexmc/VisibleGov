@@ -807,3 +807,16 @@ were parked proactively — before paying a full author/verify/check cycle each 
 class already proved. Corollary: a parked list without written reasons becomes a mystery
 blocklist in a month; every entry carries its why, and unparking is deliberately a one-line
 human edit.
+
+## Lesson 39 — A tool-call parameter can be silently truncated in transport; a "launched successfully" reply proves nothing about what arrived (2026-08-16)
+
+A workflow launch carrying a ~52KB JSON args string returned a normal "launched in background"
+success message — and the workflow died 9ms later with "args string is not valid JSON:
+Unterminated string", zero agents run. The parameter had been truncated somewhere between the
+tool call and the workflow runtime; nearly identical 53-54KB launches had squeaked through on
+prior days, so the ceiling is real but fuzzy. Two mechanics: (1) treat any single tool-call
+parameter approaching ~50KB as at-risk — split the payload (two 3-bill launches instead of one
+6-bill launch) rather than betting on the limit; (2) the failure signature to recognize is
+instant death with a parse error and 0 work done — the launch acknowledgment is an enqueue
+receipt, not a delivery receipt. Related but distinct from the 25k-token Read cap (lesson
+band): that one truncates what you READ, this one truncates what you SEND.

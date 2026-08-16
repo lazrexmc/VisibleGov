@@ -4069,6 +4069,17 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   State at pause: drain lane IDLE (next wave CJ builds from the 155-bill pool on Lance's go);
   autonomy build parked after Task 4 (resume at Task 5, see the SDD ledger); billed path
   CLOSED as always.
+- **Drain wave CJ — 4/6 published, resumed per Lance ("resume draining", 2026-08-16), and a new
+  trap found: the 6-bill launch's ~52KB args string was TRUNCATED IN TRANSPORT** — the workflow
+  reported a normal launch then died in 9ms on "Unterminated string" with 0 agents run
+  (PLAYBOOK lesson 39; the launch ack is an enqueue receipt, not a delivery receipt). Re-run
+  as two 3-bill halves (CJ-a wf_86e6a469, CJ-b wf_dad83d70; 24 agents, 0 errors, 1.26M tokens
+  combined; record run 4f29e012): HJR 169 Taxpayer Protection Act amendment published on
+  reattempt (28 verdicts), HB 655 pregnancy-center tax credits, HB 1713 wastewater/water
+  omnibus (reattempt), HB 743 crime-victims fund (40 verdicts — new single-bill depth record).
+  HB 1098 trust companies + HB 2885 boating registrations re-flagged honestly. Waves stay
+  split (2x3) from here — per-bill drafts only get bigger. Live: 891 -> 895 published, ~151
+  re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
