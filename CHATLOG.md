@@ -4159,6 +4159,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   ~117 re-authorable remain. Note: on-disk campaign envelopes go stale after a re-record —
   fresh gate objections must be carried into retry args by hand (done for HR 4776 in CP and
   HB 369 in CQ); the build script's disk path only knows the campaign-era objections.
+- **Drain wave CR — 2/6 published; SB 794 PARKED (checker-vs-verifier crossfire)** (2026-08-16,
+  2x3 split, 24 agents 0 errors, 1.33M tokens, record run bfdec527): HB 188
+  employment/immigration verification (51 verdicts; ICE-counterparty scope fixed) and HB 2013
+  leases appropriation (15; preamble citation fixed) published. **SB 794 sales tax flagged a 3rd
+  time and PARKED (17 parks) — a SECOND checker-limitation class:** the completeness checker had
+  demanded a bullet on the bracketed-'or' deletion, the author wrote it, and the verifier then
+  refuted that bullet because the EXPLANATION note it relies on is bill-wide boilerplate near
+  Section A, not part of subdivision (19) — under cited-section-alone discipline the demanded
+  bullet is unwritable; park note asks human review to confirm. Also flagged honestly: HB 1461
+  address confidentiality (5 refuted bullets + a completeness omission — enumeration-completeness
+  errors), HB 1466 occupational regulation (written-report omission), S 1383 SAVE America
+  (defendant-scope inference); each at attempt 2 with one remaining. Live: 926 -> 928 published,
+  ~112 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
