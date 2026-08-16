@@ -4258,6 +4258,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   bullet was refuted on the word "Adds" — brackets mark deletions only, so novelty is
   unprovable from the text; final attempt can state the provision without the novelty
   claim). Live: 944 -> 949 published, ~89 re-authorable remain.
+- **Drain wave CX — 2/6 published; SB 623 PARKED (shifting-demands, 21 parks)** (2026-08-16,
+  2x3 split at ~44KB per half, 24 agents 0 errors, ~1.43M tokens, runs
+  wf_7505b420/wf_81481161): HB 1800 property assessment (20 verdicts; all four demanded
+  definition/levy/complaint bullets added — its (4) counter was a stale artifact, zero real
+  prior strikes) and HB 9 corrections appropriation (63 verdicts; the 9.080
+  into-but-not-out contradiction and the AN-ACT-heading attribution both fixed) published.
+  **SB 623 child protection PARKED on its 3rd attempt** — the cleanest shifting-demands
+  case yet: the final draft carried ZERO verifier refutations at 26 verdicts (the
+  hand-carried guidance to state the 452.402 residency ground without claiming novelty
+  worked), but the blind checker then demanded a brand-new 210.566 foster-parent-rights
+  bullet it had never mentioned in two prior rounds; HRES 1423 class, park note asks human
+  review to confirm. Flagged honestly at strike 2 (one attempt remains each): HB 3 FY2022
+  higher-ed appropriation (62 verdicts, gated — checker wants an AN ACT purpose bullet),
+  HB 1696 firearms (31; b22 overbroadens the suspended-imposition bar from subsection 1 to
+  the whole section), SB 982 insurance (45; b15 understates 376.427 — misses the new
+  "health care services" definition). Live: 949 -> 951 published, ~85 re-authorable
+  remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
