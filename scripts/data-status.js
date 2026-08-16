@@ -12,6 +12,13 @@
 //   node --env-file=.env scripts/data-status.js
 //   node --env-file=.env scripts/data-status.js --json    (machine-readable)
 
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  currentWeekKey, summarizeWeekSpend, WEEKLY_CAP_USD, PER_TICK_CAP_USD,
+} from './scheduled-summaries.js';
+
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) {
@@ -20,6 +27,10 @@ if (!url || !key) {
 }
 const H = { apikey: key, Authorization: `Bearer ${key}` };
 const asJson = process.argv.includes('--json');
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.join(__dirname, '..');
+const PARKED_PATH = path.join(REPO_ROOT, '.superpowers', 'artifacts', 'scheduled-summaries', 'parked.json');
 
 // Exact count via content-range. PostgREST caps returned ROWS at 1000, but a count=exact HEAD-style
 // request returns the true total in the header regardless — this is the only counting method in
@@ -60,14 +71,14 @@ async function main() {
   const [
     voteCasts, votes, bills, billTexts, billSponsors,
     legislators, persons, personLinks, terms,
-    sumPublished, sumDraft, glossPublished, glossTotal,
+    sumPublished, sumDraft, sumRejected, glossPublished, glossTotal,
     identityOpen, reconOpen,
   ] = await Promise.all([
     count('vote_casts?select=id'), count('votes?select=id'), count('bills?select=id'),
     count('bill_texts?select=id'), count('bill_sponsors?select=id'),
     count('legislators?select=id'), count('persons?select=id'), count('person_links?select=id'),
     count('terms?select=id'),
-    count('summaries?status=eq.published&select=id'), count('summaries?status=neq.published&select=id'),
+    count('summaries?status=eq.published&select=id'), count('summaries?status=eq.draft&select=id'), count('summaries?status=eq.rejected&select=id'),
     count('glossary_terms?status=eq.published&select=id'), count('glossary_terms?select=id'),
     count('identity_flags?resolved=is.false&select=id'),
     count('vote_reconciliation_flags?resolved=is.false&select=id'),
@@ -154,7 +165,8 @@ async function main() {
       passageVoteAndPublishedSummary: passagePublished,
       readyToSummarize,
       summariesPublished: sumPublished,
-      summariesDraftOrFlagged: sumDraft,
+      summariesAwaitingReview: sumDraft,
+      summariesRetired: sumRejected,
     },
     coverage,
     castsByYear: years,
@@ -162,6 +174,7 @@ async function main() {
       identityFlagsOpen: identityOpen,
       reconciliationFlagsOpen: reconOpen,
       summariesAwaitingReview: sumDraft,
+      summariesRetired: sumRejected,
       glossaryAwaitingReview: glossDraftMappable,
       glossaryNeedsMappingBacklog: glossNeedsMapping,
     },
@@ -201,6 +214,7 @@ async function main() {
   console.log(`  READY to summarize (text, no summary)  ${n(readyToSummarize)}`);
   console.log(`  summaries published .................. ${n(sumPublished)}`);
   console.log(`  summaries draft/flagged .............. ${n(sumDraft)}  <- held back by the trust gate`);
+  console.log(`  summaries retired (superseded) ....... ${n(sumRejected)}  <- replaced by later attempts, audit trail`);
 
   console.log('\nCOVERAGE');
   for (const [j, v] of Object.entries(coverage)) {
@@ -215,7 +229,8 @@ async function main() {
   console.log('\nOPERATOR QUEUE  (needs a human decision — not errors)');
   console.log(`  identity flags open ........... ${identityOpen}`);
   console.log(`  reconciliation flags open ..... ${reconOpen}`);
-  console.log(`  summaries awaiting review ..... ${sumDraft}`);
+  console.log(`  summaries draft ............... ${sumDraft}`);
+  console.log(`  summaries retired ............ ${sumRejected}`);
   console.log(`  glossary awaiting review ...... ${n(glossDraftMappable)}`);
   console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (curation backlog, not errors)`);
 
@@ -224,6 +239,34 @@ async function main() {
     const q = f.quarantined_days > 0 ? `  (${f.quarantined_days} days quarantined)` : '';
     console.log(`  ${String(f.source).padEnd(24)} ${String(f.status).padEnd(10)} last finished ${f.finished_at ? String(f.finished_at).slice(0, 19) : '(none)'}${q}`);
   }
+
+  console.log('\nSUMMARY SCHEDULER');
+  const schedulerRuns = await rows('ingestion_runs?source=eq.scheduled-summaries&order=started_at.desc&limit=20');
+  if (schedulerRuns.length === 0) {
+    console.log('  (never ran)');
+  } else {
+    const lastRun = schedulerRuns[0];
+    const weekKey = currentWeekKey();
+    const { spentUsd: weeklySpentUsd } = summarizeWeekSpend(schedulerRuns, weekKey, PER_TICK_CAP_USD);
+    const thisWeekRuns = schedulerRuns.filter((r) => r.detail?.week_key === weekKey);
+    const publishedThisWeek = thisWeekRuns.reduce((sum, r) => sum + (Number(r.detail?.published) || 0), 0);
+
+    const lastStarted = lastRun.started_at ? String(lastRun.started_at).slice(0, 19) : '(none)';
+    console.log(`  last tick ........................ ${lastStarted} status=${lastRun.status}`);
+    console.log(`  spent this week ................. $${weeklySpentUsd.toFixed(2)} of $${WEEKLY_CAP_USD.toFixed(2)}`);
+    console.log(`  published this week ............ ${publishedThisWeek}`);
+
+    if (existsSync(PARKED_PATH)) {
+      try {
+        const parked = JSON.parse(readFileSync(PARKED_PATH, 'utf8'));
+        const parkedCount = Object.keys(parked).length;
+        console.log(`  parked (structural failures) .... ${parkedCount}`);
+      } catch {
+        // ignore corrupt parked.json
+      }
+    }
+  }
+
   console.log('\nStructure and meaning of these numbers: docs/DATA_INVENTORY.md');
 }
 
