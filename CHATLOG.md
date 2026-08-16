@@ -4219,6 +4219,28 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   and SB 672 state-government reorganization (b26 overstates appointment authority —
   minority leaders, not the presiding officers, appoint minority members). Live:
   936 -> 939 published, ~101 re-authorable remain.
+- **Drain wave CV — 5/6 published, BOTH final-attempt retries converted, zero parks**
+  (2026-08-16, ran as THREE 2-bill launches — the hand-carried objections plus full latest
+  prior-summaries pushed a 2x3 half to 67.9KB, over the ~50KB transport-truncation threshold
+  (PLAYBOOK lesson 39), so the wave was rebalanced 2+2+2 at 42.6/40/23.3KB; 24 agents 0
+  errors, ~1.36M tokens, runs wf_05840ca1/wf_387995af/wf_2c4643a4): **S 3971
+  strategic-breakthrough defense (37 verdicts) and SB 672 workforce development (58
+  verdicts, deepest MO-bill verification yet) both converted on their FINAL content
+  attempts** — the fix in each case was writing the previously-dropped qualifier in full
+  (S 3971's "as a result of an award using funds made available under a strategic
+  breakthrough allocation" causal clause; SB 672's split appointment authority with
+  minority leaders appointing minority members). Also published: HB 3 higher-education
+  appropriation (56 verdicts; the Section 3.130 three-percent-flexibility inference
+  dropped, the University of Missouri fund-split bullet added), HB 1732 workplace
+  retirement savings (35; the liability-shield proviso correctly scoped to item (4) only),
+  HB 624 Show Me Success Diploma (32; the demanded adult-high-school bid-process bullet
+  added). HB 2381 emergency medical dispatchers gated at strike 1 (28 verdicts; checker
+  demands a 650.320 definitions bullet — Board/medical director/MOU/PSAP + the
+  telecommunicator rename; fresh gate reason to hand-carry into its retry). **Process
+  note: a one-character hand-typo in HB 2381's bill_text_hash was caught by diffing the
+  launch against the args file before the run finished — the third launch was stopped
+  ~1 min in and relaunched with the exact hash, avoiding a guaranteed hashDrift failure
+  at record time.** Live: 939 -> 944 published, ~95 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
