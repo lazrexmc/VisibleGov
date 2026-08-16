@@ -4144,6 +4144,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   key_provisions=2, below the 3-7 floor) and HB 827 (checker invented two section labels not in
   the bill text). Both reappear next wave; identical 2nd strikes would park them.
   Live: 920 -> 922 published, ~121 re-authorable remain.
+- **Drain wave CQ — 4/6 published; HB 369 PARKED as a CHECKER-LIMITATION case** (2026-08-16,
+  2x3 split, 24 agents 0 errors, 1.48M tokens, record run 7a5176fd): HB 827 virtual schools
+  converted on its Malformed retry (54 verdicts — the CP checker failure did not repeat),
+  HB 1780 teacher retirement (26; stated_purpose emptied per the verbatim rule), HB 130
+  transportation network companies (47; rate-ban scope fixed), HB 2003 higher-ed appropriation
+  (51 verdicts; AN ACT purpose + 3.255 fund breakdown added). **HB 369 land management flagged
+  a 3rd time and PARKED (16 parks) — a NEW park class:** the blind completeness checker twice
+  demanded a bullet claiming the bill "creates the Animal Health Fund," but that language is
+  bracketed (repealed) in the printed text; the author correctly refused to assert it both
+  rounds. The park note explicitly asks human review to confirm the checker, not the author,
+  was wrong. SB 794 sales tax re-flagged by the verifier (2nd real content flag; final attempt
+  remains — its CP Malformed strike also did not repeat). Live: 922 -> 926 published,
+  ~117 re-authorable remain. Note: on-disk campaign envelopes go stale after a re-record —
+  fresh gate objections must be carried into retry args by hand (done for HR 4776 in CP and
+  HB 369 in CQ); the build script's disk path only knows the campaign-era objections.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
