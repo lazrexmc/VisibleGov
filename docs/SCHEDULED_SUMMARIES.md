@@ -248,8 +248,10 @@ Two places to check, and they answer different questions:
    A tick that ran out of API balance mid-run logs TWO lines: an immediate
    `BALANCE DEPLETED — reload required` the moment the billing error is detected, followed by the
    normal per-tick summary line (ending in `[BALANCE DEPLETED]`) once the tick finishes closing out
-   whatever it already recorded. **A `--dry-run` invocation writes NO log line at all** — it never
-   touches the log, the database, or the API; see "Dry-run usage" below.
+   whatever it already recorded. **A `--dry-run` invocation writes NO log line once it acquires the
+   lock** — from there it never touches the log, the database, or the API (if the lock is already
+   held it logs `already running — skipping this tick`, same as a real tick would); see "Dry-run
+   usage" below.
 
    If the most recent entry in the latest log file is more than ~24 hours old, the scheduled task
    itself has stopped firing (check Task Scheduler's History tab, not this repo).
