@@ -4111,6 +4111,16 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   gate-fix pass), SB 780 political subdivisions (41; discharge-vs-refund fixed), HB 828 tax
   credits (17; sixty-day conditional qualifier restored). Live: 905 -> 911 published,
   ~135 re-authorable remain.
+- **Drain wave CN — 5/6 published** (2026-08-16, 2x3 split, 24 agents 0 errors, 1.28M tokens,
+  record run 59cea029): HR 22 SAVE Act converted on attempt 2 (34 verdicts; the INA catch-all
+  clause restored, the refusal-to-register overreach dropped — another of the 5 parens-masked
+  re-flags now cleared), SB 54 insurance group-wide supervision (37), SB 222 political
+  subdivisions (30; stated_purpose now verbatim findings), HB 692 party committees (47 verdicts)
+  and HB 557 child protection (48 verdicts — NEW depth record, one wave after CM set 45), both
+  converting their stated_purpose/tier objections. HB 589 public health re-flagged honestly: the
+  completeness checker found the new draft still omitted part of the 578.005 definitions
+  (farm animal); next attempt carries that objection. Live: 911 -> 916 published,
+  ~129 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
