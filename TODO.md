@@ -1111,6 +1111,20 @@ session's own direct work, not assumed.**
 > our constituents voted on said bills so we can hold them accountable as they are CLEARLY running
 > amuck these days"
 
+**2026-08-16 (Lance, next-project idea drop — cross-project, bigger than VisibleGov):**
+
+> "my next project is to examine all of my current projects on the PC and my github repos and
+> create a tool/system/process/agent that takes ideas and turns them into softwares"
+
+Captured, not chased (per the capture-don't-chase convention). Notes for whenever it's picked
+up: the raw material is the project folders on this PC (F:\VisibleGov, F:\league, F:\Pokemon,
+F:\jobboard, F:\NBA2K, F:\Inoculated by the Phoenix, the MidMoConsultant folders, C4TT, the
+Duarte-izer window) plus the GitHub repos; each carries a PLAYBOOK_DELTA.md / CLAUDE.md /
+CHATLOG.md trail that is exactly the "how ideas became software here" evidence an
+idea-to-software system would distill. The superpowers flow already used in this repo
+(brainstorm → spec → plan → subagent-driven build with reviews) is a working prototype of the
+process half.
+
 Multi-faceted per Lance: (1) plain-language bill/law breakdowns, (2) purpose/intent surfaced
 clearly, (3) voting-record tracking tied to individual legislators, (4) accountability - making the
 above easy enough that regular people actually use it. Decomposed 2026-07-27 into the MVP design
