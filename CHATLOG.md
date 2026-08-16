@@ -4185,6 +4185,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   20-definition section (written-report -> "Department" -> "Certification"); HRES 1423 class.
   HB 1561 St. Louis sales tax re-flagged (refund-retention omission; final attempt remains).
   Live: 928 -> 932 published, ~108 re-authorable remain.
+- **Drain wave CT — 4/6 published; HB 1561 PARKED; LANE PAUSED on Lance's "pass after this wave
+  finalizes"** (2026-08-16, 2x3 split, 24 agents 0 errors, 1.30M tokens, record run 6196437f):
+  HB 2375 workers' compensation (21 verdicts; commuting-exclusion + paid-leave bullets added),
+  HB 1745 semitrailer registration (25; water-patrol/emergency-vehicle coverage added),
+  HR 8312 Fraud Prevention and Accountability Act (48; law-enforcement-activities bullet added),
+  SB 769 public-entity financial transactions (57 verdicts — NEW depth record) published.
+  **HB 1561 PARKED on its 3rd attempt (19 parks)** — Section-A characterization -> CS
+  refund-retention omission -> CT redistribution-formula logarithm precision refutation; each
+  round fixed the prior flag and 37-verdict verification found a new precision error in this
+  dense tax-formula bill. HB 685 public-office requirements re-flagged honestly ("school
+  district" not in 162.291's own text; final attempt remains when the lane resumes).
+  **Live: 932 -> 936 published — this drain window ran 905 -> 936 (+31) across waves CM-CT,
+  with 7 parks (SB 655, HB 589, HR 4776, HB 369, SB 794, HB 1466, HB 1561; 19 total) and the
+  verification-depth record climbing 45 -> 57 verdicts.** ~104 re-authorable remain
+  (~36.6k+ chars each). NO summary lane is running; the drain resumes only on Lance's go.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
