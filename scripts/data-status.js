@@ -71,14 +71,14 @@ async function main() {
   const [
     voteCasts, votes, bills, billTexts, billSponsors,
     legislators, persons, personLinks, terms,
-    sumPublished, sumDraft, sumRejected, glossPublished, glossTotal,
+    sumPublished, sumDraft, sumStale, sumRejected, sumNotPublished, glossPublished, glossTotal,
     identityOpen, reconOpen,
   ] = await Promise.all([
     count('vote_casts?select=id'), count('votes?select=id'), count('bills?select=id'),
     count('bill_texts?select=id'), count('bill_sponsors?select=id'),
     count('legislators?select=id'), count('persons?select=id'), count('person_links?select=id'),
     count('terms?select=id'),
-    count('summaries?status=eq.published&select=id'), count('summaries?status=eq.draft&select=id'), count('summaries?status=eq.rejected&select=id'),
+    count('summaries?status=eq.published&select=id'), count('summaries?status=eq.draft&select=id'), count('summaries?status=eq.stale&select=id'), count('summaries?status=eq.rejected&select=id'), count('summaries?status=neq.published&select=id'),
     count('glossary_terms?status=eq.published&select=id'), count('glossary_terms?select=id'),
     count('identity_flags?resolved=is.false&select=id'),
     count('vote_reconciliation_flags?resolved=is.false&select=id'),
@@ -142,6 +142,36 @@ async function main() {
   // ---- freshness (per ingestion source) ----
   const freshness = await rows('public_freshness?select=*&order=source');
 
+  // ---- summary scheduler (freshness and spend tracking) ----
+  const schedulerRuns = await rows('ingestion_runs?source=eq.scheduled-summaries&order=started_at.desc&limit=20');
+  let scheduler = { status: 'never_ran' };
+  if (schedulerRuns.length > 0) {
+    const lastRun = schedulerRuns[0];
+    const weekKey = currentWeekKey();
+    const { spentUsd: weeklySpentUsd } = summarizeWeekSpend(schedulerRuns, weekKey, PER_TICK_CAP_USD);
+    const thisWeekRuns = schedulerRuns.filter((r) => r.detail?.week_key === weekKey);
+    const publishedThisWeek = thisWeekRuns.reduce((sum, r) => sum + (Number(r.detail?.published) || 0), 0);
+    let parkedCount = 0;
+    if (existsSync(PARKED_PATH)) {
+      try {
+        const parked = JSON.parse(readFileSync(PARKED_PATH, 'utf8'));
+        parkedCount = Object.keys(parked).length;
+      } catch {
+        // ignore corrupt parked.json
+      }
+    }
+    scheduler = {
+      status: 'running',
+      lastTickStarted: lastRun.started_at,
+      lastTickRunStatus: lastRun.status,
+      weekKey,
+      weeklySpentUsd: Number(weeklySpentUsd.toFixed(2)),
+      weeklyCapUsd: WEEKLY_CAP_USD,
+      publishedThisWeek,
+      parkedCount,
+    };
+  }
+
   const report = {
     generatedAt: new Date().toISOString(),
     scale: {
@@ -165,20 +195,26 @@ async function main() {
       passageVoteAndPublishedSummary: passagePublished,
       readyToSummarize,
       summariesPublished: sumPublished,
-      summariesAwaitingReview: sumDraft,
+      summariesAwaitingReview: sumDraft + sumStale,
+      summariesDraft: sumDraft,
+      summariesStale: sumStale,
       summariesRetired: sumRejected,
+      reconciliationCheck: { draft: sumDraft, stale: sumStale, rejected: sumRejected, total: sumDraft + sumStale + sumRejected, oldLens_neq_published: sumNotPublished },
     },
     coverage,
     castsByYear: years,
     operatorQueue: {
       identityFlagsOpen: identityOpen,
       reconciliationFlagsOpen: reconOpen,
-      summariesAwaitingReview: sumDraft,
+      summariesAwaitingReview: sumDraft + sumStale,
+      summariesDraft: sumDraft,
+      summariesStale: sumStale,
       summariesRetired: sumRejected,
       glossaryAwaitingReview: glossDraftMappable,
       glossaryNeedsMappingBacklog: glossNeedsMapping,
     },
     freshness,
+    scheduler,
   };
 
   if (asJson) {
@@ -213,7 +249,7 @@ async function main() {
   console.log(`  ...of those, published summary ....... ${n(passagePublished)}`);
   console.log(`  READY to summarize (text, no summary)  ${n(readyToSummarize)}`);
   console.log(`  summaries published .................. ${n(sumPublished)}`);
-  console.log(`  summaries draft/flagged .............. ${n(sumDraft)}  <- held back by the trust gate`);
+  console.log(`  summaries awaiting review ............ ${n(sumDraft + sumStale)}  <- held back by the trust gate${sumStale > 0 ? ` (of which stale: ${n(sumStale)})` : ''}`);
   console.log(`  summaries retired (superseded) ....... ${n(sumRejected)}  <- replaced by later attempts, audit trail`);
 
   console.log('\nCOVERAGE');
@@ -229,7 +265,7 @@ async function main() {
   console.log('\nOPERATOR QUEUE  (needs a human decision — not errors)');
   console.log(`  identity flags open ........... ${identityOpen}`);
   console.log(`  reconciliation flags open ..... ${reconOpen}`);
-  console.log(`  summaries draft ............... ${sumDraft}`);
+  console.log(`  summaries awaiting review ..... ${sumDraft + sumStale}${sumStale > 0 ? ` (draft: ${sumDraft}, stale: ${sumStale})` : ''}`);
   console.log(`  summaries retired ............ ${sumRejected}`);
   console.log(`  glossary awaiting review ...... ${n(glossDraftMappable)}`);
   console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (curation backlog, not errors)`);
@@ -241,29 +277,15 @@ async function main() {
   }
 
   console.log('\nSUMMARY SCHEDULER');
-  const schedulerRuns = await rows('ingestion_runs?source=eq.scheduled-summaries&order=started_at.desc&limit=20');
-  if (schedulerRuns.length === 0) {
+  if (scheduler.status === 'never_ran') {
     console.log('  (never ran)');
   } else {
-    const lastRun = schedulerRuns[0];
-    const weekKey = currentWeekKey();
-    const { spentUsd: weeklySpentUsd } = summarizeWeekSpend(schedulerRuns, weekKey, PER_TICK_CAP_USD);
-    const thisWeekRuns = schedulerRuns.filter((r) => r.detail?.week_key === weekKey);
-    const publishedThisWeek = thisWeekRuns.reduce((sum, r) => sum + (Number(r.detail?.published) || 0), 0);
-
-    const lastStarted = lastRun.started_at ? String(lastRun.started_at).slice(0, 19) : '(none)';
-    console.log(`  last tick ........................ ${lastStarted} status=${lastRun.status}`);
-    console.log(`  spent this week ................. $${weeklySpentUsd.toFixed(2)} of $${WEEKLY_CAP_USD.toFixed(2)}`);
-    console.log(`  published this week ............ ${publishedThisWeek}`);
-
-    if (existsSync(PARKED_PATH)) {
-      try {
-        const parked = JSON.parse(readFileSync(PARKED_PATH, 'utf8'));
-        const parkedCount = Object.keys(parked).length;
-        console.log(`  parked (structural failures) .... ${parkedCount}`);
-      } catch {
-        // ignore corrupt parked.json
-      }
+    const lastStarted = scheduler.lastTickStarted ? String(scheduler.lastTickStarted).slice(0, 19) : '(none)';
+    console.log(`  last tick ........................ ${lastStarted} status=${scheduler.lastTickRunStatus}`);
+    console.log(`  spent this week ................. $${scheduler.weeklySpentUsd.toFixed(2)} of $${scheduler.weeklyCapUsd.toFixed(2)}`);
+    console.log(`  published this week ............ ${scheduler.publishedThisWeek}`);
+    if (scheduler.parkedCount > 0) {
+      console.log(`  parked (structural failures) .... ${scheduler.parkedCount}`);
     }
   }
 
