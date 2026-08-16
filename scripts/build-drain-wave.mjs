@@ -44,6 +44,7 @@ const PARKED = new Set([
   '1b19c5bb-80be-4a3c-9a4f-ae524a07a793', // HB 1607 — 2-strikes Malformed (key_provisions=2 in CF and CG runs, identical failure), 2026-08-15
   '27c2552e-b898-4be8-94f3-19dc5eab2f0d', // SB 655 — 3 attempts exhausted (waves L, N, U all flagged; 45-verdict 3rd attempt still missed), 2026-08-16
   '0236add8-d856-4f61-a808-656f55b1e207', // HB 589 — 3 attempts exhausted (578.012/578.030 omissions, then 578.005 omission in CN, then adds-vs-kept mischaracterization in CO at 44 verdicts), 2026-08-16
+  'b2617af8-7d99-42ee-8554-bee87b0bb404', // HR 4776 SPEED Act — 3 attempts exhausted (short-title omission, then 3 omissions in CO, then 2 DIFFERENT omissions in CP: the blind checker's demands shift each round on this omnibus NEPA bill — HRES 1423 condensing class), 2026-08-16
 ]);
 
 async function selectAllPaged(client, table, columns, applyFilters) {

@@ -4131,6 +4131,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   but one refuted bullet (described a pre-existing bond-timing clause as newly added); ladder was
   578.012/578.030 omissions -> 578.005 omission (CN) -> adds-vs-kept (CO). 14 parks total.
   Live: 916 -> 920 published, ~123 re-authorable remain.
+- **Drain wave CP — 2/6 published, the roughest wave of the drain; HR 4776 PARKED** (2026-08-16,
+  2x3 split, 24 agents 0 errors, 1.37M tokens, record run f3f4fb5b, exit "partial"): SB 975
+  ambulance districts (38 verdicts) and SB 403 health care omnibus (56 verdicts — NEW depth
+  record, third consecutive wave to raise it) published. **HR 4776 SPEED Act flagged a 3rd time
+  and PARKED (15 parks)** — attempt 3 added every previously-demanded bullet, but the blind
+  completeness checker demanded 2 DIFFERENT condensed subsections this round
+  (limitations-on-claims, programmatic documents); ladder was short-title -> 3 omissions -> 2
+  different omissions — the HRES 1423 condensing class on an omnibus NEPA rewrite. HB 369 land
+  management re-flagged (270.400 feral-swine/Animal Health Fund coverage; attempt 3 next). Two
+  first-strike Malformed checker failures (record refused, drafts untouched): SB 794 (checker
+  key_provisions=2, below the 3-7 floor) and HB 827 (checker invented two section labels not in
+  the bill text). Both reappear next wave; identical 2nd strikes would park them.
+  Live: 920 -> 922 published, ~121 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
