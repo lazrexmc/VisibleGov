@@ -10,10 +10,10 @@ it now that it's running.
 Each invocation (one per day, typically early morning):
 
 1. Takes a single-instance, ownership-checked lock
-   (`.superpowers/artifacts/scheduled-summaries/scheduler.lock.json`, pid + a random nonce + a declared max duration).
+   (`.superpowers/artifacts/summary-scheduler.lock.json`, pid + a random nonce + a declared max duration).
    If another invocation is already holding it, this one logs `already-running` and exits 0 —
    that is a **normal**, expected outcome, never a failure. A lock older than
-   its own declared max duration is reclaimed as stale (10 minutes by default).
+   its own declared max duration is reclaimed as stale (30 minutes by default).
 2. Checks the weekly cap (`SUMMARY_WEEKLY_CAP_USD`, $5.00 default) and the per-tick cap
    (`SUMMARY_TICK_CAP_USD`, $1.00 default) against the ledger in
    `.superpowers/artifacts/scheduled-summaries/billing-ledger.json`. If spending another tick
@@ -48,16 +48,19 @@ Each invocation (one per day, typically early morning):
   — no spend, no false success.
 - **Never creates overlapping processes.** The single-instance lock (step 1 above) prevents two
   concurrent runs. The lock's own release is ownership-checked (nonce-based) and the task's own
-  timeout (8 minutes, `CHILD_TIMEOUT_MS`) is set at Task Scheduler registration time, so Windows
-  never forcefully kills the process mid-run.
+  timeout (30 minutes, `TICK_MAX_DURATION_MS`) is the hard deadline, so a stuck tick is bounded.
+- **Never writes summary rows directly to the database.** Every write goes through spawning
+  `src/cli/summary-queue.js record` as a separate child process (code: `recordLane` at
+  scheduled-summaries.js:374-395), whose mechanical gates are unchanged. This keeps gate logic
+  centralized and testable independently of the scheduler.
 
 ## ⚠️ Budget is real — these caps are published Terms of Service with yourself
 
 `SUMMARY_WEEKLY_CAP_USD` (default $5.00) and `SUMMARY_TICK_CAP_USD` (default $1.00) are
-**hard, code-enforced limits**, not suggestions. They are imported directly from
-`src/lib/billed-summary-chain.js` and are not exposed as downward-only environment overrides
-anywhere else. **Do not edit the code to bypass them.** The `SUMMARY_WEEKLY_CAP_USD` and
-`SUMMARY_TICK_CAP_USD` env vars, if present, are mechanically floored at the code defaults:
+**hard, code-enforced limits**, not suggestions. They are defined in `scripts/scheduled-summaries.js`
+(lines 51-52) and are env-overridable via `envCapUsd()`, but downward only — a typo'd env var
+can shrink spend, never grow it. **Do not edit the code to bypass them.** The `SUMMARY_WEEKLY_CAP_USD`
+and `SUMMARY_TICK_CAP_USD` env vars, if present, are mechanically floored at the code defaults:
 an override can only make them *more* conservative, never less.
 
 ## The registry
@@ -66,7 +69,7 @@ an override can only make them *more* conservative, never less.
 |---|---|---|
 | `SUMMARY_WEEKLY_CAP_USD` | $5.00 | Hard weekly budget; env override can only lower it |
 | `SUMMARY_TICK_CAP_USD` | $1.00 | Hard per-invocation budget; env override can only lower it |
-| `CHILD_TIMEOUT_MS` | 8 minutes | Wall-clock deadline for one tick; Windows kills the task if exceeded |
+| `TICK_MAX_DURATION_MS` | 30 minutes | Wall-clock deadline for one tick (includes all streamed API calls); lock released via `finally` unconditionally |
 
 ## Registering it (Lance's step — never run `schtasks` from an agent)
 
@@ -105,7 +108,7 @@ time); Actions → New → Program: `C:\Program Files\nodejs\node.exe`, Argument
 `--env-file=F:\VisibleGov\.env F:\VisibleGov\scripts\scheduled-summaries.js`, Start in:
 `F:\VisibleGov` (redundant with the absolute `--env-file` path, but harmless to set).
 
-### ⚠️ Check the task's own "Stop the task if it runs longer than" setting — it must EXCEED 8 minutes
+### ⚠️ Check the task's own "Stop the task if it runs longer than" setting — it must EXCEED 30 minutes
 
 This is a **separate setting from everything above** — it's Windows' own execution-time limit on
 the *whole scheduled task*, not anything this script controls. The `schtasks /create` command
@@ -113,7 +116,7 @@ above does not set it explicitly, so **check it via the GUI after creating the t
 Scheduler → find "VisibleGov Scheduled Summaries" → Properties → **Settings tab** → "Stop the task
 if it runs longer than."
 
-If that value is *shorter* than `CHILD_TIMEOUT_MS` (8 minutes), Windows will kill the entire
+If that value is *shorter* than `TICK_MAX_DURATION_MS` (30 minutes), Windows will kill the entire
 scheduler process itself partway through a legitimate run — and because that's a forced process
 termination from OUTSIDE this script (not the script's own timeout), **none of this script's own
 honest-recovery logic gets a chance to run**: the lock is never released by its own `finally`
@@ -121,8 +124,9 @@ block (it self-heals eventually via the next tick's stale-reclaim, which is fine
 billing ledger row could be incomplete.
 
 **Recommendation: uncheck "Stop the task if it runs longer than" entirely, or set it to at least
-10 minutes.** This script's own per-tick timeout (8 minutes) is the real enforcement — Windows'
-own limit only needs to be generous enough to never fire first.
+1 hour (comfortably above the 30-minute TICK_MAX_DURATION_MS).** This script's own per-tick
+timeout (30 minutes) is the real enforcement — Windows' own limit only needs to be generous enough
+to never fire first.
 
 ## Reading the logs
 
@@ -184,15 +188,17 @@ node --env-file=.env scripts/scheduled-summaries.js --dry-run
 
 This will:
 
-- Load the lock (but not release it — no `finally` cleanup on dry-run).
-- Query for one unsummarized bill.
-- Run the full billed-summary chain on that bill, **including actual API calls** (dry-run does
-  not gate the API; it gates the writes).
-- Report what would have been written to the ledger and logs **without actually writing it.**
+- Acquire and release the lock (full ownership-checked lifecycle).
+- Assemble the tick's lanes in order (fresh, conversions, at most one monster).
+- Spend **zero dollars** (no Anthropic client is even constructed on `--dry-run`).
+- Open **no run row** in the database (the ledger is never touched).
+- Report the assembled lanes, computed allowance, and weekly spend — what the next live tick would
+  actually work with — **without making any writes or API calls.**
 - Exit 0.
 
 Dry-run is safe to run while the scheduled task is running; it will skip if the lock is already
-held (logging `already-running`), same as a real tick would.
+held (logging `already-running`), same as a real tick would. The report includes the real queue and
+budget state, so it can be run multiple times a day without side effects.
 
 ## Recovery properties
 
@@ -200,15 +206,15 @@ held (logging `already-running`), same as a real tick would.
 attempted. If a tick crashes partway through the chain, the ledger row for that tick is marked
 `error` with the reason; the next tick starts fresh on the next unsummarized bill.
 
-**Lock reclaim:** A lock older than its own declared max duration (10 minutes by default) is
-automatically reclaimed on the next tick, with a warning logged. This handles power loss or
-forced kills. You can also delete `.superpowers/artifacts/scheduled-summaries/scheduler.lock.json`
+**Lock reclaim:** A lock older than its own declared max duration (30 minutes, `TICK_MAX_DURATION_MS`)
+is automatically reclaimed on the next tick, with a warning logged. This handles power loss or
+forced kills. You can also delete `.superpowers/artifacts/summary-scheduler.lock.json`
 by hand at any time if you want a clean next tick immediately rather than waiting for it to age
 out.
 
 **Conservative crashed-tick assumption:** If the scheduler is killed mid-run (Windows timeout,
 power loss, etc.) and the ledger row is left at `status='running'`, the next tick's own
-`processTick` will assume it crashed (never reads it as "still working") and will not retry that
+`runTick` function will assume it crashed (never reads it as "still working") and will not retry that
 same bill — it moves on to the next unsummarized row. This is conservative: a bill that crashed
 stays in draft state and waits for a future retry, never vanishing or succeeding on a lie.
 
@@ -221,9 +227,9 @@ schtasks /delete /tn "VisibleGov Scheduled Summaries" /f         # remove entire
 ```
 
 If the machine ever loses power mid-run, the lock file self-heals: a lock older than its own
-declared max duration (10 minutes by default, `MAX_RUN_DURATION_MS`) is automatically reclaimed on
+declared max duration (30 minutes, `TICK_MAX_DURATION_MS`) is automatically reclaimed on
 the next tick, with a warning logged. You can also delete
-`.superpowers/artifacts/scheduled-summaries/scheduler.lock.json` by hand at any time if you want
+`.superpowers/artifacts/summary-scheduler.lock.json` by hand at any time if you want
 a clean next tick immediately rather than waiting out the stale-reclaim window.
 
 ## ✅ READY TO DEPLOY

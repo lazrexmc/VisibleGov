@@ -4089,5 +4089,6 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   runbook pointer, `TODO.md` RESUME HERE block (replaced "autonomy build parked" with
   "scheduled-summaries BUILT, awaiting Lance: load credits + register"). Full suite 2,420/0 in
   clean shell. State: scheduler built (Tasks 1-4 complete + reviewed), documented (Task 6),
-  unregistered (awaiting Lance's `schtasks` command after crediting API account); Tasks 5 + 7
-  remaining (data-status block + memory). Zero billed calls; $0 build cost.
+  unregistered (awaiting Lance's `schtasks` command after crediting API account); Task 5 complete
+  (data-status block exists), Task 7 remains (full-suite gate + memory). Zero billed calls; $0
+  build cost.
