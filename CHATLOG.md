@@ -4241,6 +4241,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   launch against the args file before the run finished — the third launch was stopped
   ~1 min in and relaunched with the exact hash, avoiding a guaranteed hashDrift failure
   at record time.** Live: 939 -> 944 published, ~95 re-authorable remain.
+- **Drain wave CW — 5/6 published; HB 2 sets a 79-verdict depth record** (2026-08-16, three
+  2-bill launches again — cw-b would have been 65KB as a 2x3 half; 24 agents 0 errors,
+  ~1.38M tokens, runs wf_60dd32b8/wf_541e8edb/wf_c678b164): HB 2381 emergency medical
+  dispatchers converted on attempt 2 (31 verdicts; the 650.320 definitions bullet added and
+  the dispatch-agency renumbering correctly described as kept-and-renumbered, not added —
+  both fresh objections had flowed through the build script's DB path automatically, no
+  hand-carry needed), SB 953 environmental programs (47; "vehicle" descriptor dropped from
+  the emissions-inspection fee bullet), HB 326 tax credits (24; the chapter-148/153 diaper
+  bank expansion added), HB 2 education appropriation (**79 verdicts — NEW depth record, up
+  from 75**; the Section 2.325 flexibility inference dropped, the third appropriation bill
+  fixed for that same 3-percent-shift class), and HB 2455 veteran suicide prevention (61;
+  "the commission" left unidentified per cited-section-alone, stated_purpose emptied; its
+  (2) counter was a stale campaign artifact — zero records hits). SB 623 child protection
+  flagged at strike 2 (26 verdicts; the checker-demanded "Adds a new ground" grandparent
+  bullet was refuted on the word "Adds" — brackets mark deletions only, so novelty is
+  unprovable from the text; final attempt can state the provision without the novelty
+  claim). Live: 944 -> 949 published, ~89 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
