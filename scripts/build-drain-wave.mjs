@@ -42,6 +42,7 @@ const PARKED = new Set([
   '0df013ec-35f6-4166-9d64-3b00ca375e83', // SB 644 — 3 attempts exhausted 2026-08-14 (service-dog category definitions last)
   '05304e79-e520-4b3e-a833-db73e46d74e0', // HRES 1423 — 3 attempts exhausted 2026-08-15 (4-bill House rule: completeness checker demands per-bill Sec. 2/7/8 bullets the author keeps condensing)
   '1b19c5bb-80be-4a3c-9a4f-ae524a07a793', // HB 1607 — 2-strikes Malformed (key_provisions=2 in CF and CG runs, identical failure), 2026-08-15
+  '27c2552e-b898-4be8-94f3-19dc5eab2f0d', // SB 655 — 3 attempts exhausted (waves L, N, U all flagged; 45-verdict 3rd attempt still missed), 2026-08-16
 ]);
 
 async function selectAllPaged(client, table, columns, applyFilters) {

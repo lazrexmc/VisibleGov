@@ -4094,6 +4094,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   compensation (33). HB 925 biodiesel credits + HB 2203 campaign finance (42 verdicts — the
   new depth record, but a severability-clause omission flagged it) re-flagged honestly;
   attempt 2 next for both. Live: 901 -> 905 published, ~141 re-authorable remain.
+- **SB 655 PARKED under the 3-attempts rule + a fabricated-UUID near-miss** (2026-08-16, during
+  the wave CM build): SB 655 surfaced with counter (4); history check found 3 REAL flagged
+  attempts (records-wave-l: 27 verdicts/keyProv 7; wave-n: 31/3 unsupported; wave-u: 45 verdicts
+  and still missed) — parked in `build-drain-wave.mjs` PARKED set (13 entries now). While writing
+  the park entry I typed a UUID from nowhere — caught it immediately, pulled the real bill_id
+  (`27c2552e...`) from the args file, corrected the entry, and verified the rebuilt wave excluded
+  SB 655. Standing rule held: never hand-type UUIDs; Read files and pass verbatim.
+- **Drain wave CM — 6/6 PUBLISHED, clean sweep** (2026-08-16, 2x3 split, 24 agents 0 errors,
+  1.18M tokens, record run 145e9d3c): both wave-CL re-flags converted on attempt 2 — HB 925
+  biodiesel credits (31 verdicts; the metered-pumps qualifier now tied to retail-dealer sales
+  only) and HB 2203 campaign finance (45 verdicts — NEW depth record; dropped the uncited
+  candidate-committee gloss). Plus SB 190 senior tax relief (31; added the omitted 143.125
+  rulemaking/nonseverability bullet), S 331 HALT Fentanyl Act (29; dropped the unverifiable
+  "quantity-based" characterizations — this was one of the 5 parens-masked re-flags from the
+  gate-fix pass), SB 780 political subdivisions (41; discharge-vs-refund fixed), HB 828 tax
+  credits (17; sixty-day conditional qualifier restored). Live: 905 -> 911 published,
+  ~135 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
