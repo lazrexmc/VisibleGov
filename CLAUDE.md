@@ -151,6 +151,10 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   `scripts/summary-probe-api.mjs` runs, zero credit errors, then full stop. **All summary lanes
   (billed AND subagent) are paused; any new billed call now requires Lance to add funds AND give
   an explicit go.** See the memory file `no-api-spend-hold.md` and CHATLOG 2026-08-09.
+- **Scheduled summaries — `scripts/scheduled-summaries.js` exception:** `scripts/scheduled-summaries.js`
+  runs billed calls unattended under a code-enforced $5.00/ISO-week cap (Lance, 2026-08-10; built
+  2026-08-15); this ledger+cap IS the per-run approval for this runner only. Every other billed
+  call still requires explicit per-run approval.
 - **Trust model v3 (adopted 2026-07-28 for glossary, 2026-07-31 for summaries — fully live, not
   pending; spec: docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from
   official text only → sonnet-5 adversarially verifies (mechanically completeness-gated - never

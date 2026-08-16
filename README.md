@@ -142,6 +142,9 @@ committed text is still what's live — always confirm.
 - `docs/CLOUDFLARE_DEPLOY.md` - the deploy runbook: four phases, exact Pages project settings,
   copy-paste verification commands, and the inherited traps written beside the steps that trigger
   them. All code-side pre-deploy work is done; what remains is console work.
+- `docs/SCHEDULED_SUMMARIES.md` - the autonomous bill-summarization runner: registration command,
+  budget model ($5/ISO-week, $1/tick code-enforced caps), reading logs and ledger, recovery
+  properties, and dry-run usage.
 - `docs/CONTROLLER_BRIEFING.md` - deep catch-up doc for a fresh session, compiled from the full
   project history (SDD ledgers, specs, plans, research docs, live code) - the fastest way to get
   oriented beyond what CLAUDE.md/TODO.md/CHATLOG.md alone give you.

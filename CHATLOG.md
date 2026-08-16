@@ -4081,3 +4081,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   S 331, HR 22 SAVE, S 1383, HR 33: the parens failure had short-circuited the gate and masked a
   second, real issue on each; drain-lane work). Live verified: **published 525**, drafts 316,
   retired 119. Old flagged drafts retired with audit notes via the existing supersede path.
+- **Scheduled-summaries documentation + policy carve-out (2026-08-16, Task 6): docs only, zero
+  code changes.** Created `docs/SCHEDULED_SUMMARIES.md` (registration command, budget model,
+  reading logs/ledger, recovery properties, dry-run). Added standing-policy carve-out to
+  `CLAUDE.md`: `scripts/scheduled-summaries.js` runs unattended under code-enforced $5/ISO-week
+  cap; this ledger+cap IS the per-run approval for this runner only. Updated `README.md` with
+  runbook pointer, `TODO.md` RESUME HERE block (replaced "autonomy build parked" with
+  "scheduled-summaries BUILT, awaiting Lance: load credits + register"). Full suite 2,420/0 in
+  clean shell. State: scheduler built (Tasks 1-4 complete + reviewed), documented (Task 6),
+  unregistered (awaiting Lance's `schtasks` command after crediting API account); Tasks 5 + 7
+  remaining (data-status block + memory). Zero billed calls; $0 build cost.

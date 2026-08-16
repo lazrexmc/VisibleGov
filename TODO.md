@@ -22,13 +22,11 @@ Lance's call: (a) **draft drain** — 359 verified-flagged drafts, historically 
 re-author-with-objections ("keep draining drafts" resumes it; the 103-no-envelope-drafts
 DB-objections upgrade is still owed); (b) **next manifest export** — ~2,100 eligible bills with
 text beyond this manifest, exporter is recency-first (`scripts/export-summary-wave.mjs`);
-(c) **autonomous scheduled-summaries runner** — design approved + spec'd
-(`docs/superpowers/specs/2026-08-10-scheduled-summaries-design.md`: Task-Scheduler sibling of
-scheduled-ingest.js, billed Haiku/Sonnet chain, $5/ISO-week code-enforced cap, gates
-untouched); implementation starts ONLY when Lance loads credits and says go; (d) 34
-old-manifest monster bills + ~23 passage bills missing text (ingestion) remain from earlier
-inventories. Waves are built from LIVE unattempted state (zero summaries rows = fresh), never
-manifest slices.
+(c) **scheduled-summaries BUILT (2026-08-15), awaiting Lance: load credits + register the task
+per docs/SCHEDULED_SUMMARIES.md** — the autonomous daily runner, code-enforced $5/ISO-week
+cap, unregistered but ready to go; (d) 34 old-manifest monster bills + ~23 passage bills missing
+text (ingestion) remain from earlier inventories. Waves are built from LIVE unattempted state
+(zero summaries rows = fresh), never manifest slices.
 
 **State, verified live 2026-08-10 evening (not copied from another doc):**
 - **🌐 SITE IS DEPLOYED AND LIVE: https://visiblegov.pages.dev** — full product loop verified
