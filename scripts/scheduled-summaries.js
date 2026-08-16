@@ -77,7 +77,15 @@ export function summarizeWeekSpend(rows, weekKey, perTickCapUsd) {
   let crashedTicks = 0;
   for (const row of rows ?? []) {
     if (row.status === 'running') {
-      spentUsd += perTickCapUsd;
+      // I9 (final whole-branch review): a crashed/stranded row must be charged AT LEAST the
+      // code's own hard default (PER_TICK_CAP_USD), never the CALLER's possibly-lowered
+      // perTickCapUsd. Without this, a today's throttled manual run (e.g. the I7 first-live-tick
+      // procedure's SUMMARY_TICK_CAP_USD=0.10) would retroactively UNDER-charge a stranded row
+      // from a PRIOR tick that actually ran under the real, unlowered $1.00 cap — Math.max is the
+      // conservative direction, matching this function's own "unknown spend is treated as spent"
+      // doctrine one step further (unknown spend is treated as the WORST plausible spend, not
+      // today's incidental cap).
+      spentUsd += Math.max(perTickCapUsd, PER_TICK_CAP_USD);
       crashedTicks += 1;
       continue;
     }
@@ -179,6 +187,48 @@ export const TICK_MAX_DURATION_MS = 30 * 60 * 1000;
 // assume-the-worst-until-measured convention scripts/summary-probe-api.mjs uses.
 export const WORST_BILL_FLOOR_USD = 0.05;
 
+// I3 (final whole-branch review): worstBillUsd (above) is only ever as good as what THIS tick has
+// already observed, and seeds at the tiny WORST_BILL_FLOOR_USD — at tick start, before any real
+// bill has priced, the monster-headroom gate only required 1.5x that floor ($0.075) as headroom,
+// even though a real ~400k-char monster's worst-case chain (author haiku 100k-tok in + 16k out;
+// verify sonnet 100k in + 32k out; provisions sonnet 100k in + 4k out; coverage ~$0.05) costs
+// ≈$0.99 — so a tick with as little as $0.08 of nominal remaining allowance could still start (and
+// fully pay for) a bill costing up to ~$1, overshooting the weekly cap by up to a tick's worth.
+// This estimator is a SECOND, ADDITIVE guard (the 1.5x-observed gate above is unchanged, per
+// controller ruling) computed from the bill's text length ALONE — already in hand before any paid
+// call, for every lane (fresh/conversion/monster), not just the monster one.
+//
+// Deliberately padded well above the real worst case:
+//   input side  ≈ (chars/4/1e6) * (haiku-in-once-price + sonnet-in-price * 3-stages) — 4 chars/tok,
+//                 haiku in $1/Mtok once (author) + sonnet in $2/Mtok x3 (verify/provisions/coverage,
+//                 conservatively counted as if every sonnet stage re-paid for the full text, though
+//                 coverage's real message is much smaller)
+//   output side ≈ fixed ceilings, independent of bill size: haiku's own MAX_OUTPUT_TOKENS (16000)
+//                 at $5/Mtok ≈ $0.08, plus sonnet's three fixed ceilings (32000+4000+3000 tokens)
+//                 at $10/Mtok padded 1.5x for safety ≈ $0.585 (matches this file's own existing
+//                 1.5x-safety-margin convention)
+// A 400k-char bill: input ≈ (0.4/4)*7.0 = $0.70, + $0.665 output ceiling ≈ $1.365 — comfortably
+// above the real ≈$0.99 worst case, which is the point (round the constant up for safety, never
+// down).
+export const COST_ESTIMATE_INPUT_MULTIPLIER = 1.0 + 2.0 * 3; // 7.0 — haiku-in-once + sonnet-in-x3
+export const COST_ESTIMATE_OUTPUT_CEILING_USD = 0.08 + 0.585; // 0.665 — fixed, independent of size
+
+export function estimateBillCostUsd(chars) {
+  const inputUsd = (Number(chars) / 4 / 1e6) * COST_ESTIMATE_INPUT_MULTIPLIER;
+  return inputUsd + COST_ESTIMATE_OUTPUT_CEILING_USD;
+}
+
+// I8 (final whole-branch review): the conversion lane used to examine EVERY draft-only bill EVERY
+// tick, forever — each one costing a full bill_texts content fetch plus 3 draft-objections queries
+// (summaries/summary_verifications/summary_notes), even for the (routine, expected) case where the
+// draft has no verifications on file yet and is mechanically ineligible for this lane. With
+// hundreds of draft-only bills on file, that is hundreds of DB reads spent every single tick just
+// to re-discover the same routine ineligibility. Capped at a flat constant, applied where the
+// conversions list is built (before assembleTick even sees it) — oldest-flagged-first ordering
+// (already the sort order) is preserved, so which 50 get examined is stable and meaningful, not
+// arbitrary.
+export const MAX_CONVERSIONS_EXAMINED = 50;
+
 const AUTHOR_MODEL = 'claude-haiku-4-5';
 const CHECKER_MODEL = 'claude-sonnet-5';
 
@@ -220,7 +270,22 @@ async function runTickLocked(deps) {
   }
 
   // ---- queue / lane assembly — all $0 (plan mode, DB reads, no API calls) ----
-  const planResult = deps.runChildCliFn('src/cli/summary-queue.js', ['plan', '--dry-run']);
+  let planResult;
+  try {
+    // I5 (final whole-branch review): a throwing plan CLI (ETIMEDOUT/ENOBUFS/launch failure) used
+    // to propagate straight out of runTick, crashing the whole tick BEFORE openRun ever ran —
+    // nothing in LOG_DIR, nothing in ingestion_runs, and main() would exit 1, which reads
+    // identically to a real scheduler crash in Task Scheduler's history. Caught here instead:
+    // logged honestly, exit clean, try again tomorrow — mirrors the no-API-key honesty rationale
+    // in main() below (:520-521 in the pre-fix file). 15 minutes (vs. the 8-minute
+    // CHILD_TIMEOUT_MS default every other child in this repo uses) because this CLI's plan mode
+    // loads every bills/votes/bill_texts/summaries row via loadPlanState's selectAll calls, not a
+    // small per-source query.
+    planResult = deps.runChildCliFn('src/cli/summary-queue.js', ['plan', '--dry-run'], { timeoutMs: 15 * 60 * 1000 });
+  } catch (err) {
+    deps.appendLog(`plan CLI failed: ${err.message} — skipping this tick`);
+    return { outcome: 'plan-failed' };
+  }
   const rawQueue = planResult?.parsed?.queue ?? [];
   const sessionStartByBill = await deps.loadSessionStartByBill();
   const sortedQueue = sortQueueRecencyFirst(rawQueue, sessionStartByBill);
@@ -231,12 +296,22 @@ async function runTickLocked(deps) {
 
   const summaryRows = await deps.loadSummaryRows();
   const draftOnly = computeDraftOnly(summaryRows);
-  // computeDraftOnly's Map carries no ordering guarantee; oldest-flag-first per spec.
+  // computeDraftOnly's Map carries no ordering guarantee; oldest-flag-first per spec. I8: capped
+  // at MAX_CONVERSIONS_EXAMINED here, BEFORE assembleTick ever sees the list — the cheapest seam,
+  // since every entry that reaches assembleTick is one this loop will pay a real bill_texts fetch
+  // (and, unless routinely ineligible, 3 more objection queries) to examine.
   const conversions = [...draftOnly.entries()]
     .map(([billId, v]) => ({ bill_id: billId, rejectedCount: v.rejectedCount, draftRow: v.draftRow }))
-    .sort((a, b) => String(a.draftRow.created_at ?? '').localeCompare(String(b.draftRow.created_at ?? '')));
+    .sort((a, b) => String(a.draftRow.created_at ?? '').localeCompare(String(b.draftRow.created_at ?? '')))
+    .slice(0, MAX_CONVERSIONS_EXAMINED);
 
-  const parked = deps.readParked() ?? {};
+  // I9-adjacent fix-in-passing (final whole-branch review, :503-510): readParked's real
+  // implementation now distinguishes "no file yet" (safe: {}) from "file exists but could not be
+  // read" (unknown — signaled as `null`, never treated as an empty park list to merge-write over;
+  // see the writeParked call below and readParkedReal's own comment).
+  const parkedRaw = deps.readParked();
+  const parkedReadFailed = parkedRaw === null;
+  const parked = parkedRaw ?? {};
   const parkedIds = new Set(Object.keys(parked));
 
   const assembled = assembleTick({
@@ -300,11 +375,25 @@ async function runTickLocked(deps) {
           skipped.push({ identifier: item.bill_id, reason: `bill text ${textRow.content.length} chars exceeds MAX_TEXT_CHARS (${MAX_TEXT_CHARS})` });
           continue;
         }
+        // I3: conservative pre-bill estimate from the text length now in hand — before the
+        // (cheap, unbilled) objections lookup below, let alone the first paid call.
+        const estUsd = estimateBillCostUsd(textRow.content.length);
+        if (!(allowance - tracker.spentUsd() > estUsd)) {
+          skipped.push({ identifier: item.bill_id, reason: `pre-bill cost estimate $${estUsd.toFixed(4)} exceeds remaining allowance $${(allowance - tracker.spentUsd()).toFixed(4)} — skipped before any paid call` });
+          continue;
+        }
         const draftInfo = await deps.loadDraftObjectionsFn(deps.client, {
           draftId: draftRow.id, text: textRow.content, billId: item.bill_id,
         });
         if (draftInfo.hasVerifications === false || !draftInfo.objections || draftInfo.objections.length === 0) {
-          skipped.push({ identifier: item.bill_id, reason: 'no objections/verifications on file for this draft — belongs to a re-verify lane, not conversion' });
+          // I8: routine, expected — hundreds of draft-only bills legitimately have no
+          // verifications on file yet (that's a re-verify lane's job, not this one). Tagged
+          // `routine: true` so it never forces the tick's status to 'partial' below.
+          skipped.push({
+            identifier: item.bill_id,
+            reason: 'no objections/verifications on file for this draft — belongs to a re-verify lane, not conversion',
+            routine: true,
+          });
           continue;
         }
         const hash8 = String(draftRow.bill_text_hash).slice(0, 8);
@@ -327,6 +416,15 @@ async function runTickLocked(deps) {
       } else {
         // fresh or monster — the queue item IS already shaped like a `bill` (bill_id, identifier,
         // title, bill_text_hash), courtesy of summary-queue.js's planQueue.
+        // I3: pre-bill estimate from item.text_length — already in hand, no DB read needed to get
+        // it, so this runs BEFORE loadTextRow (unlike the conversion lane, which only learns its
+        // text length from that same read). A missing text_length is treated as the worst case
+        // (MAX_TEXT_CHARS) rather than as free — never UNDER-estimate an unknown size.
+        const estUsd = estimateBillCostUsd(item.text_length ?? MAX_TEXT_CHARS);
+        if (!(allowance - tracker.spentUsd() > estUsd)) {
+          skipped.push({ identifier: item.identifier ?? item.bill_id, reason: `pre-bill cost estimate $${estUsd.toFixed(4)} exceeds remaining allowance $${(allowance - tracker.spentUsd()).toFixed(4)} — skipped before any paid call` });
+          continue;
+        }
         const textRow = await deps.loadTextRow(item.bill_id);
         if (!textRow || textRow.content_hash !== item.bill_text_hash) {
           skipped.push({ identifier: item.identifier ?? item.bill_id, reason: 'bill_texts hash mismatch vs. queue hash — skipped' });
@@ -367,8 +465,12 @@ async function runTickLocked(deps) {
 
   // ---- record: hand each non-empty lane's envelopes to summary-queue.js record ----
   let published = 0;
-  let flagged = 0;
-  let rejected = 0;
+  // FIX-IN-PASSING (:387-389 in the pre-fix file): renamed from `flagged`/`rejected` — these are
+  // the record CLI's own `gated` (mechanical-gate refusals: flagDraft) and `failures` (typed
+  // pre-write rejects: malformed shape, hash mismatch, missing text) counts, not a moderation
+  // "flag" or an editorial "rejection".
+  let gateRefusals = 0;
+  let recordFailures = 0;
   const parkedAdditions = {};
 
   async function recordLane(results, suffix, replaceDrafts) {
@@ -377,7 +479,20 @@ async function runTickLocked(deps) {
     deps.writeRecordsFile(filePath, { results });
     const args = ['record', '--file', filePath];
     if (replaceDrafts) args.push('--replace-drafts');
-    const cliResult = deps.runChildCliFn('src/cli/summary-queue.js', args);
+    let cliResult;
+    try {
+      cliResult = deps.runChildCliFn('src/cli/summary-queue.js', args);
+    } catch (err) {
+      // I4 (final whole-branch review): a throwing runChildCliFn (ETIMEDOUT/ENOBUFS/launch
+      // failure) used to propagate straight out of runTick — closeRun never ran, so the run row
+      // stranded at 'running' with NO log line at all, indistinguishable from a genuine hard
+      // crash but with none of that scenario's diagnostic trail. The records file is already on
+      // disk (written above, before this call) either way — nothing is lost; the tick continues
+      // to its own honest closeRun below instead of dying here.
+      console.error(`record CLI (${suffix}) failed to launch/complete: ${err.message} — records file kept on disk at ${filePath}`);
+      skipped.push({ identifier: `record-${suffix}`, reason: `record CLI (${suffix}) threw: ${err.message}` });
+      return;
+    }
     const parsed = cliResult?.parsed;
     if (!parsed) {
       // Recovery property: the records file stays on disk either way — nothing is lost.
@@ -385,8 +500,8 @@ async function runTickLocked(deps) {
       return;
     }
     published += Number(parsed.counts?.published) || 0;
-    flagged += Number(parsed.counts?.gated) || 0;
-    rejected += Number(parsed.counts?.failures) || 0;
+    gateRefusals += Number(parsed.counts?.gated) || 0;
+    recordFailures += Number(parsed.counts?.failures) || 0;
     for (const failure of parsed.failures ?? []) {
       if (failure?.error === 'MalformedSummaryError' && failure.bill_id) {
         parkedAdditions[failure.bill_id] = { reason: failure.message ?? 'malformed summary', parked_at: now.toISOString() };
@@ -399,18 +514,32 @@ async function runTickLocked(deps) {
 
   // The budget must never re-pay for a bill a mechanical gate has already proven unpublishable.
   if (Object.keys(parkedAdditions).length > 0) {
-    deps.writeParked({ ...parked, ...parkedAdditions });
+    if (parkedReadFailed) {
+      // Fix-in-passing (:503-510 in the pre-fix file): parked.json existed but could not be read
+      // this tick — merge-writing now would silently DELETE every previously-parked bill's row
+      // (a real money leak: each would quietly become re-eligible and re-attempted, spending real
+      // budget re-discovering what was already mechanically proven unpublishable). Refuse the
+      // write; the new park-worthy bill(s) simply get parked again on a future healthy tick.
+      deps.appendLog(`parked.json was unreadable this tick — ${Object.keys(parkedAdditions).length} new park entry/entries NOT written to avoid clobbering the existing file`);
+    } else {
+      deps.writeParked({ ...parked, ...parkedAdditions });
+    }
   }
 
   const spentUsd = tracker.spentUsd();
-  const status = balanceDepleted || skipped.length > 0 ? 'partial' : 'succeeded';
+  // I8: routine, expected conversion-lane skips (a draft-only bill with no verifications on file
+  // yet — see the `routine: true` tag above) must never force 'partial' on an otherwise healthy
+  // tick that published everything it attempted; only a genuine anomaly (hash mismatch, oversize
+  // text, an insufficient pre-bill estimate, a non-billing chain error, a crashed record CLI) does.
+  const nonRoutineSkipped = skipped.filter((s) => !s.routine);
+  const status = balanceDepleted || nonRoutineSkipped.length > 0 ? 'partial' : 'succeeded';
   const detail = {
     week_key: weekKey,
     spent_usd: Number(spentUsd.toFixed(4)),
     per_call_count: tracker.callLog.length,
     published,
-    flagged,
-    rejected,
+    gate_refusals: gateRefusals,
+    record_failures: recordFailures,
     parked: Object.keys(parkedAdditions).length,
     balance_depleted: balanceDepleted,
     lanes: { fresh: freshCount, conversion: conversionResults.length, monster: monsterCount },
@@ -418,9 +547,13 @@ async function runTickLocked(deps) {
   };
   await deps.closeRunFn(deps.client, runId, status, detail);
 
+  // Fix-in-passing (:422-425 in the pre-fix file): `now` is the TICK-START timestamp (used above
+  // for weekKey/parked_at, correctly) — the log line's own leading timestamp should reflect when
+  // the tick actually finished, not when it started, since the two can differ by minutes.
+  const finishedAt = deps.now();
   const newWeeklyTotal = weeklySpentUsd + spentUsd;
-  const logLine = `${now.toISOString()} tick=${runId} attempted=${attempted} published=${published} `
-    + `flagged=${flagged} spent=$${spentUsd.toFixed(4)} week=${weekKey} total=$${newWeeklyTotal.toFixed(4)}/${weeklyCapUsd.toFixed(2)}`
+  const logLine = `${finishedAt.toISOString()} tick=${runId} attempted=${attempted} published=${published} `
+    + `gate_refusals=${gateRefusals} spent=$${spentUsd.toFixed(4)} week=${weekKey} total=$${newWeeklyTotal.toFixed(4)}/${weeklyCapUsd.toFixed(2)}`
     + `${balanceDepleted ? ' [BALANCE DEPLETED]' : ''}`;
   deps.appendLog(logLine);
 
@@ -500,12 +633,21 @@ function appendLogReal(line) {
   appendFileSync(path.join(LOG_DIR, `${day}.log`), `${line}\n`);
 }
 
+// Fix-in-passing (final whole-branch review, :503-510 in the pre-fix file): a bare catch here used
+// to return {} for BOTH "no file yet" and "file exists but a transient read error occurred" — the
+// caller's merge-write (`writeParked({ ...parked, ...parkedAdditions })`) would then silently wipe
+// out every previously-parked bill's row on the SECOND case, quietly un-parking (and therefore
+// re-attempting, spending real budget on) bills already mechanically proven unpublishable. ENOENT
+// (genuinely nothing on disk, nothing to lose) is now distinguished from any other read/parse
+// failure (park state UNKNOWN this tick) via the `null` sentinel — see runTickLocked, which never
+// merge-writes over a `null` read.
 function readParkedReal() {
   if (!existsSync(PARKED_PATH)) return {};
   try {
     return JSON.parse(readFileSync(PARKED_PATH, 'utf8'));
-  } catch {
-    return {}; // corrupt/unreadable — never crash the tick over an optional park list
+  } catch (err) {
+    console.error(`parked.json unreadable (${err.message}) — treating park list as unknown this tick, will not overwrite it`);
+    return null;
   }
 }
 

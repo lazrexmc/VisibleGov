@@ -62,7 +62,15 @@ test('loadDraftObjections assembles prior summary + objections from DB rows and 
   const out = await loadDraftObjections(client, { draftId: 'd-1', text: 'Sec. 1' });
   assert.equal(out.priorSummary.what_it_does.length, 1);
   assert.equal(out.hasVerifications, true);
-  // the refuted verdict appears once (note dedup'd against it) + the distinct omit-note appears
+  // Fix-in-passing (final whole-branch review): this comment used to claim the REFUTED note's
+  // single appearance was due to dedup — it is not. computeObjections already derives the
+  // REFUTED-bullet objection straight from the raw verdict, and notes[0]'s REFUTED-shaped text
+  // never even matches GATE_NOTE_RE (which only matches "summary omits "/"stated_purpose "/
+  // "verdicts[N] cites section " prefixes) — so it is filtered out before dedup is ever consulted,
+  // not deduplicated against the verdict-derived objection. notes[1] (the omit-note) DOES match
+  // GATE_NOTE_RE and genuinely is NOT a duplicate of anything computeObjections produced here
+  // (completeness carries zero coverage entries in this fixture), so it is appended once, as a
+  // real distinct addition — not survives-a-dedup-check.
   assert.equal(out.objections.filter((o) => /REFUTED/.test(o)).length, 1);
   assert.equal(out.objections.filter((o) => /omits 1 key provision/.test(o)).length, 1);
 });

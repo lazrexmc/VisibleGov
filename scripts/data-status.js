@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  currentWeekKey, summarizeWeekSpend, WEEKLY_CAP_USD, PER_TICK_CAP_USD,
+  currentWeekKey, summarizeWeekSpend, envCapUsd, WEEKLY_CAP_USD, PER_TICK_CAP_USD,
 } from './scheduled-summaries.js';
 
 const url = process.env.SUPABASE_URL;
@@ -143,12 +143,22 @@ async function main() {
   const freshness = await rows('public_freshness?select=*&order=source');
 
   // ---- summary scheduler (freshness and spend tracking) ----
-  const schedulerRuns = await rows('ingestion_runs?source=eq.scheduled-summaries&order=started_at.desc&limit=20');
+  // Fix-in-passing (final whole-branch review): matches scheduled-summaries.js's own ledger read
+  // (selectRecentRunsReal) — a 10-day window, not just "the last 20 rows" (a daily scheduler
+  // produces ~1 row/day, so 20 rows already covers ~3 weeks; the window is the honest bound, the
+  // limit is just a safety cap on top of it).
+  const tenDaysAgoIso = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+  const schedulerRuns = await rows(`ingestion_runs?source=eq.scheduled-summaries&started_at=gte.${tenDaysAgoIso}&order=started_at.desc&limit=20`);
   let scheduler = { status: 'never_ran' };
   if (schedulerRuns.length > 0) {
     const lastRun = schedulerRuns[0];
     const weekKey = currentWeekKey();
-    const { spentUsd: weeklySpentUsd } = summarizeWeekSpend(schedulerRuns, weekKey, PER_TICK_CAP_USD);
+    // Fix-in-passing: envCapUsd (downward-only override), not the raw defaults — if Lance has
+    // SUMMARY_TICK_CAP_USD/SUMMARY_WEEKLY_CAP_USD set lower in his environment, this block should
+    // report the REAL effective caps the scheduler itself is using, not the code defaults.
+    const perTickCapUsd = envCapUsd('SUMMARY_TICK_CAP_USD', PER_TICK_CAP_USD);
+    const weeklyCapUsd = envCapUsd('SUMMARY_WEEKLY_CAP_USD', WEEKLY_CAP_USD);
+    const { spentUsd: weeklySpentUsd } = summarizeWeekSpend(schedulerRuns, weekKey, perTickCapUsd);
     const thisWeekRuns = schedulerRuns.filter((r) => r.detail?.week_key === weekKey);
     const publishedThisWeek = thisWeekRuns.reduce((sum, r) => sum + (Number(r.detail?.published) || 0), 0);
     let parkedCount = 0;
@@ -166,7 +176,7 @@ async function main() {
       lastTickRunStatus: lastRun.status,
       weekKey,
       weeklySpentUsd: Number(weeklySpentUsd.toFixed(2)),
-      weeklyCapUsd: WEEKLY_CAP_USD,
+      weeklyCapUsd,
       publishedThisWeek,
       parkedCount,
     };

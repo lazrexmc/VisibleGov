@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  WEEKLY_CAP_USD, PER_TICK_CAP_USD, MONSTER_THRESHOLD_CHARS, envCapUsd, currentWeekKey,
-  summarizeWeekSpend, tickAllowance, sortQueueRecencyFirst, computeDraftOnly, assembleTick,
-  runTick,
+  WEEKLY_CAP_USD, PER_TICK_CAP_USD, MONSTER_THRESHOLD_CHARS, MAX_CONVERSIONS_EXAMINED, envCapUsd,
+  currentWeekKey, summarizeWeekSpend, tickAllowance, sortQueueRecencyFirst, computeDraftOnly,
+  assembleTick, estimateBillCostUsd, runTick,
 } from '../scripts/scheduled-summaries.js';
 
 test('caps: constants match the spec', () => {
@@ -38,6 +38,18 @@ test('summarizeWeekSpend: sums this week, ignores other weeks, counts crashed ti
   ];
   const out = summarizeWeekSpend(rows, '2026-W33', 1.00);
   assert.equal(out.spentUsd, 0.40 + 0.25 + 1.00);
+  assert.equal(out.crashedTicks, 1);
+});
+
+test('summarizeWeekSpend: I9 — a crashed row is charged the code default even when THIS tick is running under a lowered env cap', () => {
+  const rows = [
+    { status: 'running', detail: {} }, // crashed under yesterday's real $1.00 cap
+  ];
+  // Today's tick is deliberately throttled (e.g. the I7 first-live-tick manual procedure,
+  // SUMMARY_TICK_CAP_USD=0.10) — the crashed row must still be charged the full PER_TICK_CAP_USD
+  // default, never today's 0.10, or the weekly ledger would under-count real prior spend.
+  const out = summarizeWeekSpend(rows, '2026-W33', 0.10);
+  assert.equal(out.spentUsd, PER_TICK_CAP_USD);
   assert.equal(out.crashedTicks, 1);
 });
 
@@ -87,6 +99,19 @@ test('assembleTick: fresh → conversions → at most ONE monster; parked and �
     parkedIds: new Set(['c3', 'f2']),
   });
   assert.deepEqual(out.map((e) => `${e.lane}:${e.item.bill_id}`), ['fresh:f1', 'conversion:c1', 'monster:m1']);
+});
+
+test('estimateBillCostUsd: I3 — matches the review\'s own worked example, padded above the real worst case', () => {
+  // 400k-char bill: input (100000/1e6 Mtok * 7.0) + $0.665 fixed output ceiling ≈ $1.365 —
+  // deliberately above the real worst-case chain cost the review itself computed (~$0.99: haiku
+  // author 100k-in/16k-out + sonnet verify 100k-in/32k-out + sonnet provisions 100k-in/4k-out +
+  // coverage ~$0.05), never below it.
+  const est400k = estimateBillCostUsd(400000);
+  assert.ok(Math.abs(est400k - 1.365) < 0.001, `expected ~1.365, got ${est400k}`);
+  assert.ok(est400k > 0.99, 'the padded estimate must stay above the real worst-case cost');
+  // A trivially small bill still costs at least the fixed output ceiling — the guard is never
+  // free, since every chain call pays fixed per-stage output tokens regardless of input size.
+  assert.ok(Math.abs(estimateBillCostUsd(0) - 0.665) < 0.0001);
 });
 
 function fakeDeps(overrides = {}) {
@@ -180,8 +205,13 @@ test('runTick: billing error stops the tick, marks balance_depleted, logs BALANC
 });
 
 test('runTick: monster-lane 1.5x-allowance headroom gate — attempted with ample headroom, excluded (skipped, no chain call) without it', async () => {
+  // text_length just over MONSTER_THRESHOLD_CHARS (100001, not the old 200000): I3's own
+  // pre-bill estimateBillCostUsd guard (a SEPARATE, additive check — see the dedicated I3 test
+  // below) must not itself exclude the "ample" sub-case here. estimateBillCostUsd(100001) ≈
+  // $0.84, comfortably under the $1.00 default allowance; estimateBillCostUsd(200000) ≈ $1.015
+  // would not have been, which is exactly the I3 test's own point made with a bigger bill.
   const monsterQueue = [{
-    bill_id: 'm1', identifier: 'HB 9', title: 'T', bill_text_hash: 'hm', text_length: 200000, priority: 'other',
+    bill_id: 'm1', identifier: 'HB 9', title: 'T', bill_text_hash: 'hm', text_length: 100001, priority: 'other',
   }];
   const monsterTexts = { m1: { content: 't', content_hash: 'hm' } };
 
@@ -223,6 +253,188 @@ test('runTick: monster-lane 1.5x-allowance headroom gate — attempted with ampl
   assert.equal(tightChainCalls, 0);
   assert.equal(tight.calls.closed[0].detail.lanes.monster, 0);
   assert.equal(tight.calls.closed[0].detail.skipped.length, 1);
+});
+
+test('runTick: I3 — pre-bill cost-estimate guard skips an under-funded bill BEFORE any chain call, even when the OLD 1.5x-worst-bill gate alone would have let it through; ample allowance and a tight-but-sufficient allowance both still run', async () => {
+  // Sub-case A: a 400k-char monster (the review's own worked example, ~$1.365 estimate) under the
+  // DEFAULT $1.00 tick allowance. The OLD monster-specific 1.5x-worst-bill gate would have passed
+  // this (1.00 - 0 = 1.00 > 1.5 * 0.05 = 0.075) — the NEW I3 guard is what actually excludes it.
+  let bigChainCalls = 0;
+  const big = fakeDeps({
+    queue: [{
+      bill_id: 'm2', identifier: 'HB 99', title: 'T', bill_text_hash: 'hm2', text_length: 400000, priority: 'other',
+    }],
+    texts: { m2: { content: 't', content_hash: 'hm2' } },
+    deps: {
+      runBillChainFn: async () => { bigChainCalls += 1; throw new Error('must not be called — I3 guard should exclude this bill first'); },
+    },
+  });
+  const bigReport = await runTick(big.deps);
+  assert.equal(bigChainCalls, 0);
+  assert.equal(bigReport.detail.lanes.monster, 0);
+  assert.equal(bigReport.detail.skipped.length, 1);
+  assert.match(bigReport.detail.skipped[0].reason, /pre-bill cost estimate/);
+  assert.equal(big.calls.closed[0].status, 'partial'); // a non-routine (I3-estimate) skip still marks partial
+
+  // Sub-case B: a small FRESH-lane bill under a genuinely tight remaining allowance ($0.70, via
+  // prior spend this week of $4.30) still runs — its estimate (~$0.666, near the fixed output
+  // floor) fits comfortably, unlike the 400k monster above at the very same allowance.
+  let smallChainCalls = 0;
+  const small = fakeDeps({
+    queue: [{ bill_id: 'f9', identifier: 'HB 9', title: 'T', bill_text_hash: 'hf9', text_length: 500, priority: 'other' }],
+    texts: { f9: { content: 't', content_hash: 'hf9' } },
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: 4.30 } }], // allowance = $0.70
+    deps: {
+      runBillChainFn: async (a, tracker, { bill }) => {
+        smallChainCalls += 1;
+        tracker.record('claude-haiku-4-5', { input_tokens: 100, output_tokens: 100 }, `author:${bill.identifier}`);
+        return {
+          envelope: {
+            bill_id: bill.bill_id, identifier: bill.identifier, bill_text_hash: bill.bill_text_hash, summary: {}, verdicts: [], completeness: {}, provenance: 'api', author_model: 'claude-haiku-4-5', verifier_model: 'claude-sonnet-5',
+          },
+        };
+      },
+    },
+  });
+  await runTick(small.deps);
+  assert.equal(smallChainCalls, 1);
+  assert.equal(small.calls.closed[0].detail.lanes.fresh, 1);
+  assert.equal(small.calls.closed[0].detail.skipped.length, 0);
+});
+
+test('runTick: I4 — a throwing record CLI call (recordLane) is caught; the run still closes honestly (status partial), the error lands in detail.skipped, records file already on disk', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 't', content_hash: 'h1' } },
+    deps: {
+      runChildCliFn: (script, args) => {
+        if (args[0] === 'plan') return { parsed: { queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }] } };
+        const e = new Error('summary-queue.js exceeded its timeout and was killed (ETIMEDOUT)');
+        e.code = 'ETIMEDOUT';
+        throw e;
+      },
+    },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'ok');
+  assert.equal(calls.closed.length, 1);
+  assert.equal(calls.closed[0].status, 'partial');
+  assert.ok(calls.closed[0].detail.skipped.some((s) => /ETIMEDOUT/.test(s.reason)));
+  assert.equal(calls.records.length, 1); // the records file was written before the throw — never lost
+});
+
+test('runTick: I5 — a throwing plan CLI is caught, logged, and returns plan-failed without opening a run row', async () => {
+  const { deps, calls } = fakeDeps({
+    deps: {
+      runChildCliFn: (script, args) => {
+        if (args[0] === 'plan') {
+          const e = new Error('summary-queue.js exceeded its 900000ms timeout and was killed (ETIMEDOUT)');
+          e.code = 'ETIMEDOUT';
+          throw e;
+        }
+        return { parsed: { counts: { published: 1, gated: 0, failures: 0 }, gated: [], failures: [] } };
+      },
+    },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'plan-failed');
+  assert.equal(calls.closed.length, 0);
+  assert.ok(calls.logs.some((l) => /plan CLI failed/.test(l)));
+});
+
+test('runTick: I8 — MAX_CONVERSIONS_EXAMINED caps how many draft-only bills are examined per tick; routine ineligibility skips do not force status partial', async () => {
+  const summaryRows = [];
+  const texts = {};
+  const total = MAX_CONVERSIONS_EXAMINED + 10;
+  for (let i = 0; i < total; i += 1) {
+    const billId = `c${i}`;
+    summaryRows.push({
+      id: `s${i}`, bill_id: billId, status: 'draft', bill_text_hash: `h${i}`, created_at: `2026-01-${String(1 + (i % 28)).padStart(2, '0')}T00:00:00Z`,
+    });
+    texts[billId] = { content: 't', content_hash: `h${i}` };
+  }
+  const { deps, calls } = fakeDeps({
+    queue: [], // no fresh/monster lane items — isolate the conversion lane
+    summaryRows,
+    texts,
+    deps: {
+      // Every draft is routinely ineligible (no verifications on file) — the review's own
+      // "hundreds of draft-only bills examined forever" scenario.
+      loadDraftObjectionsFn: async () => ({ priorSummary: {}, objections: [], hasVerifications: false }),
+    },
+  });
+  const report = await runTick(deps);
+  const routineSkips = calls.closed[0].detail.skipped.filter((s) => /no objections\/verifications/.test(s.reason));
+  assert.equal(routineSkips.length, MAX_CONVERSIONS_EXAMINED, 'only MAX_CONVERSIONS_EXAMINED entries are ever examined, not all ' + total);
+  assert.equal(calls.closed[0].status, 'succeeded', 'a tick that only skips routine, ineligible conversions is NOT partial');
+  assert.equal(report.detail.published, 0);
+});
+
+test('runTick: I8 — a non-routine skip (e.g. a bill_texts hash mismatch) still marks status partial', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 't', content_hash: 'WRONG-HASH' } }, // mismatch vs. queue's h1
+  });
+  await runTick(deps);
+  assert.equal(calls.closed[0].status, 'partial');
+  assert.match(calls.closed[0].detail.skipped[0].reason, /hash mismatch/);
+});
+
+test('runTick: I9-adjacent fix-in-passing — an unreadable (null) parked read never triggers writeParked, even when new park-worthy failures exist this tick', async () => {
+  let writeParkedCalls = 0;
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 't', content_hash: 'h1' } },
+    recordResult: { counts: { published: 0 }, gated: [], failures: [{ bill_id: 'f1', error: 'MalformedSummaryError', message: 'checker floor' }] },
+    deps: {
+      readParked: () => null, // simulates an unreadable/corrupt parked.json
+      writeParked: () => { writeParkedCalls += 1; },
+    },
+  });
+  await runTick(deps);
+  assert.equal(writeParkedCalls, 0);
+  assert.ok(calls.logs.some((l) => /parked\.json was unreadable/.test(l)));
+});
+
+test('runTick: T4-triage — the conversion lane happy path actually spends: a draft-only bill with objections runs reAuthor, records, and closes published', async () => {
+  let chainArgs = null;
+  const { deps, calls } = fakeDeps({
+    queue: [], // no fresh/monster items — isolate the conversion lane
+    summaryRows: [
+      { id: 's1', bill_id: 'c1', status: 'draft', bill_text_hash: 'hc1', created_at: '2026-08-01T00:00:00Z' },
+    ],
+    texts: { c1: { content: 'bill text', content_hash: 'hc1' } },
+    draftObjections: {
+      priorSummary: { what_it_does: [{ point: 'p', section: 's' }], stated_purpose: '' },
+      objections: ['fix the citation'],
+      hasVerifications: true,
+      identifier: 'HB 1',
+      title: 'Test Bill',
+    },
+    recordResult: { counts: { published: 1, gated: 0, failures: 0 }, gated: [], failures: [] },
+    deps: {
+      runBillChainFn: async (a, tracker, args) => {
+        chainArgs = args;
+        tracker.record('claude-haiku-4-5', { input_tokens: 5000, output_tokens: 500 }, `reauthor:${args.bill.identifier}`);
+        return {
+          envelope: {
+            bill_id: args.bill.bill_id, identifier: args.bill.identifier, bill_text_hash: args.bill.bill_text_hash, summary: {}, verdicts: [], completeness: {}, provenance: 'api', author_model: 'claude-haiku-4-5', verifier_model: 'claude-sonnet-5',
+          },
+        };
+      },
+    },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'ok');
+  assert.ok(chainArgs, 'runBillChainFn must have been called');
+  assert.ok(chainArgs.reAuthor, 'the conversion lane must pass reAuthor args');
+  assert.deepEqual(chainArgs.reAuthor.objections, ['fix the citation']);
+  assert.equal(chainArgs.bill.bill_id, 'c1');
+  assert.equal(chainArgs.bill.identifier, 'HB 1');
+  assert.equal(calls.records.length, 1); // the drafts records file, written once
+  assert.equal(calls.closed[0].status, 'succeeded');
+  assert.equal(calls.closed[0].detail.lanes.conversion, 1);
+  assert.equal(calls.closed[0].detail.published, 1);
 });
 
 test('runTick: MalformedSummaryError from record parks the bill durably', async () => {
