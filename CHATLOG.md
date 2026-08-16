@@ -4087,6 +4087,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (31 verdicts), HR 9770 FY2027 continuing appropriations (34 verdicts), HB 937
   antisemitism/CROWN Act protections (38 verdicts). **Live: 895 -> 901 published** — the
   grand arc reads 115 (08-06) -> 442 -> 710 -> 830 -> 901. ~145 re-authorable remain.
+- **Drain wave CL — 4/6 published** (2026-08-16, 2x3 split, 24 agents 0 errors, 1.22M tokens,
+  record run c655d147): HB 1102 prescription labeling/physician assistants (28 verdicts),
+  SB 1087 driver's licenses (27 — its (4) attempt counter proved to be stale campaign-era
+  artifacts, zero real strikes), HR 4626 Home Appliance Protection (34), HB 1530 unemployment
+  compensation (33). HB 925 biodiesel credits + HB 2203 campaign finance (42 verdicts — the
+  new depth record, but a severability-clause omission flagged it) re-flagged honestly;
+  attempt 2 next for both. Live: 901 -> 905 published, ~141 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
