@@ -4172,6 +4172,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   errors), HB 1466 occupational regulation (written-report omission), S 1383 SAVE America
   (defendant-scope inference); each at attempt 2 with one remaining. Live: 926 -> 928 published,
   ~112 re-authorable remain.
+- **Drain wave CS — 4/6 published, three final-attempt conversions; HB 1466 PARKED** (2026-08-16,
+  2x3 split, 24 agents 0 errors, 1.37M tokens, record run 7fb531dc): the final-attempt trio
+  mostly converted — HB 1461 address confidentiality (21 verdicts; all 8 carried objections
+  resolved, the enumeration-completeness class beaten by writing exhaustive lists), S 1383
+  SAVE America (49 verdicts — the LAST of the 5 parens-masked re-flags from the gate-fix pass
+  is now published), plus HB 2017 capital appropriation (53 verdicts; per-item authorization
+  citations instead of the sweeping claim) and HB 744 orders of protection (25; its (5) counter
+  was stale campaign artifacts — checked against records files before running, zero real
+  strikes, published on effectively attempt 2). **HB 1466 occupational regulation PARKED on its
+  3rd attempt (18 parks)** — the checker's defined-terms demands shift each round on a
+  20-definition section (written-report -> "Department" -> "Certification"); HRES 1423 class.
+  HB 1561 St. Louis sales tax re-flagged (refund-retention omission; final attempt remains).
+  Live: 928 -> 932 published, ~108 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

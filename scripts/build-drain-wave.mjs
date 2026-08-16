@@ -47,6 +47,7 @@ const PARKED = new Set([
   'b2617af8-7d99-42ee-8554-bee87b0bb404', // HR 4776 SPEED Act — 3 attempts exhausted (short-title omission, then 3 omissions in CO, then 2 DIFFERENT omissions in CP: the blind checker's demands shift each round on this omnibus NEPA bill — HRES 1423 condensing class), 2026-08-16
   '2df6f9f8-ad30-4d19-b8ac-ffe511f83275', // HB 369 — 3 attempts exhausted; CHECKER-LIMITATION class: blind completeness checker twice (CP, CQ) demanded a bullet saying the bill "creates the Animal Health Fund," but that language is BRACKETED (repealed) in the printed text — the author correctly refuses to state it; human review should confirm, 2026-08-16
   '234b550c-8b68-4e2b-981f-3a639095aab7', // SB 794 — 3 attempts exhausted; checker-vs-verifier crossfire: completeness checker demanded a bracketed-'or' deletion bullet, author added it, verifier then refuted its citation (the EXPLANATION note is bill-wide boilerplate near Section A, not inside subdivision (19)) — cited-section-alone discipline makes the demanded bullet unwritable; human review should confirm, 2026-08-16
+  '2315960f-ffa9-4eca-9b07-aab33be119dc', // HB 1466 — 3 attempts exhausted; shifting-demands class (HRES 1423): checker demanded written-report bullet (CR), draft added it plus the demanded "Department" definition, checker then demanded a "Certification" definition bullet (CS) — its defined-terms demands shift each round on this 20-definition section, 2026-08-16
 ]);
 
 async function selectAllPaged(client, table, columns, applyFilters) {
