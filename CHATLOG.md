@@ -4121,6 +4121,16 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   completeness checker found the new draft still omitted part of the 578.005 definitions
   (farm animal); next attempt carries that objection. Live: 911 -> 916 published,
   ~129 re-authorable remain.
+- **Drain wave CO — 4/6 published, HB 589 PARKED** (2026-08-16, 2x3 split, 24 agents 0 errors,
+  1.26M tokens, record run 2b202cbf): HB 158 county recall (34 verdicts; may-vs-requires modality
+  fixed), HB 461 right of sepulcher (26; fund-rename bullet added), SB 90 employment security
+  (50 verdicts) and HB 919 privacy protections (53 verdicts — the depth record climbs again,
+  CN's 48 stood one wave), both converting their objections. Two honest flags: HR 4776 SPEED Act
+  re-flagged (completeness found 3 omissions — certainty/deadlines/judicial-review provisions;
+  attempt 3 next), and **HB 589 flagged a 3rd time and PARKED** — attempt 3 hit 43/44 supported
+  but one refuted bullet (described a pre-existing bond-timing clause as newly added); ladder was
+  578.012/578.030 omissions -> 578.005 omission (CN) -> adds-vs-kept (CO). 14 parks total.
+  Live: 916 -> 920 published, ~123 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
