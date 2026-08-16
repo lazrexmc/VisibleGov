@@ -4092,3 +4092,44 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   unregistered (awaiting Lance's `schtasks` command after crediting API account); Task 5 complete
   (data-status block exists), Task 7 remains (full-suite gate + memory). Zero billed calls; $0
   build cost.
+- **Scheduled-summaries: all 7 build tasks + final whole-branch review + its fix wave, complete
+  (2026-08-16).** Task 5 (data-status scheduler block), Task 6 (runbook), and Task 7 (full-suite
+  gate + memory) finished after the build resumed; the final whole-branch review (opus) then
+  returned 2 Critical + 7 Important findings plus a must-fix triage list, all addressed in one fix
+  wave (commit e92d93d for code+tests, this entry's own commit for docs): **money-safety** — an
+  additive pre-bill cost-estimate guard (`estimateBillCostUsd`, keyed off a bill's own text length)
+  now runs before every paid call, atop the existing 1.5x-observed monster gate (kept, not
+  replaced) — the old gate alone could let a ~$0.99 monster through on as little as $0.075 of
+  nominal tick-start headroom, and a crashed/stranded tick is now charged
+  `Math.max(this tick's cap, the $1.00 code default)` against the weekly ledger so a throttled
+  manual tick can never under-charge a prior crash. **Crash hardening** — both the plan-CLI call
+  and the record-CLI call (`recordLane`) are now try/caught: a throwing plan call returns a clean
+  `plan-failed` outcome before `openRun` ever runs (15-min timeout, was inheriting the 8-min
+  ingestion default); a throwing record call is logged into the run's own `skipped` list instead of
+  leaving the row stranded at `running` with no diagnostic trail. **Conversion lane capped +
+  tested** — `MAX_CONVERSIONS_EXAMINED=50` bounds how many draft-only bills get examined per tick
+  (was unbounded: hundreds of routine, expected no-verifications-yet skips every tick, each costing
+  a real DB read), those routine skips no longer force tick status to `partial`, and the conversion
+  lane's happy path (reAuthor args, records file, published count) has a test at all for the first
+  time — previously the only unattended spending path with zero coverage. **Runbook rewritten from
+  code, not patched again** — `docs/SCHEDULED_SUMMARIES.md` went through a full section-by-section
+  re-verification against `scripts/scheduled-summaries.js`/`src/lib/billed-summary-chain.js`,
+  eliminating roughly a dozen false claims (a nonexistent `billing-ledger.json` replaced everywhere
+  with the real `ingestion_runs` + `npm run status` ledger; the `schtasks` command's `--env-file`
+  and script path are now absolute, not just `node.exe`'s; "mid-chain budget check" and
+  "per-call token budget derived from remaining cap" corrected — the caps gate whether a bill
+  STARTS, never a call's own fixed `max_tokens`; `TICK_MAX_DURATION_MS` reframed as the lock's own
+  stale-reclaim window, not a self-enforced deadline — Windows' own "Stop the task if it runs longer
+  than" setting is the actual kill; the checkpoint/retry claim was INVERTED — a crashed bill IS
+  retried on the next tick, cheaply, paying only for missing stages, never "starts fresh on the next
+  bill instead"; a missing first-live-tick procedure was added, `SUMMARY_TICK_CAP_USD=0.10` for one
+  manual throttled tick before registering). Fix-in-passing: run-detail field names
+  `flagged`/`rejected` renamed to `gate_refusals`/`record_failures`; `readParkedReal` now
+  distinguishes ENOENT from an abnormal read failure (never merge-writes over a parked.json it
+  couldn't actually read — closes a real, if narrow, money-leak path); `data-status.js`'s scheduler
+  block now uses a real 10-day window and `envCapUsd` instead of raw constants; the log line's own
+  timestamp is tick-finish, not tick-start. Full suite 2,429/2,429 in a clean shell (2,420 baseline
+  + 9 new tests), fail 0. **Scheduler remains UNREGISTERED** — still pending Lance's own two steps
+  (reload Anthropic credits, then the `schtasks` command; an agent never runs it) exactly as before
+  this fix wave; nothing in this pass changed that state or spent a cent (zero billed calls, all
+  fakeDeps-driven).
