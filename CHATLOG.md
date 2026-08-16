@@ -4200,6 +4200,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   with 7 parks (SB 655, HB 589, HR 4776, HB 369, SB 794, HB 1466, HB 1561; 19 total) and the
   verification-depth record climbing 45 -> 57 verdicts.** ~104 re-authorable remain
   (~36.6k+ chars each). NO summary lane is running; the drain resumes only on Lance's go.
+- **Drain wave CU — 3/6 published; HB 685 PARKED; lane RESUMED on Lance's "now, back to
+  draining" then "I'm taking an extended AFK, continue the drain"** (2026-08-16, 2x3 split,
+  24 agents 0 errors, ~1.37M tokens, runs wf_1a787604/wf_4211da77): HR 33 Taiwan double-tax
+  relief published (29 verdicts — the last of the old parens-masked re-flags, converted by
+  citing SEC. 202 for the committee definitions instead of SEC. 204), HB 145 sunshine law
+  (36; the 59.005-definitions attribution fixed and the 610.021 closed-records omission
+  added), and HB 2002 education appropriation (**75 verdicts — NEW depth record, up from
+  57**; the Section 2.285 three-percent-flexibility inference dropped and stated_purpose
+  made verbatim). **HB 685 public-office requirements PARKED on its 3rd attempt (20 parks)**
+  — a different single-bullet refutation each round (campaign wave-q flag -> CT's 162.291
+  "school district" refutation -> CU's b15: attributing "creates a new provision" to
+  105.035 when only Section A's repeal/enact lists show newness); each re-author fixed the
+  prior objection and 37-verdict verification found a new attribution-precision error.
+  Flagged honestly at strike 2 (one attempt remains, fresh objections to hand-carry):
+  S 3971 strategic-breakthrough defense (b8/b9 both drop the same "as a result of an award
+  using funds made available under a strategic breakthrough allocation" causal qualifier)
+  and SB 672 state-government reorganization (b26 overstates appointment authority —
+  minority leaders, not the presiding officers, appoint minority members). Live:
+  936 -> 939 published, ~101 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
