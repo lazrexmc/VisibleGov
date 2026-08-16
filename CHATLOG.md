@@ -4080,6 +4080,13 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   HB 1098 trust companies + HB 2885 boating registrations re-flagged honestly. Waves stay
   split (2x3) from here — per-bill drafts only get bigger. Live: 891 -> 895 published, ~151
   re-authorable remain.
+- **Drain wave CK — 6/6 PUBLISHED, clean sweep, and LIVE CROSSES 900** (2026-08-16, 2x3 split,
+  24 agents 0 errors, 1.14M tokens, record run 60161c3e): HB 1098 trust companies (published
+  on retry — the Section-A citation fix took), HB 2885 boating registrations (retry, 32
+  verdicts), HR 1534 IMPACT Act cement/concrete research, HB 112 health-workforce data
+  (31 verdicts), HR 9770 FY2027 continuing appropriations (34 verdicts), HB 937
+  antisemitism/CROWN Act protections (38 verdicts). **Live: 895 -> 901 published** — the
+  grand arc reads 115 (08-06) -> 442 -> 710 -> 830 -> 901. ~145 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
