@@ -4539,6 +4539,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   re-ran, coming back clean. The stale trap hit all four DJ retries in the build —
   hand-carried fresh from wave-dj records as always. Live: 999 -> 1005 published,
   26 parks, ~23 re-authorable remain.
+- **Drain wave DL — 3/6 published (live 1005 -> 1008); the parens-binding gate earned its
+  keep** (2026-08-17, three launches at ~44.5/44.6/36.3KB, 24 agents 0 errors, ~2.1M tokens,
+  runs wf_3988b03d/wf_45ede050/wf_8b3b1461; all six bills on attempt 2 with fresh
+  single-attempt objections, no stale trap): **published clean: HR 7744 DHS appropriations
+  (56 verdicts — the Sec. 212 'state or local agency' removal held), HR 8029 Pay Our
+  Homeland Defenders (64 verdicts, zero refutations — the Sec. 303 paragraphs-(1)-(5)
+  reframe held; deepest clean appropriation this drain), and HB 2571 Division of Finance
+  (54 — the 285.1000 participating-employer qualifier and the appended 285.1015 plan
+  bullet both held).** Three failed at strike 2, one attempt each: HB 352 corrections
+  (43 verdicts, ZERO refutations — gated on three omissions: 217.690's high-school-diploma
+  parole bar, 191.1165's MO HealthNet/no-dollar-limits formulary half, 217.692's actual
+  domestic-violence parole-eligibility criteria); HB 1633 criminal offenses (34, zero
+  refutations — gated on 610.140's six-month order deadline and lifetime expungement
+  caps); and HB 87 DWI (45 — b1's repealed-scheme sentence genuinely overstated prior law,
+  AND the verifier misrecorded b6's citation as 557.520 when the draft cites 577.010 —
+  **the parens-binding gate caught the mismatch mechanically and gated rather than
+  trusting the verdict**, exactly the never-trust-the-verifier's-self-report design).
+  All three retries' fixes hand-carry into wave DM as final attempts. Live: 1005 -> 1008
+  published, 26 parks, ~17 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
