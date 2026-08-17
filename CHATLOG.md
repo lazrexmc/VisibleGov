@@ -4389,6 +4389,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   rather than the cited 354.150 + b33 deposit-destination overreach on the
   withdrawal-notice fee — one attempt remains). Live: 971 -> 974 published, ~58
   re-authorable remain.
+- **Drain wave DE — 4/6 published, SB 799 SAVED on its FINAL attempt; the
+  mechanical-prefix pattern goes 6-for-6 on refuted clauses** (2026-08-16, 2+2+2 split at
+  ~36/35/31KB, 24 agents 0 errors, ~1.62M tokens, runs wf_d55c94b9/wf_359950bf/wf_dac21a40):
+  all six bills carried fresh objections (SB 799 via DB path; the rest from their single
+  prior attempt), and each refuted clause was mechanically pre-fixed in the prior_summary
+  with a preserve-NOTE before launch — every one of the six held through re-verification.
+  **SB 799 business fees converted on strike 3** (49 verdicts; the director-title and
+  fee-destination scoping fixes held). Also clean: HR 3383 INVEST Act (86 verdicts — the
+  second-deepest run of the drain; the six-condition sponsor list completed), SB 66
+  workers' compensation (38; both demanded 287.120/287.170 bullets added), and SB 869
+  political subdivisions (50; the commission-vote rule correctly scoped to subsection 3).
+  SB 655 marriage-age/sex-offender-registry flagged at strike 2 DESPITE 51 verdicts and
+  zero refutations — the completeness gate demanded 589.404's "adjudicated" definition
+  spelled out where the draft's definitions bullet lists the term without its content
+  (the SB 909 granularity class; one attempt remains). HB 2005 FY2019 appropriation
+  flagged honestly at strike 2 (37 verdicts; b7 read Section 5.030's single $19.9M total
+  as excluding the new-projects component — one attempt remains). Live: 974 -> 978
+  published, ~52 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
