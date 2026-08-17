@@ -4323,6 +4323,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   physical therapists flagged honestly at strike 2 (19 verdicts; b11 places 334.506's
   delegation rule under a 334.100 citation — wrong-section class, one attempt remains).
   Live: 960 -> 964 published, ~71 re-authorable remain.
+- **Drain wave DB — 5/6 published, NEW verification-depth record 104 (HB 2014), SB 51
+  converted on its FINAL attempt** (2026-08-16, 2+2+2 split at ~38/33/35KB, 24 agents 0
+  errors, ~1.55M tokens, runs wf_390451bc/wf_54f4fd8e/wf_4dc25693): **HB 2014 FY2020
+  COVID supplemental appropriation published CLEAN at 104 verdicts — the deepest
+  verification run of the entire drain** (verbatim stated_purpose fixed; $6.27B across
+  CARES Act school/local-government/nursing-home distributions). **SB 51 physical
+  therapists SAVED on strike 3** (20 verdicts; b11's delegation rule finally cited to
+  334.506 instead of 334.100 — wrong-section class conversion). Also clean: HR 3898
+  PERMIT Act (63 verdicts, its deepest run; both Sec. 15 remand-exception and Sec. 16
+  dual-notification refutations fixed), SCONRES 7 FY2025 budget resolution (28; the
+  added definitional claim dropped and SEC. 4001's shall-vs-may split stated), and SB 71
+  electrical/broadband (32; verbatim stated_purpose fixed). HB 711 open enrollment
+  flagged honestly at strike 2 (76 verdicts — fixed BOTH prior objections, the
+  calendar-days qualifier and the demanded 167.151 property-tax bullet, then deep
+  verification found b0's homeless-child definition omits subdivision (2)'s
+  primary-nighttime-residence category — rotating class, one attempt remains, fresh
+  objection flows via DB path). Live: 964 -> 969 published, ~65 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
