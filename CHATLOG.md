@@ -4463,6 +4463,27 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   shifting-demands class). All three retries' fixes must be hand-carried into wave DH —
   the build will re-serve stale objections. Live: 983 -> 986 published, 26 parks,
   ~43 re-authorable remain.
+- **Drain wave DH — 5/6 published (live 991), THREE final-attempt saves in one wave: HR 4553,
+  HB 2322, and SB 222 all converted on strike 3** (2026-08-17, four launches at
+  ~44/40/31/18KB — HR 4553's entry hit 55.6KB after the DG-draft swap, over the ~50KB
+  transport band, so its carried referenced_terms were stripped (11.6KB; the author
+  regenerates them from bill text) to bring it to 44KB solo; 24 agents 0 errors, ~1.9M
+  tokens, runs wf_2b8f90d0/wf_a4a520ea/wf_2cfa11d6/wf_910de2b7): **HR 4553 energy-water
+  appropriation CLEAN at 110 verdicts** — the b0 enacting-clause re-cite (following the
+  verifier's own reasoning about where the preamble language lives) and the appended
+  TITLE III overview bullet both held. **HB 2322 prosecutor/police retirement CLEAN at 53**
+  (b45 rewritten to 86.344's own "the city") and **SB 222 motorized vehicles CLEAN at 38**
+  (the demanded 301.010 backhaul/boat-transporter/towaway bullet appended) — both on their
+  final attempts. Also clean on attempt 2: HB 2006 FY2019 agriculture/DNR/conservation
+  appropriation (78 verdicts; the nine-funds correction held and the re-author expanded
+  coverage to the full transfer/loan-guarantee section run) and HB 850 election law
+  (34 verdicts; the court-or-legislative-body fix held). HR 2913 Ukraine Support Act
+  flagged honestly at strike 2 (54 verdicts; both pre-fixed Sec. 302/304 30-day-first-list
+  bullets HELD, but b38's Sec. 311 four-item sanctions list omits paragraph (4)'s distinct
+  significant-transaction target class — one attempt remains). The stale-objection trap hit
+  all three DG retries in the build (stale objections AND stale pre-DG prior summaries) —
+  all hand-carried fresh from wave-dg records with pre-fixes, NOTEs, and final-attempt
+  [GUIDANCE]. Live: 986 -> 991 published, 26 parks, ~40 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
