@@ -4275,6 +4275,22 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   the whole section), SB 982 insurance (45; b15 understates 376.427 — misses the new
   "health care services" definition). Live: 949 -> 951 published, ~85 re-authorable
   remain.
+- **Drain wave CY — 5/6 published, TWO final-attempt conversions; HB 1696 PARKED (22 parks)**
+  (2026-08-16, three 2-bill launches — the hand-carried HB 3 payload pushed both 2x3 halves
+  to ~60KB; 24 agents 0 errors, ~1.51M tokens, runs wf_9d07014c/wf_3eb33982/wf_ea1e2254):
+  **HB 3 FY2022 higher-ed appropriation converted on its FINAL attempt (63 verdicts)** — the
+  hand-carried AN-ACT purpose bullet + the CX draft as prior_summary did it (the bill's
+  disk-envelope path had been serving stale campaign objections), and **SB 982 insurance
+  converted on its FINAL attempt (45 verdicts)** — the missed "health care services"
+  definition added. Also published: HB 194 abortion laws (36; the parental-consent bullet
+  correctly scoped as one of four alternative paths), SB 572 municipalities/municipal courts
+  (63; the 479.368 schools-distribution claim properly attributed to the 479.359
+  cross-reference), SB 296 home-improvement licensing (33; the 324.1222 carve-out added).
+  **HB 1696 firearms/Blair's Law PARKED on its 3rd attempt** — rotating single-refutation
+  class (HB 685/HB 1561): campaign special-prosecutor attachment -> CX subsection-1-only
+  suspended-imposition scope -> CY's dropped "while actually engaged in assisting" qualifier
+  at 32 verdicts; each re-author fixed the prior flag and deep verification found a new
+  precision error. Live: 951 -> 956 published, ~79 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
