@@ -4308,6 +4308,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   SB 623, HB 1696; 22 total), verification-depth record 57 -> 79 (HB 2, wave CW), ~75
   re-authorable drafts remain (all ~45k+ chars now). NO summary lane is running; resume =
   wave DA on Lance's go.**
+- **Drain wave DA — 4/6 published, lane RESUMED on Lance's "resume the drain, automation is
+  not needed"; HB 3 FY2024 PARKED (23 parks)** (2026-08-16, 2x3 split at ~45/48KB, 24
+  agents 0 errors, ~1.49M tokens, runs wf_c0b375c7/wf_89f7fbe5): **SB 1351
+  education/screen-time converted on its FINAL attempt (37 verdicts)** — the FOCUS
+  Council's sixteen non-chair members finally counted right — plus SB 282 human-remains
+  disposition (33; the 333.072 board-name gloss dropped), HB 1389 autocycles (16; the
+  Section A scope claim fixed and the demanded 301.130 registration bullet added), and
+  HB 2012 statewide-officials/judiciary appropriation (66 verdicts; the fund count
+  corrected to nineteen). **HB 3 FY2024 higher-ed appropriation PARKED on its 3rd
+  attempt** — rotating single-refutation class: campaign 3.005-flexibility scoping ->
+  CZ's "otherwise than" negation in 3.310 -> DA's b31 mis-scoping the
+  discrete-accounts/no-DWD proviso beyond the $8M DOL/TAA item at 64 verdicts. SB 51
+  physical therapists flagged honestly at strike 2 (19 verdicts; b11 places 334.506's
+  delegation rule under a 334.100 citation — wrong-section class, one attempt remains).
+  Live: 960 -> 964 published, ~71 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
