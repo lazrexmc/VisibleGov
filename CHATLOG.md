@@ -4363,6 +4363,32 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   re-authorable remain. **NO summary lane is running; the drain resumes only on Lance's
   go (resume = build wave DD — note SB 909/HB 970/SB 861/HB 2057 are all disk-path
   bills whose fresh DC objections will need the hand-carry check).**
+- **Drain wave DD — 3/6 published, THREE final-attempt saves (SB 861, HB 970 + HB 1991
+  clean), TWO parks (HB 2057, SB 909; 25 total); lane RESUMED on Lance's "We need to
+  finish this drain"** (2026-08-16, 2+2+2 split at ~45/41/47KB, 24 agents 0 errors,
+  ~1.65M tokens, runs wf_26e29027/wf_08b5e173/wf_7645dc03): the predicted stale-objection
+  trap fired for three of the four strike-2 retries (HB 970, SB 861, SB 909 re-served
+  their already-fixed DC-build objections; HB 2057 alone came through fresh) — all three
+  hand-carried fresh DC refutations + [GUIDANCE] preserve-notes, with prior_summary
+  swapped to the DC drafts. **SB 861 transportation/tax incentives SAVED on strike 3**
+  (58 verdicts; the 143.2115 machinery-exclusion scope finally stated in full) and
+  **HB 970 video lottery SAVED on strike 3** (50 verdicts; the cross-license bar restated
+  per-role without handlers and the fee stated as "may impose"). HB 1991 small-wireless
+  also published CLEAN (48 verdicts; the Section A enacting-clause attribution fixed).
+  **HB 2057 concealed carry PARKED on its 3rd attempt** — rotating class: stated_purpose
+  gate -> DC's Section B pair -> DD fixed both and deep verification found b4
+  (deadly-force "only when" omitting the third private-property condition) and b13
+  (exemption missing the chapeau's "except as otherwise provided" qualifier) at 60
+  verdicts. **SB 909 trusts/digital-assets PARKED on its 3rd attempt — the
+  shifting-demands/checker-limitation class (HRES 1423/SB 623): its DD re-author fixed
+  the added-vs-renumbered b11 and passed 53 verdicts with ZERO refutations, but the
+  completeness gate demanded 456.8-808/456.1-103 bullets the draft already covers split
+  across multiple bullets — the checker's compound items don't map onto the draft's
+  bullet granularity; human review should confirm.** SB 799 business fees flagged
+  honestly at strike 2 (45 verdicts; b20 director-title elaboration drawn from 354.010
+  rather than the cited 354.150 + b33 deposit-destination overreach on the
+  withdrawal-notice fee — one attempt remains). Live: 971 -> 974 published, ~58
+  re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
