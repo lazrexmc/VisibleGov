@@ -4733,6 +4733,27 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   queue: wave DQ ($0 drain finish, needs Lance's go), tomorrow's first-unattended-tick
   check, his-side items (30→27-bill park review, custom domain, VoterTables gameplan,
   optional /ru switch, 8/31 pricing re-check).
+- **Manual trigger of the registered task (Lance's request): pathway fully validated; $0.4836
+  bought 0 publishes — the wave-C completeness-floor catch-22 is now costing real money at
+  the queue head** (2026-08-17): triggered via `schtasks /run` with Lance's explicit go
+  (console-window warning given first; window left alone this time). Tick d744297c ran
+  ~3.5 min through the REAL Task Scheduler environment: lock, ledger, lanes, 24 paid calls,
+  honest close — `attempted=2260 published=0 gate_refusals=1 spent=$0.4836`, week
+  $0.5310/$5.00. Funded 6 bills from the smallest-first fresh queue: FOUR tiny Senate
+  resolutions (SRES 377/690/520/412) each died on the KNOWN catch-22 — "key_provisions has
+  1 entries, outside the required 3-7" (TODO'd 2026-08-08, wave C, unfixed) — and were
+  AUTO-PARKED with that written reason (parked.json 27 → 31; self-healing, never re-paid);
+  SRES 532 and HCONRES 14 (23 verdicts, the budget resolution, most of the spend) recorded
+  as drafts with banked verifications (conversion/drain-recoverable). **Systemic reading:
+  the fresh lane is ordered smallest-first and its head is dense with 1-provision
+  resolutions that structurally CANNOT publish under MIN_KEY_PROVISIONS=3 — coming daily
+  ticks will pay ~$0.02-0.05 discovery cost per tiny bill and park them, yielding near-zero
+  publishes until the tiny-bill head clears or a fix lands.** Options put to Lance:
+  (a) accept self-healing pennies; (b) $0 reversible stopgap — mechanically pre-park
+  clearly-too-short fresh bills (extending seed-scheduler-parks) so the daily $1 goes to
+  publishable bills; (c) the proper TODO'd fix — length-scaled completeness floor in
+  verifier.js assessCompleteness (<2.5k chars → min 1; <5k → min 2; else 3), a spec-level
+  trust-machinery change requiring his explicit go, TDD with review.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
