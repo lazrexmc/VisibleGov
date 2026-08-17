@@ -4484,6 +4484,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   all three DG retries in the build (stale objections AND stale pre-DG prior summaries) —
   all hand-carried fresh from wave-dg records with pre-fixes, NOTEs, and final-attempt
   [GUIDANCE]. Live: 986 -> 991 published, 26 parks, ~40 re-authorable remain.
+- **Drain wave DI — 6/6 PUBLISHED (live 997), the first PERFECT wave of the drain; HR 2913
+  saved on its FINAL attempt** (2026-08-17, 2+2+2 split at ~41/43/24KB, 24 agents 0 errors,
+  ~1.88M tokens, runs wf_f446949c/wf_562324a4/wf_9f18741d): **HR 2913 Ukraine Support Act
+  converted on strike 3** (54 verdicts; the b38 rewrite listing all five Sec. 311 sanctions
+  categories — including paragraph (4)'s distinct significant-transaction class — held, as
+  did the Sec. 302/304 30-day-first-list bullets from DH). Also clean, all on attempt 2:
+  SB 119 judicial proceedings (65 verdicts — the spoofing-offense prongs correctly split so
+  "to obtain anything of value" attaches only to entering false information), HB 478
+  professional licensing (47; the 331.084 board-name removal held and the demanded 337.645
+  advanced-macro-social-worker bullet kept), HB 2336 child custody/criminal law (41; the
+  Section A numeric-facts fix held — same AN-ACT-title-clause attribution class as SB 222),
+  HB 599 financial institutions (37; the demanded 382.010 enterprise-risk definitions
+  bullet kept), and HB 1 congressional redistricting (17; the 128.348 eight-districts
+  bullet restated with the text's own Congress ranges). The DI build re-served HR 2913's
+  DH-fixed objections and its stale pre-DH prior — hand-carried fresh from wave-dh records
+  as with every retry this stretch; the five single-attempt retries carried fresh
+  objections, all pre-fixed mechanically. Live: 991 -> 997 published, 26 parks,
+  ~35 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
