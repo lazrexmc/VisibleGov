@@ -252,7 +252,50 @@ This is safe by design: a catch-up tick is just a normal tick — the lock file 
 the weekly ledger is computed from `ingestion_runs` (not from run *count*), and the per-tick cap
 binds regardless of what time the tick actually fires. Worst case, two ticks land on the same
 calendar day (a late catch-up plus the next 6 AM) — both stay under the same weekly $5.00 cap,
-so the spend guarantee is unchanged.
+so the spend guarantee is unchanged. Note it fires IMMEDIATELY on registration too: the moment
+this setting was turned on (2026-08-17, ~9:03 AM, after the 6:00 start had already passed),
+Task Scheduler treated that day's start as missed and launched a catch-up tick on the spot.
+
+### ⚠️ Modifying this task on THIS machine: GUI and `Set-ScheduledTask` both fail — use XML re-create
+
+Both interactive modification routes are broken for this task (verified live, 2026-08-17):
+
+- **The GUI** loads the Properties dialog fine but errors on OK with *"One or more of the
+  specified arguments are not valid"* — it re-validates and rewrites the entire task on save
+  and chokes on elements it didn't author (likely the quoted `Command` and/or the raw-SID
+  `UserId` the original `schtasks /create` wrote).
+- **PowerShell `Set-ScheduledTask -InputObject`** fails with *"The parameter is incorrect.
+  (23,8):UserId"* — same root cause, surfaced by the cmdlet's own re-registration validation
+  of the stored SID principal.
+
+**The route that works is re-creating from exact XML** (the same path that created the task):
+edit the saved copy at `.superpowers/artifacts/scheduled-summaries-task.xml` (or re-export with
+`schtasks /query /tn "VisibleGov Scheduled Summaries" /xml > file.xml`, saved as UTF-16 to
+match its declaration), then:
+
+```
+schtasks /create /tn "VisibleGov Scheduled Summaries" /xml "F:\VisibleGov\.superpowers\artifacts\scheduled-summaries-task.xml" /f
+```
+
+`/f` overwrites in place. This is how `StartWhenAvailable` was actually turned on. The saved
+XML stays out of git (`.superpowers/artifacts` is gitignored — it contains the machine SID).
+
+### ⚠️ The tick runs in a VISIBLE console window while you're logged on — closing it KILLS the tick
+
+The task runs with `LogonType InteractiveToken` ("only while logged on"), so every tick opens
+a black node console window on the desktop. **Closing that window (or Ctrl+C in it) terminates
+the tick mid-run** — exit code 0xC000013A. This happened live on 2026-08-17: the
+registration-moment catch-up tick popped its window, the window was closed, and the tick died.
+It died BEFORE opening its run row, so that particular kill cost $0.00 and charged nothing —
+but a kill later in a tick strands the lock (self-heals in 30 min, or delete it by hand) and a
+`running` run row (conservatively charged the full $1.00 by next tick's ledger math, by
+design). So: **when a black node window appears at tick time, leave it alone — it closes
+itself when the tick finishes.** The permanent fix is switching the task to "Run whether user
+is logged on or not" (no window at all, and ticks run while logged out): per the section
+above, the GUI can't save this task, so do it by re-creating from the saved XML with
+credentials — `schtasks /create /tn "VisibleGov Scheduled Summaries" /xml "F:\VisibleGov\.superpowers\artifacts\scheduled-summaries-task.xml" /ru LAZREX\Lazrex /rp * /f`
+(the `/rp *` prompts for the account password once; requires the account to actually have a
+password).
 
 ## Reading the logs
 
@@ -435,9 +478,12 @@ $0.70, which published HR 3095 and gate-refused HB 1562 to draft for $0.0474; co
 verified: daily 6:00, absolute paths, no ExecutionTimeLimit element = 72h default). What
 remains:
 
-1. GUI, Settings tab: check **"Run task as soon as possible after a scheduled start is
-   missed"** (see the Missed runs section above — without it, powered-off-at-6AM days get no
-   tick). Optionally set "Start in" to `F:\VisibleGov` (belt-and-braces) and "Run whether user
-   is logged on or not" (General tab) for logged-out operation.
-2. Monitor the logs and the SUMMARY SCHEDULER block as the daily runs accumulate.
-3. Re-check the cost-estimate constants when Sonnet intro pricing ends (2026-08-31).
+1. ~~Check "Run task as soon as possible after a scheduled start is missed"~~ **DONE
+   2026-08-17** — via XML re-create, after both the GUI and `Set-ScheduledTask` failed (see
+   the two warning sections above; the GUI route in this list's original wording does not
+   work for this task).
+2. Optional: switch to "Run whether user is logged on or not" via the XML + `/ru` command in
+   the console-window section above — eliminates the visible tick window and enables
+   logged-out runs. Until then: never close the black node window a tick opens.
+3. Monitor the logs and the SUMMARY SCHEDULER block as the daily runs accumulate.
+4. Re-check the cost-estimate constants when Sonnet intro pricing ends (2026-08-31).

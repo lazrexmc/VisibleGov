@@ -4693,6 +4693,28 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   remaining = that checkbox + monitoring + the 2026-08-31 Sonnet-pricing re-check. **From
   tomorrow 6 AM the pipeline publishes on its own under the $1.00/tick + $5.00/ISO-week
   code-enforced caps — the first fully autonomous billed lane in the project.**
+- **Missed-runs setting ON after a two-route failure saga; first catch-up tick fired
+  instantly and was killed by a closed console window ($0 impact); lock hand-cleaned**
+  (2026-08-17): Lance tried the runbook's GUI checkbox — Task Scheduler errored on OK with
+  "One or more of the specified arguments are not valid" (the GUI re-validates the whole
+  task and chokes on schtasks-authored elements). PowerShell `Set-ScheduledTask -InputObject`
+  then failed with "The parameter is incorrect. (23,8):UserId" — the stored raw-SID
+  principal fails the cmdlet's re-registration validation. Working route: wrote the task's
+  exported XML verbatim + `<StartWhenAvailable>true</StartWhenAvailable>` to the gitignored
+  `.superpowers/artifacts/scheduled-summaries-task.xml`; Lance re-created with
+  `schtasks /create /xml ... /f`; read-only verify confirmed the setting, trigger, command,
+  and principal all intact, task Ready, next run 8/18 6:00 AM. **Immediate side effect,
+  by design:** with today's 6:00 start already missed, the catch-up fired the moment
+  registration landed (9:03:23 AM) — as an InteractiveToken task it opened a visible console
+  window, the window got closed, and node died with 0xC000013A before opening its run row:
+  NO log line, NO ingestion_runs row, $0.00 spent, no conservative charge — the week still
+  stands at $0.0474. Only residue was the orphaned lock file; verified pid 66064 dead and
+  deleted it (runbook-blessed hand-clean; it would have self-healed as 30-min-stale
+  tomorrow anyway). Runbook updated with three new subsections: the XML-re-create
+  modification route (GUI and Set-ScheduledTask both documented broken on this machine),
+  the console-window-kills-the-tick warning ("leave the black node window alone"), and the
+  optional `/ru` re-create for hidden logged-out runs. Scheduler state: fully configured —
+  daily 6 AM + missed-run catch-up, $1/tick + $5/wk caps, week at $0.0474/5.00.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
