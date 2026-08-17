@@ -4578,6 +4578,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   nonbank-issuer-specific, plus a Sec. 20 effective-date omission; the b5 four-category
   and b19 per-clause-qualifier fixes both held). Live: 1008 -> 1010 published, 28 parks,
   ~9 re-authorable remain.
+- **Drain wave DN — 4/6 PUBLISHED (live 1010 -> 1014), two final-attempt saves, and the
+  file-pointer transport pattern proven (PLAYBOOK lesson 40)** (2026-08-17, four launches at
+  ~2.7/44.3/35.9/33.8KB + one resume, runs wf_b8c9854a/wf_5fbce043/wf_27592de5/wf_67b13f4e;
+  correcting DM's "~9 re-authorable remain" — the DN build reported 20): **published: S 1582
+  GENIUS Act stablecoins (92 verdicts, ZERO refutations — a strike-3 SAVE whose 56KB prior
+  wouldn't fit under the ~50KB transport ceiling even after a terms strip, so it was banked
+  to prior-s1582.json with a Read-instruction stub in the args; the author followed the
+  pointer, both fixes held, and it regenerated all 42 referenced_terms), SB 718 health care
+  (63 verdicts, zero refutations — strike-3 SAVE; the 195.265 ultimate-user qualifier held),
+  SB 371 transportation (61, zero refutations — the third court-review item and both
+  endangerment bullets held), and HB 631 natural resources (48, zero refutations — the
+  'amount of minerals' unit fix held; its verifier died mid-response and was recovered free
+  via resumeFromRunId, the session's second lesson-37 save).** Two failed at strike 2 for
+  wave DO finals: SB 150 workforce development (106 verdicts, ZERO refutations — gated only
+  on the 324.009 broadened-spouse-definition omission, appendable) and SB 6 controlled
+  substances (55; three precision refutations: the ID-alternative drop in 195.017, b22's
+  'throughout the sections' scope unprovable from 195.740 alone, and the 450-gram MDMA
+  branch misphrased as unbounded). Live: 1010 -> 1014 published, 28 parks, ~14 re-authorable
+  remain per the build.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

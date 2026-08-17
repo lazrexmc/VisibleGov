@@ -820,3 +820,21 @@ parameter approaching ~50KB as at-risk — split the payload (two 3-bill launche
 instant death with a parse error and 0 work done — the launch acknowledgment is an enqueue
 receipt, not a delivery receipt. Related but distinct from the 25k-token Read cap (lesson
 band): that one truncates what you READ, this one truncates what you SEND.
+
+## Lesson 40 — When a payload is too big to send, bank it to a file and send a pointer — agents can Read what transport can't carry (2026-08-17)
+
+A final-attempt re-author needed a 56KB prior draft carried to the author agent, but the
+transport ceiling (lesson 39) sits near ~50KB and the bulk was irreducible (91 verbose bullets;
+the referenced_terms strip that saved other oversized entries recovered nothing because the
+terms weren't the bulk). The fix that worked on the first try: write the full prior JSON to a
+repo-local artifacts file, and replace the inline payload with a small stub whose first field
+is an explicit read instruction ("Before authoring, Read the file <absolute path> — treat its
+content exactly as you would treat an inline PRIOR DRAFT"). The author agent (which already
+Reads the bill text and the system-prompt contract from disk) followed the pointer, applied
+both pre-fixes from the objections, regenerated the omitted referenced_terms as instructed, and
+the result came back clean at 92/92 verdicts. Two mechanics: (1) this works because the
+consumer is an AGENT with file tools, not the runtime — the script's own sandbox cannot read
+files, but the prompt it assembles can tell the agent to; (2) make the stub self-sufficient
+against the pointer being ignored: keep the mandatory fixes spelled out verbatim in the
+objections themselves so the worst case (agent authors fresh without the prior) still lands the
+required changes and only risks regression on previously-held bullets, not the fixes.
