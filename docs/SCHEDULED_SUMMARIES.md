@@ -134,13 +134,23 @@ deliberately throttled manual tick by hand** — this is Lance's own step; do no
 behalf:
 
 ```
-SUMMARY_TICK_CAP_USD=0.10 node --env-file=.env scripts/scheduled-summaries.js
+SUMMARY_TICK_CAP_USD=0.70 node --env-file=.env scripts/scheduled-summaries.js
 ```
 
-(PowerShell equivalent, if not using Git Bash: `$env:SUMMARY_TICK_CAP_USD = "0.10"; node --env-file=.env scripts/scheduled-summaries.js`)
+(PowerShell equivalent, if not using Git Bash: `$env:SUMMARY_TICK_CAP_USD = "0.70"; node --env-file=.env scripts/scheduled-summaries.js`)
 
-$0.10 is enough to fund one small bill through the whole chain (author → verify → provisions →
-coverage) without risking a large, unexpected charge on the very first real run. After it finishes:
+**The cap must be at least ~$0.67, and $0.70 is the deliberate choice.** The pre-bill cost
+estimator (`estimateBillCostUsd`) adds a fixed output-ceiling constant of $0.665
+(`COST_ESTIMATE_OUTPUT_CEILING_USD`) to every bill regardless of its size, so **no bill ever
+estimates below ~$0.67** — a cap under that skips every bill before any paid call and spends
+exactly $0. (Verified live 2026-08-17: the first manual tick was run at this section's earlier
+$0.10 figure and scanned 2,269 bills, skipped all of them on the estimate guard, and spent
+$0.0000 — safe, but useless as a first live test. This section originally claimed "$0.10 is
+enough to fund one small bill"; that was wrong.) $0.70 admits exactly one small bill
+(text ≲ 20k chars) and leaves essentially no headroom for a second: after the first bill's real
+spend, the remaining allowance falls below the $0.665 floor, so every later bill is skipped.
+The estimate is a deliberately padded worst-case ceiling — the real spend for one small bill is
+on the order of $0.04, not $0.67. After it finishes:
 
 1. Check `npm run status`'s **SUMMARY SCHEDULER** block — it should show a `last tick` entry with
    today's date, a real `spent this week` figure above $0.00, and (if the one bill it attempted
@@ -149,7 +159,7 @@ coverage) without risking a large, unexpected charge on the very first real run.
    should appear, of the `tick=<id> attempted=1 published=... spent=$...` shape described under
    "Reading the logs" below.
 3. Only once both of those look right, proceed to registration below (and remember to unset
-   `SUMMARY_TICK_CAP_USD` afterward, or the daily runs will stay throttled to $0.10/tick — a real
+   `SUMMARY_TICK_CAP_USD` afterward, or the daily runs will stay throttled to $0.70/tick — a real
    per-tick budget of $1.00 needs the env var absent, not present-and-small).
 
 ## Registering it (Lance's step — never run `schtasks` from an agent)

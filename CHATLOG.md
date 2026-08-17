@@ -4639,6 +4639,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   983 -> 1019 (+36), parks 26 -> 30, sixteen final-attempt saves, two 6/6 perfect waves,
   the parens-binding gate's first live catch, lesson 40 (file-pointer transport), and two
   resumeFromRunId recoveries.
+- **Scheduler activation begun: $20 credits loaded; first manual tick spent $0 and exposed a
+  runbook bug ($0.10 throttle is below the $0.665 estimate floor)** (2026-08-17): Lance loaded
+  $20 of API credits — the funds half of the two-part gate that kept the completed autonomy
+  build INERT. Dry-run came back green (allowance $1.00, week 2026-W34, weeklySpent $0). Lance
+  then ran the runbook's throttled first manual tick at its documented
+  `SUMMARY_TICK_CAP_USD=0.10` — and the pre-bill estimate guard skipped ALL 2,269 queued bills
+  ("estimate $0.67xx exceeds remaining allowance $0.1000") before any paid call: tick
+  c1b8fa2a logged `attempted=2269 published=0 spent=$0.0000`. Root cause: `estimateBillCostUsd`
+  adds the fixed $0.665 `COST_ESTIMATE_OUTPUT_CEILING_USD` to every bill regardless of size, so
+  no bill can estimate below ~$0.67 and a $0.10 cap can never fund anything — the runbook's
+  "$0.10 is enough to fund one small bill" claim was simply false (the guard itself worked
+  exactly as designed: zero spend rather than overshoot). Fixed the runbook
+  (docs/SCHEDULED_SUMMARIES.md): throttle corrected to $0.70 (admits exactly one small bill;
+  after its real ~$0.04 spend the remaining allowance drops below the floor, so no second bill
+  starts), with the floor arithmetic and this live incident documented in place. Remaining
+  activation steps are Lance's: re-run the manual tick at $0.70, confirm via `npm run status` +
+  the day's log, then the `schtasks /create` registration (agents never run schtasks or a live
+  tick).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
