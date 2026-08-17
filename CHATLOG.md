@@ -4616,6 +4616,29 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   four agencies' reports tie reasons to expiration when only the Comptroller's does; the
   b3 per-agency fix and b19 'public' removal both held). Live: 1014 -> 1016 published,
   29 parks, ~10 re-authorable remain.
+- **Drain wave DP — 3/6 published (live 1016 -> 1019), THREE final-attempt saves, HB 814
+  parked (parks 29 -> 30); ladder PAUSED per Lance ("pause once completed")** (2026-08-17,
+  four launches at ~36.5/30.9/45.4/45.3KB, 24 agents 0 errors, ~2.4M tokens, runs
+  wf_7c9c2963/wf_3a05574c/wf_9449471b/wf_b98cbe0e; the three DO retreads all arrived fresh
+  via the db path): **published: HR 6955 Main Street Capital Access (78 verdicts, zero
+  refutations — strike-3 SAVE, the Sec. 102 per-subsection disposition-reasons fix held),
+  HB 701 retirement (41, zero refutations — strike-3 SAVE, the b38 amendment-claim scoping
+  to the COLA item held), and SB 1233 licensure (53, zero refutations — all three appended
+  bullets held on this 216K-char bill, the largest text the drain has published).** PARKED
+  at strike 3: HB 814 financial institutions, rotating single-refutation class — DO's b10
+  fix HELD but 87 fresh verdicts surfaced two new precision refutations (the 285.1025
+  proviso attaches only to the administration/investment item; b81 misattributed the
+  deferral-limit removal to 408.178). Two flagged at strike 2 remain in the pool for a
+  future wave DQ: HR 8646 ag/FDA appropriation (57 verdicts; a new extension-figure
+  overstatement plus a Sec. 739 CFIUS omission) and HR 4016 DoD appropriation (**138
+  verdicts — new drain depth record past HB 3015's 135**; two off-by-one section citations:
+  the DPRK bar is Sec. 8044 not 8047, the animal-research bar is Sec. 8150 not 8151; the
+  b0/b3/Sec. 8124 fixes all held). **Ladder state at pause: live 1019 published, 30 parks,
+  ~7 re-authorable remain (HR 8646, HR 4016, plus ~5 untouched); resume = build wave DQ
+  with the standard stale-check/pre-fix/split cycle.** Session arc: waves DG-DP, live
+  983 -> 1019 (+36), parks 26 -> 30, sixteen final-attempt saves, two 6/6 perfect waves,
+  the parens-binding gate's first live catch, lesson 40 (file-pointer transport), and two
+  resumeFromRunId recoveries.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
