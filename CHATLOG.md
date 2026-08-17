@@ -4558,6 +4558,26 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   trusting the verdict**, exactly the never-trust-the-verifier's-self-report design).
   All three retries' fixes hand-carry into wave DM as final attempts. Live: 1005 -> 1008
   published, 26 parks, ~17 re-authorable remain.
+- **Drain wave DM — 2/6 published (live 1008 -> 1010), one final-attempt save, two
+  shifting-demands parks (parks 26 -> 28)** (2026-08-17, four launches at
+  ~41/47.6/41.3/15.7KB, 24 agents 0 errors, ~2.1M tokens, runs wf_b73fde9b/wf_d41dc84e/
+  wf_7480eb8d/wf_7cd5673a; the build served stale pre-DL data for HB 1633 and HB 352 via
+  the disk-envelope path — fresh DL drafts and gate reasons hand-carried — while HB 87
+  came through fresh via the db path): **published clean: HB 87 DWI (45 verdicts, zero
+  refutations — a strike-3 SAVE: the b1 repealed-scheme sentence removal held, and the
+  verifier read b6's 577.010 citation correctly this round after last round's misread)
+  and SB 908 taxation (47 — the 204.605 authorization/resolution unbundling held).**
+  Two PARKED at strike 3, both shifting-demands class (SB 655/SB 909 pattern — zero
+  refutations, a brand-new completeness demand each round on giant omnibus bills):
+  HB 1633 criminal offenses (35 verdicts, 0 refuted; DL's three demands all satisfied,
+  gate then demanded a NEW 577.010 LEO-victim felony-tier bullet) and HB 352 corrections
+  (46 verdicts, 0 refuted; DL's three demands all satisfied, gate then demanded a NEW
+  650.058 DNA-actual-innocence bullet). Two flagged at strike 2 for wave DN finals:
+  SB 718 health care (63 verdicts; b14 needs 195.265's ultimate-user-in-lawful-possession
+  qualifier) and S 1582 GENIUS Act stablecoins (91 verdicts — b51's BSA-report item is
+  nonbank-issuer-specific, plus a Sec. 20 effective-date omission; the b5 four-category
+  and b19 per-clause-qualifier fixes both held). Live: 1008 -> 1010 published, 28 parks,
+  ~9 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
