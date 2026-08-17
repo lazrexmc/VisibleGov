@@ -4291,6 +4291,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   suspended-imposition scope -> CY's dropped "while actually engaged in assisting" qualifier
   at 32 verdicts; each re-author fixed the prior flag and deep verification found a new
   precision error. Live: 951 -> 956 published, ~79 re-authorable remain.
+- **Drain wave CZ — 4/6 published; LANE PAUSED on Lance's "Finish this run and pause after
+  completion"** (2026-08-16, three 2-bill launches, 24 agents 0 errors, ~1.45M tokens, runs
+  wf_146121f5/wf_4f81552d/wf_dd79ef24): HB 9 FY2024 corrections appropriation published
+  (66 verdicts; stated_purpose made verbatim), S 2503 ROTOR Act (44; the 180-day briefings
+  correctly attributed to the Inspector General of the Army, not the Secretary), HB 1729
+  prevailing wages (46; the department gloss dropped from 290.095 per its own
+  definitions-scope clause), and SCONRES 22 FY2026 federal budget resolution (31; the
+  "rising outlays" framing and the "another Senator" addition both fixed). Flagged honestly
+  at strike 2, one attempt each remaining: SB 1351 education/screen-time (24 verdicts; b22
+  — the FOCUS Council has 16 non-chair members, not fourteen: subdivisions (6) and (7) each
+  name TWO education professionals) and HB 3 FY2024 higher-ed appropriation (61; b59 adds
+  "otherwise than" to Section 3.310's grant-guidelines clause, a negation the text doesn't
+  contain — both fresh refutations flow through the DB path on resume). **THE AFK DRAIN
+  WINDOW CLOSES: 936 -> 960 published (+24) across waves CU-CZ, 3 parks added (HB 685,
+  SB 623, HB 1696; 22 total), verification-depth record 57 -> 79 (HB 2, wave CW), ~75
+  re-authorable drafts remain (all ~45k+ chars now). NO summary lane is running; resume =
+  wave DA on Lance's go.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
