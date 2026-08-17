@@ -4597,6 +4597,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   'throughout the sections' scope unprovable from 195.740 alone, and the 450-gram MDMA
   branch misphrased as unbounded). Live: 1010 -> 1014 published, 28 parks, ~14 re-authorable
   remain per the build.
+- **Drain wave DO — 2/6 published (live 1014 -> 1016), SB 150 saved at 107 verdicts, SB 6
+  parked (parks 28 -> 29)** (2026-08-17, four launches at ~46.9/43.3/39.8/23.1KB, 24 agents
+  0 errors, ~2.2M tokens, runs wf_8fc3c2de/wf_58977fae/wf_654cd645/wf_3bd5e6ff; SB 6 and
+  SB 150 arrived stale from the disk-envelope path again — fresh DN drafts hand-carried):
+  **published: SB 150 workforce development (107 verdicts, ZERO refutations — a strike-3
+  SAVE and the drain's second-deepest clean verification; the appended 324.009
+  broadened-spouse bullet held) and SB 1023 notaries (76, zero refutations — the 486.795
+  three-condition window fix held).** PARKED at strike 3: SB 6 controlled substances,
+  rotating single-refutation class — DN's three precision fixes all HELD in DO, but 55
+  fresh verdicts surfaced two NEW refutations (195.010's hemp definition carries seed and
+  commodity parts beyond the nonseed clause; the 450-gram class A list also includes
+  phenmetrazine and methylphenidate). Three flagged at strike 2 with single precision
+  refutations for wave DP finals: HB 814 financial institutions (87 verdicts — b10's
+  municipality parenthetical lives in 67.2800, not the cited 67.2810), HB 701 retirement
+  (41 — b38's early-retirement qualifier is bracket-provable only for the COLA item, not
+  the survivor-annuity item), and HR 6955 Main Street Capital Access (78 — b5 claimed all
+  four agencies' reports tie reasons to expiration when only the Comptroller's does; the
+  b3 per-agency fix and b19 'public' removal both held). Live: 1014 -> 1016 published,
+  29 parks, ~10 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
