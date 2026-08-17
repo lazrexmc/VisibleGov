@@ -4340,6 +4340,29 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   verification found b0's homeless-child definition omits subdivision (2)'s
   primary-nighttime-residence category — rotating class, one attempt remains, fresh
   objection flows via DB path). Live: 964 -> 969 published, ~65 re-authorable remain.
+- **Drain wave DC — 2/6 published, HB 711 SAVED on its FINAL attempt; ladder PAUSED on
+  Lance's "Pause on those big ol Ds"** (2026-08-16, HB 711 solo at 43KB + 2+3 split at
+  ~39/45KB, 24 agents 0 errors, ~1.50M tokens, runs wf_72b12531/wf_fab1b710/wf_38156139):
+  **HB 711 open enrollment converted at 77 verdicts, zero refutations** — the b0
+  homeless-child definition now carries subdivision (2)'s primary-nighttime-residence
+  category, and both earlier fixes (calendar-days qualifier, 167.151 property-tax
+  bullet) were preserved via a hand-carried [GUIDANCE] note; the stale-objection trap
+  fired on the build (disk path re-served the two already-fixed wave-t objections —
+  identical to the CY HB 3 case) and was caught by comparing objection text to the DB
+  records before launch. SB 179 bank-filings also published CLEAN (22 verdicts; the
+  Section A characterization objection resolved by moving the statutes' subject-matter
+  description out of the Section A bullet). Flagged honestly, one attempt each remaining
+  (ladder paused before it could be used): SB 909 trusts/digital-assets (52 verdicts; b11
+  called the trust-protector definition "added" when bracket notation shows it renumbered
+  from (29) to (30)), HB 970 video lottery (49; b9 extended the cross-license bar to
+  handlers the text never mentions + b14 stated the discretionary "may impose" fee as
+  mandatory), SB 861 transportation/tax incentives (56; b31 under-scoped the
+  machinery-exclusion to related-party placements only), and HB 2057 concealed carry
+  (60; b59 read an all-bill effective-date rule into Section B + checker demanded a
+  Section B emergency-clause bullet). Live: 969 -> 971 published, 23 parks, ~63
+  re-authorable remain. **NO summary lane is running; the drain resumes only on Lance's
+  go (resume = build wave DD — note SB 909/HB 970/SB 861/HB 2057 are all disk-path
+  bills whose fresh DC objections will need the hand-carry check).**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
