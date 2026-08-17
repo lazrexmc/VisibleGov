@@ -4521,6 +4521,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   the gate demanded the board's next-generation-911 plan-and-timeline duty). All four
   retries' fixes must be hand-carried into wave DK. Live: 997 -> 999 published, 26 parks,
   ~29 re-authorable remain.
+- **Drain wave DK — 6/6 PUBLISHED, live crosses 1,000 (999 -> 1005); FOUR final-attempt
+  saves in one wave, second perfect wave of the drain** (2026-08-17, five launches at
+  ~48/39/38/29/29KB — HR 8469's DJ-draft entry hit 55.6KB so its referenced_terms were
+  stripped again to 47.6KB solo; 24 planned agents + one resume, runs wf_3e7b0604/
+  wf_08c7f880/wf_bf39b664/wf_42dd004f/wf_0a940d3b): **converted on strike 3: HR 8469
+  military-construction/VA (103 verdicts — the Sec. 420 "making referrals" third barred
+  action held), HB 1456 911 services (78 — the 70.210 gloss removal and the NG911
+  plan-and-timeline bullet both held), HR 1968 continuing appropriations (48 — the
+  Sec. 11109 per-account availability fix held), and HR 7147 homeland security (39 — the
+  Division B ratification bullet held).** Also clean on attempt 2: HB 268 Regulatory
+  Sandbox Act (74 verdicts; the 135.1310 no-exchange condition correctly scoped to
+  non-employer individual taxpayers) and HB 554 taxation (50; the 144.1000 name-only
+  repeal fix held). One infrastructure save: HB 554's verifier died mid-response
+  ("Connection lost") leaving a zero-verdict envelope — resumed via resumeFromRunId
+  (lesson 37 pattern), seven cached agents replayed free and only the dead verifier
+  re-ran, coming back clean. The stale trap hit all four DJ retries in the build —
+  hand-carried fresh from wave-dj records as always. Live: 999 -> 1005 published,
+  26 parks, ~23 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
