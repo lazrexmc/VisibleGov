@@ -4442,6 +4442,27 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   stale-objection trap for any DF-flagged retries... none remain flagged at one-attempt-
   left except HB 2005's cohort is now resolved — the pool is ~46 with no carryover
   strikes pending except what wave DG's build prints).**
+- **Drain wave DG — 3/6 published (live 986), lane RESUMED per Lance ("Anyways, let's
+  drain more backlog work"); cross-section-attribution is now the dominant refutation
+  class** (2026-08-17, 2+2+2 split at ~47/44/36KB, 24 agents 0 errors, ~1.9M tokens,
+  runs wf for dg-a `wl0k3002j`/dg-b `wa9lfc7in`/dg-c wf_f6e564a4): all six on attempt 2,
+  every carried objection pre-fixed mechanically before launch. **Clean publishes: HB 2014
+  FY2022 appropriation (0c546b02; 87 verdicts — the pre-fixed b52 rate-cap bullet held),
+  HB 6 abortion-facility licensure (1fb872ff; 59 verdicts; the appended 188.027
+  informed-consent and Section B emergency-clause bullets both held), and HB 292 bank
+  powers (47 verdicts; the b22 family-trust-transactions fix held).** Three flagged at
+  strike 2, one attempt each remains, no parks: HR 4553 energy-water appropriation
+  (109 verdicts — second-deepest run; b0 imported the enacting clause's "energy and water
+  development" phrase into a TITLE I-cited bullet, and the completeness gate separately
+  demanded a TITLE III Department of Energy bullet); HB 2322 prosecutor/police retirement
+  (53 verdicts; b45 attributed the "city not within a county" qualifier to 86.344 when it
+  appears only in referencing sections 86.330/.333/.337); SB 222 motorized vehicles
+  (37 verdicts, ZERO refutations — gated on a fresh 301.010 definitions demand
+  (backhaul/boat transporter/towaway trailer combination) after DG's build had already
+  satisfied the prior 304.005 autocycle demand; concrete and appendable, NOT the
+  shifting-demands class). All three retries' fixes must be hand-carried into wave DH —
+  the build will re-serve stale objections. Live: 983 -> 986 published, 26 parks,
+  ~43 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
