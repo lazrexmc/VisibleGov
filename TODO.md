@@ -1123,6 +1123,17 @@ idea-to-software system would distill. The superpowers flow already used in this
 (brainstorm → spec → plan → subagent-driven build with reviews) is a working prototype of the
 process half.
 
+**2026-08-17 (Lance: "Look into joining VisibleGov and VoterTables and make a gameplan"):**
+
+Gameplan written to `docs/VOTERTABLES_JOIN_GAMEPLAN.md` — PROPOSAL, awaiting Lance's review.
+Short form: join on (chamber, district). Phase 1 = "Find my legislators" page via the free
+Census geocoder (address → MO House/Senate district → existing profiles; needs NO VoterTables
+data). Phase 2 = pivot VoterTables' data channel from stalled clerk outreach (43/116 counties)
+to SoS precinct-level results files; port its working aggregate tables into Supabase. Phase 3 =
+neutral seat-election panels (candidates, raw votes, margin, turnout) on legislator profiles.
+Hard rules: voters/address PII never crosses over; mechanical neutrality on every number;
+$0/month. Three open questions for Lance sit at the bottom of the doc.
+
 Multi-faceted per Lance: (1) plain-language bill/law breakdowns, (2) purpose/intent surfaced
 clearly, (3) voting-record tracking tied to individual legislators, (4) accountability - making the
 above easy enough that regular people actually use it. Decomposed 2026-07-27 into the MVP design

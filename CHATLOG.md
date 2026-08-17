@@ -4407,6 +4407,41 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   flagged honestly at strike 2 (37 verdicts; b7 read Section 5.030's single $19.9M total
   as excluding the new-projects component — one attempt remains). Live: 974 -> 978
   published, ~52 re-authorable remain.
+- **Drain wave DF — 5/6 published, NEW verification-depth record 135 (HB 3015), HB 2005
+  SAVED on its FINAL attempt, SB 655 PARKED (26); lane PAUSED per Lance ("pause after
+  this wave")** (2026-08-16/17, four launches at ~40/35/33/17KB — HB 3015's 33KB entry
+  paired over 50KB with everything, so a 2+2+1+1 split, 24 agents 0 errors, ~1.78M
+  tokens, runs wf_df274bee/wf_8cc5d8a5/wf_517e73b0/wf_40e03f7a): **HB 3015 FY2022
+  supplemental appropriation published CLEAN at 135 verdicts — the deepest verification
+  run of the entire drain** ($851M across ~110 sections; verbatim stated_purpose fixed).
+  **HB 2005 FY2019 appropriation SAVED on strike 3** (37 verdicts; the pre-fixed Section
+  5.030 single-total bullet held). Also clean: HB 499 transportation (57 verdicts; the
+  action-organizations carve-out held and both demanded 301.010/479.500 bullets added),
+  SB 501 health care (78; both demanded 195.206/334.036 bullets held), and HB 3
+  abortion-facility licensure (0d4eb325; 62 verdicts; the physician-or-qualified-
+  professional disjunction and the expanded 188.027 bullet both held — third HB 3 in
+  the drain, distinct from parked 0a7376ce and published 257efa5b). The stale-objection
+  trap fired AGAIN for SB 655 + HB 2005 in the build (re-served their DE-fixed
+  objections) — both hand-carried with fresh DE objections, prior_summary swapped to DE
+  drafts, and refuted clauses mechanically pre-fixed. **SB 655
+  marriage-age/sex-offender-registry PARKED on its 3rd attempt — shifting-demands/
+  checker-limitation class (SB 909/SB 623): DF passed 61 verdicts with ZERO refutations
+  and had added DE's demanded 589.404 adjudicated-definition content, but the
+  completeness gate then demanded a DIFFERENT compound 589.400 bullet (adjudicated
+  basis + tier periods + clean-record reduction) whose content the draft already covers
+  across separate bullets; human review should confirm.** Also this session:
+  Lance shared VoterTables context (his Missouri precinct/voter-count product; precinct
+  officials an unworkable channel — saved to memory), and on his "Look into joining
+  VisibleGov and VoterTables and make a gameplan" the PROPOSAL was written to
+  docs/VOTERTABLES_JOIN_GAMEPLAN.md (join on (chamber, district); Phase 1 Census-geocoder
+  "Find my legislators" page needing no VoterTables data; Phase 2 pivot to SoS
+  precinct-results files replacing stalled clerk outreach; Phase 3 neutral seat-election
+  panels; PII firewall absolute) with a TODO inbox pointer — awaiting Lance's review.
+  Live: 978 -> 983 published, 26 parks, ~46 re-authorable remain. **NO summary lane is
+  running; the drain resumes only on Lance's go (resume = build wave DG; expect the
+  stale-objection trap for any DF-flagged retries... none remain flagged at one-attempt-
+  left except HB 2005's cohort is now resolved — the pool is ~46 with no carryover
+  strikes pending except what wave DG's build prints).**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
