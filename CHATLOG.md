@@ -4657,6 +4657,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   activation steps are Lance's: re-run the manual tick at $0.70, confirm via `npm run status` +
   the day's log, then the `schtasks /create` registration (agents never run schtasks or a live
   tick).
+- **First LIVE scheduler tick succeeded — 1 published, 1 gate refusal, $0.0474; only the
+  schtasks registration remains** (2026-08-17): Lance re-ran the manual tick at the corrected
+  $0.70 throttle. Tick d039e50e: `attempted=2269 published=1 gate_refusals=1 spent=$0.0474`,
+  weekly ledger $0.0474/$5.00, `npm run status` SUMMARY SCHEDULER block confirms (last tick
+  today, status=partial, published this week 1). The two funded bills exercised both paid
+  paths end-to-end: **HR 3095** (single-unique-ZIP-code designations for 66 communities;
+  Haiku author → Sonnet verify, 1/1 verdicts supported, completeness 2/2 covered) recorded
+  CLEAN and **auto-published — live count now 1,020**; **HB 1562** completed its paid chain
+  but a mechanical gate refused auto-publish, so it recorded as a draft with its
+  verifications banked (DB-verified statuses: published / draft) — exactly the trust-model
+  behavior, and the draft joins the conversion-lane/drain pool rather than wasting the
+  spend. The $0.70 cap admitted a second bill precisely because the first's real spend
+  (~$0.02) left remaining allowance above the $0.665 estimate floor — the marginal case the
+  runbook fix predicted; total stayed at a nickel. Also captured (TODO inbox, not chased):
+  run-row skip-list bloat — every tick writes one skip entry per considered bill (2,269
+  this time). **Activation state: credits loaded, dry-run green, live tick verified. The
+  ONLY remaining step is Lance's `schtasks /create` registration (cmd, not PowerShell) plus
+  the two GUI touches (Start in = F:\VisibleGov; Settings "Stop the task if it runs longer
+  than" > 30 min), then daily 6 AM runs begin under the real $1.00/tick, $5.00/week caps.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
