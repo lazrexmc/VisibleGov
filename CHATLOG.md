@@ -4502,6 +4502,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   as with every retry this stretch; the five single-attempt retries carried fresh
   objections, all pre-fixed mechanically. Live: 991 -> 997 published, 26 parks,
   ~35 re-authorable remain.
+- **Drain wave DJ — 2/6 published (live 999), four flagged at strike 2 on granular
+  completeness demands** (2026-08-17, four launches at ~40/44/40/21KB, 24 agents 0 errors,
+  ~1.96M tokens, runs wf_7de550e2/wf_fd48c522/wf_b1fb1374/wf_e94c6c00; all six bills on
+  attempt 2 with fresh single-attempt objections — no stale trap this wave): **published
+  clean: HB 155 workplace retirement savings (51 verdicts; the employee/employer
+  government-exclusion lists correctly separated and the demanded 86.280 surviving-spouse
+  reinstatement bullet kept) and HB 2012 health care (63 verdicts; the 188.212
+  discretionary-repayment reframe held).** Four flagged at strike 2, one attempt each,
+  no parks: HR 8469 military-construction/VA appropriation (103 verdicts, ZERO refutations
+  — the pre-fixed 30-day escape-valve bullet held, but the gate demanded Sec. 420's third
+  barred action, "making referrals" for marijuana programs); HR 7147 homeland security
+  (38, zero refutations — the $6M grant re-attribution held, gate demanded Division B's
+  ratification-of-obligations clause); HR 1968 continuing appropriations (48; the Sec. 1912
+  carve-out held, but b21's "become available October 1, 2025" over-generalized to all
+  seven Sec. 11109 accounts when item (7) carries no such clause); HB 1456 911 services
+  (77; b3's trailing "govern contracts and cooperation" gloss isn't in 70.210's text, and
+  the gate demanded the board's next-generation-911 plan-and-timeline duty). All four
+  retries' fixes must be hand-carried into wave DK. Live: 997 -> 999 published, 26 parks,
+  ~29 re-authorable remain.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
