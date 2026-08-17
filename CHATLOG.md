@@ -4771,6 +4771,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (5.3k), SCR 36 (5.6k), HB 1564 (5.8k)... all floor-viable. TODO catch-22 entry updated
   with the class-aware design caveat for the coming floor fix (option 3, Lance-approved
   direction, not yet built) and the unpark-by-source procedure.
+- **Brainstorm opened for the floor fix — and its context pass found the fix ALREADY EXISTS
+  (df771db); my 688-bill stopgap was mispremised and is corrected (687 unparked)**
+  (2026-08-17): reading verifier.js before asking design questions revealed
+  `minKeyProvisionsFor` (<2.5k chars -> 1; <5k -> 2; else 3) landed in commit df771db as the
+  wave-C fix — the TODO entry claiming it was "not yet built" was STALE, and I violated
+  "verify current state before asserting" by parking 687 sub-5k bills on that stale premise
+  an hour earlier. Live disproof: HR 3095 (2,873 chars, 2 provisions) PUBLISHED through the
+  billed scheduler this very morning. Corrected immediately: removed all 687 length-lens
+  stopgap entries from parked.json (kept the 1 HRES class entry + the 4 scheduler
+  self-parks — the resolution class IS genuinely broken), dry-run verified lanes restored
+  1,568 -> 2,255. **The real remaining gap is narrow: bills >= 5k chars whose honest
+  substantive yield is 1-2 provisions — floor demands 3, checker honestly returns fewer,
+  malformed, unpublishable. Known members: 4 SRES (7.6k-16.2k chars) + 1 HRES + drain-parked
+  HB 606 (5,219 chars/2 provisions — 219 chars over the band line), HB 64 (6,609/1),
+  SB 626, HB 1607 (11,703/2) — roughly nine bills plus occasional future arrivals that the
+  scheduler self-parks at ~$0.03 each. The brainstorm continues on this corrected, much
+  smaller problem.** (Also noted: one calibration query used a hand-typed UUID that silently
+  matched nothing — the no-hand-typed-UUIDs rule fired again; nothing load-bearing relied
+  on it.)
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
