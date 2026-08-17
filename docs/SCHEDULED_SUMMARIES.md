@@ -377,7 +377,19 @@ attempted again. To unpark it (e.g., after a verifier gate fix or a text source 
 
 The parked set is kept as a JSON file (not a database table) so it can be edited locally without
 server access, and so a decision to unpark survives power loss and reboots (unlike an in-memory
-registry). If `parked.json` exists but can't be read on a given tick (corrupt, a transient
+registry).
+
+**Seeded from the drain lane's parks (2026-08-17):** the drain lane's PARKED set in
+`scripts/build-drain-wave.mjs` (27 bills, each parked after exhausted supervised retries, with
+written reasons) was seeded into `parked.json` via `node scripts/seed-scheduler-parks.mjs` —
+without this, those bills are conversion-lane-eligible (they all have drafts + verifications on
+file) and the lane's oldest-flagged-first ordering puts them at the FRONT of the paid queue, so
+the scheduler would have spent budget re-attempting bills that already failed three supervised
+attempts each. Verified by dry-run after seeding: lanes dropped 2,269 → 2,261 and zero parked
+IDs remain in the assembly. The seeder is merge-safe and idempotent (never overwrites an
+existing entry) — **re-run it whenever the drain lane parks new bills**, and after any loss of
+the gitignored artifacts tree (the script and the PARKED set it reads are both committed, so
+the park list is always recoverable). If `parked.json` exists but can't be read on a given tick (corrupt, a transient
 filesystem error), that tick treats the park list as UNKNOWN for its own purposes rather than
 silently empty — it will not merge-write over a file it couldn't actually read, so a newly
 park-worthy bill from that same tick simply doesn't get parked yet (logged honestly; it gets parked

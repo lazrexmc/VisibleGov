@@ -4715,6 +4715,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   the console-window-kills-the-tick warning ("leave the black node window alone"), and the
   optional `/ru` re-create for hidden logged-out runs. Scheduler state: fully configured —
   daily 6 AM + missed-run catch-up, $1/tick + $5/wk caps, week at $0.0474/5.00.
+- **Drain parks seeded into the scheduler's parked.json — the paid conversion lane will
+  never re-fight the drain's lost battles** (2026-08-17, Lance's "#1 please"): verified the
+  gap first — the scheduler's parked.json did not exist (it only learns its OWN parks), while
+  every drain-parked bill has a draft + verifications on file = conversion-lane-eligible, and
+  that lane's oldest-flagged-first ordering puts them at the FRONT of the paid queue. Built
+  `scripts/seed-scheduler-parks.mjs` (committed): mechanically parses the PARKED set out of
+  build-drain-wave.mjs (regex over the literal block — no hand-typed UUIDs), merge-safe
+  (never overwrites an existing scheduler-authored entry), idempotent (verified: second run
+  added 0). Seeded 27 entries, each carrying its full written drain reason plus
+  source=drain-lane-seed-2026-08-17. **Count correction:** the chatlog's running park count
+  had drifted to "30" by wave DP; the PARKED set's mechanical count is 27 — the file is
+  authoritative, and 27 is the real number. Verified by $0 dry-run after seeding: lane
+  assembly dropped 2,269 → 2,261 (eight parked bills HAD been sitting in the upcoming
+  tick's lanes — the exact budget-waste scenario) and zero parked IDs leak. Runbook's parked
+  section documents the seed + the re-run-on-new-parks convention. Remaining recommendation
+  queue: wave DQ ($0 drain finish, needs Lance's go), tomorrow's first-unattended-tick
+  check, his-side items (30→27-bill park review, custom domain, VoterTables gameplan,
+  optional /ru switch, 8/31 pricing re-check).
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
