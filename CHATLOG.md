@@ -4754,6 +4754,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   publishable bills; (c) the proper TODO'd fix — length-scaled completeness floor in
   verifier.js assessCompleteness (<2.5k chars → min 1; <5k → min 2; else 3), a spec-level
   trust-machinery change requiring his explicit go, TDD with review.
+- **Tiny-bill stopgap executed (Lance: "two now, three later") — 688 structurally-unpublishable
+  bills pre-parked; tomorrow's tick head is now substantive** (2026-08-17): calibrated from
+  live evidence first, and the calibration FALSIFIED the TODO's length assumption for one
+  class — SRES 412 hard-failed the 3-provision floor at 16,163 chars while SRES 532 passed
+  at 14,354, so simple resolutions (SRES/HRES) are parked as a CLASS regardless of length
+  (ceremonial whereas-bulk hides 1-provision substance; concurrent resolutions untouched —
+  HCONRES 14 yielded 23 provisions). Regular bills parked on the length lens: text_length
+  < 5,000 chars (queue bands: 33 sub-1k, 298 sub-2.5k, 687 sub-5k — the smallest-first
+  ordering meant ~7 weeks of near-zero-yield ticks without this). New committed script
+  scripts/park-tiny-fresh-bills.mjs consumes the plan CLI's own queue JSON (same lens as
+  the scheduler), merge-safe, every entry source-tagged tiny-bill-stopgap-2026-08-17 with
+  an unpark instruction in the reason text. Result: 688 added (4 overlapped today's
+  scheduler self-parks), parked.json now 719 (27 drain seed + 4 scheduler + 688 stopgap).
+  Dry-run verified: lanes 2,261 -> 1,568, ZERO parked leaks, next-tick head = HB 1954
+  (5.3k), SCR 36 (5.6k), HB 1564 (5.8k)... all floor-viable. TODO catch-22 entry updated
+  with the class-aware design caveat for the coming floor fix (option 3, Lance-approved
+  direction, not yet built) and the unpark-by-source procedure.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
