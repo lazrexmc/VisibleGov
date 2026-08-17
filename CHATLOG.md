@@ -4676,6 +4676,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   ONLY remaining step is Lance's `schtasks /create` registration (cmd, not PowerShell) plus
   the two GUI touches (Start in = F:\VisibleGov; Settings "Stop the task if it runs longer
   than" > 30 min), then daily 6 AM runs begin under the real $1.00/tick, $5.00/week caps.**
+- **SCHEDULER REGISTERED — the autonomy milestone is COMPLETE; one GUI checkbox recommended
+  for missed runs** (2026-08-17): Lance ran the `schtasks /create` command in cmd —
+  `SUCCESS: The scheduled task "VisibleGov Scheduled Summaries" has successfully been
+  created.` Read-only XML verification: daily trigger 6:00 AM, correct absolute-path
+  command/arguments, `LogonType InteractiveToken` (runs while logged on, as documented). Two
+  findings from the XML: (1) NO `ExecutionTimeLimit` element — Windows' default for that
+  absence is 72h, already safely above the 30-min floor, so the runbook's GUI time-limit
+  check is satisfied on a fresh registration (noted in the doc); (2) NO `StartWhenAvailable`
+  — a day when the PC is off at 6 AM gets NO tick, silently, and this machine is shut down
+  regularly (the design brief's own premise). The runbook never covered missed runs — gap
+  fixed: new "Missed runs" section documents the one GUI checkbox ("Run task as soon as
+  possible after a scheduled start is missed"), safe by design since a catch-up tick is a
+  normal tick (lock prevents overlap; the ledger reads ingestion_runs, not run counts; caps
+  bind regardless of fire time). Runbook Status section rewritten: ACTIVATED 2026-08-17,
+  remaining = that checkbox + monitoring + the 2026-08-31 Sonnet-pricing re-check. **From
+  tomorrow 6 AM the pipeline publishes on its own under the $1.00/tick + $5.00/ISO-week
+  code-enforced caps — the first fully autonomous billed lane in the project.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

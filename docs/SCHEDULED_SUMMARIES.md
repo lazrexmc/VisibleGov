@@ -233,6 +233,27 @@ math).
 enforcement here; the in-script constant only needs to stay well under it so the stale-reclaim
 window and the OS-level kill can never race each other in a confusing way.
 
+(Registration-day verification note, 2026-08-17: the task XML the `schtasks /create` command
+actually produces contains NO `ExecutionTimeLimit` element at all, and Task Scheduler's default
+for that absence is 72 hours — already comfortably above 30 minutes. So on a fresh registration
+this setting is fine as-is; the check above matters if anyone ever edits the task in the GUI,
+where the dialog re-imposes its own defaults.)
+
+### ⚠️ Missed runs: check "Run task as soon as possible after a scheduled start is missed"
+
+`schtasks /create` does NOT set this (`StartWhenAvailable` is absent from the produced XML,
+which means OFF), and this machine is shut down regularly — **with it off, any day the PC is
+powered down at 6 AM simply gets NO tick that day**, silently. Turn it on via the GUI: Task
+Scheduler → "VisibleGov Scheduled Summaries" → Properties → **Settings tab** → check **"Run
+task as soon as possible after a scheduled start is missed."** Then a missed 6 AM run fires
+shortly after the next boot/logon instead of being dropped.
+
+This is safe by design: a catch-up tick is just a normal tick — the lock file prevents overlap,
+the weekly ledger is computed from `ingestion_runs` (not from run *count*), and the per-tick cap
+binds regardless of what time the tick actually fires. Worst case, two ticks land on the same
+calendar day (a late catch-up plus the next 6 AM) — both stay under the same weekly $5.00 cap,
+so the spend guarantee is unchanged.
+
 ## Reading the logs
 
 Two places to check, and they answer different questions:
@@ -404,11 +425,19 @@ a clean next tick immediately rather than waiting out the stale-reclaim window.
 
 All 7 build tasks are complete, plus a final whole-branch review and its fix wave (this document
 was rewritten section-by-section against the live code as part of that pass). The full test suite
-is green in a clean shell. What remains, in order:
+is green in a clean shell.
 
-1. Load Anthropic API credits via your console (the billed path has been closed since the
-   2026-08-09 balance depletion — see `CLAUDE.md`'s standing-policy section).
-2. Run the ONE throttled manual tick described above ("Before you register").
-3. Confirm it via `npm run status` and the day's log file.
-4. Run the registration `schtasks` command above (Lance's step — an agent never runs it).
-5. Monitor the logs and the SUMMARY SCHEDULER block as the scheduler begins its daily runs.
+**ACTIVATED 2026-08-17.** The original activation checklist completed that day, in order:
+credits loaded ($20); the throttled manual tick ran — first at this doc's original (wrong)
+$0.10, which the estimate guard correctly skipped entirely at $0 spend, then at the corrected
+$0.70, which published HR 3095 and gate-refused HB 1562 to draft for $0.0474; confirmed via
+`npm run status` and the day's log; and the `schtasks` registration succeeded (task XML
+verified: daily 6:00, absolute paths, no ExecutionTimeLimit element = 72h default). What
+remains:
+
+1. GUI, Settings tab: check **"Run task as soon as possible after a scheduled start is
+   missed"** (see the Missed runs section above — without it, powered-off-at-6AM days get no
+   tick). Optionally set "Start in" to `F:\VisibleGov` (belt-and-braces) and "Run whether user
+   is logged on or not" (General tab) for logged-out operation.
+2. Monitor the logs and the SUMMARY SCHEDULER block as the daily runs accumulate.
+3. Re-check the cost-estimate constants when Sonnet intro pricing ends (2026-08-31).
