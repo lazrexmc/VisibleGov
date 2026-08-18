@@ -50,10 +50,10 @@ test('real legiscan-datasets cache manifest: if the cache exists at all, session
 
 // ---- listCachedDatasetFiles ----
 
-test('listCachedDatasetFiles: the real repo cache dir has exactly the 32 cached dataset ZIPs this task is scoped to', (t) => {
-  // Bumped 31 -> 32 (2026-08-03), 32 -> 33 (2026-08-10): LegiScan datasets refresh weekly, so
-  // this real cache dir grows over time (a fresh 2239 weekly dataset landed 2026-08-09) — this
-  // snapshot needs periodic bumps, same as every other "real cache dir" count in this test suite.
+test('listCachedDatasetFiles: the real repo cache dir has exactly the 34 cached dataset ZIPs this task is scoped to', (t) => {
+  // Bumped 31 -> 32 (2026-08-03), 32 -> 33 (2026-08-10), 33 -> 34 (2026-08-18): LegiScan datasets
+  // refresh weekly, so this real cache dir grows over time — this snapshot needs periodic bumps,
+  // same as every other "real cache dir" count in this test suite.
   //
   // Senior engineering audit (2026-08-03, finding 15): guarded to skip honestly (not fail
   // confusingly at 0 !== 32) on a fresh clone, where this gitignored, weekly-mutating cache is
@@ -63,7 +63,7 @@ test('listCachedDatasetFiles: the real repo cache dir has exactly the 32 cached 
     t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
     return;
   }
-  assert.equal(files.length, 33);
+  assert.equal(files.length, 34);
   assert.ok(files.every((f) => f.endsWith('.json')));
   assert.ok(files.every((f) => f.startsWith(`${REAL_CACHE_DIR}/`)));
 });

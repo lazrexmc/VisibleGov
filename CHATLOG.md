@@ -4790,6 +4790,29 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   smaller problem.** (Also noted: one calibration query used a hand-typed UUID that silently
   matched nothing — the no-hand-typed-UUIDs rule fired again; nothing load-bearing relied
   on it.)
+- **Completeness-floor rollout (2026-08-18, Task 5 of 5, plan
+  `docs/superpowers/specs/2026-08-18-completeness-floor-corroboration-design.md`):** the
+  corroborated-honest-yield gate built in Tasks 1-4 (commits b93a6f8..27afe0b) is live; this task
+  unparked the class it repairs. Pre-flight full suite in a clean shell showed exactly one
+  failure — the documented periodic drift in `tests/backfill-nicknames-cli.test.js` (cached
+  LegiScan dataset ZIP count, on-disk 34 vs. expected 33, same class as the 32 -> 33 bump noted
+  2026-08-10 below); bumped to 34 with a dated comment, no other change. Drain-side:
+  `scripts/build-drain-wave.mjs` PARKED set dropped HB 606, HB 64, SB 626, HB 1607 (the fixed
+  MIN_KEY_PROVISIONS floor rejecting honest 1-2-provision yields on >=5k-char bills; every
+  3-strike structural park stays, untouched). Scheduler-side: `parked.json` dropped 9 entries
+  (`removed 9 remaining 23`) — the 4 scheduler self-parks (SRES 377/690/520/412), the
+  mispremised HRES 1299 stopgap park, and the 4 drain-seeded duplicates of the unparked bills.
+  `seed-scheduler-parks.mjs` reconciled clean: `parsed_from_source: 23, added: 0,
+  total_in_parked_json: 23` — no disagreement between the two edits. Dry-run
+  (`scheduled-summaries.js --dry-run`, the only scheduler mode this task may run) showed 2,253
+  lanes with zero of the 23 remaining parked ids present, and 8 of the 9 unparked ids now queued
+  (HRES 1299 correctly still absent — its separate cost-estimate guard excludes the 303k-char
+  bulk regardless of park status). Wave-C verification (spec rollout item 3, report-only): live
+  DB query for flagged summaries on sub-2.5k-char bills returned `flagged_total: 0, flagged_tiny:
+  0` — zero flagged summaries exist right now, so there is currently no wave-C backlog for Lance
+  to review. Final clean-shell suite after the nicknames-count bump: `# fail 0`, 2,444/2,444.
+  No manual ticks run — the 8 spec-table bills ride the normal smallest-first lane ordering
+  starting with the next scheduled 6 AM tick.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

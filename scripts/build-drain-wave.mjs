@@ -33,15 +33,14 @@ const DIR = new URL('../.superpowers/artifacts/wave3', import.meta.url).pathname
 // Bills parked out of the drain lane with documented reasons (structural failures / exhausted
 // retries — see CHATLOG 2026-08-11..14). NOT retryable by this lane; human review.
 const PARKED = new Set([
-  '12288cfc-662c-4754-b539-a77a2b605945', // HB 606 — Malformed class (2 key provisions < the 3-7 floor), 3rd attempt 2026-08-11
+  // 2026-08-18: HB 606, HB 64, SB 626, HB 1607 UNPARKED — their park class (the fixed
+  // MIN_KEY_PROVISIONS floor rejecting honest 1-2 provision yields on >=5k-char bills) is
+  // repaired by the corroborated-honest-yield gate (spec 2026-08-18). Every 3-strike park stays.
   '0e3279bf-e7df-4374-b5a4-fb82f3db9c6a', // HB 569 — 3 attempts exhausted 2026-08-14 (emergency clause, then short title)
-  '10a0178e-b4e4-4309-987b-7f937836f14b', // HB 64 — 2-strikes Malformed (key_provisions=1 in BS and BT runs), 2026-08-14
-  '301ec8a7-3543-4881-8497-380c2179a57c', // SB 626 — 2-strikes Malformed (key_provisions=1 in BT and BU runs), 2026-08-14
   '92ea0b8d-6383-47df-b7cd-1a8f46ece4e8', // HR 2683 — 3 attempts exhausted 2026-08-14 (amendment-mapping overstatements)
   '374bfa04-a3ef-4b1a-afe7-dbd6b74bde52', // SB 786 — 3 attempts exhausted 2026-08-14 (unbracketed civil-action redline language)
   '0df013ec-35f6-4166-9d64-3b00ca375e83', // SB 644 — 3 attempts exhausted 2026-08-14 (service-dog category definitions last)
   '05304e79-e520-4b3e-a833-db73e46d74e0', // HRES 1423 — 3 attempts exhausted 2026-08-15 (4-bill House rule: completeness checker demands per-bill Sec. 2/7/8 bullets the author keeps condensing)
-  '1b19c5bb-80be-4a3c-9a4f-ae524a07a793', // HB 1607 — 2-strikes Malformed (key_provisions=2 in CF and CG runs, identical failure), 2026-08-15
   '27c2552e-b898-4be8-94f3-19dc5eab2f0d', // SB 655 — 3 attempts exhausted (waves L, N, U all flagged; 45-verdict 3rd attempt still missed), 2026-08-16
   '0236add8-d856-4f61-a808-656f55b1e207', // HB 589 — 3 attempts exhausted (578.012/578.030 omissions, then 578.005 omission in CN, then adds-vs-kept mischaracterization in CO at 44 verdicts), 2026-08-16
   'b2617af8-7d99-42ee-8554-bee87b0bb404', // HR 4776 SPEED Act — 3 attempts exhausted (short-title omission, then 3 omissions in CO, then 2 DIFFERENT omissions in CP: the blind checker's demands shift each round on this omnibus NEPA bill — HRES 1423 condensing class), 2026-08-16
