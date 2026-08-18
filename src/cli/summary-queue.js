@@ -760,7 +760,7 @@ export async function applyRecordDecision(client, runId, decision) {
     // 2026-08-18) — the receipt trail must show the higher evidence bar was met. Additive keys
     // only; readers of the existing shape are unaffected.
     const completenessVerdicts = decision.completenessCorroboratedThin
-      ? { ...decision.completeness, corroborated_thin: true, corroboration_key_provisions: decision.completenessCorroboration.key_provisions }
+      ? { ...decision.completeness, corroborated_thin: true, corroboration_key_provisions: decision.completenessCorroboration?.key_provisions ?? null }
       : decision.completeness;
     const { error: compErr } = await client.from('summary_verifications').insert({
       summary_id: summaryId, kind: 'completeness', verdicts: completenessVerdicts, overall: decision.completenessOverall,
