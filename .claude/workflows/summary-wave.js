@@ -2,7 +2,7 @@ export const meta = {
   name: 'summary-wave-3',
   description: 'Author + adversarially verify plain-language summaries for 12 queued bills ($0 subagent path, trust model v3)',
   phases: [
-    { title: 'Summarize', detail: 'per bill: opus author -> sonnet verify -> blind provisions -> coverage' },
+    { title: 'Summarize', detail: 'per bill: opus author -> sonnet verify -> blind provisions (sub-floor corroborated) -> coverage' },
   ],
 }
 
@@ -97,6 +97,19 @@ const results = await pipeline(
       { label: `provisions:${bill.identifier}`, phase: 'Summarize', model: 'sonnet', schema: PROVISIONS_SCHEMA }
     ).then((prov) => ({ ...acc, provisions: prov.key_provisions }))
     : acc),
+  // Corroborate below 3 = the MAX possible floor (verifier.js minKeyProvisionsFor: <2.5k chars
+  // -> 1; <5k -> 2; else 3). The workflow cannot import verifier.js (sandbox), and on this $0
+  // subagent path an occasionally-unneeded corroboration is free — the gate ignores a stray one
+  // at-floor (spec 2026-08-18). KEEP IN SYNC with minKeyProvisionsFor's ceiling.
+  // Stage 3b: sub-floor corroboration — an INDEPENDENT second blind provisions extraction
+  // (fresh agent = fresh context; independence by construction). See the sync comment above.
+  (acc, bill) => {
+    if (!acc || !acc.provisions || acc.provisions.length === 0 || acc.provisions.length >= 3) return acc;
+    return agent(
+      `You are PHASE 1 (key provisions) of VisibleGov's completeness checker. You have NOT been shown any summary; do not assume, guess, or reference one. Read the completeness contract in ${REPO}/src/lib/verifier.js (COMPLETENESS_SYSTEM_PROMPT, phase 1 rules) and follow it exactly.\n\nRead the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier}). List the provisions a reader must know to understand what this bill actually does — 3 to 7 for a full-size bill, but if this bill genuinely contains fewer than 3 substantive provisions (common in very short bills), list ONLY the real ones; NEVER pad with enactment/codification boilerplate ("Chapter X is amended by adding section Y" is the vehicle, not a provision). For each: the section it lives in (copied from the text) and a short factual statement. Facts only — no significance language beyond what the text supports.\n\n${VERBATIM_RULE}`,
+      { label: `provisions-corroboration:${bill.identifier}`, phase: 'Summarize', model: 'sonnet', schema: PROVISIONS_SCHEMA }
+    ).then((cor) => ({ ...acc, provisionsCorroboration: cor.key_provisions }));
+  },
   // Stage 4: coverage — provisions + bullets ONLY (no bill text; the separation is the check)
   (acc, bill) => (acc && acc.provisions && acc.summary
     ? agent(
@@ -120,6 +133,7 @@ const results = await pipeline(
     if (bill.author_provenance) envelope.author_provenance = bill.author_provenance
     if (acc.verify) envelope.verdicts = acc.verify.verdicts
     if (acc.provisions && acc.coverage) envelope.completeness = { key_provisions: acc.provisions, coverage: acc.coverage }
+    if (acc.provisionsCorroboration) envelope.completeness_corroboration = { key_provisions: acc.provisionsCorroboration }
     return envelope
   },
 )
