@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisibleGov — bills</title>
+  <link rel="icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="wordmark" href="/">VISIBLE<span class="wordmark-accent">GOV</span></a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/">Directory</a> · <a href="/bills">Bills</a> · <a href="/trust">Trust</a>
+    </nav>
+  </header>
+  <main id="app" class="board-main">
+    <h1>Browse bills</h1>
+    <p>Every bill with a published plain-language summary, newest first. The date is when the
+      summary was published on VisibleGov; every summary carries receipts back to the official
+      bill text.</p>
+
+    <section id="bills" aria-label="Bills">
+      <div class="directory-toggle" role="group" aria-label="Bills view">
+        <button id="bills-view-federal" type="button" aria-pressed="true">Federal</button>
+        <button id="bills-view-missouri" type="button" aria-pressed="false">Missouri</button>
+      </div>
+      <label for="bills-filter">Filter by bill number or title</label>
+      <div class="directory-search">
+        <input id="bills-filter" type="text" name="filter" />
+      </div>
+      <p id="bills-count" class="directory-footnote" aria-live="polite"></p>
+      <div id="bills-list" aria-live="polite"></div>
+      <div id="bills-other"></div>
+    </section>
+  </main>
+  <footer id="site-footer"></footer>
+  <script type="module" src="/js/boot-bills.js"></script>
+</body>
+</html>
