@@ -4901,6 +4901,20 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   generated stub — the no-hand-typed-values rule's third and worst firing this session);
   caught by post-launch self-check, TaskStop, relaunched verbatim from the file. New
   discipline: never launch args not Read in the same breath.
+- **Drain wave DT — 4/6 published (live 1033 -> 1037), the three finals swept 3-for-3**
+  (2026-08-18, two launches: 3.6KB triple-stub + 15.5KB, 24 agents 0 errors, ~2.74M tokens,
+  runs wf_7cb9aea1/wf_f9a6b2ef — every bill a 265k-377k-char monster, all five big priors
+  via lesson-40 banks): **published: SB 66 children/vulnerable-persons omnibus (64
+  verdicts, zero refutations — the subsection-9 appeal-rights reattribution and the
+  dropped whichever-occurs-later both held), HR 8595 State appropriation (67 clean — the
+  replaced fuller Sec. 7049 bullet held), SB 53 administration of justice (73 clean — the
+  conditional-release drop plus both appended omissions held), and HR 6644 ROAD to Housing
+  Act (79 clean, attempt 2 — the sunset fix held).** FLAGGED at strike 2, finals next:
+  HR 3944 MilCon/VA (b0 overclaimed that Sec. 2 splits the Act + Sec. 742 China-poultry
+  omission at 53 verdicts) and HB 564 Fresh Start Act (b23's pharmacy-records content
+  miscited to 339.100 + 327.131 good-moral-character omission at 35 verdicts). Wave DU (the
+  drain's LAST two bills, both finals) built with HR 3944 hand-carried from the DT record
+  (disk-envelope stale AGAIN) and launched.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
