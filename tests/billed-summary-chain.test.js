@@ -127,3 +127,60 @@ test('runBillChain: author refusal/max_tokens surfaces as a thrown error (no env
   );
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ---- sub-floor corroboration stage (spec 2026-08-18) ----
+
+const THIN_PROVISIONS = { key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }] };
+const THIN_COVERAGE = { coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'n' }] };
+// ≥5,000 chars → floor 3, so a 1-provision yield is sub-floor and must trigger corroboration.
+const LONG_TEXT = `${'W'.repeat(5200)} SEC. 1. Does X.`;
+
+test('runBillChain: sub-floor provisions yield triggers ONE corroboration call, checkpointed, and the envelope carries the field', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'chain-'));
+  const anthropic = fakeAnthropic([
+    { json: SUMMARY }, { json: VERIFY }, { json: THIN_PROVISIONS },
+    { json: THIN_PROVISIONS }, // the corroboration call's canned response
+    { json: THIN_COVERAGE },
+  ]);
+  const tracker = createCostTracker();
+  const { envelope } = await runBillChain(anthropic, tracker, {
+    bill: BILL, text: LONG_TEXT, stageDir: dir, checkpointKey: 'b-1-thin0001',
+    authorModel: 'claude-haiku-4-5', checkerModel: 'claude-sonnet-5',
+  });
+  assert.equal(anthropic.calls.length, 5);
+  assert.deepEqual(envelope.completeness_corroboration, { key_provisions: THIN_PROVISIONS.key_provisions });
+  assert.ok(tracker.callLog.some((c) => c.label === 'provisions-corroboration:HB 1'));
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('runBillChain: at-floor yield makes NO corroboration call and the envelope lacks the field', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'chain-'));
+  const anthropic = fakeAnthropic([{ json: SUMMARY }, { json: VERIFY }, { json: PROVISIONS }, { json: COVERAGE }]);
+  const tracker = createCostTracker();
+  const { envelope } = await runBillChain(anthropic, tracker, {
+    bill: BILL, text: 'Does X. SEC. 1. SEC. 2. SEC. 3.', stageDir: dir, checkpointKey: 'b-1-atfloor1',
+    authorModel: 'claude-haiku-4-5', checkerModel: 'claude-sonnet-5',
+  });
+  assert.equal(anthropic.calls.length, 4);
+  assert.equal(envelope.completeness_corroboration, undefined);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('runBillChain: checkpoint replay skips a completed corroboration stage — no double pay', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'chain-'));
+  const first = fakeAnthropic([
+    { json: SUMMARY }, { json: VERIFY }, { json: THIN_PROVISIONS }, { json: THIN_PROVISIONS }, { json: THIN_COVERAGE },
+  ]);
+  await runBillChain(first, createCostTracker(), {
+    bill: BILL, text: LONG_TEXT, stageDir: dir, checkpointKey: 'b-1-replay01',
+    authorModel: 'claude-haiku-4-5', checkerModel: 'claude-sonnet-5',
+  });
+  const second = fakeAnthropic([]); // every stage checkpointed — a replay must make ZERO calls
+  const { envelope } = await runBillChain(second, createCostTracker(), {
+    bill: BILL, text: LONG_TEXT, stageDir: dir, checkpointKey: 'b-1-replay01',
+    authorModel: 'claude-haiku-4-5', checkerModel: 'claude-sonnet-5',
+  });
+  assert.equal(second.calls.length, 0);
+  assert.deepEqual(envelope.completeness_corroboration, { key_provisions: THIN_PROVISIONS.key_provisions });
+  rmSync(dir, { recursive: true, force: true });
+});

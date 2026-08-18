@@ -12,7 +12,7 @@ import {
 import {
   VERIFY_SCHEMA, VERIFY_SYSTEM_PROMPT, buildVerifyMessage, VERIFY_MAX_OUTPUT_TOKENS,
   COMPLETENESS_SCHEMA, COMPLETENESS_SYSTEM_PROMPT, buildProvisionsMessage, buildCoverageMessage,
-  VERIFIER_MODEL,
+  VERIFIER_MODEL, minKeyProvisionsFor,
 } from './verifier.js';
 
 export { VERIFIER_MODEL };
@@ -175,6 +175,23 @@ export async function runBillChain(anthropic, tracker, {
     cp.provisions = prov.key_provisions;
     saveCheckpoint(stageDir, checkpointKey, cp);
   }
+  // Sub-floor corroboration stage (spec 2026-08-18): a yield under the length-scaled floor gets
+  // ONE independent blind re-extraction — same prompt, fresh call — and the gate accepts the thin
+  // check only if the two runs mechanically agree. Conditional (rare; pennies) and checkpointed
+  // like every paid stage; estimateBillCostUsd is deliberately NOT changed (one provisions-sized
+  // call sits well inside its existing padding).
+  if (cp.provisions.length >= 1 && cp.provisions.length < minKeyProvisionsFor(text.length) && !cp.provisionsCorroboration) {
+    const cor = await callStructured(anthropic, tracker, {
+      model: checkerModel, system: COMPLETENESS_SYSTEM_PROMPT,
+      userContent: buildProvisionsMessage(bill.identifier, text) + GROUNDING_RULE,
+      schema: {
+        type: 'object', additionalProperties: false, required: ['key_provisions'], properties: { key_provisions: apiProvisionsSchema() },
+      },
+      maxTokens: 4000, label: `provisions-corroboration:${bill.identifier}`,
+    });
+    cp.provisionsCorroboration = cor.key_provisions;
+    saveCheckpoint(stageDir, checkpointKey, cp);
+  }
   if (!cp.coverage) {
     const cov = await callStructured(anthropic, tracker, {
       model: checkerModel, system: COMPLETENESS_SYSTEM_PROMPT,
@@ -195,6 +212,7 @@ export async function runBillChain(anthropic, tracker, {
       summary,
       verdicts: cp.verify.verdicts,
       completeness: { key_provisions: cp.provisions, coverage: cp.coverage },
+      ...(cp.provisionsCorroboration ? { completeness_corroboration: { key_provisions: cp.provisionsCorroboration } } : {}),
       provenance: 'api',
       author_model: authorModel,
       verifier_model: VERIFIER_MODEL,
