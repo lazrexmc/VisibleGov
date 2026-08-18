@@ -4814,6 +4814,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   to review. Final clean-shell suite after the nicknames-count bump: `# fail 0`, 2,444/2,444.
   No manual ticks run — the 8 spec-table bills ride the normal smallest-first lane ordering
   starting with the next scheduled 6 AM tick.
+- **Corroborated-honest-yield BUILD COMPLETE — final whole-branch review caught a real
+  Important defect (vacuous containment), fix wave clean, suite 2,446/0** (2026-08-18): the
+  5-task SDD run (commits b93a6f8..3f5b60e) went 5-for-5 clean on task reviews, then the
+  opus final review earned its seat: the corroboration overlap rule's bare substring
+  containment passed vacuously on containment-related section pairs — "TITLE I" ⊂
+  "TITLE II", "Section 2" ⊂ "Section 24" — meaning two blind runs that identified genuinely
+  DIFFERENT provisions could count as agreement (~1% of the 871 recorded real payloads carry
+  the shape; HR 8646/HR 4016 among them). One fix wave (110d664/e399e74/273891e): overlap is
+  now boundary-aware containment (equality, or shorter-in-longer with non-alphanumeric
+  boundary chars on BOTH sides, ANY occurrence) with TITLE I/TITLE II + Section 2/24 +
+  same-section-variance regression tests; CORROBORATION_SCHEMA deleted as dead code (the API
+  layer rejects minItems/maxItems — spec amended with the rationale); an optional-chain
+  guard; CHATLOG/TODO doc corrections; and the spec gained a Design-amendments section
+  acknowledging the two deliberate trust boundaries (provision TEXT never compared;
+  corroboration INDEPENDENCE is a producer-side contract, same class as the phase-separation
+  contract). Scoped re-review verified all 7 findings ADDRESSED with independent live tests
+  (including the both-sides boundary edge "2." vs "167.632. 1." and the
+  any-occurrence scan). Everything pushed; the 8 long-but-thin bills ride tomorrow's 6 AM
+  tick under normal lane ordering.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
