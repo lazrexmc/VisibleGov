@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   COMPLETENESS_SCHEMA, COMPLETENESS_SYSTEM_PROMPT, COMPLETENESS_PROMPT_VERSION,
   buildProvisionsMessage, buildCoverageMessage, assessCompleteness,
-  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS, minKeyProvisionsFor,
+  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS, minKeyProvisionsFor, CORROBORATION_SCHEMA,
 } from '../src/lib/verifier.js';
 
 // ---- COMPLETENESS_PROMPT_VERSION ----
@@ -253,7 +253,7 @@ test('assessCompleteness: fewer than the floor on a FULL-SIZE bill -> malformed 
   };
   const result = assessCompleteness(thin, 3, fullSizeText);
   assert.equal(result.overall, 'malformed');
-  assert.match(result.reasons[0], /1 entries, outside the required 3-7/);
+  assert.match(result.reasons[0], /without a well-formed corroboration run/);
 });
 
 test('assessCompleteness: exactly MIN_KEY_PROVISIONS is accepted (the bound is inclusive) — on a FULL-SIZE bill where the standard floor of 3 actually binds', () => {
@@ -327,7 +327,7 @@ test('assessCompleteness: TWO provisions on a mid-tiny bill (2500-4999 chars) ->
   };
   const result = assessCompleteness(one, 1, midText);
   assert.equal(result.overall, 'malformed');
-  assert.match(result.reasons[0], /outside the required 2-7/);
+  assert.match(result.reasons[0], /without a well-formed corroboration run/);
 });
 
 test('assessCompleteness: TWO provisions on a full-size bill (>=5000 chars) -> malformed (the standard floor of 3 still binds)', () => {
@@ -344,9 +344,121 @@ test('assessCompleteness: TWO provisions on a full-size bill (>=5000 chars) -> m
   };
   const result = assessCompleteness(two, 2, bigText);
   assert.equal(result.overall, 'malformed');
-  assert.match(result.reasons[0], /outside the required 3-7/);
+  assert.match(result.reasons[0], /without a well-formed corroboration run/);
 });
 
 test('assessCompleteness: zero provisions stays malformed at EVERY size — the scaled floor never reaches 0', () => {
   assert.equal(assessCompleteness({ key_provisions: [], coverage: [] }, 3, 'x').overall, 'malformed');
+});
+
+// ============================================================
+// sub-floor corroboration (spec 2026-08-18): a yield below the length-scaled floor is
+// publishable ONLY when a second independent blind extraction mechanically corroborates it
+// ============================================================
+
+// ≥5,000 chars → minKeyProvisionsFor floor of 3; the substance is one Resolved clause + one
+// grant section, so honest yields of 1-2 are SUB-floor here.
+const WHEREAS_PAD = 'Whereas the Congress has found further considerations worth weighing; '.repeat(80);
+const LONG_THIN_TEXT = `${WHEREAS_PAD}Resolved, That the Senate designates the week. SEC. 2. Establishes a grant program.`;
+
+function thinPayload(overrides = {}) {
+  return {
+    key_provisions: [{ section: 'Resolved,', provision: 'Designates the week.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'covered by bullet 0' }],
+    ...overrides,
+  };
+}
+const thinCorroboration = () => ({ key_provisions: [{ section: 'Resolved,', provision: 'Designates the week.' }] });
+
+test('CORROBORATION_SCHEMA: key_provisions only, no coverage, additionalProperties false', () => {
+  assert.deepEqual(CORROBORATION_SCHEMA.required, ['key_provisions']);
+  assert.equal(CORROBORATION_SCHEMA.properties.coverage, undefined);
+  assert.equal(CORROBORATION_SCHEMA.additionalProperties, false);
+});
+
+// spec test 1 — the happy path
+test('assessCompleteness sub-floor: corroborated equal count + overlapping grounded sections -> complete', () => {
+  const result = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, thinCorroboration());
+  assert.deepEqual(result, { overall: 'complete', missing: [], reasons: [] });
+});
+
+// spec test 2 — corroborator finds fewer than the primary
+test('assessCompleteness sub-floor: primary 2, corroborator 1 with overlapping section -> corroborated', () => {
+  const payload = thinPayload({
+    key_provisions: [
+      { section: 'Resolved,', provision: 'Designates the week.' },
+      { section: 'SEC. 2.', provision: 'Establishes a grant program.' },
+    ],
+    coverage: [
+      { provision_index: 0, covered: true, bullet_index: 0, note: 'n' },
+      { provision_index: 1, covered: true, bullet_index: 0, note: 'n' },
+    ],
+  });
+  const result = assessCompleteness(payload, 1, LONG_THIN_TEXT, thinCorroboration());
+  assert.equal(result.overall, 'complete');
+});
+
+// spec test 3 — corroborator finds MORE -> the primary may have missed substance
+test('assessCompleteness sub-floor: corroborator finds more provisions than primary -> malformed', () => {
+  const cor = { key_provisions: [
+    { section: 'Resolved,', provision: 'Designates the week.' },
+    { section: 'SEC. 2.', provision: 'Establishes a grant program.' },
+  ] };
+  const result = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, cor);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons.join(' '), /primary may have missed substance/);
+});
+
+// spec test 4 — ungrounded corroborator section
+test('assessCompleteness sub-floor: corroborator cites a section absent from the bill -> malformed', () => {
+  const cor = { key_provisions: [{ section: 'SEC. 99.', provision: 'Invented.' }] };
+  const result = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, cor);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons.join(' '), /not found in the bill text/);
+});
+
+// spec test 5 — grounded but non-overlapping section
+test('assessCompleteness sub-floor: corroborator section matches no primary section -> malformed', () => {
+  const cor = { key_provisions: [{ section: 'SEC. 2.', provision: 'Establishes a grant program.' }] };
+  const result = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, cor);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons.join(' '), /matches no primary provision/);
+});
+
+// spec test 6 — absent / wrong shape / empty, each with its distinct reason
+test('assessCompleteness sub-floor: corroboration absent, malformed, or empty -> malformed with distinct reasons', () => {
+  const absent = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT);
+  assert.equal(absent.overall, 'malformed');
+  assert.match(absent.reasons.join(' '), /without a well-formed corroboration run/);
+
+  const wrongShape = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, { key_provisions: 'nope' });
+  assert.equal(wrongShape.overall, 'malformed');
+  assert.match(wrongShape.reasons.join(' '), /without a well-formed corroboration run/);
+
+  const empty = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, { key_provisions: [] });
+  assert.equal(empty.overall, 'malformed');
+  assert.match(empty.reasons.join(' '), /corroborator that finds none has not checked anything/);
+});
+
+// spec test 7 — the vacuous rule always wins
+test('assessCompleteness: zero primary provisions + perfect corroboration -> still malformed', () => {
+  const result = assessCompleteness({ key_provisions: [], coverage: [] }, 1, LONG_THIN_TEXT, thinCorroboration());
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons.join(' '), /zero key_provisions/);
+});
+
+// spec test 8 — at-floor path byte-identical; stray corroboration ignored
+test('assessCompleteness at-floor: stray corroboration argument is ignored — result identical to the 3-arg call', () => {
+  const withCor = assessCompleteness(goodPayload(), 3, BILL_TEXT, { key_provisions: [{ section: 'garbage', provision: 'garbage' }] });
+  const withoutCor = assessCompleteness(goodPayload(), 3, BILL_TEXT);
+  assert.deepEqual(withCor, withoutCor);
+  assert.equal(withCor.overall, 'complete');
+});
+
+// spec test 9 (regression) — sub-floor corroborated but coverage incomplete -> incomplete, not complete
+test('assessCompleteness sub-floor corroborated: uncovered provision still reads incomplete', () => {
+  const payload = thinPayload({ coverage: [{ provision_index: 0, covered: false, bullet_index: null, note: 'missing' }] });
+  const result = assessCompleteness(payload, 1, LONG_THIN_TEXT, thinCorroboration());
+  assert.equal(result.overall, 'incomplete');
+  assert.equal(result.missing.length, 1);
 });

@@ -200,6 +200,21 @@ export const COMPLETENESS_SCHEMA = {
   },
 };
 
+// CORROBORATION_SCHEMA — the response shape for the independent sub-floor re-extraction
+// (spec 2026-08-18): phase 1 only, no coverage. Both producers (billed chain, drain workflow)
+// bind the corroboration call to this one definition.
+export const CORROBORATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['key_provisions'],
+  properties: {
+    key_provisions: {
+      ...COMPLETENESS_SCHEMA.properties.key_provisions,
+      description: 'Independent blind re-extraction of the key provisions, bill text only — used solely to corroborate a sub-floor primary check; never merged, never covered',
+    },
+  },
+};
+
 export function buildProvisionsMessage(identifier, billText) {
   return `Bill ${identifier}\n\n<bill_text>\n${billText}\n</bill_text>\n\nPHASE 1 ONLY. List the key provisions a reader must know, per your schema's key_provisions shape — 3 to 7 for a full-size bill, but if this bill genuinely contains fewer than 3 substantive provisions, list ONLY the real ones (never pad with enactment/codification boilerplate). Do not reference any summary — none has been shown to you.`;
 }
@@ -214,6 +229,45 @@ export function buildCoverageMessage(identifier, provisionsJson, bulletsJson) {
 // FROM this file, and this axis's grounding check has no reason to invert that direction.
 function collapseWhitespace(value) {
   return String(value).replace(/\s+/g, ' ').trim();
+}
+
+// assessCorroboration — the sub-floor branch's mechanical comparison (spec 2026-08-18).
+// Returns [] when the corroboration run confirms the primary's thinness; otherwise every
+// failure reason found. Rules, all mechanical: present and shaped; non-empty; count <= the
+// primary's count (more means the primary may have missed substance); every section grounded
+// in the bill text (same collapse-then-substring discipline as the primary's own grounding);
+// every section overlapping some primary section (containment either way after collapsing).
+function assessCorroboration(primaryProvisions, corroboration, billText, minRequired) {
+  const n = primaryProvisions.length;
+  const cor = corroboration && Array.isArray(corroboration.key_provisions) ? corroboration.key_provisions : null;
+  if (!cor) {
+    return [`sub-floor key_provisions (${n} < ${minRequired}) without a well-formed corroboration run — an uncorroborated thin check cannot support the receipt it would earn`];
+  }
+  if (cor.length === 0) {
+    return ['corroboration lists zero provisions — a corroborator that finds none has not checked anything'];
+  }
+  const reasons = [];
+  if (cor.length > MAX_KEY_PROVISIONS) {
+    reasons.push(`corroboration lists ${cor.length} provisions, above the ${MAX_KEY_PROVISIONS} ceiling — not a shape this gate accepts`);
+  }
+  if (cor.length > n) {
+    reasons.push(`corroboration found ${cor.length} provisions but the primary check found ${n} — the primary may have missed substance, so its coverage verdict cannot be trusted`);
+  }
+  const normalizedBillText = collapseWhitespace(billText ?? '');
+  const normalizedPrimarySections = primaryProvisions.map((p) => (p && typeof p.section === 'string' ? collapseWhitespace(p.section) : ''));
+  cor.forEach((p) => {
+    const section = p && p.section;
+    const normalized = typeof section === 'string' ? collapseWhitespace(section) : '';
+    if (normalized === '' || !normalizedBillText.includes(normalized)) {
+      reasons.push(`corroboration cites section ${JSON.stringify(section ?? null)} not found in the bill text — the corroborator invented it`);
+      return;
+    }
+    const overlaps = normalizedPrimarySections.some((ps) => ps !== '' && (ps.includes(normalized) || normalized.includes(ps)));
+    if (!overlaps) {
+      reasons.push(`corroboration section ${JSON.stringify(section)} matches no primary provision's section — the two runs identified different substance`);
+    }
+  });
+  return reasons;
 }
 
 // assessCompleteness — the completeness axis's own mechanical, never-trust-the-checker's-self-report
@@ -235,7 +289,7 @@ function collapseWhitespace(value) {
 //   - grounding: any key_provisions[].section absent from billText (same normalize-whitespace-
 //     then-substring discipline as checkStatedPurposeGrounding) — a provision citing a section that
 //     isn't in the bill means the checker invented it.
-export function assessCompleteness(completeness, bulletCount, billText) {
+export function assessCompleteness(completeness, bulletCount, billText, corroboration) {
   const keyProvisions = completeness && Array.isArray(completeness.key_provisions) ? completeness.key_provisions : null;
   const coverage = completeness && Array.isArray(completeness.coverage) ? completeness.coverage : null;
   if (!keyProvisions || !coverage) {
@@ -250,12 +304,22 @@ export function assessCompleteness(completeness, bulletCount, billText) {
   // above the ceiling the checker ignored its instructions, so its output is not the artifact
   // this gate was designed to assess. Either way: malformed, never publishable.
   const minRequired = minKeyProvisionsFor(typeof billText === 'string' ? billText.length : NaN);
-  if (keyProvisions.length < minRequired || keyProvisions.length > MAX_KEY_PROVISIONS) {
+  if (keyProvisions.length > MAX_KEY_PROVISIONS) {
     return {
       overall: 'malformed',
       missing: [],
       reasons: [`key_provisions has ${keyProvisions.length} entries, outside the required ${minRequired}-${MAX_KEY_PROVISIONS} — the check does not meet the standard its verdict would claim`],
     };
+  }
+  if (keyProvisions.length < minRequired) {
+    // Sub-floor (spec 2026-08-18): an honest thin yield is acceptable ONLY with independent
+    // mechanical corroboration — two blind runs agreeing beats one, and the comparison below
+    // never trusts either self-report alone. Failure here is malformed, exactly as the plain
+    // floor breach was before.
+    const corroborationReasons = assessCorroboration(keyProvisions, corroboration, billText, minRequired);
+    if (corroborationReasons.length > 0) {
+      return { overall: 'malformed', missing: [], reasons: corroborationReasons };
+    }
   }
 
   const reasons = [];
