@@ -7,7 +7,7 @@ import {
 } from '../lib/summarizer.js';
 import {
   VERIFIER_MODEL, VERIFY_PROMPT_VERSION, VERIFY_SCHEMA, assessVerdicts,
-  COMPLETENESS_PROMPT_VERSION, assessCompleteness,
+  COMPLETENESS_PROMPT_VERSION, assessCompleteness, minKeyProvisionsFor,
 } from '../lib/verifier.js';
 import { parsePositiveIntegerFlag } from '../lib/errors.js';
 import { nextStatus, mapNoteAction } from '../review/server.js';
@@ -622,7 +622,12 @@ export async function classifyRecordItem(client, item, options = {}) {
       gateReason: 'completeness_check_absent: no completeness payload was supplied for this item — trust-model v3 requires both axes (support and completeness) verified before auto-publish',
     };
   }
-  const completenessResult = assessCompleteness(item.completeness, summary.what_it_does.length, currentText.content);
+  const completenessResult = assessCompleteness(item.completeness, summary.what_it_does.length, currentText.content, item.completeness_corroboration);
+  // corroborated_thin marker (spec 2026-08-18): true exactly when the sub-floor branch is what
+  // the gate exercised — i.e., the primary yield sits under the length-scaled floor AND the gate
+  // did not malform. Derived here mechanically (never from the checker's self-report).
+  const corroboratedThin = Array.isArray(item.completeness?.key_provisions)
+    && item.completeness.key_provisions.length < minKeyProvisionsFor(currentText.content.length);
   if (completenessResult.overall === 'malformed') {
     throw new MalformedSummaryError(
       `completeness check for bill ${identifier} is malformed — the checker's own output cannot be trusted: ${completenessResult.reasons.join('; ')}`,
@@ -638,17 +643,33 @@ export async function classifyRecordItem(client, item, options = {}) {
       overall,
       completeness: item.completeness,
       completenessOverall: 'incomplete',
+      completenessCorroboration: item.completeness_corroboration ?? null,
+      completenessCorroboratedThin: corroboratedThin,
       gateReason: `summary omits ${completenessResult.missing.length} key provision(s) present in the bill text: ${missingDesc}`,
     };
   }
 
   if (overall === 'clean') {
     return {
-      action: 'publish', ...base, verdicts: item.verdicts, overall, completeness: item.completeness, completenessOverall: 'complete',
+      action: 'publish',
+      ...base,
+      verdicts: item.verdicts,
+      overall,
+      completeness: item.completeness,
+      completenessOverall: 'complete',
+      completenessCorroboration: item.completeness_corroboration ?? null,
+      completenessCorroboratedThin: corroboratedThin,
     };
   }
   return {
-    action: 'flagDraft', ...base, verdicts: item.verdicts, overall, completeness: item.completeness, completenessOverall: 'complete',
+    action: 'flagDraft',
+    ...base,
+    verdicts: item.verdicts,
+    overall,
+    completeness: item.completeness,
+    completenessOverall: 'complete',
+    completenessCorroboration: item.completeness_corroboration ?? null,
+    completenessCorroboratedThin: corroboratedThin,
   };
 }
 
@@ -735,8 +756,14 @@ export async function applyRecordDecision(client, runId, decision) {
   // completeness payload at all, so nothing to write here for it — an honest absence, not a
   // fabricated one.
   if (decision.completeness) {
+    // corroborated-thin publishes carry the corroborator's list in the SAME row (spec
+    // 2026-08-18) — the receipt trail must show the higher evidence bar was met. Additive keys
+    // only; readers of the existing shape are unaffected.
+    const completenessVerdicts = decision.completenessCorroboratedThin
+      ? { ...decision.completeness, corroborated_thin: true, corroboration_key_provisions: decision.completenessCorroboration.key_provisions }
+      : decision.completeness;
     const { error: compErr } = await client.from('summary_verifications').insert({
-      summary_id: summaryId, kind: 'completeness', verdicts: decision.completeness, overall: decision.completenessOverall,
+      summary_id: summaryId, kind: 'completeness', verdicts: completenessVerdicts, overall: decision.completenessOverall,
       model: verifierModelLabel, prompt_version: COMPLETENESS_PROMPT_VERSION,
     });
     if (compErr) throw new Error(`summary_verifications (completeness) insert failed for bill ${identifier}: ${compErr.message}`);

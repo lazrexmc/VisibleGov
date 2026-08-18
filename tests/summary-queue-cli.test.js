@@ -756,6 +756,77 @@ test('applyRecordDecision: leaveUnverified writes NO completeness row either —
   assert.equal(calls.filter((c) => c.table === 'summary_verifications').length, 0);
 });
 
+// ---- sub-floor completeness corroboration passthrough (spec 2026-08-18) ----
+// Task 1 (commit b93a6f8) gave assessCompleteness a 4th arg, corroboration: a sub-floor primary
+// key_provisions yield is accepted ONLY when an independent corroboration run mechanically
+// confirms it. These tests wire the record CLI to pass item.completeness_corroboration through
+// and to carry the resulting corroborated_thin marker into the decision + the completeness row.
+
+// >=5,000 chars so minKeyProvisionsFor demands 3; the item's honest yield below is 1.
+const THIN_PAD = 'Whereas further considerations were weighed by the chamber in question; '.repeat(75);
+const THIN_TEXT = `${THIN_PAD}Resolved, That the week is designated. SEC. 1. Does X.`;
+
+function thinTextRow(contentHash = 'h1', retrievedAt = '2026-01-01T00:00:00Z') {
+  return { content: THIN_TEXT, content_hash: contentHash, retrieved_at: retrievedAt };
+}
+
+test('classifyRecordItem: sub-floor completeness WITH mechanical corroboration -> publish; WITHOUT -> MalformedSummaryError', async () => {
+  const thinCompleteness = {
+    key_provisions: [{ section: 'Resolved,', provision: 'Designates the week.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }],
+  };
+  const corroboration = { key_provisions: [{ section: 'Resolved,', provision: 'Designates the week.' }] };
+  // stated_purpose blanked out: THIN_TEXT is a different bill body than BILL_TEXT_CONTENT, and
+  // goodSummary()'s default stated_purpose would fail checkStatedPurposeGrounding against it —
+  // an unrelated gate this test has no business exercising. what_it_does/verdicts stay the
+  // defaults (goodSummary/goodVerdicts bind to each other, not to bill text).
+  const summary = { ...goodSummary(), stated_purpose: '' };
+
+  const corroboratedClient = fakeClient({
+    bill_texts: { data: [thinTextRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const corroboratedItem = baseItem({ summary, completeness: thinCompleteness, completeness_corroboration: corroboration });
+  const decision = await classifyRecordItem(corroboratedClient, corroboratedItem);
+  assert.equal(decision.action, 'publish');
+  assert.equal(decision.completenessCorroboratedThin, true);
+  assert.deepEqual(decision.completenessCorroboration, corroboration);
+
+  const uncorroboratedClient = fakeClient({
+    bill_texts: { data: [thinTextRow()], error: null },
+    summaries: { data: [], error: null },
+  });
+  const uncorroboratedItem = baseItem({ summary, completeness: thinCompleteness });
+  await assert.rejects(
+    () => classifyRecordItem(uncorroboratedClient, uncorroboratedItem),
+    (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /without a well-formed corroboration run/); return true; },
+  );
+});
+
+test('applyRecordDecision: corroborated-thin publish writes corroborated_thin + corroboration_key_provisions into the completeness row', async () => {
+  const calls = [];
+  const client = fakeClient({
+    summaries: { data: { id: 'sum-1' }, error: null },
+  }, (table, method, args) => calls.push({ table, method, args }));
+
+  const completeness = { key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }], coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'ok' }] };
+  const corroboration = { key_provisions: [{ section: 'SEC. 1.', provision: 'Does X.' }] };
+  const result = await applyRecordDecision(client, 'run-1', writeDecision('publish', {
+    completeness,
+    completenessOverall: 'complete',
+    completenessCorroboration: corroboration,
+    completenessCorroboratedThin: true,
+  }));
+  assert.equal(result.outcome, 'published');
+
+  const verInserts = calls.filter((c) => c.table === 'summary_verifications' && c.method === 'insert');
+  const completenessRow = verInserts.find((c) => c.args[0].kind === 'completeness');
+  assert.ok(completenessRow, 'expected a completeness-kind row');
+  assert.equal(completenessRow.args[0].verdicts.corroborated_thin, true);
+  assert.deepEqual(completenessRow.args[0].verdicts.corroboration_key_provisions, corroboration.key_provisions);
+  assert.deepEqual(completenessRow.args[0].verdicts.key_provisions, completeness.key_provisions);
+});
+
 test('applyRecordDecision: leaveUnverified inserts a draft summary ONLY — no verification row, no status update', async () => {
   const calls = [];
   const client = fakeClient({
