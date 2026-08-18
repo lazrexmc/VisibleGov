@@ -200,21 +200,6 @@ export const COMPLETENESS_SCHEMA = {
   },
 };
 
-// CORROBORATION_SCHEMA — the response shape for the independent sub-floor re-extraction
-// (spec 2026-08-18): phase 1 only, no coverage. Both producers (billed chain, drain workflow)
-// bind the corroboration call to this one definition.
-export const CORROBORATION_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['key_provisions'],
-  properties: {
-    key_provisions: {
-      ...COMPLETENESS_SCHEMA.properties.key_provisions,
-      description: 'Independent blind re-extraction of the key provisions, bill text only — used solely to corroborate a sub-floor primary check; never merged, never covered',
-    },
-  },
-};
-
 export function buildProvisionsMessage(identifier, billText) {
   return `Bill ${identifier}\n\n<bill_text>\n${billText}\n</bill_text>\n\nPHASE 1 ONLY. List the key provisions a reader must know, per your schema's key_provisions shape — 3 to 7 for a full-size bill, but if this bill genuinely contains fewer than 3 substantive provisions, list ONLY the real ones (never pad with enactment/codification boilerplate). Do not reference any summary — none has been shown to you.`;
 }
@@ -229,6 +214,33 @@ export function buildCoverageMessage(identifier, provisionsJson, bulletsJson) {
 // FROM this file, and this axis's grounding check has no reason to invert that direction.
 function collapseWhitespace(value) {
   return String(value).replace(/\s+/g, ' ').trim();
+}
+
+// sectionsOverlap — boundary-aware containment between two ALREADY-collapsed section strings
+// (final whole-branch review, finding 1). Plain substring containment (`a.includes(b) ||
+// b.includes(a)`) is vacuous: "TITLE I" is a literal prefix of "TITLE II", "Section 2" is a
+// literal prefix of "Section 24" — a primary/corroborator pair naming DIFFERENT sections would
+// wrongly read as corroborated. Overlap holds only when the two strings are EQUAL, or the shorter
+// occurs in the longer at a position bordered — on each side that exists — by a non-alphanumeric
+// character. That still lets "SEC. 2." match inside "SEC. 2. ESTABLISHMENT OF PROGRAM." (bordered
+// by a space, honest same-section variance), while "TITLE I" no longer matches inside "TITLE II"
+// (bordered by the second "I", a real different section).
+function sectionsOverlap(a, b) {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (shorter === '') return false;
+  const isAlnum = (ch) => /[a-zA-Z0-9]/.test(ch);
+  let fromIndex = 0;
+  for (;;) {
+    const idx = longer.indexOf(shorter, fromIndex);
+    if (idx === -1) return false;
+    const before = idx > 0 ? longer[idx - 1] : null;
+    const after = idx + shorter.length < longer.length ? longer[idx + shorter.length] : null;
+    if ((before === null || !isAlnum(before)) && (after === null || !isAlnum(after))) {
+      return true;
+    }
+    fromIndex = idx + 1;
+  }
 }
 
 // assessCorroboration — the sub-floor branch's mechanical comparison (spec 2026-08-18).
@@ -247,6 +259,7 @@ function assessCorroboration(primaryProvisions, corroboration, billText, minRequ
     return ['corroboration lists zero provisions — a corroborator that finds none has not checked anything'];
   }
   const reasons = [];
+  // Provably redundant defense-in-depth: sub-floor implies primary n <= 2, so cor.length > 7 always also trips the count rule below — kept anyway as an explicit, self-contained check.
   if (cor.length > MAX_KEY_PROVISIONS) {
     reasons.push(`corroboration lists ${cor.length} provisions, above the ${MAX_KEY_PROVISIONS} ceiling — not a shape this gate accepts`);
   }
@@ -262,7 +275,7 @@ function assessCorroboration(primaryProvisions, corroboration, billText, minRequ
       reasons.push(`corroboration cites section ${JSON.stringify(section ?? null)} not found in the bill text — the corroborator invented it`);
       return;
     }
-    const overlaps = normalizedPrimarySections.some((ps) => ps !== '' && (ps.includes(normalized) || normalized.includes(ps)));
+    const overlaps = normalizedPrimarySections.some((ps) => ps !== '' && sectionsOverlap(ps, normalized));
     if (!overlaps) {
       reasons.push(`corroboration section ${JSON.stringify(section)} matches no primary provision's section — the two runs identified different substance`);
     }

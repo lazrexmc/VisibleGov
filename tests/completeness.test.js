@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   COMPLETENESS_SCHEMA, COMPLETENESS_SYSTEM_PROMPT, COMPLETENESS_PROMPT_VERSION,
   buildProvisionsMessage, buildCoverageMessage, assessCompleteness,
-  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS, minKeyProvisionsFor, CORROBORATION_SCHEMA,
+  MIN_KEY_PROVISIONS, MAX_KEY_PROVISIONS, minKeyProvisionsFor,
 } from '../src/lib/verifier.js';
 
 // ---- COMPLETENESS_PROMPT_VERSION ----
@@ -370,12 +370,6 @@ function thinPayload(overrides = {}) {
 }
 const thinCorroboration = () => ({ key_provisions: [{ section: 'Resolved,', provision: 'Designates the week.' }] });
 
-test('CORROBORATION_SCHEMA: key_provisions only, no coverage, additionalProperties false', () => {
-  assert.deepEqual(CORROBORATION_SCHEMA.required, ['key_provisions']);
-  assert.equal(CORROBORATION_SCHEMA.properties.coverage, undefined);
-  assert.equal(CORROBORATION_SCHEMA.additionalProperties, false);
-});
-
 // spec test 1 — the happy path
 test('assessCompleteness sub-floor: corroborated equal count + overlapping grounded sections -> complete', () => {
   const result = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, thinCorroboration());
@@ -423,6 +417,50 @@ test('assessCompleteness sub-floor: corroborator section matches no primary sect
   const result = assessCompleteness(thinPayload(), 1, LONG_THIN_TEXT, cor);
   assert.equal(result.overall, 'malformed');
   assert.match(result.reasons.join(' '), /matches no primary provision/);
+});
+
+// ---- boundary-aware containment (final whole-branch review, finding 1) ----
+// Plain substring containment (`ps.includes(normalized) || normalized.includes(ps)`) is vacuous:
+// "TITLE I" is a literal prefix of "TITLE II", "Section 2" is a literal prefix of "Section 24" —
+// a primary/corroborator pair naming DIFFERENT sections would wrongly count as corroborated.
+// These are THE regression tests for that defect.
+
+const TITLE_BILL_TEXT = `${WHEREAS_PAD}TITLE I--Definitions. TITLE II--Appropriations. Resolved, that the Senate designates the week.`;
+
+test('assessCorroboration boundary containment: primary TITLE I vs corroborator TITLE II -> malformed, matches-no-primary (regression)', () => {
+  const payload = thinPayload({
+    key_provisions: [{ section: 'TITLE I', provision: 'Sets definitions.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'n' }],
+  });
+  const cor = { key_provisions: [{ section: 'TITLE II', provision: 'Appropriates funds.' }] };
+  const result = assessCompleteness(payload, 1, TITLE_BILL_TEXT, cor);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons.join(' '), /matches no primary provision/);
+});
+
+const SECTION_BILL_TEXT = `${WHEREAS_PAD}Section 2 establishes eligibility. Section 24 establishes penalties. Resolved, that the Senate designates the week.`;
+
+test('assessCorroboration boundary containment: primary Section 2 vs corroborator Section 24 -> malformed, matches-no-primary', () => {
+  const payload = thinPayload({
+    key_provisions: [{ section: 'Section 2', provision: 'Establishes eligibility.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'n' }],
+  });
+  const cor = { key_provisions: [{ section: 'Section 24', provision: 'Establishes penalties.' }] };
+  const result = assessCompleteness(payload, 1, SECTION_BILL_TEXT, cor);
+  assert.equal(result.overall, 'malformed');
+  assert.match(result.reasons.join(' '), /matches no primary provision/);
+});
+
+const SEC_ESTABLISH_BILL_TEXT = `${WHEREAS_PAD}SEC. 2. ESTABLISHMENT OF PROGRAM. Resolved, that the Senate designates the week.`;
+
+test('assessCorroboration boundary containment: primary SEC. 2. vs corroborator SEC. 2. ESTABLISHMENT OF PROGRAM. -> corroborated (honest same-section variance stays passing)', () => {
+  const payload = thinPayload({
+    key_provisions: [{ section: 'SEC. 2.', provision: 'Establishes a grant program.' }],
+    coverage: [{ provision_index: 0, covered: true, bullet_index: 0, note: 'n' }],
+  });
+  const cor = { key_provisions: [{ section: 'SEC. 2. ESTABLISHMENT OF PROGRAM.', provision: 'Establishes a grant program.' }] };
+  const result = assessCompleteness(payload, 1, SEC_ESTABLISH_BILL_TEXT, cor);
+  assert.equal(result.overall, 'complete');
 });
 
 // spec test 6 — absent / wrong shape / empty, each with its distinct reason
