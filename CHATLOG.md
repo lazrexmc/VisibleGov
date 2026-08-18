@@ -4879,6 +4879,28 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   parked.json so the billed conversion lane never pays for either). Ladder CONTINUES per
   Lance ("hopefully we can finish off all the bills this week"; "this needs finished") —
   wave DS next, ~9 re-authorable remain incl. HR 4016's final.
+- **Drain wave DS — 2/6 published (live 1031 -> 1033) and HR 4016's 138-verdict FINAL is
+  LIVE; SRES 532 parked on a second corroboration-gate refusal** (2026-08-18, two launches:
+  25.3KB five-bill + 1.1KB lesson-40 stub for HR 4016's banked 138-bullet DP draft, 25
+  agents 0 errors, ~2.55M tokens, runs wf_d52b77ca/wf_0ad1f64f): **published: SB 27
+  political subdivisions (106 verdicts, ZERO refutations — ALL FOUR precision rewrites
+  held: the 49.266 dual-prong burn-ban condition, 50.166's treasurer-duties scope, 64.870's
+  planning-commission fee recipients, 105.035's narrowed affidavit) and HR 4016 DoD
+  appropriation (138 verdicts, ZERO refutations, full coverage — the pipeline's deepest
+  verification ever, saved on its final attempt by two off-by-one citation fixes carried
+  from the DP record via lesson-40 file-pointer).** FLAGGED with fresh objections (all
+  facing FINAL attempts next): SB 66 (2 precision refutations at 64 verdicts on the
+  265k-char omnibus), HR 8595 (Sec. 7049 UN-Secretariat omission at 67 verdicts), SB 53
+  (217.650 parole-board scope refutation + 590.070/650.055 omissions at 71 verdicts).
+  PARKED: SRES 532, 2-strikes Malformed via the corroboration gate — DR tripped the count
+  rule (primary 1 vs corroborator 2), DS tripped the overlap rule (corroborator cited the
+  "EXECUTIVE RESOLUTION" heading) — checker-limitation class: a 97-nomination en-bloc LIST
+  defeats stable provision citation though the draft itself verified clean twice (parks
+  25 -> 26, seed synced). Process note logged honestly: the HR 4016 launch was first
+  dispatched with a FABRICATED bill_id/hash (typed from memory instead of Reading the
+  generated stub — the no-hand-typed-values rule's third and worst firing this session);
+  caught by post-launch self-check, TaskStop, relaunched verbatim from the file. New
+  discipline: never launch args not Read in the same breath.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
