@@ -4857,6 +4857,28 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   unavailable; its verdicts were hand-eyeballed before recording and the refutation is
   sound. **Ladder state at pause: live 1,028 published, 23 parks, ~13 re-authorable remain
   (incl. HR 8646 + HR 4016 finals, untouched this wave); resume = build wave DR.**
+- **Drain wave DR — 3/6 published (live 1028 -> 1031), both monster finals resolved (one save,
+  one park), and the corroboration gate's FIRST live refusal** (2026-08-18, two launches
+  ~19.9KB + 1.6KB lesson-40 stub for HR 8646's banked 38KB prior, 26 agents 0 errors,
+  ~1.46M tokens, runs wf_c3663c90/wf_d585b2f4; HR 8646 arrived STALE from the disk-envelope
+  path AGAIN — DP's fresh objections hand-carried from wave-dp-records.json): **published:
+  HB 1725 lodging establishments (7 verdicts clean — both conditional-liability reframes
+  held), SJR 38 police-funding amendment (6 clean), and HCONRES 14 FY2025 budget resolution
+  (36 verdicts, ZERO refutations — the Senate-enforcement scoping fix held; the $0.48
+  billed-tick draft converted on attempt 2).** PARKED at strike 3, both with written
+  reasons: SJR 46 (rotating citation-target crossfire — the verifier refuted the
+  submission-to-voters bullet at Section A, then refuted the SAME bullet at the resolving
+  clause the completeness checker TWICE independently grounded it in; checker and verifier
+  disagree about which citable string carries the provision) and HR 8646 ag/FDA
+  appropriation (DP's two fixes both HELD at 58 verdicts/zero refutations, but the gate
+  demanded a never-before-requested Sec. 726 SNAP-retailer provision — shifting-demands
+  class on a 175k omnibus). **Corroboration-gate first live refusal: SRES 532's primary
+  check found 1 provision, its independent corroborator found 2 — MalformedSummaryError,
+  zero writes, fail-closed exactly per spec ('the primary may have missed substance');
+  the bill stays draft for another attempt.** Parks 23 -> 25 (seed re-run synced
+  parked.json so the billed conversion lane never pays for either). Ladder CONTINUES per
+  Lance ("hopefully we can finish off all the bills this week"; "this needs finished") —
+  wave DS next, ~9 re-authorable remain incl. HR 4016's final.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim

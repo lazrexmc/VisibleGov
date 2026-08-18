@@ -36,6 +36,8 @@ const PARKED = new Set([
   // 2026-08-18: HB 606, HB 64, SB 626, HB 1607 UNPARKED — their park class (the fixed
   // MIN_KEY_PROVISIONS floor rejecting honest 1-2 provision yields on >=5k-char bills) is
   // repaired by the corroborated-honest-yield gate (spec 2026-08-18). Every 3-strike park stays.
+  'c6b1fd1f-6d32-49cf-9fa3-841bca8fb2f3', // SJR 46 — 3 attempts exhausted 2026-08-18; rotating citation-target crossfire: the submission-to-voters bullet was refuted at Section A (DQ), the completeness checker TWICE independently grounded that provision in the resolving clause, the final attempt cited that same resolving clause and the verifier refuted THAT too (the substance lives in the unlabeled paragraph after it) — checker and verifier disagree about which citable string carries the provision; human review should confirm, 2026-08-18
+  'b4f00aa2-9cc2-4323-b13e-b9a74f9b8399', // HR 8646 ag/FDA appropriation — 3 attempts exhausted 2026-08-18; shifting-demands class (HB 1633/HB 352): DP's two objections were both FIXED and HELD (58 verdicts, ZERO refutations on the final attempt) but the completeness gate demanded a NEW Sec. 726 SNAP-retailer-rule provision it never asked for in two prior rounds — the checker picks a different provision of this 175k-char omnibus each round; human review should confirm, 2026-08-18
   '0e3279bf-e7df-4374-b5a4-fb82f3db9c6a', // HB 569 — 3 attempts exhausted 2026-08-14 (emergency clause, then short title)
   '92ea0b8d-6383-47df-b7cd-1a8f46ece4e8', // HR 2683 — 3 attempts exhausted 2026-08-14 (amendment-mapping overstatements)
   '374bfa04-a3ef-4b1a-afe7-dbd6b74bde52', // SB 786 — 3 attempts exhausted 2026-08-14 (unbracketed civil-action redline language)
