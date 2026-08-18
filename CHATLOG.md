@@ -4915,6 +4915,24 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   miscited to 339.100 + 327.131 good-moral-character omission at 35 verdicts). Wave DU (the
   drain's LAST two bills, both finals) built with HR 3944 hand-carried from the DT record
   (disk-envelope stale AGAIN) and launched.
+- **Drain wave DU — 0/2, both finals parked — and THE DRAIN IS COMPLETE: re-authorable
+  drafts = 0** (2026-08-18, one launch, 8 agents 0 errors, ~775k tokens, run wf_e1d730da;
+  HR 3944 hand-carried from the DT record after the disk-envelope path served stale data
+  for the FINAL time): HR 3944 MilCon/VA — the Sec. 2 narrowing and Sec. 742 bullet HELD,
+  but the gate demanded a never-before-requested Sec. 734 embryo-modification bar
+  (shifting-demands class, third different demand in three rounds on a three-division
+  324k omnibus) and the Division-C compensation bullet drew a heading-scope refutation.
+  HB 564 Fresh Start Act — all prior fixes held, but 3 NEW refutations surfaced
+  (324.1112/340.274 never name their professions in the cited section's own text; the
+  327.131 bullet, phrased from the checker's own demand, overclaimed beyond architects) —
+  rotating-refutation/cited-section-alone class on a 368k-char 75-section
+  repeal-and-replace. Parks 26 -> 28, seed synced. **Probe build confirms: re-authorable
+  drafts 0/0. THE DRAIN LADDER IS DONE. Session totals for 2026-08-18: waves DQ-DU, live
+  1,023 -> 1,037 (+14 drain publishes on top of the scheduler's 3), five waves, 27 bills
+  attempted, 4 parks, the corroboration gate's first two live refusals, HR 4016's
+  138-verdict save. DB state: 46 draft-only bills remain = 28 parked (human review) + 18
+  no-objection drafts (conversion-lane fodder the daily scheduler owns). Every future
+  summary flows through the autonomous 6 AM scheduler.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
