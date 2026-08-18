@@ -4833,6 +4833,30 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (including the both-sides boundary edge "2." vs "167.632. 1." and the
   any-occurrence scan). Everything pushed; the 8 long-but-thin bills ride tomorrow's 6 AM
   tick under normal lane ordering.
+- **Drain wave DQ — 5/6 published (live 1023 -> 1028), ladder PAUSED per Lance ("pause once
+  wave DQ completes"); first live drain-side corroboration field produced** (2026-08-18, one
+  launch ~13.3KB, 25 agents 0 errors, ~1.14M tokens, run wf_aa17e827): the re-authorable pool
+  had grown 7 -> 19 (the live scheduler's gate refusals now mint drafts-with-objections —
+  the pipeline feeding the drain, not a backlog), and smallest-first picked six tiny bills:
+  **published HB 1562 Stars and Stripes Historic Region (4 verdicts clean — yesterday's
+  first-billed-tick gate refusal, now live), HB 1692 immunization liability (5), HB 1683 AP
+  credit (4), HB 1600 legislative employees (6), HB 1713 Religious Freedom Protection Act
+  (7) — every mechanical pre-fix held, including both citation-split fixes.** FLAGGED:
+  SJR 46 county assessors (5 verdicts, 1 refutation — the checker's own omission demand had
+  attributed the submission-to-voters clause to Section A; the verifier's
+  cited-section-alone discipline correctly places it in the PRECEDING resolving clause;
+  next attempt = strike 3). SJR 46 also produced the drain lane's FIRST live
+  completeness_corroboration field (its 2-provision yield tripped the workflow's
+  corroborate-below-3 rule; at 1,779 chars its floor is 1, so the gate correctly ignored
+  the stray — spec behavior, live-proven). Two launch hiccups, both mine/environmental:
+  the permission layer rejected the first launch over CRLF control characters in
+  summary-wave.js (Task-4-era line endings; normalized to LF), and my retyped relaunch
+  corrupted HB 1562's text_file UUID — caught by self-scan, TaskStop + resumeFromRunId
+  relaunch with the verbatim path (the no-hand-typed-UUIDs rule fired AGAIN and this time
+  cost a stop/relaunch). One verify agent (SJR 46) ran with the safety classifier
+  unavailable; its verdicts were hand-eyeballed before recording and the refutation is
+  sound. **Ladder state at pause: live 1,028 published, 23 parks, ~13 re-authorable remain
+  (incl. HR 8646 + HR 4016 finals, untouched this wave); resume = build wave DR.**
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
