@@ -4790,8 +4790,9 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   smaller problem.** (Also noted: one calibration query used a hand-typed UUID that silently
   matched nothing — the no-hand-typed-UUIDs rule fired again; nothing load-bearing relied
   on it.)
-- **Completeness-floor rollout (2026-08-18, Task 5 of 5, plan
-  `docs/superpowers/specs/2026-08-18-completeness-floor-corroboration-design.md`):** the
+- **Completeness-floor rollout (2026-08-18, Task 5 of 5, spec
+  `docs/superpowers/specs/2026-08-18-completeness-floor-corroboration-design.md`, plan
+  `docs/superpowers/plans/2026-08-18-completeness-floor-corroboration.md`):** the
   corroborated-honest-yield gate built in Tasks 1-4 (commits b93a6f8..27afe0b) is live; this task
   unparked the class it repairs. Pre-flight full suite in a clean shell showed exactly one
   failure — the documented periodic drift in `tests/backfill-nicknames-cli.test.js` (cached

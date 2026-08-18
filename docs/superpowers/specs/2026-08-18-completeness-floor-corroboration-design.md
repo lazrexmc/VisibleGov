@@ -202,3 +202,26 @@ gate any commit on the extracted fail count, never pipeline exit status (lesson 
 - At-floor behavior provably unchanged (regression tests + untouched existing tests).
 - Future thin arrivals flow through the same path unattended, at one extra provisions-sized call
   each, under existing caps.
+
+## Design amendments (2026-08-18 final review)
+
+1. **`CORROBORATION_SCHEMA` was dropped.** The API layer rejects `minItems`/`maxItems` on
+   structured-output schemas (`apiProvisionsSchema` in `src/lib/billed-summary-chain.js` already
+   strips both for exactly this reason), and the drain workflow sandbox cannot import a shared
+   module from `verifier.js` anyway — so no producer could ever bind to the exported schema as
+   written, and each necessarily builds its own API-safe shape instead. The real, load-bearing
+   contract is the gate's own mechanical rules in `assessCompleteness`/`assessCorroboration`, not
+   a shared schema object.
+2. **The overlap rule is boundary-aware containment, not plain substring containment.** Equality,
+   or the shorter string occurring in the longer at a position where both neighboring characters
+   (where one exists) are non-alphanumeric. Plain `a.includes(b) || b.includes(a)` was found to
+   pass vacuously on TITLE-I/TITLE-II-shaped section pairs — "TITLE I" is a literal prefix of
+   "TITLE II" — which would have let a primary/corroborator pair naming genuinely different
+   sections read as corroborated.
+3. **Two acknowledged trust boundaries, by design.** Provision *text* is never compared between
+   the primary and corroboration runs — only their grounded `section` strings — so two runs citing
+   the same section but describing different substance are not caught by this gate. And the gate
+   has no mechanism to verify the corroboration run's *independence*: a producer that echoes the
+   primary's list back as its "corroboration" satisfies every mechanical rule here. Both are
+   producer-side contracts, the same trust class as the existing phase-1/phase-2 blindness
+   separation already documented and relied upon in `verifier.js`.
