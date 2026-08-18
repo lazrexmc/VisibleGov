@@ -4933,6 +4933,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   138-verdict save. DB state: 46 draft-only bills remain = 28 parked (human review) + 18
   no-objection drafts (conversion-lane fodder the daily scheduler owns). Every future
   summary flows through the autonomous 6 AM scheduler.**
+- **Browse-bills page built and shipped (Lance: "build the bills page"; bounded design
+  approved "Good to go")** (2026-08-18, commit 7a9ab71, TDD): new `/bills` catalog — every
+  bill with a PUBLISHED plain-language summary (a completeness criterion, never editorial),
+  newest first, Federal/Missouri toggle, client-side filter over the complete fetched list.
+  Design facts verified before building: bills carries NO action-date column, so chronology
+  keys on summaries.published_at and the UI labels it honestly as the summary publish date;
+  exactly two jurisdictions exist (us-congress, mo-legislature) and a defensive
+  labeled-Other bucket renders anything else rather than silently mis-filing it. House
+  pattern faithfully copied: pure model (buildBillEntries dedupe/sort, partitionBills,
+  filterBills — 10 new tests, red-first) + DOM orchestration in one module, boot-bills.js
+  external bootstrap (CSP), fetchAllRows with the deterministic published_at.desc,id.desc
+  order its contract requires, sectionState loading/failed/empty states. Bills nav link
+  added to all seven shells; NO _redirects change (no deep links — Pages serves /bills
+  natively, the /trust precedent). Suite 2,456/0 clean shell. Live browser verification
+  against the deployed page followed the push.
 - **Parens-binding gate fix (2026-08-10, TDD, commit 92816ff):** `validateVerdictBinding` now
   strips ONE complete surrounding paren pair from each side before comparing (the section value
   is the verifier's echo of WHICH bullet it verified, not bill content — facts-only verbatim
