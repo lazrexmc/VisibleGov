@@ -165,8 +165,8 @@ export async function persistGloss(client, runId, term, { glossMd, supportedByQu
   if (updErr) throw new Error(`${GLOSSARY_TERMS_TABLE} update failed for term ${term.id}: ${updErr.message}`);
 }
 
-async function glossOne(client, runId, term, anthropic) {
-  const { url, excerptText, hash } = await fetchGlossSource(term.citation);
+async function glossOne(client, runId, term, anthropic, fetchSource = fetchGlossSource) {
+  const { url, excerptText, hash } = await fetchSource(term.citation);
   const { json: glossJson } = await authorGloss(anthropic, { term: term.term, excerptText });
 
   const sentences = splitGlossSentences(glossJson.gloss_md);
@@ -194,6 +194,50 @@ async function glossOne(client, runId, term, anthropic) {
   });
 
   return { overall };
+}
+
+// ---- the per-term batch loop (extracted so the abort path is directly testable) ----
+//
+// F6 (post-audit fix wave, 2026-08-19) — gloss-abort observability. A non-FAILURE_TYPES error is a
+// WHOLE-RUN hard stop by design (spec §4: a bot-detection page must abort honestly, never
+// retry-hammer or count-and-continue). But the run record only ever carried the error string, and
+// MoBotPageError's message names the SOURCE, not which term triggered it — so an aborted run left
+// no trace of the culprit, and the operator had to re-derive it by hand. The culprit term is now
+// attached to the error and surfaced in both the console line and the closeRun 'failed' detail.
+//
+// Operator remedy for a citation that pages the bot detector PERMANENTLY (e.g. a section a bill
+// created that the revisor does not serve yet): set that term's status='rejected' on the review
+// page. planGlossing already routes rejected terms out of `candidates`, so the next run skips it
+// instead of aborting on it again. Nothing here retries, widens, or guesses at such a citation.
+export async function glossCandidates(client, runId, candidates, anthropic, { fetchSource } = {}) {
+  const failures = [];
+  let glossed = 0;
+  let flagged = 0;
+  for (const term of candidates) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- sequential billed calls, one term at a time
+      const { overall } = await glossOne(client, runId, term, anthropic, fetchSource);
+      glossed += 1;
+      if (overall === 'flagged') flagged += 1;
+    } catch (err) {
+      if (isTypedFailure(err)) {
+        failures.push({ id: term.id, term: term.term, error: err.name, message: err.message });
+      } else {
+        if (err && typeof err === 'object') err.term = { id: term.id, citation: term.citation };
+        console.error(
+          `HARD STOP on term ${term.id} (${term.term} / ${term.citation}): ${err?.name ?? 'Error'}: ${err?.message ?? String(err)}`,
+        );
+        throw err;
+      }
+    }
+  }
+  return { glossed, flagged, failures };
+}
+
+// failedRunDetail: the closeRun 'failed' payload, factored out so the "name the culprit" contract
+// is pinned by a test rather than living inline in main() where nothing can reach it.
+export function failedRunDetail(err) {
+  return { error: String(err), ...(err?.term ? { term: err.term } : {}) };
 }
 
 // ---- main ----
@@ -254,23 +298,8 @@ async function main() {
   }
 
   const runId = await openRun(client, 'gloss');
-  const failures = [];
   try {
-    let glossed = 0;
-    let flagged = 0;
-    for (const term of candidates) {
-      try {
-        const { overall } = await glossOne(client, runId, term, anthropic);
-        glossed += 1;
-        if (overall === 'flagged') flagged += 1;
-      } catch (err) {
-        if (isTypedFailure(err)) {
-          failures.push({ id: term.id, term: term.term, error: err.name, message: err.message });
-        } else {
-          throw err;
-        }
-      }
-    }
+    const { glossed, flagged, failures } = await glossCandidates(client, runId, candidates, anthropic);
 
     const counts = {
       candidates: candidates.length, glossed, flagged,
@@ -281,7 +310,7 @@ async function main() {
     console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts, failures }, null, 2));
     if (failures.length > 0) process.exitCode = 2;
   } catch (err) {
-    await closeRun(client, runId, 'failed', { error: String(err) });
+    await closeRun(client, runId, 'failed', failedRunDetail(err));
     throw err;
   }
 }

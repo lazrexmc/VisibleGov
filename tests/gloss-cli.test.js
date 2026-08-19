@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseArgs, planGlossing, persistGloss, GLOSS_COST_PER_TERM_USD, loadAllTerms, FAILURE_TYPES,
+  glossCandidates, failedRunDetail,
 } from '../src/cli/gloss.js';
 import { MoBotPageError, MoPageIdentityError } from '../src/adapters/mo-statutes.js';
+import { SourceFetchError } from '../src/lib/errors.js';
 
 // ---- planGlossing: the branched routing decision (mirrors extract-terms.js's planExtraction) ----
 
@@ -143,6 +145,47 @@ function makeFakeClient({ failTable = null } = {}) {
     },
   };
 }
+
+// ---- F6 (post-audit fix wave, 2026-08-19): gloss-abort observability ----
+//
+// A MoBotPageError is a whole-run HARD STOP by design (spec §4) — but its message names the SOURCE,
+// not the term, so an aborted run's record used to leave no trace of which citation triggered it.
+// The culprit must now ride on the error and reach the closeRun 'failed' detail.
+test('a MoBotPageError-throwing fetch aborts the run AND the failure detail names the culprit term (F6)', async () => {
+  const client = makeFakeClient();
+  const term = { id: 'term-9', term: 'section 999.999', citation: 'RSMo 999.999' };
+  const fetchSource = () => { throw new MoBotPageError('revisor.mo.gov returned its bot-detection page'); };
+
+  await assert.rejects(
+    () => glossCandidates(client, 'run-1', [term], null, { fetchSource }),
+    (err) => {
+      assert.ok(err instanceof MoBotPageError, 'the hard stop propagates untyped-as-failure, aborting the run');
+      assert.deepEqual(err.term, { id: 'term-9', citation: 'RSMo 999.999' });
+      const detail = failedRunDetail(err);
+      assert.deepEqual(detail.term, { id: 'term-9', citation: 'RSMo 999.999' });
+      assert.match(detail.error, /bot-detection page/);
+      return true;
+    },
+  );
+  assert.deepEqual(client.calls, [], 'nothing was written for a term that never produced a gloss');
+});
+
+test('failedRunDetail omits the term key entirely when an error carries no culprit (F6)', () => {
+  assert.deepEqual(failedRunDetail(new Error('openRun blew up')), { error: 'Error: openRun blew up' });
+});
+
+test('glossCandidates still COUNTS a typed failure and continues to the next term — only untyped errors hard-stop (F6)', async () => {
+  const client = makeFakeClient();
+  const terms = [
+    { id: 'term-1', term: 'section 1.010', citation: 'RSMo 1.010' },
+    { id: 'term-2', term: 'section 2.020', citation: 'RSMo 2.020' },
+  ];
+  const fetchSource = (citation) => { throw new SourceFetchError(`network blip for ${citation}`); };
+  const { glossed, flagged, failures } = await glossCandidates(client, 'run-1', terms, null, { fetchSource });
+  assert.equal(glossed, 0);
+  assert.equal(flagged, 0);
+  assert.deepEqual(failures.map((f) => f.id), ['term-1', 'term-2']);
+});
 
 const SAMPLE_GLOSS = {
   glossMd: 'The Secretary administers grants to States.',
