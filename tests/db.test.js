@@ -116,10 +116,13 @@ test('isCheckConstraintViolation is false for a null/absent error', () => {
 
 function makeCappedTableClient(allRows, { serverCap = 1000, orderKey = 'id' } = {}) {
   const rangeCalls = [];
+  const orderCalls = [];
   // Fixed insertion-order-independent sort, mirroring Postgres's own guarantee: a query IS
   // deterministic once an ORDER BY is present. selectAll always appends `.order('id', ...)` — this
   // fake's `.order()` is a no-op that trusts THAT append happened and always serves rows sorted by
   // `orderKey`, the same contract a real ordered table would honor across separate .range() calls.
+  // It DOES still record every call (col, opts) so tests can assert on selectAll's orderBy wiring
+  // (the `orderCalls` array below) without that assertion affecting the actual served row order.
   const sorted = [...allRows].sort((a, b) => {
     if (a[orderKey] < b[orderKey]) return -1;
     if (a[orderKey] > b[orderKey]) return 1;
@@ -127,13 +130,14 @@ function makeCappedTableClient(allRows, { serverCap = 1000, orderKey = 'id' } = 
   });
   return {
     rangeCalls,
+    orderCalls,
     from(table) {
       const filters = [];
       const builder = {
         select() { return this; },
         eq(col, val) { filters.push(['eq', col, val]); return this; },
         in(col, vals) { filters.push(['in', col, vals]); return this; },
-        order() { return this; },
+        order(col, opts) { orderCalls.push({ col, opts }); return this; },
         range(from, to) {
           rangeCalls.push({ table, from, to });
           let rows = sorted;
@@ -196,6 +200,35 @@ test('selectAll: a smaller pageSize still retrieves everything via more pages (p
   const { data } = await selectAll(client, 't', 'id', { pageSize: 10 });
   assert.equal(data.length, 25);
   assert.equal(client.rangeCalls.length, 3, '10+10+5');
+});
+
+// ---- selectAll orderBy option (Task 8 live-dry-run finding: summary_terms has NO id column —
+// composite PK (summary_id, term_id), migration 0007 — so selectAll's old unconditional
+// .order('id', ...) crashed against it for real; a fake-only test suite couldn't see this because
+// none of the fakes validate column names against real schema) ----
+
+test('selectAll: default orderBy is unchanged — still orders by "id" alone when no orderBy is given', async () => {
+  const rows = [{ id: '001' }];
+  const client = makeCappedTableClient(rows);
+  await selectAll(client, 't', 'id');
+  assert.deepEqual(client.orderCalls, [{ col: 'id', opts: { ascending: true } }]);
+});
+
+test('selectAll: a string orderBy orders by that single column instead of "id"', async () => {
+  const rows = [{ created_at: '2026-01-01' }];
+  const client = makeCappedTableClient(rows, { orderKey: 'created_at' });
+  await selectAll(client, 't', 'created_at', { orderBy: 'created_at' });
+  assert.deepEqual(client.orderCalls, [{ col: 'created_at', opts: { ascending: true } }]);
+});
+
+test('selectAll: an array orderBy chains one .order() per column, in order — required for a composite-PK table with no id column', async () => {
+  const rows = [{ summary_id: 's1', term_id: 't1' }];
+  const client = makeCappedTableClient(rows, { orderKey: 'summary_id' });
+  await selectAll(client, 'summary_terms', 'summary_id,term_id', { orderBy: ['summary_id', 'term_id'] });
+  assert.deepEqual(client.orderCalls, [
+    { col: 'summary_id', opts: { ascending: true } },
+    { col: 'term_id', opts: { ascending: true } },
+  ]);
 });
 
 test('selectAll: propagates an error from whichever page produced it, without throwing', async () => {

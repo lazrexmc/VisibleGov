@@ -73,22 +73,33 @@ export function isMissingRelationError(error, table) {
 // `.order('created_at', {ascending: true})`) onto the query builder before pagination begins.
 // Pagination via .range() is only correct with a DETERMINISTIC order — without one, Postgres makes
 // no promise that two separate .range() calls see the same row ordering, which could silently drop
-// a row into the gap between two pages or return it twice. An `id` tiebreaker is therefore ALWAYS
-// appended after whatever order `filter` set (or as the sole order, if `filter` set none) — every
-// table this touches has a uuid primary key named `id`, so this is safe to apply unconditionally.
+// a row into the gap between two pages or return it twice. A tiebreaker on `orderBy` is therefore
+// ALWAYS appended after whatever order `filter` set (or as the sole order, if `filter` set none).
+// `orderBy` defaults to `'id'`, which assumes the table has a uuid `id` column — true for most
+// tables this touches, but NOT universal: a table with a composite primary key and no surrogate
+// `id` (e.g. summary_terms, PK (summary_id, term_id) — migration 0007) has no `id` column to order
+// by at all, and the default would fail outright. Callers of such a table MUST pass `orderBy`
+// explicitly — a string for a single column, or an array of columns to chain `.order()` once per
+// column IN ORDER (a composite key needs every column to form a genuine total order; ordering by
+// just the first column alone would leave ties within it undetermined across pages, same failure
+// mode as having no order at all).
 //
 // Fail loud, never silently truncate (finding 1's fix direction): if the very LAST page fetched is
 // still full-sized (`pageSize` rows), the loop cannot tell whether that was the true end of the
 // table or whether `maxPages` cut it off mid-scan — throws rather than returning a result that
 // LOOKS complete but might not be. `maxPages` defaults to 200 (200k rows at the default page size),
 // the same sanity-backstop magnitude ingest-mo-house.js's dryRunReport used.
-export async function selectAll(client, table, columns, { filter, pageSize = 1000, maxPages = 200 } = {}) {
+export async function selectAll(client, table, columns, {
+  filter, pageSize = 1000, maxPages = 200, orderBy = 'id',
+} = {}) {
+  const orderCols = Array.isArray(orderBy) ? orderBy : [orderBy];
   const rows = [];
   for (let page = 0; page < maxPages; page += 1) {
     const from = page * pageSize;
     let query = client.from(table).select(columns);
     if (filter) query = filter(query);
-    query = query.order('id', { ascending: true }).range(from, from + pageSize - 1);
+    for (const col of orderCols) query = query.order(col, { ascending: true });
+    query = query.range(from, from + pageSize - 1);
     // Sequential (not parallel) is deliberate: each page's .range() bounds depend on knowing the
     // PRIOR page came back full-sized — same "sequential, small/infrequent backlog" precedent as
     // ingest-mo-senate.js's replayJournalArtifacts.

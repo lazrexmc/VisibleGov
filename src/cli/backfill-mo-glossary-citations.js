@@ -68,16 +68,20 @@ export function planMoCitationBackfill({ terms, linksByTermId, jurisdictionBySum
 // other call site in this codebase, e.g. gloss.js's loadAllTerms, backfill-mo-term-dates.js's
 // loadDatelessMoTerms); this local helper destructures and fails loud, the same convention those
 // call sites use, so every one of the seven reads below stays a one-liner at the call site.
-async function loadAll(client, table, columns) {
-  const { data, error } = await selectAll(client, table, columns);
+async function loadAll(client, table, columns, opts) {
+  const { data, error } = await selectAll(client, table, columns, opts);
   if (error) throw new Error(`backfill-mo-glossary-citations: ${table} load failed: ${error.message}`);
   return data;
 }
 
 export async function fetchBackfillInputs(client) {
-  // All unbounded reads via selectAll (pagination-enforcement test scans this file).
+  // All unbounded reads via selectAll (pagination-enforcement test scans this file). selectAll's
+  // default page-tiebreaker order is `id` — true for every table below EXCEPT summary_terms,
+  // whose primary key is the composite (summary_id, term_id) with no surrogate `id` column
+  // (migration 0007) — it must pass its real key explicitly, in order, or pagination across it
+  // has no deterministic total order.
   const terms = await loadAll(client, 'glossary_terms', 'id,term,kind,citation,needs_mapping,gloss_md,created_at');
-  const links = await loadAll(client, 'summary_terms', 'summary_id,term_id');
+  const links = await loadAll(client, 'summary_terms', 'summary_id,term_id', { orderBy: ['summary_id', 'term_id'] });
   const summaries = await loadAll(client, 'summaries', 'id,bill_id');
   const bills = await loadAll(client, 'bills', 'id,session_id');
   const sessions = await loadAll(client, 'sessions', 'id,jurisdiction_id');

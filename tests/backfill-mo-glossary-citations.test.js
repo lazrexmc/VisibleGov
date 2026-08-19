@@ -122,13 +122,23 @@ test('already-mapped rows and unparseable terms are never updates', () => {
 // table — proves the given brief code's selectAll destructure (selectAll returns {data,error},
 // same contract as gloss.js's loadAllTerms and backfill-mo-term-dates.js's loadDatelessMoTerms,
 // NEVER a bare array) is actually wired correctly, and that a table-load error surfaces loudly.
+//
+// Live-dry-run fix (Task 8 finding): this fake records every .order(col) call per table so the
+// test below can prove fetchBackfillInputs' summary_terms read passes its real composite key
+// (summary_id, term_id) through to selectAll's orderBy — a fake this permissive can't by itself
+// catch a call to .order('id') against a table with no id column (it doesn't validate against
+// real schema at all), which is exactly why this bug only surfaced against the live database in
+// Task 8's dry-run; asserting the actual order-call arguments here is the closest a fake-only test
+// can get to that same guarantee.
 
 function fakeSelectAllClient(rowsByTable) {
+  const orderCallsByTable = {};
   return {
+    orderCallsByTable,
     from(table) {
       return {
         select() { return this; },
-        order() { return this; },
+        order(col) { (orderCallsByTable[table] ??= []).push(col); return this; },
         range: () => Promise.resolve({ data: rowsByTable[table] ?? [], error: null }),
       };
     },
@@ -155,6 +165,18 @@ test('fetchBackfillInputs wires selectAll results into terms/linksByTermId/juris
   assert.equal(inputs.terms[0].hasNotes, false);
   assert.deepEqual(inputs.linksByTermId.get('t1'), ['s1']);
   assert.equal(inputs.jurisdictionBySummaryId.get('s1'), MO);
+
+  // Live-dry-run fix (Task 8 finding): summary_terms has NO id column (composite PK
+  // (summary_id, term_id), migration 0007) — its read must pass its real key through as orderBy,
+  // never fall through to selectAll's id default, or pagination against the live table throws.
+  // Every other table read here does keep the id default (each genuinely has a uuid id PK).
+  assert.deepEqual(client.orderCallsByTable.summary_terms, ['summary_id', 'term_id']);
+  assert.deepEqual(client.orderCallsByTable.glossary_terms, ['id']);
+  assert.deepEqual(client.orderCallsByTable.summaries, ['id']);
+  assert.deepEqual(client.orderCallsByTable.bills, ['id']);
+  assert.deepEqual(client.orderCallsByTable.sessions, ['id']);
+  assert.deepEqual(client.orderCallsByTable.glossary_verifications, ['id']);
+  assert.deepEqual(client.orderCallsByTable.glossary_notes, ['id']);
 });
 
 test('fetchBackfillInputs throws a descriptive error when a table read fails, rather than silently continuing', async () => {
