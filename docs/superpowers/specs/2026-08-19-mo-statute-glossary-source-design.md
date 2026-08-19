@@ -38,13 +38,23 @@ bill). These numbers drift with live growth; re-derive at run time, never cite t
 ## 3. v1 scope
 
 **In scope (maps):**
-- Single sections: `section 536.010`, `§ 536.010`, bare dotted `302.309`, optional leading
-  `RSMo`, optional trailing `, RSMo`. The dotted `\d{1,3}\.\d{3,4}` shape is RSMo's signature —
-  USC sections are never dotted. A trailing subdivision (`536.010.2`, `(1)`) parses but
-  normalizes to the parent section: the gloss covers the whole section — broader, never wrong.
-- Single chapters: `chapter 303`, optional RSMo affixes.
+- Single sections: `section 536.010`, `sec. 536.010`, `§ 536.010`, bare dotted `302.309`, optional
+  leading `RSMo`, optional trailing `, RSMo` (with an optional canonical year: `, RSMo 2016`,
+  `, RSMo Supp. 2023`). The dotted `[1-9]\d{0,2}\.\d{3,4}` shape is RSMo's signature — USC sections
+  are never dotted. A trailing subdivision (`536.010.2`, `(1)`) parses but normalizes to the parent
+  section: the gloss covers the whole section — broader, never wrong.
 
 **Out of scope (stays `needs_mapping`, honestly):**
+- **Chapters** (`chapter 303`) — chapters were dropped from v1 by post-audit ruling (2026-08-19):
+  a chapter page is a table of contents — revisor-authored catchlines and cross-references naming
+  other chapters' subjects — not statutory text; an adversarial audit demonstrated a verifier quote
+  drawn from a cross-reference line could mechanically 'support' a wrong-chapter gloss claim.
+  Chapters stay needs_mapping until a design grounds them honestly.
+- **Bare low-chapter dotted cites** (`section 2.100`, chapter part ≤ 20, with no `RSMo` marker in
+  the text) — Missouri appropriations bills (HB 1-19) number their own internal sections `N.MMM`,
+  so a bare low-chapter dotted cite inside a MO bill is ambiguous between a real RSMo section and
+  the bill's own internal section. The corroborated forms (`RSMo 1.140`, `section 1.140, RSMo`)
+  still map, so stored citations round-trip at gloss time.
 - Ranges and lists ("sections 302.302 **to** 302.309", "302.309 **and** 302.341") — no single
   official text; synthesizing across sections is fabrication risk.
 - Bare "RSMo" (144 published-summary references) and "Constitution of Missouri" (40) — no
@@ -72,19 +82,20 @@ Binding rules for this adapter:
    honestly, never retry-hammer. (Same class as the LegiScan 429 lesson.)
 4. Excerpts are hash-pinned at gloss time (existing `glossary_verifications` mechanics), so a
    page is fetched once per gloss attempt and never re-fetched to re-verify.
-5. Total v1 drain footprint at current counts: ~1,557 section pages + ~168 chapter pages, one
-   time, ≈2.4 hours of spacing spread across gloss batches.
+5. Total v1 drain footprint: section pages only (chapters left v1 — see §3), one time, at 5s
+   spacing. Re-derive the page count from a fresh dry-run rather than citing this line: the
+   2026-08-19 post-audit parser hardening moved it. ~2.4 hours was the pre-drop estimate.
 
 ## 5. Architecture
 
 New adapter `src/adapters/mo-statutes.js`, mirroring `uscode.js`'s structure exactly: pure
 parse/extract functions carrying the test weight, thin fetch wrappers structurally reviewed.
 
-**Parser** — `parseMoCitation(raw) -> {kind:'section', section} | {kind:'chapter', chapter} | null`
-per §3's shapes and refusals. Pure; jurisdiction is NOT its concern (see guard, below).
+**Parser** — `parseMoCitation(raw) -> {kind:'section', section} | null` per §3's shapes and
+refusals. Pure; jurisdiction is NOT its concern (see guard, below).
 
 **Normalization** — stored `glossary_terms.citation` strings are prefix-discriminated:
-`RSMo 536.010` / `RSMo chapter 536` (vs the existing `42 U.S.C. 1396b`). This is the whole
+`RSMo 536.010` (vs the existing `42 U.S.C. 1396b`). This is the whole
 dispatch mechanism — **no schema migration anywhere**. The existing `(kind, citation)` unique
 key and the `(kind, term) where citation is null` partial index (migration 0007) work unchanged.
 
@@ -101,13 +112,17 @@ everything else takes the existing USC path. Defensive typed errors on unparseab
 matching the existing convention.
 
 **Fetch + extraction** —
-- Sections: excerpt = the statute body from its stable markers plus the effective-date line.
-- Chapters: excerpt = chapter title + the official section-number/heading list.
-- Both reuse `OversizeExcerptError` / `MAX_EXCERPT_CHARS` (exported by uscode.js): an oversize
-  chapter or section is an honest counted skip, never a truncation.
+- Sections only: excerpt = the statute body from its stable markers plus the enactment-history /
+  effective-date line. The revisor's judicial-decision annotations that follow that line (each its
+  own paragraph opening with a parenthesized year, e.g. "(1977) Held, …  Krentz v. Robertson, 228
+  F.3d 897") are CUT — editorial case-law commentary about the statute, not the statute, and
+  quotable as law if left in.
+- Reuses `OversizeExcerptError` / `MAX_EXCERPT_CHARS` (exported by uscode.js): an oversize
+  section is an honest counted skip, never a truncation.
 - **Response-identity verification (hard requirement):** before any extracted text is trusted,
-  the page must contain the requested section's own number marker (or the requested chapter's
-  heading). Because a nonexistent section returns HTTP 200 with bot-page content, a naive
+  the isolated slice must BEGIN with the requested section's own number marker — anchored, not
+  merely present, so a page that only cross-references the requested section is refused. Because a
+  nonexistent section returns HTTP 200 with bot-page content, a naive
   extractor would store bot-page text as statute text — the exact fabrication class this
   pipeline exists to prevent. The bot page's distinctive fixed text ("Are you double clicking
   links? Don't if you are.") is recognized explicitly as `MoBotPageError`; an identity mismatch
@@ -115,9 +130,10 @@ matching the existing convention.
   hole closed 2026-07-31.)
 - Fixtures: real captured HTML for a normal section, a long section, a repealed/transferred
   section, the chapter index, and the bot page. Fixture capture counts against §4's politeness
-  budget.
+  budget. The chapter-index fixture stays on disk after the chapter drop (§3): it documents what
+  the source actually serves, and is the evidence any future chapter design starts from.
 
-**Jurisdiction guard** — bare `chapter 303` / dotted `section 536.010` shapes map to RSMo only
+**Jurisdiction guard** — the bare dotted `section 536.010` shape maps to RSMo only
 in Missouri context. Insert time: the caller's bill jurisdiction. Backfill: a term maps only if
 **every** summary referencing it belongs to a `mo-legislature` bill; zero-reference terms stay
 unmapped. Live measurement: the guard blocks 0 terms today (every parse-OK term is exclusively
@@ -187,3 +203,30 @@ attribution claim in §7's first draft assumed uscode.house.gov treatment that d
 (4) jurisdiction is on `sessions`, not `bills`. It confirmed: the glosser contract, the
 reusable oversize machinery, the shared rate limiter, all three call sites, and the 0007 key
 semantics. All counts in this spec are that audit's snapshot and drift daily.
+
+## 11. Design amendments
+
+**2026-08-19 — three-auditor post-build pass on branch `mo-statute-glossary-source`.** The built
+code was audited by three independent reviewers against live data and executed proofs; the
+controller ruled the following changes, all applied to this spec above rather than left as code-only
+drift:
+
+1. **Chapters left v1 entirely** (§3, §5). Reason recorded verbatim in §3. This is a scope
+   reduction, not a deferral of work already done: the chapter parser, URL builder, fetch wrapper
+   and extractor were REMOVED from `src/adapters/mo-statutes.js`, and `upsertKeyFor` no longer maps
+   a chapter term even in Missouri context. `tests/fixtures/mo-statutes/chapter-536.html` is kept.
+2. **Bare low-chapter dotted cites refused** (§3). Missouri appropriations bills number their own
+   internal sections `N.MMM`; a bare cite with a chapter part ≤ 20 is ambiguous, so the text must
+   carry the `RSMo` marker itself. Stored citations always do, so gloss-time round-tripping is
+   unaffected.
+3. **Parser hardened** (§3): chapter part `[1-9]\d{0,2}` (no zero/leading-zero chapters), balanced
+   subdivision groups only, and acceptance of the canonical `sec.` short form and `RSMo <year>` /
+   `RSMo Supp. <year>` suffixes.
+4. **Case-law annotations cut from the section excerpt** (§5). Revisor-authored judicial-decision
+   commentary is not statutory text; the enactment-history / effective-date line IS kept.
+5. **Response-identity check anchored** (§5): the isolated slice must BEGIN with the requested
+   section number. Executed proof: `536.010`'s own body cross-references `536.100`, which the old
+   contains-anywhere check wrongly accepted as a `536.100` page.
+
+**Counts in §1 and §6 are pre-amendment.** Amendments 1 and 2 both REDUCE what maps, on purpose —
+re-derive every count from a fresh dry-run, never from this document.
