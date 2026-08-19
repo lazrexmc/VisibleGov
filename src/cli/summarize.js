@@ -206,7 +206,13 @@ async function markStale(client, staleSummaries) {
 // predates this fix).
 export async function persistReferencedTermsGracefully(client, runId, { bill, summaryId, referencedTerms }) {
   try {
-    const { termsUpserted } = await persistReferencedTerms(client, runId, { summaryId, referencedTerms });
+    // Task 5 (jurisdiction-aware insert-time dispatch): derive billId from the full bill object
+    // this wrapper already receives — createDraftSummary's own bill_id insert (below) confirms
+    // bill.id is populated by the time this is called. Absent/null threads through as null, which
+    // resolveBillJurisdiction (glossary-terms.js) treats as "no jurisdiction" — today's exact
+    // USC-only mapping behavior, unchanged.
+    const billId = bill?.id ?? null;
+    const { termsUpserted } = await persistReferencedTerms(client, runId, { summaryId, referencedTerms, billId });
     return { termsUpserted, warning: null };
   } catch (err) {
     const missingRelation = isMissingRelationError(err, GLOSSARY_TERMS_TABLE) || isMissingRelationError(err, SUMMARY_TERMS_TABLE);

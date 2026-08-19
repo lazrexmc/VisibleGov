@@ -734,8 +734,11 @@ export async function applyRecordDecision(client, runId, decision) {
   if (insErr) throw new Error(`summary insert failed for bill ${identifier}: ${insErr.message}`);
   const summaryId = inserted.id;
 
+  // Task 5 (jurisdiction-aware insert-time dispatch): billId is already in scope (destructured
+  // from decision above) — threading it through as bill.id lets the wrapper's own
+  // `bill?.id ?? null` derivation (summarize.js) pick it up unchanged.
   const { termsUpserted, warning } = await persistReferencedTermsGracefully(client, runId, {
-    bill: { identifier }, summaryId, referencedTerms,
+    bill: { identifier, id: billId }, summaryId, referencedTerms,
   });
 
   if (decision.action === 'leaveUnverified') {

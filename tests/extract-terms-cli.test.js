@@ -51,7 +51,10 @@ test('normalizeTermText handles empty/nullish input without throwing', () => {
 
 test('upsertKeyFor: a term with a parseable USC citation upserts by citation, not needing mapping', () => {
   const key = upsertKeyFor({ term: 'Social Security Act', kind: 'act', citation_raw: '42 U.S.C. 1396b' });
-  assert.deepEqual(key, { by: 'citation', needs_mapping: false });
+  // Task 5 (jurisdiction-aware insert-time dispatch): `citation` is a new, additive field on the
+  // by:'citation' branch — carries the normalized string so upsertGlossaryTerm no longer re-derives
+  // it. Not a behavior change to which branch this citation takes.
+  assert.deepEqual(key, { by: 'citation', needs_mapping: false, citation: '42 U.S.C. 1396b' });
 });
 
 test('upsertKeyFor: a term with no citation printed upserts by term, needing mapping', () => {
@@ -66,7 +69,8 @@ test('upsertKeyFor: a popular-name-only citation (no USC cite printed) upserts b
 
 test('upsertKeyFor: a "section X of title Y" citation resolves by citation', () => {
   const key = upsertKeyFor({ term: 'Some Program', kind: 'program', citation_raw: 'section 1396b of title 42' });
-  assert.deepEqual(key, { by: 'citation', needs_mapping: false });
+  // Task 5: additive `citation` field, same reasoning as the test above.
+  assert.deepEqual(key, { by: 'citation', needs_mapping: false, citation: '42 U.S.C. 1396b' });
 });
 
 // ---- normalizeCitation: AS-CITED granularity (fix round 1 controller ruling) — a captured

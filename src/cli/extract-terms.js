@@ -170,7 +170,10 @@ async function extractOne(client, runId, summary, anthropic) {
   // Behavior here is UNCHANGED: any DB error still propagates and hard-fails this summary's
   // extraction (isTypedFailure in main() below doesn't know about DB errors, same as before this
   // fix — extract-terms.js has always preferred a loud crash over a silently partial backfill).
-  return persistReferencedTerms(client, runId, { summaryId: summary.id, referencedTerms: json.referenced_terms ?? [] });
+  // Task 5 (jurisdiction-aware insert-time dispatch): summary.bill_id is already selected
+  // (loadAllSummaries' own `.select('id,bill_id,...)`) — threading it through lets
+  // persistReferencedTerms resolve this bill's jurisdiction and map RSMo citations at insert time.
+  return persistReferencedTerms(client, runId, { summaryId: summary.id, referencedTerms: json.referenced_terms ?? [], billId: summary.bill_id });
 }
 
 // ---- main ----

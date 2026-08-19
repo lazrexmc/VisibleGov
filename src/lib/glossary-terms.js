@@ -11,6 +11,7 @@
 // identical needs_mapping/as-cited-citation rules, no risk of the two ever drifting apart — right
 // after a draft summary row exists, instead of only ever retroactively.
 import { parseCitation } from '../adapters/uscode.js';
+import { parseMoCitation, normalizeMoCitation } from '../adapters/mo-statutes.js';
 import { insertIfAbsent } from './db.js';
 
 export const GLOSSARY_TERMS_TABLE = 'glossary_terms';
@@ -31,11 +32,24 @@ export function normalizeTermText(s) {
 // base `unique (kind, citation)` constraint when parseCitation resolves citation_raw to a real
 // USC cite, and the partial index `(kind, term) where citation is null` when it can't. Which
 // applies is decided ENTIRELY by whether parseCitation resolves — never by kind, never a guess.
-// Pure: does not itself build the normalized citation string or touch the DB (see
-// upsertGlossaryTerm below for that).
-export function upsertKeyFor(term) {
+// Pure: does not itself touch the DB (see upsertGlossaryTerm below for that).
+//
+// Task 5 (jurisdiction-aware insert-time dispatch, mo-statute-glossary-source): a bare MO citation
+// ("section 536.010") looks nothing like a USC citation, so parseCitation never confuses the two —
+// but it's ALSO not self-evidently Missouri without knowing which legislature is speaking. The MO
+// parser (mo-statutes.js) is only ever consulted when jurisdictionId is LITERALLY
+// 'mo-legislature' — every existing caller (jurisdictionId omitted) and any OTHER jurisdiction stay
+// on today's exact unmapped behavior. Never guess: a same-shaped bare citation from a different
+// state's bill must not get mapped to an RSMo gloss it doesn't mean. The `citation` field is
+// additive on the `by:'citation'` branch — carries the normalized string for BOTH sources (USC and
+// RSMo) so upsertGlossaryTerm no longer needs to re-derive it (and re-parse) itself.
+export function upsertKeyFor(term, jurisdictionId = null) {
   const parsed = parseCitation(term.citation_raw);
-  if (parsed) return { by: 'citation', needs_mapping: false };
+  if (parsed) return { by: 'citation', needs_mapping: false, citation: normalizeCitation(term.citation_raw) };
+  if (jurisdictionId === 'mo-legislature') {
+    const mo = parseMoCitation(term.citation_raw);
+    if (mo) return { by: 'citation', needs_mapping: false, citation: normalizeMoCitation(mo) };
+  }
   return { by: 'term', needs_mapping: true };
 }
 
@@ -86,13 +100,13 @@ async function findExistingGlossaryTerm(client, { kind, citation, term }) {
 //   reject it outright ("no unique or exclusion constraint matching"). This is the SAME shape as
 //   ingest.js's findExistingTerm/upsertTerm working around a nullable start_date breaking
 //   ON CONFLICT dedup: manual check-then-insert instead of insertIfAbsent for this branch only.
-export async function upsertGlossaryTerm(client, runId, rawTerm) {
-  const key = upsertKeyFor(rawTerm);
+export async function upsertGlossaryTerm(client, runId, rawTerm, jurisdictionId = null) {
+  const key = upsertKeyFor(rawTerm, jurisdictionId);
   const term = normalizeTermText(rawTerm.term);
   const kind = rawTerm.kind;
 
   if (key.by === 'citation') {
-    const citation = normalizeCitation(rawTerm.citation_raw);
+    const citation = key.citation;
     await insertIfAbsent(client, GLOSSARY_TERMS_TABLE,
       [{ term, kind, citation, status: 'draft', needs_mapping: false, run_id: runId }], 'kind,citation');
     const existing = await findExistingGlossaryTerm(client, { kind, citation, term: null });
@@ -107,6 +121,22 @@ export async function upsertGlossaryTerm(client, runId, rawTerm) {
     .select('id').single();
   if (error) throw new Error(`${GLOSSARY_TERMS_TABLE} insert failed for ${kind}/"${term}": ${error.message}`);
   return data.id;
+}
+
+// resolveBillJurisdiction: bills carries NO jurisdiction column — it is two hops away
+// (bills.session_id -> sessions.jurisdiction_id; audit finding, 2026-08-19). Null-safe on
+// missing rows (-> USC-only mapping, today's exact behavior): term persistence must never fail
+// over a lookup miss. Real DB errors propagate typed — summarize.js's graceful wrapper catches
+// them (persistReferencedTermsGracefully), extract-terms.js prefers the loud crash (both existing
+// policies, unchanged by this task).
+export async function resolveBillJurisdiction(client, billId) {
+  if (!billId) return null;
+  const { data: bill, error: billErr } = await client.from('bills').select('session_id').eq('id', billId).maybeSingle();
+  if (billErr) throw new Error(`bills lookup failed for ${billId}: ${billErr.message}`);
+  if (!bill?.session_id) return null;
+  const { data: session, error: sessErr } = await client.from('sessions').select('jurisdiction_id').eq('id', bill.session_id).maybeSingle();
+  if (sessErr) throw new Error(`sessions lookup failed for ${bill.session_id}: ${sessErr.message}`);
+  return session?.jurisdiction_id ?? null;
 }
 
 // persistReferencedTerms: for each {term, kind, citation_raw} in referencedTerms, upsert a
@@ -125,11 +155,15 @@ export async function upsertGlossaryTerm(client, runId, rawTerm) {
 // harmless metadata that extract-terms.js's caller never looks at (its own behavior, and its
 // tests, are unaffected), but that summarize.js's persistReferencedTermsGracefully now reads to
 // build an honest, specific warning instead of a generic one.
-export async function persistReferencedTerms(client, runId, { summaryId, referencedTerms }) {
+export async function persistReferencedTerms(client, runId, { summaryId, referencedTerms, billId = null }) {
   let termsUpserted = 0;
+  // Resolved ONCE before the loop, not per-term — every term in one referencedTerms batch comes
+  // from the same bill, so its jurisdiction can't vary term to term (and re-resolving per term
+  // would be N redundant round trips for a batch of N terms).
+  const jurisdictionId = await resolveBillJurisdiction(client, billId);
   for (const rawTerm of referencedTerms) {
     try {
-      const termId = await upsertGlossaryTerm(client, runId, rawTerm);
+      const termId = await upsertGlossaryTerm(client, runId, rawTerm, jurisdictionId);
       await insertIfAbsent(client, SUMMARY_TERMS_TABLE, [{ summary_id: summaryId, term_id: termId }], 'summary_id,term_id');
       termsUpserted += 1;
     } catch (err) {
