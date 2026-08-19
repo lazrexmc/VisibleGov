@@ -85,10 +85,13 @@ test('extractMoSectionText throws OversizeExcerptError instead of truncating', (
   assert.throws(() => extractMoSectionText(padded, { section: '536.010', url: 'x' }), OversizeExcerptError);
 });
 
-test('extractMoSectionText extracts a repealed section honestly (repeal notice IS official text)', () => {
-  // Skip cleanly if Task 1 could not capture a repealed fixture (documented in SOURCES.md).
+test('extractMoSectionText extracts a repealed section honestly (repeal notice IS official text)', (t) => {
+  // Minor finding 5: skip HONESTLY (visible in test output as skipped, not silently as passed)
+  // if Task 1 could not capture a repealed fixture (documented in SOURCES.md). The fixture file
+  // exists in this repo (tests/fixtures/mo-statutes/section-repealed.html), so this branch is not
+  // expected to fire live — it is a documented fallback for a future re-capture, not a shrug.
   let html;
-  try { html = fx('section-repealed.html'); } catch { return; }
+  try { html = fx('section-repealed.html'); } catch { t.skip('section-repealed.html fixture not captured'); return; }
   const section = '1.022';
   const text = extractMoSectionText(html, { section, url: 'x' });
   assert.ok(text.includes(section));
@@ -107,6 +110,59 @@ test('extractMoChapterText identity check: wrong chapter fails typed', () => {
 
 test('extractMoChapterText bot page fails typed', () => {
   assert.throws(() => extractMoChapterText(fx('bot-page.html'), { chapter: '536', url: 'x' }), MoBotPageError);
+});
+
+test('extractMoChapterText throws MoPageIdentityError on a section page for the same chapter, instead of silently returning empty text (Important finding 1)', () => {
+  // Empirically: the chapter layout div markers (MO_CHAPTER_BODY_START/END) are site-wide
+  // template chrome present on section pages too, and the old whole-page identity check's
+  // dotted-number alternative (`\b536\.\d{3}`) is satisfied by the section page's own
+  // "536.010" text. Before this fix, extractMoChapterText(section-536.010 fixture, {chapter:
+  // '536'}) both isolated AND identity-passed, then returned an EMPTY string (the chapter div
+  // markers exist on the section page but bracket nothing) — silently handing empty text to a
+  // gloss author. It must now throw typed instead.
+  assert.throws(
+    () => extractMoChapterText(fx('section-536.010.html'), { chapter: '536', url: 'x' }),
+    MoPageIdentityError,
+  );
+});
+
+test('extractMoSectionText throws MoPageIdentityError when the isolated slice strips to empty even though both real markers are present (template drift)', () => {
+  // Synthetic splice of the REAL fixture: keep both real body markers (so isolateBetween itself
+  // does not throw for a missing marker — that is finding 1's OTHER, already-covered failure
+  // mode, tested above) but delete everything between them, so the isolated+stripped excerpt is
+  // the empty string. Per finding 1a, this must be its own typed refusal, not a silent empty
+  // extraction.
+  const real = fx('section-536.010.html');
+  const START = '<div class="norm" title="" style="background-color:#fffff7;padding-left:.75%;padding-right:.75%;">';
+  const END = '<hr><div style="padding:.2em 0em 0em 2em;">';
+  const s = real.indexOf(START);
+  const e = real.indexOf(END, s + START.length);
+  assert.ok(s !== -1 && e !== -1, 'fixture must still contain both real markers this test splices around');
+  const spliced = real.slice(0, s + START.length) + real.slice(e);
+  assert.throws(
+    () => extractMoSectionText(spliced, { section: '536.010', url: 'x' }),
+    MoPageIdentityError,
+  );
+});
+
+test('extractMoChapterText identity check requires the Chapter N heading in the ISOLATED slice, not just a same-chapter dotted section number anywhere on the page', () => {
+  // The real chapter-536 fixture's isolated slice contains the literal heading "Chapter 536
+  // Administrative Procedure and Review" (verified against the captured fixture) — this is the
+  // real signal the identity check should key on. This test pins that the extraction still
+  // succeeds off that heading now that the whole-page dotted-number alternative is gone.
+  const text = extractMoChapterText(fx('chapter-536.html'), { chapter: '536', url: 'x' });
+  assert.ok(text.length > 0);
+});
+
+test('stripMoHtml decodes &amp; LAST so a literal &amp;lt; in source text does not double-decode into a bare <  (Minor finding 2)', () => {
+  const real = fx('section-536.010.html');
+  const spliced = real.replace(
+    'For the purpose of this chapter',
+    'For the purpose of this chapter &amp;lt; literal-marker',
+  );
+  const text = extractMoSectionText(spliced, { section: '536.010', url: 'x' });
+  assert.ok(text.includes('&lt; literal-marker'), 'literal &amp;lt; must decode to the two-character text "&lt;", not "<"');
+  assert.ok(!text.includes('< literal-marker'), 'must never double-decode &amp;lt; into a bare <');
 });
 
 test('MO URL builders produce the verified revisor.mo.gov shapes', () => {

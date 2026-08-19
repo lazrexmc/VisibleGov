@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseArgs, planGlossing, persistGloss, GLOSS_COST_PER_TERM_USD, loadAllTerms,
+  parseArgs, planGlossing, persistGloss, GLOSS_COST_PER_TERM_USD, loadAllTerms, FAILURE_TYPES,
 } from '../src/cli/gloss.js';
+import { MoBotPageError, MoPageIdentityError } from '../src/adapters/mo-statutes.js';
 
 // ---- planGlossing: the branched routing decision (mirrors extract-terms.js's planExtraction) ----
 
@@ -50,6 +51,19 @@ test('planGlossing partitions a mixed batch into all four mutually exclusive buc
   assert.deepEqual(plan.needsMapping.map((t) => t.id), ['needs-mapping']);
   assert.deepEqual(plan.rejected.map((t) => t.id), ['rejected-1']);
   assert.deepEqual(plan.candidates.map((t) => t.id), ['candidate-1', 'candidate-2']);
+});
+
+// ---- FAILURE_TYPES pinning (Minor finding 4) ----
+//
+// Spec §4: receiving revisor.mo.gov's bot-detection page is a whole-run HARD STOP, not a
+// counted-and-continued per-term failure — abort the run honestly, never retry-hammer past it.
+// A page-identity mismatch (MoPageIdentityError) gets the same treatment: both must propagate
+// uncaught through the CLI's per-term try/catch (isTypedFailure) and abort the batch, rather than
+// being recorded in failures[] like the source-fetch/verification failure types that ARE listed.
+// This pins that neither MO adapter's typed identity errors are ever added to FAILURE_TYPES.
+test('FAILURE_TYPES does not include MoBotPageError or MoPageIdentityError — both are whole-run hard stops per spec §4, never counted-and-continued', () => {
+  assert.ok(!FAILURE_TYPES.includes(MoBotPageError), 'MoBotPageError must abort the run, not be counted and continued');
+  assert.ok(!FAILURE_TYPES.includes(MoPageIdentityError), 'MoPageIdentityError must abort the run, not be counted and continued');
 });
 
 test('planGlossing on an empty term list returns four empty buckets', () => {

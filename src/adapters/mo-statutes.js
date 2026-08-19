@@ -57,6 +57,14 @@ export class MoPageIdentityError extends Error {
   constructor(message, meta = {}) { super(message); this.name = 'MoPageIdentityError'; Object.assign(this, meta); }
 }
 
+// Minor finding 2: &amp; MUST decode last. Decoding it first turns a literal "&amp;lt;" in the
+// source (i.e. the two visible characters "&lt;") into "&lt;" after the &amp; pass, which the
+// &lt; pass below would then ALSO decode, double-decoding it into a bare "<" — text that was
+// never actually a real HTML tag delimiter in the original page. Every other named/numeric
+// entity is safe to decode before &amp; since none of their OUTPUTS collide with another
+// entity's pattern; only &amp; -> "&" produces new text that a later replace in this same chain
+// would re-interpret. (uscode.js's stripStatuteHtml has this same ordering issue — out of scope
+// per this fix's brief; left untouched there.)
 function stripMoHtml(raw) {
   return raw
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
@@ -65,11 +73,11 @@ function stripMoHtml(raw) {
     .replace(/&ndash;/gi, '-')
     .replace(/&mdash;/gi, '—')
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#\d+;/g, ' ')
+    .replace(/&amp;/gi, '&')
     .replace(/[ \t]+/g, ' ')
     .replace(/\s*\n\s*/g, '\n')
     .trim();
@@ -127,23 +135,46 @@ function isolateBetween(html, startMarker, endMarker, meta = {}) {
   return html.slice(startIdx, e);
 }
 
-// extractMoSectionText(html, {section, url}) -> plain text. Order per spec §5: bot check ->
-// response-identity check -> isolate -> strip -> size gate. Never truncates; throws
-// OversizeExcerptError instead (same discipline as uscode.js's extractSectionText).
+// Throws MoPageIdentityError when the isolated+stripped excerpt is the empty string (Important
+// finding 1a). Empirically: revisor.mo.gov's chapter-page layout div markers are site-wide
+// template chrome present on OTHER page types too (verified: they bracket zero content on a
+// section page), so isolateBetween can succeed — both markers found — while the slice between
+// them carries nothing. An empty-but-200 response must never flow silently into a gloss author
+// as source text (same posture as uscode.js's extractSubsectionText empty-slice guard, ~:221-226).
+// Deliberately its own check ahead of the marker-presence regex below: an empty string trivially
+// fails that regex too, but this gives the honest, specific diagnosis ("empty slice" vs "slice
+// present but wrong page") instead of collapsing both into one generic message.
+function assertNotEmptyExcerpt(text, meta) {
+  if (text.length === 0) {
+    throw new MoPageIdentityError(
+      `revisor.mo.gov response isolated an EMPTY excerpt for ${meta.section ? `section ${meta.section}` : `chapter ${meta.chapter}`} — the page is not what was asked for, or the template drifted`,
+      meta,
+    );
+  }
+}
+
+// extractMoSectionText(html, {section, url}) -> plain text. Order per spec §5 (Important finding
+// 1b/1c restructuring): bot check -> isolate -> strip -> empty-excerpt guard -> response-identity
+// check (now run on the ISOLATED, stripped slice, not the whole raw page) -> size gate. Never
+// truncates; throws OversizeExcerptError instead (same discipline as uscode.js's
+// extractSectionText).
 export function extractMoSectionText(html, meta = {}) {
   assertNotBotPage(html, meta);
-  // Response-identity (spec §5): the page must print the requested section's own number
+  // Body isolation: derived from the REAL fixture (Task 1) — slice from the section-number
+  // heading to the page's own end-of-content boundary, then strip. Keeps the effective-date line.
+  const text = stripMoHtml(isolateBetween(html, MO_SECTION_BODY_START, MO_SECTION_BODY_END, meta));
+  assertNotEmptyExcerpt(text, meta);
+  // Response-identity (spec §5): the ISOLATED SLICE must print the requested section's own number
   // marker before ANY text is trusted — a wrong or generic page must never become a gloss source.
+  // Checking the slice (not the whole page, per finding 1c) matters because the whole page also
+  // carries nav/history-table/cross-reference chrome that can mention other section numbers.
   const escaped = meta.section.replace(/\./g, '\\.');
-  if (!new RegExp(`\\b${escaped}\\.?\\s`).test(html.replace(/<[^>]+>/g, ' '))) {
+  if (!new RegExp(`\\b${escaped}\\.?\\s`).test(text)) {
     throw new MoPageIdentityError(
       `revisor.mo.gov response does not carry section ${meta.section}'s own marker — refusing to extract`,
       meta,
     );
   }
-  // Body isolation: derived from the REAL fixture (Task 1) — slice from the section-number
-  // heading to the page's own end-of-content boundary, then strip. Keeps the effective-date line.
-  const text = stripMoHtml(isolateBetween(html, MO_SECTION_BODY_START, MO_SECTION_BODY_END, meta));
   if (text.length > MAX_EXCERPT_CHARS) {
     throw new OversizeExcerptError(
       `excerpt for RSMo ${meta.section} is ${text.length} chars, exceeds MAX_EXCERPT_CHARS=${MAX_EXCERPT_CHARS}; will not truncate silently`,
@@ -154,17 +185,25 @@ export function extractMoSectionText(html, meta = {}) {
 }
 
 // extractMoChapterText(html, {chapter, url}) -> plain text. Same order as extractMoSectionText.
+// Important finding 1b: the identity check now requires `\bChapter\s+<N>\b` in the ISOLATED
+// slice's stripped text — verified present in the real chapter-536 fixture's slice, which opens
+// with the literal heading "Chapter 536 Administrative Procedure and Review". The old whole-page
+// dotted-number alternative (`\b<chapter>\.\d{3}`) is DROPPED: it was satisfied by any same-
+// chapter SECTION page (536.010's own page contains "536.010" — a false identity pass) and even
+// by bot-page boilerplate for single-digit chapters ("3.090" on the bot page satisfies chapter
+// '3'). The bot page carries no "Chapter <digit>" text at all, so the surviving check alone still
+// refuses it — though assertNotBotPage below already short-circuits that case unconditionally
+// first regardless.
 export function extractMoChapterText(html, meta = {}) {
   assertNotBotPage(html, meta);
-  const stripped = html.replace(/<[^>]+>/g, ' ');
-  if (!new RegExp(`\\bChapter\\s+${meta.chapter}\\b`, 'i').test(stripped)
-      && !new RegExp(`\\b${meta.chapter}\\.\\d{3}`).test(stripped)) {
+  const text = stripMoHtml(isolateBetween(html, MO_CHAPTER_BODY_START, MO_CHAPTER_BODY_END, meta));
+  assertNotEmptyExcerpt(text, meta);
+  if (!new RegExp(`\\bChapter\\s+${meta.chapter}\\b`, 'i').test(text)) {
     throw new MoPageIdentityError(
       `revisor.mo.gov response does not carry chapter ${meta.chapter}'s own marker — refusing to extract`,
       meta,
     );
   }
-  const text = stripMoHtml(isolateBetween(html, MO_CHAPTER_BODY_START, MO_CHAPTER_BODY_END, meta));
   if (text.length > MAX_EXCERPT_CHARS) {
     throw new OversizeExcerptError(
       `excerpt for RSMo chapter ${meta.chapter} is ${text.length} chars, exceeds MAX_EXCERPT_CHARS=${MAX_EXCERPT_CHARS}; will not truncate silently`,

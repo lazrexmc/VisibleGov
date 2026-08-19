@@ -27,7 +27,13 @@ const GLOSSARY_VERIFICATIONS_TABLE = 'glossary_verifications';
 // fetch failures (network/429), and the same model-response/verification-completeness failures
 // verify.js and extract-terms.js already established. A term hitting any of these is recorded in
 // failures[] and the batch continues — never a silent drop, never an aborted run.
-const FAILURE_TYPES = [
+// Exported (Minor finding 4) so tests can pin what belongs here — in particular, that
+// MoBotPageError and MoPageIdentityError (src/adapters/mo-statutes.js) are DELIBERATELY absent:
+// per spec §4, a bot-detection page is a whole-run hard stop (abort honestly, never retry-hammer
+// or count-and-continue past it), and a page-identity mismatch gets the same treatment — both
+// propagate up through fetchGlossSource uncaught and abort the batch, rather than being recorded
+// in failures[] and continued past like the types actually listed below.
+export const FAILURE_TYPES = [
   OversizeExcerptError, UscSectionNotFoundError, SubsectionNotFoundError,
   SourceFetchError, RateLimitedError,
   SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError, EmptyGlossError,

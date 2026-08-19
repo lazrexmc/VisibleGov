@@ -112,6 +112,17 @@ export async function executeBackfillPlan(client, runId, plan) {
   // next run — an already-updated survivor drops out of the needs_mapping=true scan, and a
   // stranded loser (linked to a survivor now mapped) simply re-plans as a collision with a mapped
   // row on the next dry-run/apply pass.
+  //
+  // Minor finding 3 — this "re-plans cleanly" claim is honest for a crash BETWEEN the two loops,
+  // but NOT for a crash inside a single merge iteration, between its link-delete (below) and its
+  // loser-delete (below that): the loser's summary_terms links are already gone (repointed to the
+  // survivor) but the loser row itself survives, still needs_mapping=true with citation still
+  // null. The next plan sees a needs_mapping row with zero links and skips it under
+  // skips.zeroLinks — forever, since it can never gain new links once its citation is null and it
+  // no longer appears in any summary's extraction. This is harmless cruft (a citation-null,
+  // link-less, gloss-less stub — never rendered, never re-merged, never deleted) rather than a
+  // correctness bug, but it is a residual, not a clean re-plan; stated honestly here rather than
+  // implying the merge loop is fully crash-transparent.
   for (const u of plan.updates) {
     // .is('citation', null) is the concurrent-write guard: a row someone else already mapped
     // is silently skipped, not clobbered. Count via returned rows, never `count` (PLAYBOOK
