@@ -106,8 +106,29 @@ export async function fetchBackfillInputs(client) {
 
 // ---- execute (Task 7): apply a plan's updates then merges, guarded against concurrent writes ----
 
+// PostgREST surfaces a constraint violation as a returned {data:null, error:{code,message}} object
+// (supabase-js does NOT throw for it) — so every write below reads `error` and these two predicates
+// classify it. Both check the SQLSTATE code and the message text: the code is authoritative when
+// present, and the message is the fallback for shapes/relays that drop it.
+const isUniqueViolation = (e) => e?.code === '23505' || /duplicate key/i.test(String(e?.message ?? ''));
+const isForeignKeyViolation = (e) => e?.code === '23503' || /foreign key/i.test(String(e?.message ?? ''));
+
 export async function executeBackfillPlan(client, runId, plan) {
   const result = { updated: 0, merged: 0, skipped: [] };
+  try {
+    await applyBackfillPlan(client, runId, plan, result);
+  } catch (err) {
+    // Honest partial reporting (F5): an unexpected throw must never LOSE the counts already
+    // earned. main()'s catch spreads this into the closeRun 'failed' detail, so a run that died
+    // halfway still records exactly what it did before it died, instead of reporting only an
+    // error string over an unknown amount of committed work.
+    if (err && typeof err === 'object') err.partialResult = result;
+    throw err;
+  }
+  return result;
+}
+
+async function applyBackfillPlan(client, runId, plan, result) {
   // Order matters: updates before merges. A crash between the two loops re-plans cleanly on the
   // next run — an already-updated survivor drops out of the needs_mapping=true scan, and a
   // stranded loser (linked to a survivor now mapped) simply re-plans as a collision with a mapped
@@ -124,14 +145,24 @@ export async function executeBackfillPlan(client, runId, plan) {
   // correctness bug, but it is a residual, not a clean re-plan; stated honestly here rather than
   // implying the merge loop is fully crash-transparent.
   for (const u of plan.updates) {
-    // .is('citation', null) is the concurrent-write guard: a row someone else already mapped
-    // is silently skipped, not clobbered. Count via returned rows, never `count` (PLAYBOOK
-    // lesson 20 — this backend never populates count on .update().select()).
+    // .is('citation', null) guards THE TARGET ROW ONLY: a row someone else already mapped is
+    // silently skipped, not clobbered. It is NOT a guard against the other race — a DIFFERENT row
+    // claiming this same (kind, citation) between planning and this write. That collision surfaces
+    // as a unique violation on glossary_terms' base `unique (kind, citation)` constraint (migration
+    // 0007) and is caught below as an honest skip (F5). Count via returned rows, never `count`
+    // (PLAYBOOK lesson 20 — this backend never populates count on .update().select()).
+    // run_id stamps the write with this run (codebase convention: every write path stamps its run).
     // eslint-disable-next-line no-await-in-loop -- sequential writes, small per-run batch
     const { data, error } = await client.from('glossary_terms')
-      .update({ citation: u.citation, needs_mapping: false })
+      .update({ citation: u.citation, needs_mapping: false, run_id: runId })
       .eq('id', u.id).is('citation', null).select('id');
-    if (error) throw new Error(`update failed for ${u.id} (${u.citation}): ${error.message}`);
+    if (error) {
+      if (isUniqueViolation(error)) {
+        result.skipped.push({ id: u.id, reason: 'another row claimed (kind, citation) mid-apply — next plan will merge this row into it' });
+        continue;
+      }
+      throw new Error(`update failed for ${u.id} (${u.citation}): ${error.message}`);
+    }
     if ((data ?? []).length === 1) result.updated += 1;
     else result.skipped.push({ id: u.id, reason: 'update matched no citation-null row (already mapped?)' });
   }
@@ -158,12 +189,30 @@ export async function executeBackfillPlan(client, runId, plan) {
       result.skipped.push({ id: m.loserId, reason: 'loser is not a bare stub at execute time — merge aborted' });
       continue;
     }
-    for (const summaryId of m.linkMoves) {
+    // LIVE link re-read before repointing (F5). m.linkMoves is the PLANNING snapshot — it stays in
+    // the dry-run output verbatim because that is what a human reviews and approves. Execute time
+    // must use LIVE state instead: a link minted onto the loser after planning is absent from
+    // m.linkMoves, so repointing the planned set alone and then deleting the loser's links
+    // wholesale would DESTROY that new link (a summary silently losing its glossary reference).
+    // eslint-disable-next-line no-await-in-loop -- sequential writes, small per-run batch
+    const { data: liveLinks, error: liveLinkErr } = await client.from('summary_terms')
+      .select('summary_id').eq('term_id', m.loserId);
+    if (liveLinkErr) throw new Error(`live link read failed for ${m.loserId}: ${liveLinkErr.message}`);
+    const liveSummaryIds = (liveLinks ?? []).map((l) => l.summary_id);
+    for (const summaryId of liveSummaryIds) {
       // eslint-disable-next-line no-await-in-loop -- sequential writes, small per-run batch
       await insertIfAbsent(client, 'summary_terms', [{ summary_id: summaryId, term_id: m.survivorId }], 'summary_id,term_id');
     }
-    const { error: linkDelErr } = await client.from('summary_terms').delete().eq('term_id', m.loserId);
-    if (linkDelErr) throw new Error(`link delete failed for ${m.loserId}: ${linkDelErr.message}`);
+    if (liveSummaryIds.length > 0) {
+      // Scoped to EXACTLY the set just repointed, never a bare .eq('term_id', loser): a link minted
+      // between the re-read above and this delete is outside the .in() list and survives un-deleted
+      // (it then blocks the loser delete below with a foreign-key violation, which is handled
+      // honestly rather than by destroying the link).
+      // eslint-disable-next-line no-await-in-loop -- sequential writes, small per-run batch
+      const { error: linkDelErr } = await client.from('summary_terms')
+        .delete().eq('term_id', m.loserId).in('summary_id', liveSummaryIds);
+      if (linkDelErr) throw new Error(`link delete failed for ${m.loserId}: ${linkDelErr.message}`);
+    }
     // Same concurrent-write discipline as the update loop above: a delete that matched zero rows
     // (the .is('citation', null) guard blocked it — someone else mapped this loser between the
     // live stub re-check above and this delete, e.g. two overlapping --apply invocations) must
@@ -171,9 +220,24 @@ export async function executeBackfillPlan(client, runId, plan) {
     // 20). The loser's links were already repointed to the survivor above, so this is reported
     // honestly rather than retried or rolled back — the next plan/apply cycle will see the loser
     // still present and either merge it again or, if it's genuinely now mapped, leave it alone.
+    // eslint-disable-next-line no-await-in-loop -- sequential writes, small per-run batch
     const { data: delData, error: delErr } = await client.from('glossary_terms')
       .delete().eq('id', m.loserId).is('citation', null).select('id');
-    if (delErr) throw new Error(`loser delete failed for ${m.loserId}: ${delErr.message}`);
+    if (delErr) {
+      // A foreign-key violation here means exactly one thing (F5): a summary_terms link was minted
+      // onto the loser between this merge's live link re-read and this delete, so the loser is
+      // still referenced. Report it honestly and CONTINUE — never abort the whole run, and never
+      // "fix" it by deleting the new link, which would silently drop a real reference. The next
+      // plan/apply cycle sees the loser still present with a link and completes the merge.
+      if (isForeignKeyViolation(delErr)) {
+        result.skipped.push({
+          id: m.loserId,
+          reason: 'loser gained a new link mid-merge — links repointed, loser row kept; next plan/apply completes it',
+        });
+        continue;
+      }
+      throw new Error(`loser delete failed for ${m.loserId}: ${delErr.message}`);
+    }
     if ((delData ?? []).length === 1) result.merged += 1;
     else {
       result.skipped.push({
@@ -215,7 +279,10 @@ export async function main(argv = process.argv.slice(2)) {
     await closeRun(client, runId, 'succeeded', { ...summary, ...result, skipped: result.skipped });
     console.log(JSON.stringify({ ...summary, ...result }, null, 2));
   } catch (err) {
-    await closeRun(client, runId, 'failed', { ...summary, error: err.message });
+    // F5 honest partial reporting: executeBackfillPlan attaches the in-progress counts to the
+    // error before rethrowing, so a run that died halfway records exactly what it committed
+    // (updated/merged/skipped) instead of an error string over an unknown amount of real work.
+    await closeRun(client, runId, 'failed', { ...summary, ...(err.partialResult ?? {}), error: err.message });
     throw err;
   }
 }

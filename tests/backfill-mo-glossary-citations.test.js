@@ -20,13 +20,42 @@ test('update in place: a clean MO-referenced section term maps', () => {
 
 test('jurisdiction guard: mixed or federal references never map; zero links never map', () => {
   const plan = planMoCitationBackfill({
-    terms: [T('t1', 'chapter 303'), T('t2', 'section 33.080'), T('t3', '302.309')],
+    terms: [T('t1', 'section 303.190'), T('t2', 'section 33.080'), T('t3', '302.309')],
     linksByTermId: new Map([['t1', ['s1', 's2']], ['t2', ['s2']]]),
     jurisdictionBySummaryId: new Map([['s1', MO], ['s2', FED]]),
   });
   assert.equal(plan.updates.length, 0);
   assert.equal(plan.skips.guardBlocked, 2);
   assert.equal(plan.skips.zeroLinks, 1);
+});
+
+// F1 (post-audit fix wave, 2026-08-19): chapters left v1, so planMoCitationBackfill needs no code
+// change of its own — it purely delegates to parseMoCitation, and a chapter term now parse-fails.
+// This pins that it lands in skips.parseFailed (staying needs_mapping, honestly) rather than in
+// updates, and that the parse failure is counted BEFORE the jurisdiction guard ever runs.
+test('chapters land in skips.parseFailed, never in updates (F1)', () => {
+  const plan = planMoCitationBackfill({
+    terms: [T('t1', 'chapter 536'), T('t2', 'chapter 303, RSMo'), T('t3', 'RSMo chapter 536')],
+    linksByTermId: new Map([['t1', ['s1']], ['t2', ['s1']], ['t3', ['s1']]]),
+    jurisdictionBySummaryId: new Map([['s1', MO]]),
+  });
+  assert.equal(plan.updates.length, 0);
+  assert.equal(plan.merges.length, 0);
+  assert.equal(plan.skips.parseFailed, 3);
+  assert.equal(plan.skips.guardBlocked, 0);
+});
+
+// F2 (post-audit fix wave): the low-chapter corroboration guard reaches the backfill through the
+// same delegation — a BARE 'section 2.100' (ambiguous with a MO appropriations bill's own internal
+// section numbering) parse-fails, while the RSMo-corroborated form still maps.
+test('a bare low-chapter dotted cite parse-fails in the backfill; the RSMo-corroborated form maps (F2)', () => {
+  const plan = planMoCitationBackfill({
+    terms: [T('t1', 'section 2.100'), T('t2', 'section 1.140, RSMo')],
+    linksByTermId: new Map([['t1', ['s1']], ['t2', ['s1']]]),
+    jurisdictionBySummaryId: new Map([['s1', MO]]),
+  });
+  assert.equal(plan.skips.parseFailed, 1);
+  assert.deepEqual(plan.updates, [{ id: 't2', term: 'section 1.140, RSMo', citation: 'RSMo 1.140' }]);
 });
 
 test('intra-batch collision: most-linked row survives; tie -> earliest created_at -> smallest id', () => {
@@ -209,8 +238,32 @@ function projectCols(row, cols) {
 }
 
 function rowMatches(row, filters) {
-  return filters.every(([col, val]) => row[col] === val);
+  return filters.every(([col, val, op]) => (op === 'in' ? val.includes(row[col]) : row[col] === val));
 }
+
+// ---- real constraint enforcement (F5, post-audit fix wave) ----
+//
+// The fake previously accepted any write, so it could not catch the two races the audit found: a
+// SECOND row claiming the same (kind, citation) mid-apply, and a summary_terms link minted onto a
+// merge loser mid-merge. Both are enforced by real constraints in the live schema (migration 0007:
+// `unique (kind, citation)` on glossary_terms, and summary_terms.term_id -> glossary_terms.id), so
+// the fake now enforces them too.
+//
+// SHAPE MATTERS: supabase-js does NOT throw on a constraint violation — PostgREST returns it, and
+// the client hands back {data: null, error: {code, message}}. Every write path in the CLI reads
+// `error` off that object, so the fake returns the same shape rather than throwing, or the tests
+// would prove the wrong contract.
+const uniqueViolation = (constraint) => ({
+  data: null,
+  error: { code: '23505', message: `duplicate key value violates unique constraint "${constraint}"` },
+});
+const fkViolation = (constraint) => ({
+  data: null,
+  error: {
+    code: '23503',
+    message: `update or delete on table "glossary_terms" violates foreign key constraint "${constraint}" on table "summary_terms"`,
+  },
+});
 
 // onBeforeExecute(({table, op, filters, store}) => void) is an optional hook fired at the top of
 // every execute() call, before filtering/mutation happens — it exists so a single test can
@@ -232,8 +285,16 @@ function makeFakeDb(seed, { onBeforeExecute } = {}) {
 
     function execute() {
       if (onBeforeExecute) onBeforeExecute({ table, op, filters, store });
-      const rows = store.get(table) ?? [];
+      if (!store.has(table)) store.set(table, []);
+      const rows = store.get(table);
+      const terms = store.get('glossary_terms');
+      const links = store.get('summary_terms');
       if (op === 'upsert') {
+        // FK: summary_terms.term_id -> glossary_terms.id.
+        if (table === 'summary_terms' && terms
+          && upsertRows.some((r) => !terms.some((t) => t.id === r.term_id))) {
+          return fkViolation('summary_terms_term_id_fkey');
+        }
         const keyCols = String(upsertOnConflict).split(',').map((c) => c.trim());
         for (const incoming of upsertRows) {
           const exists = rows.some((r) => keyCols.every((c) => r[c] === incoming[c]));
@@ -243,11 +304,27 @@ function makeFakeDb(seed, { onBeforeExecute } = {}) {
       }
       const matched = rows.filter((r) => rowMatches(r, filters));
       if (op === 'delete') {
+        // FK: a glossary_terms row still referenced by summary_terms cannot be deleted.
+        if (table === 'glossary_terms' && links
+          && matched.some((r) => links.some((l) => l.term_id === r.id))) {
+          return fkViolation('summary_terms_term_id_fkey');
+        }
         const remaining = rows.filter((r) => !matched.includes(r));
         store.set(table, remaining);
         return { data: matched.map((r) => ({ ...r })), error: null };
       }
       if (op === 'update') {
+        // unique (kind, citation) on glossary_terms — checked against the POST-patch value, and
+        // only for a non-null citation (Postgres lets any number of NULLs coexist).
+        if (table === 'glossary_terms') {
+          for (const r of matched) {
+            const next = { ...r, ...patch };
+            if (next.citation != null
+              && rows.some((o) => o !== r && o.citation === next.citation && o.kind === next.kind)) {
+              return uniqueViolation('glossary_terms_kind_citation_key');
+            }
+          }
+        }
         for (const r of matched) Object.assign(r, patch);
         return { data: matched.map((r) => projectCols(r, selectCols ?? 'id')), error: null };
       }
@@ -256,8 +333,9 @@ function makeFakeDb(seed, { onBeforeExecute } = {}) {
 
     const builder = {
       select(cols) { calls.push({ table, method: 'select', args: [cols] }); selectCols = cols; return builder; },
-      eq(col, val) { calls.push({ table, method: 'eq', args: [col, val] }); filters.push([col, val]); return builder; },
-      is(col, val) { calls.push({ table, method: 'is', args: [col, val] }); filters.push([col, val]); return builder; },
+      eq(col, val) { calls.push({ table, method: 'eq', args: [col, val] }); filters.push([col, val, 'eq']); return builder; },
+      is(col, val) { calls.push({ table, method: 'is', args: [col, val] }); filters.push([col, val, 'is']); return builder; },
+      in(col, vals) { calls.push({ table, method: 'in', args: [col, vals] }); filters.push([col, vals, 'in']); return builder; },
       update(p) { calls.push({ table, method: 'update', args: [p] }); op = 'update'; patch = p; return builder; },
       delete() { calls.push({ table, method: 'delete', args: [] }); op = 'delete'; return builder; },
       upsert(rows, opts) {
@@ -290,6 +368,8 @@ test('executeBackfillPlan updates in place with a needs_mapping=true write guard
   const row = fake.store.get('glossary_terms').find((r) => r.id === 't1');
   assert.equal(row.citation, 'RSMo 536.010');
   assert.equal(row.needs_mapping, false);
+  // F5: every write path in this codebase stamps its run — glossary_terms has the run_id column.
+  assert.equal(row.run_id, 'run-1');
 
   // The write must be guarded by .eq('id', 't1').is('citation', null) — a concurrently-mapped row
   // can never be clobbered.
@@ -421,6 +501,134 @@ test('executeBackfillPlan re-verifies the loser stub live before deleting; a glo
   assert.deepEqual(result.skipped, [{ id: 't2', reason: 'loser is not a bare stub at execute time — merge aborted' }]);
   assert.deepEqual(fake.store.get('glossary_terms').map((r) => r.id).sort(), ['t1', 't2']);
   assert.deepEqual(fake.store.get('summary_terms'), [{ summary_id: 's3', term_id: 't2' }]);
+});
+
+// ---- F5 (post-audit fix wave): merge/update concurrency + honest partial reporting ----
+//
+// (a) A link minted onto the LOSER after planning is absent from m.linkMoves. Repointing only the
+// planned set and then deleting the loser's links wholesale would DESTROY it — a summary silently
+// losing a glossary reference. Execute time therefore RE-READS the loser's live links and repoints
+// those; m.linkMoves stays in the dry-run output because that is what a human reviews.
+test('a summary_terms link minted onto the loser AFTER planning is REPOINTED to the survivor, never destroyed (F5)', async () => {
+  const fake = makeFakeDb({
+    glossary_terms: [
+      { id: 't1', kind: 'statute', citation: 'RSMo 536.010', needs_mapping: false, gloss_md: null },
+      { id: 't2', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+    ],
+    // s9 was minted after this plan was built — it is deliberately NOT in linkMoves below.
+    summary_terms: [{ summary_id: 's3', term_id: 't2' }, { summary_id: 's9', term_id: 't2' }],
+    glossary_verifications: [],
+    glossary_notes: [],
+  });
+  const plan = { updates: [], merges: [{ survivorId: 't1', loserId: 't2', citation: 'RSMo 536.010', linkMoves: ['s3'] }] };
+  const result = await executeBackfillPlan(fake, 'run-1', plan);
+  assert.deepEqual(result, { updated: 0, merged: 1, skipped: [] });
+
+  const links = fake.store.get('summary_terms').map((l) => `${l.summary_id}->${l.term_id}`).sort();
+  assert.deepEqual(links, ['s3->t1', 's9->t1'], 'both links, planned and unplanned, end up on the survivor');
+  assert.deepEqual(fake.store.get('glossary_terms').map((r) => r.id), ['t1']);
+
+  // The link delete must be SCOPED to the repointed set, never a bare .eq('term_id', loser).
+  const linkDelete = callsFor(fake, 'summary_terms').findIndex((c) => c.method === 'delete');
+  const afterDelete = callsFor(fake, 'summary_terms').slice(linkDelete);
+  assert.deepEqual(afterDelete.map((c) => c.method), ['delete', 'eq', 'in']);
+  assert.deepEqual(afterDelete[2].args, ['summary_id', ['s3', 's9']]);
+});
+
+// (b) The narrowest window: a link minted BETWEEN the live re-read and the loser delete is outside
+// the scoped .in() delete, so it survives — and the loser row it references can no longer be
+// deleted. The FK violation must be an honest skip that CONTINUES the run, never an abort and
+// never a "fix" that destroys the new link.
+test('a link minted between the live re-read and the loser delete: FK violation becomes an honest skip, loser survives, no data lost (F5)', async () => {
+  const fake = makeFakeDb({
+    glossary_terms: [
+      { id: 't1', kind: 'statute', citation: 'RSMo 536.010', needs_mapping: false, gloss_md: null },
+      { id: 't2', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+    ],
+    summary_terms: [{ summary_id: 's3', term_id: 't2' }],
+    glossary_verifications: [],
+    glossary_notes: [],
+  }, {
+    onBeforeExecute: ({ table, op, store: s }) => {
+      if (table !== 'glossary_terms' || op !== 'delete') return;
+      const links = s.get('summary_terms');
+      if (!links.some((l) => l.summary_id === 's9' && l.term_id === 't2')) {
+        links.push({ summary_id: 's9', term_id: 't2' }); // a second process linked the loser
+      }
+    },
+  });
+  const plan = { updates: [], merges: [{ survivorId: 't1', loserId: 't2', citation: 'RSMo 536.010', linkMoves: ['s3'] }] };
+  const result = await executeBackfillPlan(fake, 'run-1', plan);
+
+  assert.equal(result.merged, 0);
+  assert.deepEqual(result.skipped, [{
+    id: 't2',
+    reason: 'loser gained a new link mid-merge — links repointed, loser row kept; next plan/apply completes it',
+  }]);
+  assert.ok(fake.store.get('glossary_terms').some((r) => r.id === 't2'), 'loser row must survive');
+  const links = fake.store.get('summary_terms').map((l) => `${l.summary_id}->${l.term_id}`).sort();
+  assert.deepEqual(links, ['s3->t1', 's9->t2'], 'the repointed link and the newly-minted link both survive');
+});
+
+// (c) The other race: a DIFFERENT row claims this (kind, citation) between planning and the write.
+// .is('citation', null) cannot see that — it guards the target row only. The unique violation is an
+// honest skip, and the run keeps going: later updates AND merges still execute.
+test('an update losing the (kind, citation) race is an honest skip; later updates and merges still execute (F5)', async () => {
+  const fake = makeFakeDb({
+    glossary_terms: [
+      { id: 'x0', kind: 'statute', citation: 'RSMo 536.010', needs_mapping: false, gloss_md: null },
+      { id: 't1', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+      { id: 't2', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+      { id: 't3', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+    ],
+    summary_terms: [{ summary_id: 's3', term_id: 't3' }],
+    glossary_verifications: [],
+    glossary_notes: [],
+  });
+  const plan = {
+    updates: [
+      { id: 't1', term: 'section 536.010', citation: 'RSMo 536.010' }, // x0 already holds this
+      { id: 't2', term: 'section 302.309', citation: 'RSMo 302.309' }, // must still run
+    ],
+    merges: [{ survivorId: 't2', loserId: 't3', citation: 'RSMo 302.309', linkMoves: ['s3'] }],
+  };
+  const result = await executeBackfillPlan(fake, 'run-1', plan);
+
+  assert.equal(result.updated, 1, 'the second update still ran after the first one lost the race');
+  assert.equal(result.merged, 1, 'merges still ran too');
+  assert.deepEqual(result.skipped, [{
+    id: 't1',
+    reason: 'another row claimed (kind, citation) mid-apply — next plan will merge this row into it',
+  }]);
+  const t1 = fake.store.get('glossary_terms').find((r) => r.id === 't1');
+  assert.equal(t1.citation, null, 'the losing row is left untouched for the next plan to merge');
+  assert.equal(t1.needs_mapping, true);
+  assert.deepEqual(fake.store.get('summary_terms'), [{ summary_id: 's3', term_id: 't2' }]);
+});
+
+// (d) An unexpected (non-race) failure must never LOSE the counts already earned.
+test('an unexpected throw carries err.partialResult with the counts committed so far (F5)', async () => {
+  const boom = new Error('connection reset mid-apply');
+  const fake = makeFakeDb({
+    glossary_terms: [
+      { id: 't1', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+      { id: 't2', kind: 'statute', citation: null, needs_mapping: true, gloss_md: null },
+    ],
+    summary_terms: [{ summary_id: 's3', term_id: 't2' }],
+    glossary_verifications: [],
+    glossary_notes: [],
+  }, {
+    onBeforeExecute: ({ table, op }) => { if (table === 'summary_terms' && op === 'delete') throw boom; },
+  });
+  const plan = {
+    updates: [{ id: 't1', term: 'section 536.010', citation: 'RSMo 536.010' }],
+    merges: [{ survivorId: 't1', loserId: 't2', citation: 'RSMo 536.010', linkMoves: ['s3'] }],
+  };
+  await assert.rejects(() => executeBackfillPlan(fake, 'run-1', plan), (err) => {
+    assert.equal(err, boom, 'the original error propagates unchanged');
+    assert.deepEqual(err.partialResult, { updated: 1, merged: 0, skipped: [] });
+    return true;
+  });
 });
 
 test('idempotency: executing the same plan twice against the same fake writes nothing the second time', async () => {
