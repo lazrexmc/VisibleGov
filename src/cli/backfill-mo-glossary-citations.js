@@ -149,9 +149,23 @@ export async function executeBackfillPlan(client, runId, plan) {
     }
     const { error: linkDelErr } = await client.from('summary_terms').delete().eq('term_id', m.loserId);
     if (linkDelErr) throw new Error(`link delete failed for ${m.loserId}: ${linkDelErr.message}`);
-    const { error: delErr } = await client.from('glossary_terms').delete().eq('id', m.loserId).is('citation', null);
+    // Same concurrent-write discipline as the update loop above: a delete that matched zero rows
+    // (the .is('citation', null) guard blocked it — someone else mapped this loser between the
+    // live stub re-check above and this delete, e.g. two overlapping --apply invocations) must
+    // never silently count as a completed merge. Count via returned rows, never `count` (lesson
+    // 20). The loser's links were already repointed to the survivor above, so this is reported
+    // honestly rather than retried or rolled back — the next plan/apply cycle will see the loser
+    // still present and either merge it again or, if it's genuinely now mapped, leave it alone.
+    const { data: delData, error: delErr } = await client.from('glossary_terms')
+      .delete().eq('id', m.loserId).is('citation', null).select('id');
     if (delErr) throw new Error(`loser delete failed for ${m.loserId}: ${delErr.message}`);
-    result.merged += 1;
+    if ((delData ?? []).length === 1) result.merged += 1;
+    else {
+      result.skipped.push({
+        id: m.loserId,
+        reason: 'loser delete matched no citation-null row (concurrently mapped?) — links already repointed to survivor',
+      });
+    }
   }
   return result;
 }

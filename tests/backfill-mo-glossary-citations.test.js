@@ -190,7 +190,13 @@ function rowMatches(row, filters) {
   return filters.every(([col, val]) => row[col] === val);
 }
 
-function makeFakeDb(seed) {
+// onBeforeExecute(({table, op, filters, store}) => void) is an optional hook fired at the top of
+// every execute() call, before filtering/mutation happens — it exists so a single test can
+// simulate a write from a SECOND, concurrent process landing at a specific point mid-merge (e.g.
+// "someone else maps the loser between this run's live stub re-check and its own delete"), which
+// a purely-seeded starting state can't express: seeding the loser WITH a citation from the start
+// would only ever exercise the EARLIER .maybeSingle() stub lookup, never the delete's own guard.
+function makeFakeDb(seed, { onBeforeExecute } = {}) {
   const store = new Map(Object.entries(seed).map(([table, rows]) => [table, rows.map((r) => ({ ...r }))]));
   const calls = [];
 
@@ -203,6 +209,7 @@ function makeFakeDb(seed) {
     let upsertOnConflict = null;
 
     function execute() {
+      if (onBeforeExecute) onBeforeExecute({ table, op, filters, store });
       const rows = store.get(table) ?? [];
       if (op === 'upsert') {
         const keyCols = String(upsertOnConflict).split(',').map((c) => c.trim());
@@ -288,13 +295,67 @@ test('executeBackfillPlan merges: link repointed insert-if-absent, old links del
   assert.deepEqual(fake.store.get('glossary_terms').map((r) => r.id), ['t1']);
 
   // The loser delete must be guarded by .eq('id', ...).is('citation', null) — a row someone else
-  // already mapped can never be deleted.
+  // already mapped can never be deleted — and must carry .select('id') so the caller can verify
+  // how many rows it actually removed (see the dedicated race-condition test below).
   const deleteCall = callsFor(fake, 'glossary_terms').find((c) => c.method === 'delete');
   assert.ok(deleteCall, 'expected a delete against glossary_terms');
   const afterDelete = callsFor(fake, 'glossary_terms').slice(callsFor(fake, 'glossary_terms').indexOf(deleteCall));
-  assert.deepEqual(afterDelete.map((c) => c.method), ['delete', 'eq', 'is']);
+  assert.deepEqual(afterDelete.map((c) => c.method), ['delete', 'eq', 'is', 'select']);
   assert.deepEqual(afterDelete[1].args, ['id', 't2']);
   assert.deepEqual(afterDelete[2].args, ['citation', null]);
+  assert.deepEqual(afterDelete[3].args, ['id']);
+});
+
+// Important finding (task-7 review, controller ruled it stands): the loser delete didn't verify
+// how many rows it actually removed, unlike the update loop's .is('citation', null) guard check.
+// If a SECOND, concurrent --apply invocation maps the loser's citation in the narrow window
+// between THIS run's live stub re-check (the earlier .maybeSingle() lookup, which already passed
+// since the loser was still a bare stub at that instant) and this run's own delete, the delete's
+// .is('citation', null) guard silently matches zero rows — yet the old code still incremented
+// result.merged, misreporting a completed merge while an orphaned, un-deleted loser survived with
+// its links already repointed to the survivor.
+//
+// Seeding the loser WITH a citation from the start would only ever exercise the EARLIER
+// .maybeSingle() lookup (it would skip with 'loser row gone or already mapped' before ever
+// reaching the delete) — it can't reach the delete's own guard. To exercise that specific guard,
+// this test uses makeFakeDb's onBeforeExecute hook to land the concurrent write at the exact
+// moment the delete itself executes, after the stub re-check has already passed.
+test('executeBackfillPlan: a citation concurrently mapped between the live stub re-check and the delete is an honest skip, never a false merged count', async () => {
+  const fake = makeFakeDb({
+    glossary_terms: [
+      { id: 't1', citation: 'RSMo 536.010', needs_mapping: false, gloss_md: null },
+      { id: 't2', citation: null, needs_mapping: true, gloss_md: null },
+    ],
+    summary_terms: [{ summary_id: 's3', term_id: 't2' }],
+    glossary_verifications: [],
+    glossary_notes: [],
+  }, {
+    onBeforeExecute: ({ table, op, store: s }) => {
+      if (table === 'glossary_terms' && op === 'delete') {
+        const row = s.get('glossary_terms').find((r) => r.id === 't2');
+        if (row) row.citation = 'RSMo 999.999'; // a second process mapped it first
+      }
+    },
+  });
+  const plan = { updates: [], merges: [{ survivorId: 't1', loserId: 't2', citation: 'RSMo 536.010', linkMoves: ['s3'] }] };
+  const result = await executeBackfillPlan(fake, 'run-1', plan);
+
+  assert.equal(result.merged, 0, 'a delete that matched zero citation-null rows must never count as a completed merge');
+  assert.deepEqual(result.skipped, [{
+    id: 't2',
+    reason: 'loser delete matched no citation-null row (concurrently mapped?) — links already repointed to survivor',
+  }]);
+
+  // The loser row survives — orphaned (its link was already repointed above), but never silently
+  // vanished and never reported as a completed merge.
+  const loserRow = fake.store.get('glossary_terms').find((r) => r.id === 't2');
+  assert.ok(loserRow, 'loser row must still exist — the guarded delete did not remove it');
+  assert.equal(loserRow.citation, 'RSMo 999.999');
+
+  // The delete call itself must still carry .select('id') so a zero-row match is observable.
+  const deleteCall = callsFor(fake, 'glossary_terms').find((c) => c.method === 'delete');
+  const afterDelete = callsFor(fake, 'glossary_terms').slice(callsFor(fake, 'glossary_terms').indexOf(deleteCall));
+  assert.deepEqual(afterDelete.map((c) => c.method), ['delete', 'eq', 'is', 'select']);
 });
 
 test('executeBackfillPlan re-verifies the loser stub live before deleting; gloss_md present aborts that merge only', async () => {
