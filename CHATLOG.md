@@ -5038,3 +5038,33 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   Spec: docs/superpowers/specs/2026-08-19-mo-statute-glossary-source-design.md — awaiting
   Lance's review before writing-plans. Zero writes to any table; all analysis via read-only
   scratchpad scripts.
+- **MO statute glossary source — BUILT, 8 SDD tasks + final review CLEAN; live dry-run proves
+  the unlock (2026-08-19, branch mo-statute-glossary-source, commits 82a6733..f0551d2):**
+  subagent-driven execution of the audited spec. Shipped: `src/adapters/mo-statutes.js` (RSMo
+  parser with federal-marker/range refusals; fixture-tested extraction ordered bot-check ->
+  isolate -> identity-on-slice -> size-gate, all typed errors; 5s limiter, 5x inside
+  revisor.mo.gov's enforced 1s bot threshold), real captured fixtures (incl. the bot page and
+  repealed section 1.022 — 6 polite requests total), gloss-time dispatch in glosser.js (RSMo
+  prefix -> MO fetch, USC path byte-identical), insert-time jurisdiction-aware dispatch
+  (upsertKeyFor + resolveBillJurisdiction, threaded through all three call sites — a federal
+  bill's "chapter 303" can never map to RSMo), and the re-mapping backfill CLI (dry-run
+  default; guarded apply: update-in-place with .is(citation,null), deterministic merge
+  survivor most-links -> created_at -> id, live 3-condition stub re-check before any delete,
+  loser-delete row-count verified). Suite 2,394 -> 2,502, fail 0 clean shell throughout. The
+  review machinery earned its keep four times: (1) Task-3's reviewer proved the bot page
+  contains a section-shaped "3.090" — the bot-check-first ordering is load-bearing, not
+  ceremony; (2) Task-7's reviewer caught the loser-delete not verifying its row count (a
+  concurrent mapping could misreport a merge as complete) — fixed with an onBeforeExecute
+  race-injection test; (3) Task-8's LIVE dry-run crashed on a REAL bug no fixture test could
+  see: selectAll hard-orders by id and summary_terms has no id column (composite PK) — fixed
+  with an additive orderBy option (1cb68d5), live-verified, recorded in TODO per Lance's
+  explicit mid-run ask; (4) the final fable review empirically DISPROVED a controller ruling
+  ("a section page lacks the chapter isolation markers" — false: they are site-wide chrome)
+  and found empty excerpts passed untyped — fix wave added typed empty-excerpt refusal +
+  slice-scoped identity checks + a pinning test that MoBotPageError stays a whole-run hard
+  stop (spec §4), re-review clean. **Live dry-run at HEAD: 1,725 updates + 439 merges (2,164
+  terms unlock) / 0 guard-blocked / 0 stub violations / 4,664 parse-failed (ranges, specials,
+  federal, agencies — out of v1 scope by design), = 1,557 distinct sections + 168 chapters to
+  fetch once at gloss time.** Nothing written to any table; zero spend. Awaiting Lance: merge
+  decision, then the --apply review (draft-then-apply), then the gloss-run spend call
+  (~$290-310 at the historical opus/sonnet rate; a cheaper-config probe recommended first).

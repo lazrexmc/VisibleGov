@@ -10,8 +10,26 @@
 that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
 check — that drift is exactly what has burned this project before.*
 
-**✅ STANDING STATE (updated 2026-08-10 evening): THE 2025-SESSION MANIFEST CAMPAIGN IS
-COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
+**🆕 MO STATUTE GLOSSARY SOURCE — BUILT AND REVIEW-CLEAN, AWAITING LANCE (2026-08-19), on
+branch `mo-statute-glossary-source` (merge decision pending):** the revisor.mo.gov adapter,
+jurisdiction-aware citation dispatch, and the re-mapping backfill CLI
+(`src/cli/backfill-mo-glossary-citations.js`) are complete — 8 SDD tasks + final whole-branch
+review (fable) clean after one fix wave; suite 2,502/0 clean shell. **A LIVE dry-run ran clean:
+1,725 terms map in place + 439 merge into them (2,164 total unlock) · 0 guard-blocked ·
+0 stub violations** — reader coverage goes 87 → ~565 of ~1,041 published summaries once glossed.
+Awaiting Lance, in order: (1) merge decision; (2) review the dry-run merge plan, then the
+backfill `--apply` (draft-then-apply — writes citations, merges 439 duplicate stubs; zero gloss
+content touched); (3) the gloss-run spend decision (~1,557 section + 168 chapter pages to fetch
+once; historical opus/sonnet rate ≈ $0.17–0.18/term → ~$290–310 full drain, a Haiku-config
+probe would likely cut that hard; per-run approval required — the scheduler carve-out is
+summaries-only). ✅ **Found-and-FIXED during the build (per Lance's ask to record it):** the
+`selectAll()`/`summary_terms` composite-PK pagination bug that blocked `--apply` on a clean
+checkout — `selectAll` assumed every table has an `id` column; fixed with an additive `orderBy`
+option (commit `1cb68d5`), live-verified. Spec:
+`docs/superpowers/specs/2026-08-19-mo-statute-glossary-source-design.md`.
+
+**✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
+CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
 with documented structural reasons (HR 3095 ZIP-code list + 5 SRES en-bloc nomination lists —
 single-provision structures the completeness floor rightly refuses; park set lives in the
 session build script, reasons in CHATLOG 2026-08-10). **Live: 710 published / 359 drafts / 119
