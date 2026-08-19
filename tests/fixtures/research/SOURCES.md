@@ -475,3 +475,62 @@ already-held `legiscan-current.tar.gz`), and the Task 9 attribution-rule recomme
 single-bill-primary attribution, no join table — already precedented by `ingest-mo-senate.js`'s
 own `bill_refs[0]`-as-primary pattern) live in
 `docs/research/2026-07-29-legiscan-substitute-vehicles.md`.
+
+## mo-statutes/
+
+Captured 2026-08-19 for Task 1 of the MO statute glossary-source plan
+(`.superpowers/sdd/2026-08-19-mo-statute-glossary-source/`). All fetched directly and live from
+`revisor.mo.gov` (Missouri's official Revisor of Statutes site; no auth, no key) via `curl` and
+Node's built-in `fetch()`, both with a self-identifying User-Agent
+(`VisibleGov-research/1.0 (civic transparency project; contact lancemccarter1316@hotmail.com)`),
+strictly sequential, >=5s apart. **6 requests total (at the <=6 budget cap, none over, no retry
+ever needed).**
+
+`revisor.mo.gov`'s own bot-detection page (`bot-page.html` below) states its policy verbatim:
+
+> Recent accesses are tracked over a thirty second interval. If the time between accesses is
+> shorter than one second multiple times in that thirty second interval you might see this page.
+
+> The system tracks cumulative accesses by IP address, as well as recent accesses.
+
+Contact printed on that page: `WebMaster@LR.mo.gov`.
+
+**Request log (chronological, all 200 OK):**
+1. `https://revisor.mo.gov/main/Info.aspx` (curl, 40,262 bytes) — the Revisor's publications
+   index page. Not committed as a fixture (only used to locate the Repeal & Transfer link);
+   grepped for a "Repeal & Transfer" link, found `<a ... href="/main/rx.aspx" title="sections
+   repealed and transferred">Repeal &amp; Transfer</a>`.
+2. `https://revisor.mo.gov/main/rx.aspx` (curl, 9,528,519 bytes) — the full "Repeals And
+   Transfers" listing (every repealed/transferred RSMo section, whole-site scope, not
+   chapter-scoped). Not committed as a fixture (huge, and superseded by the one section picked
+   from it below). First table row: section `1.022`, `(Repealed L. 1975 H.B. 945 § 1) (9/28/1975)`
+   — chosen as the repealed section for `section-repealed.html` below. Step 1 total: 2 of the
+   <=2-fetch budget for the repealed-section hunt.
+3. `https://revisor.mo.gov/main/OneSection.aspx?section=536.010` (Node `fetch()`, 200, 36,446
+   bytes) → `tests/fixtures/mo-statutes/section-536.010.html`. Real section text: "536.010.
+   Definitions. — For the purpose of this chapter: ..." — both required markers (`536.010`, 15
+   occurrences; `For the purpose of this chapter`) verified present by direct grep before commit.
+4. `https://revisor.mo.gov/main/OneChapter.aspx?chapter=536` (Node `fetch()`, 200, 70,101 bytes)
+   → `tests/fixtures/mo-statutes/chapter-536.html`. Real chapter index page: "Chapter 536
+   Administrative Procedure and Review", with a real section-link row for `536.010`
+   (`href="/main/PageSelect.aspx?section=536.010&bid=28388&hl="`). Both required markers verified
+   present.
+5. `https://revisor.mo.gov/main/OneSection.aspx?section=999.999` (Node `fetch()`, 200, 29,114
+   bytes) → `tests/fixtures/mo-statutes/bot-page.html`. A bogus section number did not 404 or
+   error — it returned the site's bot-detection interstitial (`200 OK`, not a distinguishable HTTP
+   failure), same shape as the `uscode.house.gov` "not found" finding above (marker-absence /
+   marker-presence detection, not HTTP status, is the right adapter strategy here too). Contains
+   the distinctive fixed text "Are you double clicking links? Don't if you are." — required
+   marker verified present.
+6. `https://revisor.mo.gov/main/OneSection.aspx?section=1.022` (Node `fetch()`, 200, 27,614
+   bytes) → `tests/fixtures/mo-statutes/section-repealed.html`. Real repealed-section page:
+   "1.022. (Repealed L. 1975 H.B. 945 § 1)" (also echoed in `<meta property="og:description">`).
+   Both required markers (own section number `1.022`, 11 occurrences; repeal language) verified
+   present — **no gap to note; the repealed-section fixture was successfully captured.**
+
+All four committed fixtures are the raw, unedited, untruncated response bodies (verified: on-disk
+byte counts are consistent with genuinely fetched pages, not truncated stubs — `chapter-536.html`
+is the largest at 70,101 bytes, `bot-page.html` the smallest committed fixture at 29,114 bytes).
+Grepped for anything key-shaped (`api_key`, `Authorization: Bearer`, `secret_key`, `password=`)
+before committing — no matches; the site is fully public and unauthenticated, consistent with
+every other adapter captured in this file.
