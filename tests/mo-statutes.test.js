@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   parseMoCitation, normalizeMoCitation, isMoCitation,
   extractMoSectionText, extractMoChapterText, MoBotPageError, MoPageIdentityError,
+  buildMoSectionUrl, buildMoChapterUrl,
 } from '../src/adapters/mo-statutes.js';
 import { OversizeExcerptError } from '../src/adapters/uscode.js';
 
@@ -106,4 +107,24 @@ test('extractMoChapterText identity check: wrong chapter fails typed', () => {
 
 test('extractMoChapterText bot page fails typed', () => {
   assert.throws(() => extractMoChapterText(fx('bot-page.html'), { chapter: '536', url: 'x' }), MoBotPageError);
+});
+
+test('MO URL builders produce the verified revisor.mo.gov shapes', () => {
+  assert.equal(buildMoSectionUrl('536.010'), 'https://revisor.mo.gov/main/OneSection.aspx?section=536.010');
+  assert.equal(buildMoChapterUrl('536'), 'https://revisor.mo.gov/main/OneChapter.aspx?chapter=536');
+});
+
+test('extractMoSectionText throws MoPageIdentityError when the body-start marker is absent (controller ruling: no silent slice-from-0 fallback)', () => {
+  // Mangle the REAL fixture's body-start marker so the identity check (section number present)
+  // still passes but isolateBetween can no longer find where the body begins. Per the controller
+  // ruling on Task 3's review, isolateBetween must THROW here rather than silently widening the
+  // slice to the whole document.
+  const startMarker = '<div class="norm" title="" style="background-color:#fffff7;padding-left:.75%;padding-right:.75%;">';
+  const real = fx('section-536.010.html');
+  assert.ok(real.includes(startMarker), 'fixture must still contain the marker this test mangles');
+  const mangled = real.replace(startMarker, '<!-- gone -->');
+  assert.throws(
+    () => extractMoSectionText(mangled, { section: '536.010', url: 'x' }),
+    MoPageIdentityError,
+  );
 });

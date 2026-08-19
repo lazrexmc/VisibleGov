@@ -9,6 +9,7 @@
 import {
   parseCitation, fetchUscSection, fetchUscSubsection, OversizeExcerptError, sha256,
 } from '../adapters/uscode.js';
+import { isMoCitation, parseMoCitation, fetchMoSection, fetchMoChapter } from '../adapters/mo-statutes.js';
 import { SummaryRefusedError, SummaryTruncatedError } from './summarizer.js';
 
 export const MODEL = 'claude-opus-5';
@@ -300,6 +301,18 @@ export async function verifyGloss(client, { term, sentences, excerptText }) {
 // extract-terms.js's own parseCitation call at insert time — the defensive throw below is a belt,
 // not the expected path.
 export async function fetchGlossSource(citation) {
+  if (isMoCitation(citation)) {
+    const parsed = parseMoCitation(citation);
+    if (!parsed) {
+      throw new Error(`citation "${citation}" carries the RSMo prefix but is not a parseable RSMo citation — this term should have needs_mapping=true and never reach the glosser`);
+    }
+    // Whole-section/whole-chapter only in v1 (spec §3) — no subsection fallback for MO.
+    const { url, excerptText } = parsed.kind === 'chapter'
+      ? await fetchMoChapter(parsed.chapter)
+      : await fetchMoSection(parsed.section);
+    return { url, excerptText, hash: sha256(excerptText) };
+  }
+  // ---- existing USC path, unchanged ----
   const parsed = parseCitation(citation);
   if (!parsed) {
     throw new Error(`citation "${citation}" is not a parseable USC citation — this term should have needs_mapping=true and never reach the glosser`);

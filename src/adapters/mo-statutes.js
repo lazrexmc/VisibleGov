@@ -102,16 +102,29 @@ const MO_SECTION_BODY_END = '<hr><div style="padding:.2em 0em 0em 2em;">';
 const MO_CHAPTER_BODY_START = '<div class="lr-fl-s-all lr-fl-m-7-10 lr-fl-l-4-5">';
 const MO_CHAPTER_BODY_END = '<div class="lr-fl-s-all lr-fl-m-3-10 lr-fl-l-1-5">';
 
-// Slices html between two literal markers. Falls back to the start/end of the string when a
-// marker is missing (never throws here) — the response-identity check upstream is what refuses a
-// wrong/absent page; this just keeps slicing defensive rather than producing a garbage negative
-// range if the page's own layout ever shifts.
-function isolateBetween(html, startMarker, endMarker) {
+// Slices html between two literal markers. THROWS MoPageIdentityError when either marker is
+// absent (controller ruling on Task 3's review) — silently falling back to slicing from index 0
+// or end-of-document would hand navigation boilerplate to the glosser if revisor.mo.gov's
+// template ever drifts. The response-identity check upstream (section/chapter number present)
+// catches a wrong or generic page; this catches the narrower case where the RIGHT page's layout
+// no longer matches the markers we derived from the captured fixtures.
+function isolateBetween(html, startMarker, endMarker, meta = {}) {
   const s = html.indexOf(startMarker);
-  const startIdx = s === -1 ? 0 : s + startMarker.length;
+  if (s === -1) {
+    throw new MoPageIdentityError(
+      `revisor.mo.gov response is missing its expected body-start marker for ${meta.section ? `section ${meta.section}` : `chapter ${meta.chapter}`} — refusing to extract`,
+      meta,
+    );
+  }
+  const startIdx = s + startMarker.length;
   const e = html.indexOf(endMarker, startIdx);
-  const endIdx = e === -1 ? html.length : e;
-  return html.slice(startIdx, endIdx);
+  if (e === -1) {
+    throw new MoPageIdentityError(
+      `revisor.mo.gov response is missing its expected body-end marker for ${meta.section ? `section ${meta.section}` : `chapter ${meta.chapter}`} — refusing to extract`,
+      meta,
+    );
+  }
+  return html.slice(startIdx, e);
 }
 
 // extractMoSectionText(html, {section, url}) -> plain text. Order per spec §5: bot check ->
@@ -130,7 +143,7 @@ export function extractMoSectionText(html, meta = {}) {
   }
   // Body isolation: derived from the REAL fixture (Task 1) — slice from the section-number
   // heading to the page's own end-of-content boundary, then strip. Keeps the effective-date line.
-  const text = stripMoHtml(isolateBetween(html, MO_SECTION_BODY_START, MO_SECTION_BODY_END));
+  const text = stripMoHtml(isolateBetween(html, MO_SECTION_BODY_START, MO_SECTION_BODY_END, meta));
   if (text.length > MAX_EXCERPT_CHARS) {
     throw new OversizeExcerptError(
       `excerpt for RSMo ${meta.section} is ${text.length} chars, exceeds MAX_EXCERPT_CHARS=${MAX_EXCERPT_CHARS}; will not truncate silently`,
@@ -151,7 +164,7 @@ export function extractMoChapterText(html, meta = {}) {
       meta,
     );
   }
-  const text = stripMoHtml(isolateBetween(html, MO_CHAPTER_BODY_START, MO_CHAPTER_BODY_END));
+  const text = stripMoHtml(isolateBetween(html, MO_CHAPTER_BODY_START, MO_CHAPTER_BODY_END, meta));
   if (text.length > MAX_EXCERPT_CHARS) {
     throw new OversizeExcerptError(
       `excerpt for RSMo chapter ${meta.chapter} is ${text.length} chars, exceeds MAX_EXCERPT_CHARS=${MAX_EXCERPT_CHARS}; will not truncate silently`,
@@ -159,4 +172,26 @@ export function extractMoChapterText(html, meta = {}) {
     );
   }
   return text;
+}
+
+// ---- fetch wrappers (Task 4) ----
+//
+// Thin — structurally reviewed, not integration-tested (the codebase convention for fetch*
+// wrappers, per uscode.js's own comment; the URL builders ARE unit-tested above, and the pure
+// extraction functions underneath these carry the real test weight).
+export function buildMoSectionUrl(section) {
+  return `https://revisor.mo.gov/main/OneSection.aspx?section=${section}`;
+}
+export function buildMoChapterUrl(chapter) {
+  return `https://revisor.mo.gov/main/OneChapter.aspx?chapter=${chapter}`;
+}
+export async function fetchMoSection(section, limiter = moStatutesLimiter) {
+  const url = buildMoSectionUrl(section);
+  const html = await fetchWithLimit(url, { source: SOURCE, limiter, as: 'text' });
+  return { url, excerptText: extractMoSectionText(html, { section, url }) };
+}
+export async function fetchMoChapter(chapter, limiter = moStatutesLimiter) {
+  const url = buildMoChapterUrl(chapter);
+  const html = await fetchWithLimit(url, { source: SOURCE, limiter, as: 'text' });
+  return { url, excerptText: extractMoChapterText(html, { chapter, url }) };
 }
