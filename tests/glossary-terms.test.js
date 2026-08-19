@@ -62,10 +62,15 @@ test('upsertKeyFor: USC parse wins regardless of jurisdiction, and carries its c
     { by: 'citation', needs_mapping: false, citation: '42 U.S.C. 1396b' });
 });
 
-test('upsertKeyFor: a chapter maps in MO context', () => {
+// F1 (post-audit fix wave, 2026-08-19): chapters were DROPPED from v1. A chapter page is a table
+// of contents — revisor-authored catchlines plus cross-references naming OTHER chapters' subjects —
+// not statutory text, and an adversarial audit showed a verifier quote drawn from one of those
+// cross-reference lines could mechanically "support" a wrong-chapter gloss claim. A chapter term
+// must therefore stay needs_mapping even in MO context, honestly, rather than mapping to a source
+// that cannot ground it.
+test('upsertKeyFor: a chapter NEVER maps, even in MO context — it stays needs_mapping (F1)', () => {
   const ch = { term: 'chapter 536', kind: 'statute', citation_raw: 'chapter 536' };
-  assert.deepEqual(upsertKeyFor(ch, 'mo-legislature'),
-    { by: 'citation', needs_mapping: false, citation: 'RSMo chapter 536' });
+  assert.deepEqual(upsertKeyFor(ch, 'mo-legislature'), { by: 'term', needs_mapping: true });
 });
 
 // ---- fake-client helpers for resolveBillJurisdiction/persistReferencedTerms below ----

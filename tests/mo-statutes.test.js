@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   parseMoCitation, normalizeMoCitation, isMoCitation,
-  extractMoSectionText, extractMoChapterText, MoBotPageError, MoPageIdentityError,
-  buildMoSectionUrl, buildMoChapterUrl,
+  extractMoSectionText, MoBotPageError, MoPageIdentityError,
+  buildMoSectionUrl,
 } from '../src/adapters/mo-statutes.js';
+import * as moStatutes from '../src/adapters/mo-statutes.js';
 import { OversizeExcerptError } from '../src/adapters/uscode.js';
 
 const fx = (name) => readFileSync(new URL(`./fixtures/mo-statutes/${name}`, import.meta.url), 'utf8');
@@ -27,14 +28,76 @@ test('parseMoCitation normalizes a subdivision tail to the parent section', () =
   assert.deepEqual(parseMoCitation('section 536.010(1)'), { kind: 'section', section: '536.010' });
 });
 
-test('parseMoCitation accepts chapter shapes including the stored format', () => {
-  assert.deepEqual(parseMoCitation('chapter 303'), { kind: 'chapter', chapter: '303' });
-  assert.deepEqual(parseMoCitation('chapter 536, RSMo'), { kind: 'chapter', chapter: '536' });
-  assert.deepEqual(parseMoCitation('RSMo chapter 536'), { kind: 'chapter', chapter: '536' });
+// ---- F1 (post-audit fix wave, 2026-08-19): chapters are OUT of v1 entirely ----
+//
+// A chapter page is a table of contents — revisor-authored catchlines plus cross-references naming
+// OTHER chapters' subjects — not statutory text. An adversarial audit demonstrated a verifier quote
+// drawn from one of those cross-reference lines (e.g. "Deaf persons, auxiliary services and aids,
+// 476.750 to 476.766") could mechanically "support" a wrong-chapter gloss claim. Chapters must now
+// parse-fail so they stay needs_mapping, honestly, until a design grounds them.
+test('parseMoCitation REFUSES every chapter shape — chapters are out of v1 (F1)', () => {
+  for (const raw of ['chapter 536', 'RSMo chapter 536', 'chapter 303, RSMo', 'chapter 303', 'Chapter 1']) {
+    assert.equal(parseMoCitation(raw), null, raw);
+  }
+});
+
+test('extractMoChapterText is no longer exported — the chapter extraction path is gone (F1)', () => {
+  assert.equal(moStatutes.extractMoChapterText, undefined);
+  assert.equal(moStatutes.fetchMoChapter, undefined);
+  assert.equal(moStatutes.buildMoChapterUrl, undefined);
+});
+
+test('normalizeMoCitation throws defensively on any non-section parse result (F1)', () => {
+  assert.throws(() => normalizeMoCitation({ kind: 'chapter', chapter: '536' }), /only section citations exist in v1/);
+  assert.throws(() => normalizeMoCitation(null), /only section citations exist in v1/);
 });
 
 test('parseMoCitation reparses its own normalized output (gloss-time round trip)', () => {
   assert.deepEqual(parseMoCitation('RSMo 536.010'), { kind: 'section', section: '536.010' });
+});
+
+// ---- F2 (post-audit fix wave): parser hardening, both directions ----
+
+test('parseMoCitation refuses a zero or leading-zero chapter part (F2)', () => {
+  for (const raw of ['0.500', '000.000', '053.010', 'section 0.500', 'RSMo 053.010']) {
+    assert.equal(parseMoCitation(raw), null, raw);
+  }
+  // A leading-zero SECTION suffix after the dot is untouched — RSMo genuinely prints '536.010'.
+  assert.deepEqual(parseMoCitation('536.010'), { kind: 'section', section: '536.010' });
+  assert.deepEqual(parseMoCitation('section 302.015, RSMo'), { kind: 'section', section: '302.015' });
+});
+
+// Low-chapter corroboration guard: MO appropriations bills (HB 1-19) number their OWN internal
+// sections N.MMM, so a BARE low-chapter dotted cite inside a MO bill is ambiguous between a real
+// RSMo section and the bill's own internal section. Refuse unless the text itself carries RSMo.
+test('parseMoCitation refuses a BARE low-chapter dotted cite but accepts the RSMo-corroborated form (F2)', () => {
+  assert.equal(parseMoCitation('section 2.100'), null);
+  assert.equal(parseMoCitation('1.140'), null);
+  assert.equal(parseMoCitation('section 20.100'), null, 'chapter 20 is the boundary — still refused bare');
+  assert.deepEqual(parseMoCitation('RSMo 1.140'), { kind: 'section', section: '1.140' });
+  assert.deepEqual(parseMoCitation('section 1.140, RSMo'), { kind: 'section', section: '1.140' });
+  // Chapter 21 and up are unambiguous — no RSMo marker needed.
+  assert.deepEqual(parseMoCitation('section 21.100'), { kind: 'section', section: '21.100' });
+});
+
+test('parseMoCitation round-trips its own stored output for a low-chapter section (the guard must not break gloss time) (F2)', () => {
+  const parsed = parseMoCitation('section 1.140, RSMo');
+  const stored = normalizeMoCitation(parsed);
+  assert.equal(stored, 'RSMo 1.140');
+  assert.deepEqual(parseMoCitation(stored), { kind: 'section', section: '1.140' });
+});
+
+test('parseMoCitation accepts the canonical Missouri year forms and the sec. short form (F2)', () => {
+  assert.deepEqual(parseMoCitation('section 536.010, RSMo 2016'), { kind: 'section', section: '536.010' });
+  assert.deepEqual(parseMoCitation('section 536.010, RSMo Supp. 2023'), { kind: 'section', section: '536.010' });
+  assert.deepEqual(parseMoCitation('sec. 536.010'), { kind: 'section', section: '536.010' });
+  assert.deepEqual(parseMoCitation('Sec. 536.010'), { kind: 'section', section: '536.010' });
+});
+
+test('parseMoCitation requires BALANCED subdivision groups (F2)', () => {
+  assert.deepEqual(parseMoCitation('536.010(1)(a)'), { kind: 'section', section: '536.010' });
+  assert.equal(parseMoCitation('536.010(a)b)'), null);
+  assert.equal(parseMoCitation('536.010(a'), null);
 });
 
 test('parseMoCitation refuses ranges, lists, specials, and federal markers', () => {
@@ -50,11 +113,14 @@ test('parseMoCitation refuses ranges, lists, specials, and federal markers', () 
 
 test('normalizeMoCitation produces the stored prefix-discriminated format', () => {
   assert.equal(normalizeMoCitation({ kind: 'section', section: '536.010' }), 'RSMo 536.010');
-  assert.equal(normalizeMoCitation({ kind: 'chapter', chapter: '536' }), 'RSMo chapter 536');
 });
 
 test('isMoCitation discriminates stored citation strings', () => {
   assert.equal(isMoCitation('RSMo 536.010'), true);
+  // Still true for a legacy 'RSMo chapter N' string: isMoCitation is a pure prefix test, and
+  // routing such a citation to the MO path is CORRECT — parseMoCitation then refuses it and
+  // fetchGlossSource takes its defensive typed throw, rather than the citation silently falling
+  // through to the US Code path (F1).
   assert.equal(isMoCitation('RSMo chapter 536'), true);
   assert.equal(isMoCitation('42 U.S.C. 1396b'), false);
   assert.equal(isMoCitation(null), false);
@@ -97,35 +163,6 @@ test('extractMoSectionText extracts a repealed section honestly (repeal notice I
   assert.ok(text.includes(section));
 });
 
-test('extractMoChapterText extracts the chapter title and section list', () => {
-  const text = extractMoChapterText(fx('chapter-536.html'), { chapter: '536', url: 'x' });
-  assert.ok(text.includes('Administrative Procedure and Review'));
-  assert.ok(text.includes('536.010'));
-  assert.ok(!text.includes('<'));
-});
-
-test('extractMoChapterText identity check: wrong chapter fails typed', () => {
-  assert.throws(() => extractMoChapterText(fx('chapter-536.html'), { chapter: '999', url: 'x' }), MoPageIdentityError);
-});
-
-test('extractMoChapterText bot page fails typed', () => {
-  assert.throws(() => extractMoChapterText(fx('bot-page.html'), { chapter: '536', url: 'x' }), MoBotPageError);
-});
-
-test('extractMoChapterText throws MoPageIdentityError on a section page for the same chapter, instead of silently returning empty text (Important finding 1)', () => {
-  // Empirically: the chapter layout div markers (MO_CHAPTER_BODY_START/END) are site-wide
-  // template chrome present on section pages too, and the old whole-page identity check's
-  // dotted-number alternative (`\b536\.\d{3}`) is satisfied by the section page's own
-  // "536.010" text. Before this fix, extractMoChapterText(section-536.010 fixture, {chapter:
-  // '536'}) both isolated AND identity-passed, then returned an EMPTY string (the chapter div
-  // markers exist on the section page but bracket nothing) — silently handing empty text to a
-  // gloss author. It must now throw typed instead.
-  assert.throws(
-    () => extractMoChapterText(fx('section-536.010.html'), { chapter: '536', url: 'x' }),
-    MoPageIdentityError,
-  );
-});
-
 test('extractMoSectionText throws MoPageIdentityError when the isolated slice strips to empty even though both real markers are present (template drift)', () => {
   // Synthetic splice of the REAL fixture: keep both real body markers (so isolateBetween itself
   // does not throw for a missing marker — that is finding 1's OTHER, already-covered failure
@@ -145,13 +182,46 @@ test('extractMoSectionText throws MoPageIdentityError when the isolated slice st
   );
 });
 
-test('extractMoChapterText identity check requires the Chapter N heading in the ISOLATED slice, not just a same-chapter dotted section number anywhere on the page', () => {
-  // The real chapter-536 fixture's isolated slice contains the literal heading "Chapter 536
-  // Administrative Procedure and Review" (verified against the captured fixture) — this is the
-  // real signal the identity check should key on. This test pins that the extraction still
-  // succeeds off that heading now that the whole-page dotted-number alternative is gone.
-  const text = extractMoChapterText(fx('chapter-536.html'), { chapter: '536', url: 'x' });
-  assert.ok(text.length > 0);
+// ---- F3 (post-audit fix wave): revisor-authored case-law annotations are NOT statute text ----
+//
+// The captured 536.010 page's `<div class="foot">` block holds the enactment-history source note
+// followed by four judicial-decision annotations, each opening with a parenthesized year
+// ("(1977) Held, director of revenue must hold hearing... Randle et al. v. Spradling (Mo.), 556
+// S.W.2d 10." … "(2000) ... Krentz v. Robertson, 228 F.3d 897 (8th Cir.)."). Those are the
+// revisor's editorial commentary ABOUT the statute, not the law — quotable by a gloss author or
+// verifier as if they were law if they stay in the excerpt.
+test('extractMoSectionText keeps the statute body and enactment history but DROPS the case-law annotations (F3)', () => {
+  const text = extractMoSectionText(fx('section-536.010.html'), { section: '536.010', url: 'x' });
+  assert.ok(text.includes('For the purpose of this chapter'), 'statute body must survive');
+  assert.ok(text.includes('(L. 1945 p. 1504'), 'enactment-history line must survive');
+  assert.ok(text.includes('A.L. 2006 S.B. 1146'), 'the whole enactment-history line must survive');
+  assert.ok(!text.includes('Krentz'), 'case-law annotation citation must be gone');
+  assert.ok(!text.includes('(1977)'), 'case-law annotation must be gone');
+  assert.ok(!text.includes('Randle'), 'case-law annotation must be gone');
+  assert.ok(!text.includes('Yarber'), 'case-law annotation must be gone');
+});
+
+test('extractMoSectionText still extracts the repealed 1.022 fixture unchanged — it has no annotations block to cut (F3)', () => {
+  const text = extractMoSectionText(fx('section-repealed.html'), { section: '1.022', url: 'x' });
+  assert.ok(text.includes('1.022'));
+  assert.ok(/Repealed L\. 1975 H\.B\. 945/.test(text), 'the repeal notice IS the official text and must survive');
+});
+
+// ---- F4 (post-audit fix wave): the identity check is PREFIX-ANCHORED ----
+//
+// The isolated slice genuinely BEGINS with its own section number ("536.010. Definitions. — ...").
+// The old contains-anywhere check accepted a page that merely cross-references the requested
+// section: 536.010's own body links to 536.100, so requesting 536.100 off 536.010's page passed
+// (executed proof). Anchoring proves the page IS the section.
+test('extractMoSectionText refuses a page that only CROSS-REFERENCES the requested section (F4)', () => {
+  const html = fx('section-536.010.html');
+  assert.ok(html.includes('536.100'), 'fixture must still contain the cross-reference this test relies on');
+  assert.throws(() => extractMoSectionText(html, { section: '536.100', url: 'x' }), MoPageIdentityError);
+});
+
+test('extractMoSectionText: the anchored identity check still accepts the real page it belongs to (F4)', () => {
+  const text = extractMoSectionText(fx('section-536.010.html'), { section: '536.010', url: 'x' });
+  assert.match(text, /^536\.010\./);
 });
 
 test('stripMoHtml decodes &amp; LAST so a literal &amp;lt; in source text does not double-decode into a bare <  (Minor finding 2)', () => {
@@ -165,9 +235,8 @@ test('stripMoHtml decodes &amp; LAST so a literal &amp;lt; in source text does n
   assert.ok(!text.includes('< literal-marker'), 'must never double-decode &amp;lt; into a bare <');
 });
 
-test('MO URL builders produce the verified revisor.mo.gov shapes', () => {
+test('MO URL builder produces the verified revisor.mo.gov shape', () => {
   assert.equal(buildMoSectionUrl('536.010'), 'https://revisor.mo.gov/main/OneSection.aspx?section=536.010');
-  assert.equal(buildMoChapterUrl('536'), 'https://revisor.mo.gov/main/OneChapter.aspx?chapter=536');
 });
 
 test('extractMoSectionText throws MoPageIdentityError when the body-start marker is absent (controller ruling: no silent slice-from-0 fallback)', () => {

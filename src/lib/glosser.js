@@ -9,7 +9,7 @@
 import {
   parseCitation, fetchUscSection, fetchUscSubsection, OversizeExcerptError, sha256,
 } from '../adapters/uscode.js';
-import { isMoCitation, parseMoCitation, fetchMoSection, fetchMoChapter } from '../adapters/mo-statutes.js';
+import { isMoCitation, parseMoCitation, fetchMoSection } from '../adapters/mo-statutes.js';
 import { SummaryRefusedError, SummaryTruncatedError } from './summarizer.js';
 
 export const MODEL = 'claude-opus-5';
@@ -306,10 +306,12 @@ export async function fetchGlossSource(citation) {
     if (!parsed) {
       throw new Error(`citation "${citation}" carries the RSMo prefix but is not a parseable RSMo citation — this term should have needs_mapping=true and never reach the glosser`);
     }
-    // Whole-section/whole-chapter only in v1 (spec §3) — no subsection fallback for MO.
-    const { url, excerptText } = parsed.kind === 'chapter'
-      ? await fetchMoChapter(parsed.chapter)
-      : await fetchMoSection(parsed.section);
+    // SECTIONS ONLY in v1 — no subsection fallback for MO, and no chapter path at all (chapters
+    // were dropped by the post-audit ruling, 2026-08-19; see mo-statutes.js's fetch-wrapper
+    // header). A stored 'RSMo chapter N' citation therefore fails parseMoCitation above and takes
+    // the existing defensive typed throw, which is the honest outcome: it should never have been
+    // mapped, and must never silently fetch something else.
+    const { url, excerptText } = await fetchMoSection(parsed.section);
     return { url, excerptText, hash: sha256(excerptText) };
   }
   // ---- existing USC path, unchanged ----
