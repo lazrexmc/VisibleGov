@@ -5012,3 +5012,29 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (reload Anthropic credits, then the `schtasks` command; an agent never runs it) exactly as before
   this fix wave; nothing in this pass changed that state or spent a cent (zero billed calls, all
   fakeDeps-driven).
+- **MO statute glossary source (revisor.mo.gov) — elaborated, brainstormed, AUDITED, spec
+  committed** (2026-08-19, Lance: "elaborate on the glossary backlog but do not build anything"
+  -> "proceed with a Missouri statute source" -> scope/engine rulings -> "audit this small
+  process as a whole" -> "proceed"): read-only live analysis first established the backlog's
+  real shape (6,816 needs_mapping; only 87 of ~1,040 published summaries carry any published
+  gloss; RSMo citations are BOTH the largest unmapped class AND the top-leverage terms —
+  chapter 536 alone cited by 120 published summaries). Brainstorm rulings (Lance): v1 = single
+  sections + single chapters only (ranges/lists/bare-RSMo/Constitution stay honestly unmapped);
+  Option A — build ends at "mapped and gloss-ready," every gloss-run spend decision stays his
+  with real numbers; Approach 1 — mirror uscode.js with prefix-discriminated citations
+  ("RSMo 536.010"), no schema migration. His requested pre-spec audit EARNED ITS COST, catching
+  two real errors in the presented design: (1) "no automated-access policy" was FALSE —
+  revisor.mo.gov enforces a bot policy (accesses tracked over 30s windows; faster than 1s
+  repeatedly -> blocked; cumulative per-IP tracking) discovered on its bot-detection page, now
+  a binding-constraints spec section (our 5s sequential spacing is 5x inside their line);
+  (2) nonexistent sections return HTTP 200 with bot-page content, NOT a 404 — forcing a
+  response-identity requirement (page must print the requested section's own marker before any
+  text is trusted; bot-page fixed text is a typed hard-stop error) — without it a bad citation
+  would store bot-page text as statute text. Also corrected: trust.html attributes NEITHER
+  statute source today (the spec adds both), and jurisdiction is bills->sessions, two hops. The
+  audit's exact-rules simulation replaced estimates: 2,164 terms unlock (1,922 sections + 242
+  chapters -> 1,725 distinct citations; 439 intra-batch collisions dominate the merge path;
+  guard blocks 0 today; zero stub violations), coverage 87 -> 565 of 1,041 if fully glossed.
+  Spec: docs/superpowers/specs/2026-08-19-mo-statute-glossary-source-design.md — awaiting
+  Lance's review before writing-plans. Zero writes to any table; all analysis via read-only
+  scratchpad scripts.
