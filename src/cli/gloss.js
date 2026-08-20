@@ -150,7 +150,12 @@ export async function loadAllTerms(client, dryRun) {
 // stays retry-eligible (gloss_md still null) for as long as EITHER write hasn't succeeded, the
 // same shape extract-terms.js already has. See tests/gloss-cli.test.js for the failure-then-retry
 // proof.
-export async function persistGloss(client, runId, term, { glossMd, supportedByQuote, sourceUrl, sourceHash, verdicts, overall }) {
+// authorModel (2026-08-20, batch-runner addition): the public byline must name the TRUE author
+// model. Defaults to MODEL (opus — the interactive CLI's author), so every existing caller is
+// unchanged; the batch runner passes its own author model per round (haiku / sonnet escalation).
+export async function persistGloss(client, runId, term, {
+  glossMd, supportedByQuote, sourceUrl, sourceHash, verdicts, overall, authorModel = MODEL,
+}) {
   const { error: verErr } = await client.from(GLOSSARY_VERIFICATIONS_TABLE).insert({
     term_id: term.id, verdicts, overall,
     model: GLOSS_VERIFIER_MODEL, prompt_version: GLOSS_VERIFY_PROMPT_VERSION,
@@ -164,7 +169,7 @@ export async function persistGloss(client, runId, term, { glossMd, supportedByQu
   // co-arrives with gloss_md in this same update, so a separate gate on it would be redundant.
   const { error: updErr } = await client.from(GLOSSARY_TERMS_TABLE).update({
     gloss_md: glossMd, supported_by_quote: supportedByQuote, source_url: sourceUrl, source_hash: sourceHash,
-    model: MODEL, prompt_version: PROMPT_VERSION, run_id: runId,
+    model: authorModel, prompt_version: PROMPT_VERSION, run_id: runId,
   }).eq('id', term.id);
   if (updErr) throw new Error(`${GLOSSARY_TERMS_TABLE} update failed for term ${term.id}: ${updErr.message}`);
 }

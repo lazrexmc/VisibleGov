@@ -5165,3 +5165,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   gloss run needs to be next but it needs to run at a much more efficient cost rate"): the
   answer is the Batch API (50% off, zero quality change) + running before sonnet intro
   pricing ends 2026-08-31 — design goes to him next with the revised estimate.
+- **Batch gloss runner BUILT (2026-08-20, Lance: "I agree, lets go for it"; suite 2,527 ->
+  2,535 fail 0):** `scripts/gloss-batch-mo.mjs` — the MO glossary drain on the Message Batches
+  API (50% off; spend tracked as interactive price x 0.5 from real usage). Haiku authors ->
+  mechanical gates (verbatim-quote + empty-gloss, BEFORE any verify spend) -> one
+  retry-with-explicit-warning (the wave-2 remedy) -> sonnet-author escalation -> sonnet batch
+  verify -> assessVerdicts gate -> persistGloss with the TRUE author model byline (persistGloss
+  gained an additive authorModel param, default unchanged, tested both ways). Politeness: the
+  fetch sweep is sequential through the adapter's 5s limiter; a bot page = 10-min cooldown +
+  ONE retry, second bot page = mechanical PARK (status='rejected' + a glossary_notes row
+  carrying the evidence — the nonexistent-section signal, e.g. bill-created sections the
+  Revisor does not serve yet); 20 identity errors abort the sweep honestly (template-drift
+  tripwire). Checkpointed to .superpowers/artifacts/gloss-batch-mo/ (batch ids stored;
+  --resume survives kills). All prompts/schemas/gates are the trust lib's own exports — the
+  runner orchestrates, never re-derives. 8 new tests (request shapes, retry-warning append,
+  gate pass/fail matrix incl. non-verbatim-as-retryable, 50%-discount math, true-byline
+  persistence). Launching with --budget-usd 15 per Lance's approved cap.
