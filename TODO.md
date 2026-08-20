@@ -6,10 +6,11 @@
 
 ## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
-**⚡ IN FLIGHT AT SHUTDOWN (2026-08-20): the MO gloss batch drain was mid-fetch (504/1,546
-excerpts checkpointed, $0.00 spent — no batch submitted yet) when Lance restarted VS Code,
-killing the runner BY DESIGN (everything checkpoints; two bot-page parks so far were already
-written to the DB). DO NOT rebuild anything — resume with exactly:
+**⏸ PAUSED BY LANCE (2026-08-20, "pause all activity"): the MO gloss batch drain is stopped
+mid-fetch at 1,270/1,546 excerpts checkpointed, **$0.00 spent — no batch ever submitted** (still
+the free fetch phase). 37 terms parked (nonexistent-section double-strikes, evidence in
+glossary_notes), 16 fetch failures recorded. Do NOT restart without Lance's explicit go. When he
+gives it — DO NOT rebuild anything — resume with exactly:
 `node --env-file=.env scripts/gloss-batch-mo.mjs --budget-usd 15 --resume`
 (the $15 cap is Lance-approved, 2026-08-20 "I agree, lets go for it"). It skips fetched pages,
 finishes the sweep (~5s/page + 10-min cooldowns on bot pages), then runs the batched author →
