@@ -6,6 +6,16 @@
 
 ## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
+**⚡ IN FLIGHT AT SHUTDOWN (2026-08-20): the MO gloss batch drain was mid-fetch (504/1,546
+excerpts checkpointed, $0.00 spent — no batch submitted yet) when Lance restarted VS Code,
+killing the runner BY DESIGN (everything checkpoints; two bot-page parks so far were already
+written to the DB). DO NOT rebuild anything — resume with exactly:
+`node --env-file=.env scripts/gloss-batch-mo.mjs --budget-usd 15 --resume`
+(the $15 cap is Lance-approved, 2026-08-20 "I agree, lets go for it"). It skips fetched pages,
+finishes the sweep (~5s/page + 10-min cooldowns on bot pages), then runs the batched author →
+gate → retry → verify → persist chain and prints the run detail. Afterward: run
+`node --env-file=.env src/cli/auto-publish-glossary.js` ($0, own gates), verify live, report.**
+
 *Everything below this block is a historical record, mostly resolved. This block is the only part
 that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
 check — that drift is exactly what has burned this project before.*
