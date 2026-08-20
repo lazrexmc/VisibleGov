@@ -177,7 +177,7 @@ async function main() {
   const excerpts = loadJson('excerpts.json', {});
 
   // ---- candidates: RSMo-cited, gloss-ready, per the same planGlossing buckets gloss.js uses
-  const terms = await loadAllTerms(client);
+  const { terms } = await loadAllTerms(client); // returns {terms, tableMissing}, never a bare array
   const candidates = planGlossing(terms).candidates.filter((t) => isMoCitation(t.citation)).slice(0, args.maxTerms);
   console.error(`candidates: ${candidates.length} RSMo-cited gloss-ready terms`);
 
