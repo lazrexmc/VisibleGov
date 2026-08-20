@@ -5134,3 +5134,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   then the billed run at Haiku-author/sonnet-verify with the quote gate + one
   retry-with-explicit-warning (the wave-2 checker-invention remedy) and sonnet-author
   escalation on second failure — blended estimate ~$25-35 full drain, per-run approval his.
+- **Backfill --apply RAN AND VERIFIED — the RSMo glossary unlock is live in the database
+  (2026-08-20, Lance: "1", ran the command himself after the permission classifier blocked the
+  agent-side run — landing exactly on draft-then-apply):** `{updated: 1540, merged: 370,
+  skipped: []}` against the banked 1,546/364 plan — the 6-row drift is the overnight 6 AM
+  scheduler tick minting mapped rows through the NEW insert-time dispatch (the feature working
+  unaided), which converted six planned updates into merge losers. Independent live
+  verification, all green: **1,546 RSMo-mapped rows** (1,540 apply + 6 scheduler), every one
+  carrying a run_id; **0 chapter citations; 0 gloss content touched; USC rows untouched at
+  808; still-needs_mapping 4,925 = the plan's parseFailed exactly; 0 orphan links of 22,360;
+  spot-checks (536.010 / 33.080 / 3.010) exact; post-apply dry-run reads 0 updates / 0 merges
+  — converged and idempotent; ingestion_runs record succeeded.** One meta-note owned honestly:
+  the verification script itself first crashed calling bare selectAll on summary_terms — the
+  exact composite-PK lesson this build just taught (fixed with the orderBy option the build
+  added). Remaining before the ~$25-35 gloss run (Lance's go): the two probe-found fixes —
+  the mechanical supported_by_quote verbatim gate and the leading-asterisk identity-anchor
+  tolerance.

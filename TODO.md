@@ -22,12 +22,20 @@ wrong-chapter claim; chapters stay needs_mapping until a design grounds them hon
 low-chapter (≤20) corroboration guard against MO appropriations bills' internal `N.MMM` section
 numbers, cut revisor case-law annotations out of excerpts, and hardened the backfill against
 concurrent-writer races (23505/23503 → honest per-item skips, live link re-reads, partial counts
-always reach the run record). **Awaiting Lance, in order: (1) backfill `--apply`**
-(draft-then-apply — dry-run prints the full merge plan; writes citations + `run_id`, merges 364
-duplicate stubs, zero gloss content touched, idempotent); **(2) the gloss-run spend decision**
-(1,546 section pages fetched once at 5s spacing ≈ 2.1h; historical opus/sonnet rate ≈
-$0.17–0.18/term → ~$260–280 full drain; a cheap-config probe first is recommended; per-run
-approval required — the scheduler ledger carve-out is summaries-only). Coverage math gets
+always reach the run record). ✅ **Backfill `--apply` RAN (Lance, 2026-08-20): 1,540 updated + 370 merged, 0 skips — verified
+live** (1,546 RSMo rows mapped incl. 6 minted overnight by the scheduler's new insert-time
+dispatch working on its own; 0 chapter citations; 0 orphan links of 22,360; USC untouched at
+808; post-apply dry-run reads 0/0 — converged; run record succeeded). ✅ **Cheap-config gloss
+probe RAN (2026-08-19, $0.0995): $0.0124/term measured** (Haiku author / Sonnet verify; the
+verifier correctly flagged a real Haiku overstatement) → full 1,546-term drain ≈ $19–21 raw,
+~$25–35 with retries — ~13× under the opus estimate. **Awaiting Lance now: (1) the two
+probe-found gloss-lane fixes ($0, TDD):** (a) a mechanical `supported_by_quote`
+verbatim-substring gate — the probe caught Haiku inserting editorial text inside a "verbatim"
+receipt quote and NOTHING gates this today (pre-existing gap, applies to opus glosses too);
+(b) the section identity anchor must tolerate the Revisor's leading-asterisk footnote marker
+(`*536.028.` — 2 of 10 real pages honestly refused; raw pages banked as fixtures). **(2) the
+billed gloss run** (Haiku-author/Sonnet-verify + quote gate + one retry-with-warning +
+sonnet-author escalation; per-run approval — the scheduler ledger carve-out is summaries-only). Coverage math gets
 re-derived at gloss time (the earlier ~565 figure included dropped chapters and overcounted
 merge-loser inline rendering — merged-away term texts don't inline-highlight; a rendering
 fallback for linked-but-unmatched terms is a future site item). ✅ **Found-and-FIXED during the
