@@ -5110,3 +5110,27 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   update line, CONTROLLER_BRIEFING banner, PLAYBOOK lessons 41-42, spec amended in-branch with
   the dated ruling. Awaiting Lance: backfill --apply review, then the gloss-run spend call
   (1,546 pages ~ 2.1h at 5s spacing; ~$260-280 at the historical opus/sonnet rate; probe first).
+- **MO gloss cheap-config probe (Lance: "small cheap-config probe it then") — $0.0995 total,
+  three decisive findings (2026-08-19):** 10 mapped-candidate terms from the dry-run list ran
+  the REAL chain with zero DB writes — revisor fetch (adapter 5s limiter) -> Haiku author using
+  glosser.js's own exported prompt/schema verbatim (only the model id swapped) -> the untouched
+  sonnet verifyGloss -> the mechanical assessVerdicts gate; per-stage checkpoints banked to
+  scratchpad. **(1) Cost: $0.0124/term measured** (sonnet verify dominates; Haiku authoring is
+  ~$0.001-0.002) -> full 1,546-term drain projects ~$19-21 at this config vs ~$260-280 at the
+  historical opus rate (~13x cheaper), before retry overhead. **(2) The trust model works at
+  this tier:** 7/8 authored glosses verified clean; the verifier correctly FLAGGED RSMo 3.010
+  (Haiku dropped a conditional qualifier — "concurrent resolution required only IF an
+  appropriation is provided," stated as universal). **(3) Two gaps must close before any real
+  run: (a) the gloss pipeline has NO mechanical supported_by_quote gate** — nothing checks the
+  receipt quote is a verbatim excerpt substring, and the probe caught Haiku inserting an
+  editorial bracket INSIDE a "verbatim" quote ("[followed by 35 defined terms covering
+  adverse...]") that today would publish as a receipt (pre-existing gap — applies to
+  opus-authored glosses too; the bill-summary side has had mechanical quote grounding since
+  0021, the glossary never did); **(b) the section identity anchor is too strict for real
+  pages** — 2/10 sections (536.028, 33.080) begin with the Revisor's leading-asterisk footnote
+  marker ("*536.028.") and were honestly refused (MoPageIdentityError); both raw pages banked
+  to scratchpad as future fixtures. Recommended run design when Lance greenlights: backfill
+  --apply first (gloss.js reads candidates from the DB), then (a)+(b) fixed with tests ($0),
+  then the billed run at Haiku-author/sonnet-verify with the quote gate + one
+  retry-with-explicit-warning (the wave-2 checker-invention remedy) and sonnet-author
+  escalation on second failure — blended estimate ~$25-35 full drain, per-run approval his.
