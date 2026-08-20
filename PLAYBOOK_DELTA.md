@@ -838,3 +838,37 @@ files, but the prompt it assembles can tell the agent to; (2) make the stub self
 against the pointer being ignored: keep the mandatory fixes spelled out verbatim in the
 objections themselves so the worst case (agent authors fresh without the prior) still lands the
 required changes and only risks regression on previously-held bullets, not the fixes.
+
+## Lesson 41 — A test fake that reproduces a backend's return shapes but not its CONSTRAINTS passes every concurrency test you write against it (2026-08-19)
+
+The MO-glossary backfill CLI shipped through five green review rounds with an in-memory fake DB
+that faithfully mirrored PostgREST return shapes (lesson 20: never trust `count`) — and enforced
+zero constraints. An adversarial audit then produced, with executed evidence, three failures the
+suite structurally could not see: an update racing a concurrent insert violated the real
+`unique (kind, citation)` key and aborted the whole apply with no partial audit trail; a loser
+delete racing a concurrently-minted link hit the real un-cascaded FK; and a stale link snapshot
+let the merge path silently destroy rows minted after planning while reporting full success. The
+fix was two-sided: the code gained typed 23505/23503 handlers, live re-reads, and
+`err.partialResult`, and the FAKE gained the real constraints (unique key checked against live
+store state on update; FK checked on delete) so those tests could exist at all. The rule: when a
+write path's correctness depends on what the DATABASE refuses, the fake must refuse it too —
+shape fidelity without constraint fidelity is a fake that can only ever agree with you. Cheapest
+mechanical form: derive violations from the fake's own store state at execute time, never from
+canned error injections keyed to test names.
+
+## Lesson 42 — A verbatim-quote check is only as strong as the excerpt's provenance: an index or TOC excerpt lets a true quote "support" a claim about a DIFFERENT law (2026-08-19)
+
+The glossary trust chain verifies every claim against an exact quote from the fetched official
+excerpt. That is sound only while the excerpt is OPERATIVE TEXT of the cited thing. The MO
+chapter design fetched the chapter index page — revisor-authored catchlines plus cross-reference
+lines naming OTHER chapters' subjects — so a gloss claiming "Chapter 536 provides auxiliary
+services for deaf persons" would carry the literal, verifiable quote "Deaf persons, auxiliary
+services and aids, 476.750 to 476.766"... which is a cross-reference to a different chapter. The
+verifier passes it CLEAN; auto-publish follows; the receipt UI renders an index line as a
+quotation from the cited law. Nothing in the chain lies, and the output is still wrong. Caught
+only by an adversarial audit constructing the failure, after the design survived a spec audit,
+five task reviews, and a whole-branch review. The rule: before wiring any new source into a
+quote-grounded pipeline, ask what KIND of text the excerpt is — statute body, index, editorial
+annotation, headnote — and refuse everything that is not the operative text itself (the same
+pass also found revisor case-law annotations riding inside section excerpts; same class). Scope
+reduction (chapters left v1) beats a clever gate you cannot prove.

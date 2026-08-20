@@ -5,9 +5,12 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-10): DEPLOYED and live at https://visiblegov.pages.dev — 710 plain-language
-summaries published; the 400-bill 2025-session manifest campaign is COMPLETE (394 attempted,
-6 class-parked with documented reasons), and no summary lane is currently running.** *(Fresh
+**Status (2026-08-19): DEPLOYED and live at https://visiblegov.pages.dev — 1,037 plain-language
+summaries published (the draft drain completed 2026-08-18; every future summary flows through
+the autonomous daily scheduler under code-enforced caps). NEW: a Missouri statute glossary
+source (revisor.mo.gov) is merged — adapter + jurisdiction-aware citation mapping +
+re-mapping backfill, triple-audited; the backfill `--apply` and the gloss-run spend decision
+await Lance (see `TODO.md` RESUME HERE).** *(Fresh
 session? Read the RESUME HERE block at the top of `TODO.md` — it is verified against the live
 database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,

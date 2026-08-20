@@ -1,7 +1,11 @@
-> # ⏱ STOP — READ THIS FIRST (banner refreshed 2026-08-10)
+> # ⏱ STOP — READ THIS FIRST (banner refreshed 2026-08-19)
 > **This document is a dated palimpsest and is NOT the place to learn current state.** Go to the
-> `⏱ RESUME HERE` block at the top of `TODO.md` — it was verified against the live database on
-> 2026-08-10 and is the only doc in this repo that claims to be current.
+> `⏱ RESUME HERE` block at the top of `TODO.md` — it is the only doc in this repo that claims to
+> be current. Since this file's last full refresh: the draft drain COMPLETED 2026-08-18 (live
+> 1,037 published; the registered daily 6 AM scheduler owns all future summaries), the
+> browse-bills page shipped, and the **Missouri statute glossary source (revisor.mo.gov) merged
+> 2026-08-19** (triple-audited; backfill `--apply` + gloss-run spend decisions await Lance — see
+> TODO RESUME HERE and PLAYBOOK lessons 41-42).
 >
 > Specifically, as of 2026-08-10 this file is stale on: migration counts (there are now **32**
 > files, 0001-0031 + 0018a, **ALL applied** — nothing awaits an apply anywhere in this repo), test

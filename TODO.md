@@ -10,23 +10,35 @@
 that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
 check — that drift is exactly what has burned this project before.*
 
-**🆕 MO STATUTE GLOSSARY SOURCE — BUILT AND REVIEW-CLEAN, AWAITING LANCE (2026-08-19), on
-branch `mo-statute-glossary-source` (merge decision pending):** the revisor.mo.gov adapter,
-jurisdiction-aware citation dispatch, and the re-mapping backfill CLI
-(`src/cli/backfill-mo-glossary-citations.js`) are complete — 8 SDD tasks + final whole-branch
-review (fable) clean after one fix wave; suite 2,502/0 clean shell. **A LIVE dry-run ran clean:
-1,725 terms map in place + 439 merge into them (2,164 total unlock) · 0 guard-blocked ·
-0 stub violations** — reader coverage goes 87 → ~565 of ~1,041 published summaries once glossed.
-Awaiting Lance, in order: (1) merge decision; (2) review the dry-run merge plan, then the
-backfill `--apply` (draft-then-apply — writes citations, merges 439 duplicate stubs; zero gloss
-content touched); (3) the gloss-run spend decision (~1,557 section + 168 chapter pages to fetch
-once; historical opus/sonnet rate ≈ $0.17–0.18/term → ~$290–310 full drain, a Haiku-config
-probe would likely cut that hard; per-run approval required — the scheduler carve-out is
-summaries-only). ✅ **Found-and-FIXED during the build (per Lance's ask to record it):** the
-`selectAll()`/`summary_terms` composite-PK pagination bug that blocked `--apply` on a clean
-checkout — `selectAll` assumed every table has an `id` column; fixed with an additive `orderBy`
-option (commit `1cb68d5`), live-verified. Spec:
-`docs/superpowers/specs/2026-08-19-mo-statute-glossary-source-design.md`.
+**🆕 MO STATUTE GLOSSARY SOURCE — BUILT, TRIPLE-AUDITED, MERGED TO MAIN (2026-08-19); two
+decisions await Lance:** the revisor.mo.gov adapter, jurisdiction-aware citation dispatch, and
+the re-mapping backfill CLI (`src/cli/backfill-mo-glossary-citations.js`) are on main — 8 SDD
+tasks, a final whole-branch review, and then a Lance-requested 3-auditor pass (intent /
+live-data / adversarial) whose fix wave was re-verified clean; suite 2,517/0 clean shell on the
+merged tree. **Post-audit LIVE dry-run: 1,546 sections map in place + 364 merge into them ·
+0 guard-blocked · 0 stub violations.** The audit DROPPED chapters from v1 (a chapter page is a
+TOC of revisor catchlines — an executed construction showed a verifier quote could "support" a
+wrong-chapter claim; chapters stay needs_mapping until a design grounds them honestly), added a
+low-chapter (≤20) corroboration guard against MO appropriations bills' internal `N.MMM` section
+numbers, cut revisor case-law annotations out of excerpts, and hardened the backfill against
+concurrent-writer races (23505/23503 → honest per-item skips, live link re-reads, partial counts
+always reach the run record). **Awaiting Lance, in order: (1) backfill `--apply`**
+(draft-then-apply — dry-run prints the full merge plan; writes citations + `run_id`, merges 364
+duplicate stubs, zero gloss content touched, idempotent); **(2) the gloss-run spend decision**
+(1,546 section pages fetched once at 5s spacing ≈ 2.1h; historical opus/sonnet rate ≈
+$0.17–0.18/term → ~$260–280 full drain; a cheap-config probe first is recommended; per-run
+approval required — the scheduler ledger carve-out is summaries-only). Coverage math gets
+re-derived at gloss time (the earlier ~565 figure included dropped chapters and overcounted
+merge-loser inline rendering — merged-away term texts don't inline-highlight; a rendering
+fallback for linked-but-unmatched terms is a future site item). ✅ **Found-and-FIXED during the
+build (recorded per Lance's ask):** the `selectAll()`/`summary_terms` composite-PK pagination
+bug that blocked `--apply` on a clean checkout — fixed with an additive `orderBy` option
+(commit `1cb68d5`), live-verified. Known deferred gloss-lane behavior: a permanently
+bot-paging citation (e.g. a bill-created section revisor doesn't serve yet) aborts its gloss
+run by design; the run record now names the term, and the operator remedy is the existing
+`status='rejected'`. Spec (with dated post-audit amendments):
+`docs/superpowers/specs/2026-08-19-mo-statute-glossary-source-design.md`; PLAYBOOK lessons
+41–42 came out of the audit.
 
 **✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
 CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked

@@ -27,6 +27,11 @@ accountable with real information instead of spin.
 > balance is spent ($1.98, 2026-08-09) and Lance's standing instruction is "Once depleted, pause
 > waves as I do not auto reload credits" — no billed call without new funds AND his explicit
 > go.**
+> **Update 2026-08-19:** the drain is COMPLETE (live 1,037; the registered daily 6 AM scheduler
+> owns all future summaries under its $1/tick + $5/wk ledger carve-out), and the **Missouri
+> statute glossary source (revisor.mo.gov) is MERGED** — triple-audited; the backfill `--apply`
+> and the gloss-run spend decision await Lance (TODO RESUME HERE has the live numbers; PLAYBOOK
+> lessons 41-42 record what the audit caught).
 >
 > **Two traps that will cost you a session if you hit them cold:**
 > 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct

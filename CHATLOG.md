@@ -5068,3 +5068,45 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   fetch once at gloss time.** Nothing written to any table; zero spend. Awaiting Lance: merge
   decision, then the --apply review (draft-then-apply), then the gloss-run spend call
   (~$290-310 at the historical opus/sonnet rate; a cheaper-config probe recommended first).
+- **MO glossary source: Lance-ordered audit REFUTED the merge verdict, fix wave landed, branch
+  MERGED to main; full doc sync (2026-08-19, "audit and fix errors, remain consistent with the
+  systems intent" then "once complete merge to main locally, update all documentation...
+  commit and push"):** three independent auditors ran in parallel — intent/trust-chain (fable),
+  live-data (sonnet), adversarial (opus, instructed to refute). Live-data: PLAN SOUND, all five
+  checks passed with zero discrepancies (15-update + 10-merge live samples exact, partition
+  arithmetic exact, drift zero). The other two earned the audit its cost: **(1) CRITICAL —
+  chapter glosses would have grounded on a table of contents:** the adversarial auditor executed
+  the construction — a chapter excerpt is revisor-authored catchlines + cross-references naming
+  OTHER chapters, so a verifier could pass "Chapter 536 provides auxiliary services for deaf
+  persons" on the literal quote "Deaf persons, auxiliary services and aids, 476.750 to 476.766"
+  (a cross-reference to a different chapter) -> auto-publish under trust model v3 with a receipt
+  rendering an index line as law. RULING: chapters DROPPED from v1 entirely (my own spec was
+  wrong; scope reduction beats an unprovable gate) — parser refuses them, they stay
+  needs_mapping honestly. **(2) CRITICAL — the backfill merge could silently destroy
+  concurrently-minted summary_terms links** (stale linkMoves snapshot + unconditional link
+  delete, executed proof: merged:1/skipped:[] while a new summary lost its glossary link
+  permanently); **(3) a (kind,citation) unique-key race aborted the whole apply with no partial
+  audit trail; (4) an un-cascaded FK race aborted mid-merge raw.** Root cause named: the test
+  fake mirrored return shapes but enforced NO constraints — it could only ever agree (PLAYBOOK
+  lesson 41). **(5) bill-internal section collision:** MO appropriations bills number their own
+  sections N.MMM, so bare "section 2.100" would map to an unrelated real RSMo statute with valid
+  receipts — RULING: low-chapter (<=20) bare cites now require an explicit RSMo marker or stay
+  unmapped. **(6) case-law annotations rode inside section excerpts** (editorial "Krentz v.
+  Robertson" holdings as gloss-quotable text) — cut at the foot-block year-parenthesis boundary,
+  anchored so statute text is unreachable (lesson 42 records the excerpt-provenance class).
+  Plus: identity checks prefix-anchored (536.010's page no longer extractable as "536.100" via
+  its own cross-references), parser hardened (canonical ", RSMo 2016"/"Supp." forms accepted;
+  zero/leading-zero chapters refused; balanced-paren subdivisions), gloss-abort observability
+  (a wedging term is named in the run record; operator remedy = existing rejected status),
+  run_id threaded onto backfill updates, trust.html li reworded to what the code actually does.
+  Fix wave (opus, 4 commits b8f65a8..8a95b14) re-reviewed: ALL findings ADDRESSED, no new
+  breakage; the upgraded fake now derives unique/FK violations from live store state. **Fresh
+  post-audit LIVE dry-run: 1,546 updates + 364 merges (was 1,725/439 — 242 chapters + 12
+  uncorroborated low-chapter cites correctly moved to parseFailed 4,918), 0 guard-blocked, 0
+  stub violations, zero chapter citations anywhere.** Merged fast-forward c59f61d..8a95b14,
+  suite on merged main 2,517/2,517 fail 0 clean shell. Doc sync: TODO RESUME HERE block
+  (post-audit numbers + the two pending Lance decisions + the found-and-FIXED
+  selectAll/composite-PK bug recorded per his explicit ask), README status, CLAUDE.md banner
+  update line, CONTROLLER_BRIEFING banner, PLAYBOOK lessons 41-42, spec amended in-branch with
+  the dated ruling. Awaiting Lance: backfill --apply review, then the gloss-run spend call
+  (1,546 pages ~ 2.1h at 5s spacing; ~$260-280 at the historical opus/sonnet rate; probe first).
