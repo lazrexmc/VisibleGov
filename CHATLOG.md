@@ -5150,3 +5150,18 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   added). Remaining before the ~$25-35 gloss run (Lance's go): the two probe-found fixes —
   the mechanical supported_by_quote verbatim gate and the leading-asterisk identity-anchor
   tolerance.
+- **The two probe-found gloss-lane fixes SHIPPED (2026-08-20, Lance: "yes, proceed"; TDD
+  red-first, 10 new tests, suite 2,517 -> 2,527 fail 0 clean shell):** (1) **the mechanical
+  receipts gate the gloss chain never had** — `assertQuoteVerbatim` (glosser.js): the public
+  `supported_by_quote` must be a verbatim whitespace-collapsed, case-sensitive substring of the
+  fetched excerpt (mirrors checkStatedPurposeGrounding's exact rule) and never empty; wired
+  into glossOne BEFORE any verify spend; `QuoteNotVerbatimError` joins FAILURE_TYPES as a
+  counted, retryable per-term failure (never a run stop); CLI-level test proves a gated
+  receipt spends no verify call and persists nothing. (2) **leading-asterisk identity
+  tolerance** — the anchor now allows exactly one optional "*" before the section number
+  (`*536.028.` — the Revisor's footnote marker), pinned by the two banked REAL pages committed
+  as fixtures (SOURCES.md updated); a wrong-section probe against an asterisk page still
+  refuses, so the tolerance weakens nothing. Mid-build cost directive from Lance ("the billed
+  gloss run needs to be next but it needs to run at a much more efficient cost rate"): the
+  answer is the Batch API (50% off, zero quality change) + running before sonnet intro
+  pricing ends 2026-08-31 — design goes to him next with the revised estimate.

@@ -6,7 +6,7 @@ import {
   buildGlossUserMessage, authorGloss,
   GLOSS_VERIFIER_MODEL, GLOSS_VERIFY_PROMPT_VERSION, GLOSS_VERIFY_MAX_OUTPUT_TOKENS,
   GLOSS_VERIFY_SCHEMA, GLOSS_VERIFY_SYSTEM_PROMPT, buildGlossVerifyMessage, splitGlossSentences,
-  fetchGlossSource, EmptyGlossError, assertGlossNotEmpty,
+  fetchGlossSource, EmptyGlossError, assertGlossNotEmpty, QuoteNotVerbatimError, assertQuoteVerbatim,
 } from '../src/lib/glosser.js';
 import { assessVerdicts } from '../src/lib/verifier.js';
 import { parseCitation, extractSubsectionText } from '../src/adapters/uscode.js';
@@ -308,4 +308,43 @@ test('a stored AS-CITED citation round-trips through parseCitation to reach subs
   const excerpt = extractSubsectionText(section1396b, reparsed.subsection, { title: reparsed.title, section: reparsed.section });
   assert.ok(excerpt.length > 0 && excerpt.length < 100000);
   assert.match(excerpt, /organ transplant/i);
+});
+
+// ---- assertQuoteVerbatim: the mechanical receipts gate (2026-08-19 probe finding) ----
+
+test('assertQuoteVerbatim passes an exact substring quote', () => {
+  assert.doesNotThrow(() => assertQuoteVerbatim(
+    'the director shall hold a hearing',
+    'Upon request, the director shall hold a hearing within thirty days.',
+    { term: 'x', termId: 't1' },
+  ));
+});
+
+test('assertQuoteVerbatim passes when only whitespace runs differ (collapse-then-substring rule)', () => {
+  assert.doesNotThrow(() => assertQuoteVerbatim(
+    'the director  shall\n  hold a hearing',
+    'Upon request, the director shall hold a hearing within thirty days.',
+    { term: 'x', termId: 't1' },
+  ));
+});
+
+test('assertQuoteVerbatim throws QuoteNotVerbatimError on an editorial insertion inside the quote', () => {
+  assert.throws(() => assertQuoteVerbatim(
+    'the following terms mean: [followed by 35 defined terms]',
+    'the following terms mean: (1) "Adverse determination", a determination by a health carrier',
+    { term: 'x', termId: 't1' },
+  ), QuoteNotVerbatimError);
+});
+
+test('assertQuoteVerbatim throws on an empty or whitespace-only quote', () => {
+  assert.throws(() => assertQuoteVerbatim('', 'real excerpt text', { term: 'x', termId: 't1' }), QuoteNotVerbatimError);
+  assert.throws(() => assertQuoteVerbatim('   \n ', 'real excerpt text', { term: 'x', termId: 't1' }), QuoteNotVerbatimError);
+});
+
+test('assertQuoteVerbatim is case-sensitive — a case-drifted "quote" is not verbatim', () => {
+  assert.throws(() => assertQuoteVerbatim(
+    'The Director shall hold a hearing',
+    'the director shall hold a hearing',
+    { term: 'x', termId: 't1' },
+  ), QuoteNotVerbatimError);
 });

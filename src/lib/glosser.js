@@ -253,6 +253,45 @@ export function assertGlossNotEmpty(sentences, { term, termId }) {
   }
 }
 
+// collapseQuoteWhitespace mirrors summary-queue.js's checkStatedPurposeGrounding EXACTLY (the
+// same convention verifier.js's own private collapseWhitespace follows, each copy citing the
+// others): whitespace runs collapse to a single space on both sides before the substring test;
+// comparison stays case-sensitive.
+function collapseQuoteWhitespace(value) {
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+export class QuoteNotVerbatimError extends Error {
+  constructor(message, meta = {}) {
+    super(message);
+    this.name = 'QuoteNotVerbatimError';
+    Object.assign(this, meta);
+  }
+}
+
+// assertQuoteVerbatim — the mechanical receipts gate the gloss chain never had, found by the
+// 2026-08-19 cheap-config probe: an author inserted editorial text INSIDE a "verbatim" quote
+// ("[followed by 35 defined terms...]") and nothing in the pipeline would have refused it.
+// supported_by_quote is the PUBLIC receipt (rendered as a blockquote with a Source link) — it
+// must be an exact, whitespace-collapsed substring of the fetched excerpt, and never empty.
+// Runs BEFORE any verify call: a bad receipt must not spend a billed verify on itself (same
+// rationale as assertGlossNotEmpty). Pure; unit-testable without any client.
+export function assertQuoteVerbatim(supportedByQuote, excerptText, { term, termId }) {
+  const quote = collapseQuoteWhitespace(supportedByQuote);
+  if (!quote) {
+    throw new QuoteNotVerbatimError(
+      `gloss for "${term}" (id ${termId}): supported_by_quote is empty — a receipt with no quote is not a receipt`,
+      { term, termId },
+    );
+  }
+  if (!collapseQuoteWhitespace(excerptText).includes(quote)) {
+    throw new QuoteNotVerbatimError(
+      `gloss for "${term}" (id ${termId}): supported_by_quote is not a verbatim substring of the source excerpt — refusing to store a receipt the source does not contain`,
+      { term, termId },
+    );
+  }
+}
+
 export function buildGlossVerifyMessage(term, sentencesJson, excerptText) {
   return `Term: ${term}\n\n<gloss_sentences_to_verify>\n${sentencesJson}\n</gloss_sentences_to_verify>\n\n<source_excerpt>\n${excerptText}\n</source_excerpt>\n\nAttempt to refute each sentence against ONLY the source excerpt. Return one verdict per sentence, in order, per your schema (bullet_index = sentence position).`;
 }

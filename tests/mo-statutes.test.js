@@ -253,3 +253,28 @@ test('extractMoSectionText throws MoPageIdentityError when the body-start marker
     MoPageIdentityError,
   );
 });
+
+// ---- leading-asterisk pages (2026-08-19 gloss-probe finding): the Revisor prints a footnote
+// marker before the section number on sections with notes ("*536.028.") — real pages, banked
+// as fixtures after the probe honestly refused them 2-of-10. The identity anchor must
+// tolerate exactly that marker and nothing else.
+
+test('extractMoSectionText extracts a leading-asterisk page (536.028)', () => {
+  const text = extractMoSectionText(fx('section-536.028.html'), { section: '536.028', url: 'x' });
+  assert.match(text, /^\s*\*?\s*536\.028\./);
+  assert.ok(text.includes('Contingent delegation of rulemaking power'));
+  assert.ok(!text.includes('<'));
+});
+
+test('extractMoSectionText extracts a leading-asterisk page (33.080)', () => {
+  const text = extractMoSectionText(fx('section-33.080.html'), { section: '33.080', url: 'x' });
+  assert.ok(text.includes('All fees, funds and moneys'));
+  assert.ok(!text.includes('<'));
+});
+
+test('asterisk tolerance does not weaken identity: wrong section still refuses on an asterisk page', () => {
+  assert.throws(
+    () => extractMoSectionText(fx('section-536.028.html'), { section: '111.111', url: 'x' }),
+    MoPageIdentityError,
+  );
+});

@@ -534,3 +534,13 @@ is the largest at 70,101 bytes, `bot-page.html` the smallest committed fixture a
 Grepped for anything key-shaped (`api_key`, `Authorization: Bearer`, `secret_key`, `password=`)
 before committing — no matches; the site is fully public and unauthenticated, consistent with
 every other adapter captured in this file.
+
+### mo-statutes/ — leading-asterisk pages (added 2026-08-20)
+
+`section-536.028.html` and `section-33.080.html`: captured 2026-08-19 during the gloss-probe
+diagnostic pass (2 requests, >=5s apart, within the same politeness budget documented above) from
+`https://revisor.mo.gov/main/OneSection.aspx?section=536.028` and `...?section=33.080`. Both are
+real pages whose statute body opens with the Revisor's leading-asterisk footnote marker
+("*536.028.", "*33.080.") — the shape that made the probe's prefix-anchored identity check
+honestly refuse 2 of 10 sections. Kept byte-exact as the fixtures pinning the one-asterisk
+tolerance in extractMoSectionText's identity anchor.

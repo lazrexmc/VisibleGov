@@ -229,8 +229,12 @@ export function extractMoSectionText(html, meta = {}) {
   // only CROSS-REFERENCES the requested section satisfies: 536.010's own body links to 536.100, so
   // extracting "536.100" off 536.010's page wrongly passed (executed proof). Anchoring makes the
   // check prove the page IS the section, not merely that it mentions it.
+  // One tolerated prefix (2026-08-19 gloss-probe finding, verified on two live pages banked as
+  // fixtures): the Revisor prints a leading-asterisk footnote marker on sections with notes —
+  // the slice opens "*536.028. Contingent delegation..." — so exactly one optional "*" is
+  // allowed before the number. Nothing else is: any other leading content still refuses.
   const escaped = meta.section.replace(/\./g, '\\.');
-  if (!new RegExp(`^\\s*${escaped}\\b`).test(text)) {
+  if (!new RegExp(`^\\s*\\*?\\s*${escaped}\\b`).test(text)) {
     throw new MoPageIdentityError(
       `revisor.mo.gov response does not begin with section ${meta.section}'s own marker — refusing to extract`,
       meta,

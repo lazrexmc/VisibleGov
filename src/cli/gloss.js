@@ -6,7 +6,7 @@ import { assessVerdicts, VerificationIncompleteError } from '../lib/verifier.js'
 import {
   MODEL, PROMPT_VERSION, authorGloss, fetchGlossSource, splitGlossSentences,
   GLOSS_VERIFIER_MODEL, GLOSS_VERIFY_PROMPT_VERSION, verifyGloss,
-  EmptyGlossError, assertGlossNotEmpty,
+  EmptyGlossError, assertGlossNotEmpty, QuoteNotVerbatimError, assertQuoteVerbatim,
 } from '../lib/glosser.js';
 import { OversizeExcerptError, UscSectionNotFoundError, SubsectionNotFoundError } from '../adapters/uscode.js';
 import { SourceFetchError, RateLimitedError } from '../lib/errors.js';
@@ -33,10 +33,14 @@ const GLOSSARY_VERIFICATIONS_TABLE = 'glossary_verifications';
 // or count-and-continue past it), and a page-identity mismatch gets the same treatment — both
 // propagate up through fetchGlossSource uncaught and abort the batch, rather than being recorded
 // in failures[] and continued past like the types actually listed below.
+// QuoteNotVerbatimError (2026-08-19 probe finding) is deliberately IN this list: a receipt
+// quote that isn't a verbatim excerpt substring is a per-term authoring flaw — counted,
+// retryable next run — never a run-level stop.
 export const FAILURE_TYPES = [
   OversizeExcerptError, UscSectionNotFoundError, SubsectionNotFoundError,
   SourceFetchError, RateLimitedError,
   SummaryRefusedError, SummaryTruncatedError, VerificationIncompleteError, EmptyGlossError,
+  QuoteNotVerbatimError,
 ];
 
 function isTypedFailure(err) {
@@ -168,6 +172,11 @@ export async function persistGloss(client, runId, term, { glossMd, supportedByQu
 async function glossOne(client, runId, term, anthropic, fetchSource = fetchGlossSource) {
   const { url, excerptText, hash } = await fetchSource(term.citation);
   const { json: glossJson } = await authorGloss(anthropic, { term: term.term, excerptText });
+
+  // Mechanical receipts gate (2026-08-19 probe finding), BEFORE any verify spend: the public
+  // supported_by_quote must be a verbatim (whitespace-collapsed) substring of the excerpt —
+  // see assertQuoteVerbatim's own comment. A gated term is a counted, retryable failure.
+  assertQuoteVerbatim(glossJson.supported_by_quote, excerptText, { term: term.term, termId: term.id });
 
   const sentences = splitGlossSentences(glossJson.gloss_md);
   // Fix wave (Minor finding 4): empty-gloss guard, BEFORE any verify call — '' is schema-valid

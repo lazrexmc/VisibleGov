@@ -5,6 +5,7 @@ import {
   glossCandidates, failedRunDetail,
 } from '../src/cli/gloss.js';
 import { MoBotPageError, MoPageIdentityError } from '../src/adapters/mo-statutes.js';
+import { QuoteNotVerbatimError } from '../src/lib/glosser.js';
 import { SourceFetchError } from '../src/lib/errors.js';
 
 // ---- planGlossing: the branched routing decision (mirrors extract-terms.js's planExtraction) ----
@@ -326,4 +327,30 @@ test('loadAllTerms: a live (non-dry-run) missing-relation error still throws —
     error: { code: 'PGRST205', message: "Could not find the table 'public.glossary_terms' in the schema cache" },
   });
   await assert.rejects(() => loadAllTerms(client, false), /glossary_terms lookup failed/);
+});
+
+// ---- QuoteNotVerbatimError: counted per-term failure, gated BEFORE any verify spend ----
+
+test('FAILURE_TYPES includes QuoteNotVerbatimError — a bad receipt is a counted, retryable per-term failure', () => {
+  assert.ok(FAILURE_TYPES.includes(QuoteNotVerbatimError));
+});
+
+test('glossCandidates: a non-verbatim supported_by_quote is counted as a failure, spends no verify call, writes nothing', async () => {
+  const client = makeFakeClient();
+  const term = { id: 'term-q', term: 'section 1.010', citation: 'RSMo 1.010' };
+  const fetchSource = async () => ({ url: 'u', excerptText: 'the director shall hold a hearing within thirty days', hash: 'h' });
+  const fakeAnthropic = {
+    messages: {
+      create: async () => ({
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify({ gloss_md: 'A sentence.', supported_by_quote: 'text the excerpt does not contain' }) }],
+      }),
+      stream: () => { throw new Error('verify must never be called for a gated receipt'); },
+    },
+  };
+  const { glossed, flagged, failures } = await glossCandidates(client, 'run-1', [term], fakeAnthropic, { fetchSource });
+  assert.equal(glossed, 0);
+  assert.equal(flagged, 0);
+  assert.deepEqual(failures.map((f) => f.id), ['term-q']);
+  assert.deepEqual(client.calls, [], 'nothing persisted for a gated receipt');
 });
