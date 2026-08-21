@@ -40,7 +40,18 @@ export const ESCALATION_MODEL = 'claude-sonnet-5';
 export const BATCH_DISCOUNT = 0.5; // Message Batches API: 50% of standard prices
 export const BOT_PAGE_COOLDOWN_MS = 10 * 60 * 1000;
 export const IDENTITY_ABORT_THRESHOLD = 20; // sweep-wide template-drift tripwire
-export const RUN_SOURCE = 'gloss-batch-mo';
+export const RUN_SOURCE = 'gloss-batch-mo'; // the MO default; see runSourceFor
+
+// --source widening (2026-08-21): the same runner drains the USC mappable drafts. The two drains
+// stay separate in run labels and checkpoint dirs so --resume can never mix them. Routing is by
+// the STORED citation shape (the prefix-discriminated format the glossary keys on).
+export function citationFilterFor(source) {
+  if (source === 'mo') return (t) => isMoCitation(t?.citation);
+  if (source === 'usc') return (t) => typeof t?.citation === 'string' && /U\.S\.C\./.test(t.citation);
+  throw new Error(`unknown --source ${source} (expected mo|usc)`);
+}
+export function runSourceFor(source) { return `gloss-batch-${source}`; }
+export function stateDirNameFor(source) { return `gloss-batch-${source}`; }
 
 // The wave-2 remedy class: an explicit warning against the exact prior mistake, appended to the
 // SAME user message the first attempt saw (prompts themselves stay the trust lib's, unmodified).
@@ -120,22 +131,25 @@ export function gateAuthoredGloss(term, message, excerptText) {
 
 // ---- orchestration (thin; everything above is the tested surface) ----
 
-const STATE_DIR = new URL('../.superpowers/artifacts/gloss-batch-mo/', import.meta.url);
+let STATE_DIR = new URL('../.superpowers/artifacts/gloss-batch-mo/', import.meta.url);
+function useStateDir(source) { STATE_DIR = new URL(`../.superpowers/artifacts/${stateDirNameFor(source)}/`, import.meta.url); }
 const p = (name) => new URL(name, STATE_DIR);
 const loadJson = (name, fallback) => (existsSync(p(name)) ? JSON.parse(readFileSync(p(name), 'utf8')) : fallback);
 const saveJson = (name, value) => writeFileSync(p(name), JSON.stringify(value, null, 2));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function parseRunnerArgs(argv) {
-  const out = { budgetUsd: NaN, maxTerms: Infinity, fetchOnly: false, resume: false };
+  const out = { budgetUsd: NaN, maxTerms: Infinity, fetchOnly: false, resume: false, source: 'mo' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--budget-usd') out.budgetUsd = Number(argv[i += 1, i]);
     else if (argv[i] === '--max-terms') out.maxTerms = Number(argv[i += 1, i]);
     else if (argv[i] === '--fetch-only') out.fetchOnly = true;
     else if (argv[i] === '--resume') out.resume = true;
+    else if (argv[i] === '--source') out.source = argv[i += 1, i];
     else throw new Error(`unknown flag ${argv[i]}`);
   }
   if (!(out.budgetUsd > 0)) throw new Error('--budget-usd must be > 0');
+  citationFilterFor(out.source); // validates early
   return out;
 }
 
@@ -179,6 +193,7 @@ async function runBatch(anthropic, requests, label, state, spend) {
 
 async function main() {
   const args = parseRunnerArgs(process.argv.slice(2));
+  useStateDir(args.source);
   mkdirSync(STATE_DIR, { recursive: true });
   const client = getClient();
   const anthropic = new Anthropic();
@@ -188,8 +203,8 @@ async function main() {
 
   // ---- candidates: RSMo-cited, gloss-ready, per the same planGlossing buckets gloss.js uses
   const { terms } = await loadAllTerms(client); // returns {terms, tableMissing}, never a bare array
-  const candidates = planGlossing(terms).candidates.filter((t) => isMoCitation(t.citation)).slice(0, args.maxTerms);
-  console.error(`candidates: ${candidates.length} RSMo-cited gloss-ready terms`);
+  const candidates = planGlossing(terms).candidates.filter(citationFilterFor(args.source)).slice(0, args.maxTerms);
+  console.error(`candidates: ${candidates.length} ${args.source}-cited gloss-ready terms`);
 
   // ---- phase FETCH (sequential, 5s limiter inside fetchGlossSource; free) ----
   let identityErrors = 0;
@@ -271,7 +286,7 @@ async function main() {
   const verifyResults = await runBatch(anthropic, verifyRequests, 'verify', state, spend);
 
   // ---- phase PERSIST (the mechanical gates decide; the run record carries everything) ----
-  const runId = await openRun(client, RUN_SOURCE);
+  const runId = await openRun(client, runSourceFor(args.source));
   let glossed = 0; let flagged = 0; const verifyFailures = [];
   try {
     for (const term of verifyTerms) {

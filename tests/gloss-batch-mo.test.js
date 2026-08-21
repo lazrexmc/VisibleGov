@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildAuthorRequest, buildVerifyRequest, gateAuthoredGloss, batchSpendUsd,
   RETRY_WARNING, AUTHOR_MODEL, ESCALATION_MODEL, BATCH_DISCOUNT,
+  citationFilterFor, runSourceFor, stateDirNameFor,
 } from '../scripts/gloss-batch-mo.mjs';
 import {
   GLOSS_SYSTEM_PROMPT, GLOSS_SCHEMA, GLOSS_VERIFIER_MODEL, GLOSS_VERIFY_SCHEMA, MODEL,
@@ -103,4 +104,24 @@ test('batchSpendUsd prices a dated canonical model id the Batch API returns (cla
 
 test('batchSpendUsd still refuses a genuinely unpriced model', () => {
   assert.throws(() => batchSpendUsd('claude-unknown-9-20260101', { input_tokens: 1, output_tokens: 1 }), /no price entry/);
+});
+
+// ---- --source widening (2026-08-21: the 692 USC mappable drafts through the same runner) ----
+
+test('citationFilterFor routes by stored-citation shape: mo -> RSMo only, usc -> U.S.C. only', () => {
+  const mo = citationFilterFor('mo');
+  const usc = citationFilterFor('usc');
+  assert.equal(mo({ citation: 'RSMo 536.010' }), true);
+  assert.equal(mo({ citation: '42 U.S.C. 1396b' }), false);
+  assert.equal(usc({ citation: '42 U.S.C. 1396b(i)' }), true);
+  assert.equal(usc({ citation: 'RSMo 536.010' }), false);
+  assert.equal(usc({ citation: null }), false);
+  assert.throws(() => citationFilterFor('all'), /unknown --source/);
+});
+
+test('runSourceFor / stateDirNameFor keep the two drains in separate run labels and checkpoint dirs', () => {
+  assert.equal(runSourceFor('mo'), 'gloss-batch-mo');
+  assert.equal(runSourceFor('usc'), 'gloss-batch-usc');
+  assert.equal(stateDirNameFor('mo'), 'gloss-batch-mo');
+  assert.equal(stateDirNameFor('usc'), 'gloss-batch-usc');
 });
