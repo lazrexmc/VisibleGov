@@ -7,10 +7,10 @@ information.
 
 **Status (2026-08-19): DEPLOYED and live at https://visiblegov.pages.dev — 1,037 plain-language
 summaries published (the draft drain completed 2026-08-18; every future summary flows through
-the autonomous daily scheduler under code-enforced caps). NEW: a Missouri statute glossary
-source (revisor.mo.gov) is merged — adapter + jurisdiction-aware citation mapping +
-re-mapping backfill, triple-audited; the backfill `--apply` and the gloss-run spend decision
-await Lance (see `TODO.md` RESUME HERE).** *(Fresh
+the autonomous daily scheduler under code-enforced caps). NEW (2026-08-21): the Missouri statute
+glossary is LIVE — 1,217 RSMo section glosses published through the Batch-API runner for
+$12.45, each with a verbatim statute quote and a revisor.mo.gov source link (glossary
+published 116 → 1,333); see `TODO.md` RESUME HERE for what is next.** *(Fresh
 session? Read the RESUME HERE block at the top of `TODO.md` — it is verified against the live
 database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,

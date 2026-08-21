@@ -29,9 +29,9 @@ accountable with real information instead of spin.
 > go.**
 > **Update 2026-08-19:** the drain is COMPLETE (live 1,037; the registered daily 6 AM scheduler
 > owns all future summaries under its $1/tick + $5/wk ledger carve-out), and the **Missouri
-> statute glossary source (revisor.mo.gov) is MERGED** — triple-audited; the backfill `--apply`
-> and the gloss-run spend decision await Lance (TODO RESUME HERE has the live numbers; PLAYBOOK
-> lessons 41-42 record what the audit caught).
+> statute glossary is LIVE** (2026-08-21: 1,217 RSMo glosses published for $12.45 via the
+> Batch-API runner; glossary 116 → 1,333; PLAYBOOK lessons 41-43 record what the audit and the
+> run taught — incl. lesson 43: stop background runners by PID, never by command-line grep).
 >
 > **Two traps that will cost you a session if you hit them cold:**
 > 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct

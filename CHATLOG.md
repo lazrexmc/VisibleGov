@@ -5194,3 +5194,33 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   .superpowers/artifacts/gloss-batch-mo/runner.pid so a future stop is real. Next phases: gate
   author-1, author-2 retry (Haiku + warning), author-3 (sonnet), verify (sonnet batch), persist,
   then auto-publish-glossary + live verification. Cap remains $15.
+- **MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses published
+  for $12.45 — glossary published 116 -> 1,333.** Resume hit one more live-only defect first: the
+  Batch API returns each result's model as the CANONICAL dated id (claude-haiku-4-5-20251001)
+  while PRICES keys on the alias — priceOf threw on the first collected result and killed the
+  resume before any new spend; fixed TDD (priceableModelId strips one trailing -YYYYMMDD only when
+  the exact id is unpriced; a truly unknown model still refuses), commit ed2fd85, suite 2,537/0.
+  The relaunched resume (PID captured this time) collected the orphan-submitted author-1 batch
+  FREE and ran the rest unattended: author-1 597/1,489 passed the mechanical gates (Haiku's
+  first-pass receipt quotes fail verbatim ~60%, matching the probe) -> author-2 (902 retries
+  with the explicit warning) lifted it to 1,191 -> author-3 (308 sonnet escalations) to 1,498 ->
+  verify batch 1,498 sonnet -> persist. Run record: glossed_clean 1,217 / flagged 279 / parked 47
+  / fetch failures 11 / author failures 1 / verify failures 2; spent $12.45 of the $15 cap
+  ($3.99 authoring incl. retries, ~$8.46 verify). Then the $0 auto-publish pass (its own gates:
+  1,217 eligible = the clean set, 279 flagged held for Lance, 0 corrupted, 0 edited-since-
+  verification) published 1,217 / failed 0 (run 64de5531). **Independent live verification:**
+  published 1,333 total, 1,217 RSMo; honest bylines (940 haiku-authored / 277 sonnet-escalated
+  among the published); the receipts gate re-checked mechanically against the banked excerpts —
+  1,217/1,217 quotes verbatim, 0 failures; anon public-surface probe all PASS; a real browser
+  load of HB 2336's bill page (82 linked MO glosses) rendered inline gloss toggles with zero
+  console errors, and expanding "section 476.412" showed citation + plain-language gloss +
+  verbatim statute blockquote + a Source link to revisor.mo.gov/main/OneSection.aspx?section=476.412.
+  **Honest coverage numbers (the thing Audit A warned about):** 486 of 1,045 published summaries
+  now LINK to a published gloss, but inline rendering requires the term text verbatim in the
+  summary body, so only **366 summaries actually show one (313 via MO glosses; 1,006 of 2,208
+  links render)** — up from 87 before the build. The remaining ~120 linked-but-invisible summaries
+  (and the merge-repointed links) need a rendering fallback — a "Referenced laws" list under the
+  summary for linked terms that didn't match inline — logged in TODO as the next highest-leverage
+  reader item. Also logged: 279 flagged MO glosses await Lance's flag review (his trust-model
+  role); the 692 USC mappable drafts are still ungloss'd (same runner, ~$5, on his go); the daily
+  scheduler now maps new MO terms at insert time so gloss-ready drafts accumulate for a future run.
