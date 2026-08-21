@@ -6,58 +6,17 @@
 
 ## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
-**⏸ PAUSED BY LANCE (2026-08-20, "pause all activity"): the MO gloss batch drain is stopped
-mid-fetch at 1,270/1,546 excerpts checkpointed, **$0.00 spent — no batch ever submitted** (still
-the free fetch phase). 37 terms parked (nonexistent-section double-strikes, evidence in
-glossary_notes), 16 fetch failures recorded. Do NOT restart without Lance's explicit go. When he
-gives it — DO NOT rebuild anything — resume with exactly:
-`node --env-file=.env scripts/gloss-batch-mo.mjs --budget-usd 15 --resume`
-(the $15 cap is Lance-approved, 2026-08-20 "I agree, lets go for it"). It skips fetched pages,
-finishes the sweep (~5s/page + 10-min cooldowns on bot pages), then runs the batched author →
-gate → retry → verify → persist chain and prints the run detail. Afterward: run
-`node --env-file=.env src/cli/auto-publish-glossary.js` ($0, own gates), verify live, report.**
-
-*Everything below this block is a historical record, mostly resolved. This block is the only part
-that tells you what is actually OPEN. If the two ever disagree, re-verify live and trust the live
-check — that drift is exactly what has burned this project before.*
-
-**🆕 MO STATUTE GLOSSARY SOURCE — BUILT, TRIPLE-AUDITED, MERGED TO MAIN (2026-08-19); two
-decisions await Lance:** the revisor.mo.gov adapter, jurisdiction-aware citation dispatch, and
-the re-mapping backfill CLI (`src/cli/backfill-mo-glossary-citations.js`) are on main — 8 SDD
-tasks, a final whole-branch review, and then a Lance-requested 3-auditor pass (intent /
-live-data / adversarial) whose fix wave was re-verified clean; suite 2,517/0 clean shell on the
-merged tree. **Post-audit LIVE dry-run: 1,546 sections map in place + 364 merge into them ·
-0 guard-blocked · 0 stub violations.** The audit DROPPED chapters from v1 (a chapter page is a
-TOC of revisor catchlines — an executed construction showed a verifier quote could "support" a
-wrong-chapter claim; chapters stay needs_mapping until a design grounds them honestly), added a
-low-chapter (≤20) corroboration guard against MO appropriations bills' internal `N.MMM` section
-numbers, cut revisor case-law annotations out of excerpts, and hardened the backfill against
-concurrent-writer races (23505/23503 → honest per-item skips, live link re-reads, partial counts
-always reach the run record). ✅ **Backfill `--apply` RAN (Lance, 2026-08-20): 1,540 updated + 370 merged, 0 skips — verified
-live** (1,546 RSMo rows mapped incl. 6 minted overnight by the scheduler's new insert-time
-dispatch working on its own; 0 chapter citations; 0 orphan links of 22,360; USC untouched at
-808; post-apply dry-run reads 0/0 — converged; run record succeeded). ✅ **Cheap-config gloss
-probe RAN (2026-08-19, $0.0995): $0.0124/term measured** (Haiku author / Sonnet verify; the
-verifier correctly flagged a real Haiku overstatement) → full 1,546-term drain ≈ $19–21 raw,
-~$25–35 with retries — ~13× under the opus estimate. **Awaiting Lance now: (1) the two
-probe-found gloss-lane fixes ($0, TDD):** (a) a mechanical `supported_by_quote`
-verbatim-substring gate — the probe caught Haiku inserting editorial text inside a "verbatim"
-receipt quote and NOTHING gates this today (pre-existing gap, applies to opus glosses too);
-(b) the section identity anchor must tolerate the Revisor's leading-asterisk footnote marker
-(`*536.028.` — 2 of 10 real pages honestly refused; raw pages banked as fixtures). **(2) the
-billed gloss run** (Haiku-author/Sonnet-verify + quote gate + one retry-with-warning +
-sonnet-author escalation; per-run approval — the scheduler ledger carve-out is summaries-only). Coverage math gets
-re-derived at gloss time (the earlier ~565 figure included dropped chapters and overcounted
-merge-loser inline rendering — merged-away term texts don't inline-highlight; a rendering
-fallback for linked-but-unmatched terms is a future site item). ✅ **Found-and-FIXED during the
-build (recorded per Lance's ask):** the `selectAll()`/`summary_terms` composite-PK pagination
-bug that blocked `--apply` on a clean checkout — fixed with an additive `orderBy` option
-(commit `1cb68d5`), live-verified. Known deferred gloss-lane behavior: a permanently
-bot-paging citation (e.g. a bill-created section revisor doesn't serve yet) aborts its gloss
-run by design; the run record now names the term, and the operator remedy is the existing
-`status='rejected'`. Spec (with dated post-audit amendments):
-`docs/superpowers/specs/2026-08-19-mo-statute-glossary-source-design.md`; PLAYBOOK lessons
-41–42 came out of the audit.
+**▶ RUNNING (resumed 2026-08-21 on Lance's go): the MO gloss batch drain.** Fetch sweep COMPLETE
+(1,489 excerpts banked, 47 parked nonexistent sections with evidence in glossary_notes, 10
+fetch/identity failures). The author-1 Haiku batch was submitted 2026-08-20 23:52Z by an
+orphaned process after the pause (disclosed; PLAYBOOK lesson 43) and completed 1,489/1,489; the
+resumed runner collects it free and continues: gate -> author-2 retry -> author-3 sonnet ->
+verify batch -> persist -> then `node --env-file=.env src/cli/auto-publish-glossary.js` ($0) and
+live verification. **To STOP it for real:** `Stop-Process -Id (Get-Content
+.superpowersrtifacts\gloss-batch-mounner.pid) -Force`, then confirm the PID is gone —
+never trust a command-line grep. Resume after any stop: `node --env-file=.env
+scripts/gloss-batch-mo.mjs --budget-usd 15 --resume` (cap $15, Lance-approved). Progress:
+`.superpowers/artifacts/gloss-batch-mo/run.err`.
 
 **✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
 CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked

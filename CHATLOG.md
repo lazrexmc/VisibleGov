@@ -5181,3 +5181,16 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   runner orchestrates, never re-derives. 8 new tests (request shapes, retry-warning append,
   gate pass/fail matrix incl. non-verbatim-as-retryable, 50%-discount math, true-byline
   persistence). Launching with --budget-usd 15 per Lance's approved cap.
+- **Gloss drain RESUMED (Lance: "resume the gloss drain", 2026-08-21) — with an honest disclosure
+  first:** the 2026-08-20 "pause all activity" did NOT fully stop the runner. TaskStop killed the
+  PowerShell wrapper; the node child survived as an orphan (liveness checks matched on a
+  CommandLine Windows nulls for orphaned processes, so they reported "0 running" — PLAYBOOK lesson
+  43). It kept going ~2h: finished the sweep (1,489 fetched + 47 parked + 10 identity/fetch
+  failures = all 1,546), submitted the author-1 Haiku batch (msgbatch_013ygDy2tCWiDkAsCAgQ4aDG,
+  1,489 requests, created 23:52Z, ended 23:58Z, 1,489 succeeded / 0 errored) — the one billed
+  action, est. ~$1-1.5 at batch pricing — then died before collecting (PC shutdown). Results are
+  retained by the API; the runner's --resume path collects the stored batch free and continues.
+  Relaunched with Start-Process -PassThru and the PID written to
+  .superpowers/artifacts/gloss-batch-mo/runner.pid so a future stop is real. Next phases: gate
+  author-1, author-2 retry (Haiku + warning), author-3 (sonnet), verify (sonnet batch), persist,
+  then auto-publish-glossary + live verification. Cap remains $15.

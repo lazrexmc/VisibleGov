@@ -872,3 +872,19 @@ quote-grounded pipeline, ask what KIND of text the excerpt is — statute body, 
 annotation, headnote — and refuse everything that is not the operative text itself (the same
 pass also found revisor case-law annotations riding inside section excerpts; same class). Scope
 reduction (chapters left v1) beats a clever gate you cannot prove.
+
+## Lesson 43 — Killing a background SHELL does not kill its node child; verify liveness by PID, never by command-line matching (2026-08-21)
+
+"Pause all activity" was executed with a TaskStop on the PowerShell wrapper around a long-running
+node runner. The wrapper died; the node child was orphaned and kept running for ~2 hours — it
+finished a 1,546-page fetch sweep and SUBMITTED A BILLED BATCH (~$1-1.5) after the operator had
+asked for everything paused. Two liveness checks said "0 runner processes" because they filtered
+Win32_Process on CommandLine -match 'gloss-batch' — and Windows returns a NULL CommandLine for
+processes the querying session no longer owns, so the orphan silently failed the match. The
+honest signal was there the whole time (checkpoint files kept changing) and was not consulted.
+Rules: (1) launch long-running children with Start-Process -PassThru and WRITE THE PID to a file
+at launch; stop by Stop-Process on that PID (tree), then confirm the PID is gone — never confirm
+by grepping command lines. (2) After any "stop," re-read the job's own checkpoint/state files a
+few minutes later: a state file that keeps moving is a process that is still alive, whatever the
+process table says. (3) Disclose an unpaused process and any spend it incurred immediately and
+plainly; the checkpoint design made this one recoverable, not invisible.
