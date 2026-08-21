@@ -52,8 +52,18 @@ export const RETRY_WARNING = [
   'not print at that position. gloss_md must be non-empty (1-2 sentences).',
 ].join('\n');
 
+// The Batch API reports each result's model as the CANONICAL dated id (e.g.
+// claude-haiku-4-5-20251001) while PRICES keys on the alias we requested (claude-haiku-4-5) —
+// learned live 2026-08-21 when the first collected result threw "no price entry" and killed the
+// resume. Strip one trailing -YYYYMMDD only when the exact id is unpriced; a genuinely unknown
+// model still refuses (priceOf throws) — never spend unpriced.
+export function priceableModelId(model) {
+  try { priceOf(model); return model; } catch { /* fall through to the alias */ }
+  return String(model).replace(/-\d{8}$/, '');
+}
+
 export function batchSpendUsd(model, usage) {
-  const p = priceOf(model);
+  const p = priceOf(priceableModelId(model));
   return ((usage.input_tokens * p.in + usage.output_tokens * p.out) / 1e6) * BATCH_DISCOUNT;
 }
 

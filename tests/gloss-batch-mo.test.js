@@ -94,3 +94,13 @@ test('persistGloss writes the TRUE author model when given, and the opus default
   assert.equal(updates[0].row.model, 'claude-haiku-4-5');
   assert.equal(updates[1].row.model, MODEL);
 });
+
+test('batchSpendUsd prices a dated canonical model id the Batch API returns (claude-haiku-4-5-20251001) the same as its alias', () => {
+  const usage = { input_tokens: 1_000_000, output_tokens: 0 };
+  assert.equal(batchSpendUsd('claude-haiku-4-5-20251001', usage), batchSpendUsd('claude-haiku-4-5', usage));
+  assert.equal(batchSpendUsd('claude-sonnet-5-20260301', usage), batchSpendUsd('claude-sonnet-5', usage));
+});
+
+test('batchSpendUsd still refuses a genuinely unpriced model', () => {
+  assert.throws(() => batchSpendUsd('claude-unknown-9-20260101', { input_tokens: 1, output_tokens: 1 }), /no price entry/);
+});
