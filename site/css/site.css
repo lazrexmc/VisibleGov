@@ -1196,6 +1196,37 @@ main.board-main.bill-not-found section:not(#bill-identity) {
   color: var(--faint);
 }
 
+/* "Referenced laws and terms" (2026-08-21): the collapsed list of linked glosses the inline
+   marking could not place in the text. Same toggle/receipt affordance as .gloss-term; the list
+   itself stays visually quiet so a Missouri bill with 80 linked sections does not shout. */
+.gloss-referenced {
+  margin: 1rem 0 0.5rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.gloss-referenced-heading {
+  font-weight: 700;
+  margin: 0 0 0.15rem;
+}
+
+.gloss-referenced-note {
+  font-size: 0.85em;
+  color: var(--faint);
+  margin: 0 0 0.5rem;
+}
+
+.gloss-referenced-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gloss-referenced-item {
+  margin: 0.2rem 0;
+  max-width: 100%;
+}
+
 /* ============================================================================
    12. Trust page (site/trust.html / site/js/trust-page.js)
    ============================================================================ */

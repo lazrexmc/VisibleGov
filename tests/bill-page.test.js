@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import {
   tallyPositions, renderSummaryStructured, buildVerificationNote, NO_SUMMARY_NOTE, PLAIN_TEXT_FALLBACK_NOTE,
   loadVotesSection, loadSummarySection, classifyVerificationOverall, selectVerificationNotes,
-  filterRedundantOpenStatesVotes, ZERO_CAST_TALLY_NOTE,
+  filterRedundantOpenStatesVotes, ZERO_CAST_TALLY_NOTE, renderSummary,
 } from '../site/js/bill-page.js';
 import { markTerms } from '../site/js/glossary-inline.js';
 import { renderMarkdown } from '../src/lib/summarizer.js';
@@ -987,4 +987,64 @@ test('loadSummarySection: a public_verification_notes row with no `citations` ke
 
   assert.equal(container.querySelector('.bill-citation-toggle'), null);
   assert.notEqual(container.querySelector('.bill-summary-bullet-section'), null);
+});
+
+// ============================================================================
+// renderSummary — "Referenced laws and terms" fallback (2026-08-21): every linked, published
+// glossary term the inline marking did NOT claim anywhere in the summary renders in a collapsed
+// list under the bullets, each with the same receipt (gloss + verbatim quote + Source). Exported
+// for this test the same way the repo's other DOM-orchestration helpers were ("extract for
+// testability"); the inline marks themselves are unchanged.
+// ============================================================================
+
+const GLOSS_ROW = (id, term, citation) => ({
+  id, term, kind: 'statute', citation, gloss_md: `Gloss for ${term}.`,
+  supported_by_quote: `quote ${term}`, source_url: 'https://revisor.mo.gov/main/OneSection.aspx?section=1.010',
+});
+
+test('renderSummary: linked terms NOT matched inline land in a collapsed "Referenced laws and terms" section; matched ones do not repeat', () => {
+  const container = document.createElement('div');
+  const md = renderMarkdown(REAL_SUMMARY); // bullets: "Prohibits X payments", "Establishes a new grant program"
+  const matched = GLOSS_ROW('m', 'grant program', 'RSMo 1.010');   // appears inline in bullet 2
+  const unmatched = GLOSS_ROW('u', 'section 536.010', 'RSMo 536.010'); // never appears in the text
+  renderSummary(container, {
+    summary: { body_md: md }, note: null, noteUnavailable: false, completenessNote: null,
+    glossaryTerms: [matched, unmatched], glossaryUnavailable: false,
+  });
+  assert.equal(container.querySelectorAll('.bill-summary-bullets dfn.gloss-term').length, 1, 'one inline mark');
+  const section = container.querySelector('.gloss-referenced');
+  assert.ok(section, 'referenced section rendered');
+  assert.equal(section.querySelector('.gloss-referenced-heading').textContent, 'Referenced laws and terms (1)');
+  const toggles = [...section.querySelectorAll('dfn.gloss-term')].map((d) => d.textContent);
+  assert.deepEqual(toggles, ['section 536.010']);
+  const ul = container.querySelector('.bill-summary-bullets');
+  assert.ok(ul.compareDocumentPosition(section) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, 'section follows the bullet list');
+});
+
+test('renderSummary: every linked term matched inline -> no referenced section; no linked terms -> no section', () => {
+  const md = renderMarkdown(REAL_SUMMARY);
+  const c1 = document.createElement('div');
+  renderSummary(c1, {
+    summary: { body_md: md }, note: null, noteUnavailable: false, completenessNote: null,
+    glossaryTerms: [GLOSS_ROW('m', 'grant program', 'RSMo 1.010')], glossaryUnavailable: false,
+  });
+  assert.equal(c1.querySelector('.gloss-referenced'), null);
+  const c2 = document.createElement('div');
+  renderSummary(c2, {
+    summary: { body_md: md }, note: null, noteUnavailable: false, completenessNote: null,
+    glossaryTerms: [], glossaryUnavailable: false,
+  });
+  assert.equal(c2.querySelector('.gloss-referenced'), null);
+});
+
+test('renderSummary: on the plain-text fallback branch (unparseable body) ALL linked terms are referenced — the list is linked data, not text marking', () => {
+  const container = document.createElement('div');
+  const mangled = renderMarkdown(REAL_SUMMARY).replace(' (Sec. 2)', ''); // drops a trailing section -> fallback
+  renderSummary(container, {
+    summary: { body_md: mangled }, note: null, noteUnavailable: false, completenessNote: null,
+    glossaryTerms: [GLOSS_ROW('u1', 'section 536.010', 'RSMo 536.010'), GLOSS_ROW('u2', 'section 33.080', 'RSMo 33.080')],
+    glossaryUnavailable: false,
+  });
+  assert.ok(container.querySelector('.bill-summary-fallback-note'), 'fallback branch taken');
+  assert.equal(container.querySelector('.gloss-referenced-heading').textContent, 'Referenced laws and terms (2)');
 });

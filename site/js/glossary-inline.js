@@ -216,6 +216,10 @@ export function renderMarkedText(text, glossaryTerms) {
   const segments = markTerms(text, glossaryTerms);
   const inline = document.createDocumentFragment();
   const details = [];
+  // `matched` (2026-08-21, additive): every row claimed by an inline mark in THIS text, so the
+  // caller can compute what was linked to the summary but never matched anywhere in it and
+  // render those via renderReferencedLaws. Existing callers that ignore the field are unaffected.
+  const matched = [];
   for (const seg of segments) {
     if (!seg.terms || seg.terms.length === 0) {
       if (seg.text) inline.appendChild(document.createTextNode(seg.text));
@@ -224,6 +228,53 @@ export function renderMarkedText(text, glossaryTerms) {
     const { dfn, detail } = buildMarkedTerm(seg.text, seg.terms);
     inline.appendChild(dfn);
     details.push(detail);
+    matched.push(...seg.terms);
   }
-  return { inline, details };
+  return { inline, details, matched };
+}
+
+// ---- the "Referenced laws and terms" fallback (2026-08-21) ----
+//
+// Inline marking can only surface a linked gloss whose term text appears verbatim in the summary
+// body; live measurement (2026-08-21) found that left ~45% of linked, published glosses — and
+// every merge-repointed link from the MO glossary backfill — invisible to readers. This renders
+// the leftovers as a collapsed list under the summary, each entry the SAME toggle+receipt the
+// inline marks use (buildMarkedTerm: gloss + verbatim quote + Source), grouped by term text
+// exactly as markTerms groups (MED-1 parity: duplicate term texts with different citations become
+// one toggle carrying every citation). Pure data from summary_terms — no text parsing involved —
+// so it is honest on the plain-text fallback branch too. Factual heading, no editorial language.
+export const REFERENCED_LAWS_NOTE = "Official text this summary's bullets cite, with a quoted excerpt and a source link.";
+
+// unmatchedTerms(allTerms, matchedRows) -> the rows of allTerms whose id was never claimed inline,
+// in the caller's fetch order. Pure; tolerates null/undefined.
+export function unmatchedTerms(allTerms, matchedRows) {
+  const claimed = new Set((Array.isArray(matchedRows) ? matchedRows : []).map((r) => r && r.id));
+  return (Array.isArray(allTerms) ? allTerms : []).filter((r) => r && !claimed.has(r.id));
+}
+
+// renderReferencedLaws(rows) -> <section class="gloss-referenced"> or null when there is nothing
+// to list (the caller renders nothing — a summary whose every linked gloss matched inline, or one
+// with no linked glosses at all, shows no extra section).
+export function renderReferencedLaws(rows) {
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.term === 'string' && r.term.length > 0);
+  if (list.length === 0) return null;
+  const groups = new Map(); // lowerTerm -> { label, rows } — same grouping rule as markTerms
+  for (const row of list) {
+    const key = row.term.toLowerCase();
+    if (!groups.has(key)) groups.set(key, { label: row.term, rows: [] });
+    groups.get(key).rows.push(row);
+  }
+  const section = el('section', { class: 'gloss-referenced' });
+  section.appendChild(el('p', { class: 'gloss-referenced-heading' }, `Referenced laws and terms (${groups.size})`));
+  section.appendChild(el('p', { class: 'gloss-referenced-note' }, REFERENCED_LAWS_NOTE));
+  const ul = el('ul', { class: 'gloss-referenced-list' });
+  for (const group of groups.values()) {
+    const li = el('li', { class: 'gloss-referenced-item' });
+    const { dfn, detail } = buildMarkedTerm(group.label, group.rows);
+    li.appendChild(dfn);
+    li.appendChild(detail);
+    ul.appendChild(li);
+  }
+  section.appendChild(ul);
+  return section;
 }

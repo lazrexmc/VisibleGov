@@ -23,7 +23,7 @@ import { parseBullets, extractStatedPurpose } from './summary-parse.js';
 import { chamberLabel, groupSponsorships } from './profile-model.js';
 import { slugify } from './slugs.js';
 import { idFromPath, isNumericStatusCode, joinFlagBadges } from './person-page.js';
-import { renderMarkedText } from './glossary-inline.js';
+import { renderMarkedText, unmatchedTerms, renderReferencedLaws } from './glossary-inline.js';
 
 // ============================================================================
 // Pure helpers (TDD'd in tests/bill-page.test.js BEFORE any of the DOM code below existed)
@@ -460,10 +460,15 @@ function renderVotes(container, votes, tallyByVoteId, flagsUnavailable) {
   container.appendChild(list);
 }
 
-function renderSummary(container, {
+// Exported 2026-08-21 (referenced-laws fallback) for direct DOM tests — "extract for testability".
+export function renderSummary(container, {
   summary, note, noteUnavailable, completenessNote, glossaryTerms, glossaryUnavailable,
 }) {
   clearChildren(container);
+  // Rows claimed by inline marks anywhere in this summary; the leftovers render as the
+  // "Referenced laws and terms" list (glossary-inline.js's renderReferencedLaws) at the end of
+  // whichever branch below renders.
+  const matchedRows = [];
 
   if (!summary) {
     // sectionState's own 'empty' render already prints this (see loadSummarySection below) — this
@@ -489,7 +494,8 @@ function renderSummary(container, {
       // Fix round 1, LOW-4: `inline` (text + <dfn> wraps) goes INTO the <p>; `details` (block-level
       // expandable panels) are appended AFTER it, as siblings in `container` — never nested inside
       // the <p>, which would be invalid structure and broken layout.
-      const { inline, details } = renderMarkedText(structured.statedPurpose, glossaryTerms);
+      const { inline, details, matched } = renderMarkedText(structured.statedPurpose, glossaryTerms);
+      matchedRows.push(...matched);
       p.appendChild(inline);
       container.appendChild(p);
       for (const detail of details) container.appendChild(detail);
@@ -509,7 +515,8 @@ function renderSummary(container, {
         // A bullet's <li> can validly hold block content directly (unlike the purpose <p> above),
         // so the detail panels are appended as further children of the SAME <li>, after the
         // inline text and section citation — still never nested inside an inline element.
-        const { inline, details } = renderMarkedText(bullet.point, glossaryTerms);
+        const { inline, details, matched } = renderMarkedText(bullet.point, glossaryTerms);
+        matchedRows.push(...matched);
         li.appendChild(inline);
         const citation = citationsByIndex.get(bullet.index);
         const hasQuote = citation && typeof citation.evidence_quote === 'string' && citation.evidence_quote.trim() !== '';
@@ -531,6 +538,8 @@ function renderSummary(container, {
     // is moot: no marking would have applied even on a successful fetch, so nothing to apologize
     // for. LOW-6 (round 1): distinct from "this summary references no glossary terms at all,"
     // which renders no notice because there is nothing wrong to report.
+    const referenced = renderReferencedLaws(unmatchedTerms(glossaryTerms, matchedRows));
+    if (referenced) container.appendChild(referenced);
     if (glossaryUnavailable) {
       container.appendChild(el('p', { class: 'bill-glossary-unavailable' }, 'Glossary unavailable for this summary.'));
     }
@@ -543,6 +552,11 @@ function renderSummary(container, {
     for (const line of structured.plainTextLines) {
       container.appendChild(el('p', { class: 'bill-summary-plain-line' }, line));
     }
+    // Linked glossary rows are data from summary_terms, not a product of the (untrusted) parse —
+    // so the referenced list is honest here too; nothing was marked on this branch, so it lists
+    // every linked term.
+    const referencedAll = renderReferencedLaws(unmatchedTerms(glossaryTerms, matchedRows));
+    if (referencedAll) container.appendChild(referencedAll);
   }
 
   container.appendChild(el('p', { class: 'bill-verification-note' }, buildVerificationNote({
