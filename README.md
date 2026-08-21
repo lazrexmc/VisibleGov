@@ -10,7 +10,9 @@ summaries published (the draft drain completed 2026-08-18; every future summary 
 the autonomous daily scheduler under code-enforced caps). NEW (2026-08-21): the Missouri statute
 glossary is LIVE — 1,217 RSMo section glosses published through the Batch-API runner for
 $12.45, each with a verbatim statute quote and a revisor.mo.gov source link (glossary
-published 116 → 1,333); see `TODO.md` RESUME HERE for what is next.** *(Fresh
+published 116 → 1,333), and every linked gloss now renders on the bill page — inline or in a
+"Referenced laws and terms" list (486 of 1,045 summaries show one); see `TODO.md` RESUME HERE
+for what is next.** *(Fresh
 session? Read the RESUME HERE block at the top of `TODO.md` — it is verified against the live
 database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,

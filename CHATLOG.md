@@ -5224,3 +5224,29 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   reader item. Also logged: 279 flagged MO glosses await Lance's flag review (his trust-model
   role); the 692 USC mappable drafts are still ungloss'd (same runner, ~$5, on his go); the daily
   scheduler now maps new MO terms at insert time so gloss-ready drafts accumulate for a future run.
+- **"Referenced laws and terms" rendering fallback — BUILT, DEPLOYED, LIVE-VERIFIED (2026-08-21;
+  Lance: "i restarted the pc, resume again" -> post-restart state check found nothing in flight
+  (drain complete, git clean/in-sync, scheduler ticked 11:04Z: +4 published, $1.96/$5 wk) -> menu
+  -> "a" -> bounded brainstorm design approved ("proceed") -> TDD build; mid-build Lance:
+  "ensure all chat items are log on chatlog" -> created `LLM Tools/CHATLOG.md` for the
+  Master Reference V7 session (that work belongs to that folder's trail, not this repo's) and
+  this entry covers today's VisibleGov exchanges in full):** the gap Audit A predicted and the
+  drain's live check measured — inline gloss marks need the term text verbatim in the summary
+  body, so only 366 of the 486 summaries with a published gloss LINK actually showed one. Built:
+  `renderMarkedText` gains an additive `matched` field; new pure `unmatchedTerms` + DOM
+  `renderReferencedLaws` in glossary-inline.js (reuses the existing buildMarkedTerm toggle +
+  receipt, grouped by term text for MED-1 parity — duplicate term texts with different citations
+  = one toggle carrying every citation; factual heading "Referenced laws and terms (N)" + the
+  note "Official text this summary's bullets cite, with a quoted excerpt and a source link.");
+  bill-page.js's renderSummary (now exported for DOM tests) accumulates matched rows across the
+  stated purpose + bullets and appends the collapsed list after the bullets on BOTH branches
+  (on the plain-text fallback it lists every linked term — linked data, not text marking, so it
+  is honest there); quiet CSS beside the gloss rules. 9 new tests (glossary-inline.test.js: matched
+  field, leftover computation, section shape/toggle/receipt, duplicate grouping; bill-page.test.js:
+  leftovers render after the list, all-matched and none-linked render nothing, fallback branch
+  lists all). Suite 2,537 -> 2,546 fail 0 clean shell; commit d02e83c; Pages served the new JS
+  ~20s after push. **Real browser on HB 2336: "Referenced laws and terms (68)" — exactly the
+  predicted count — expanding "167.031" shows the citation heading, gloss, verbatim statute
+  blockquote, and the revisor.mo.gov Source link; zero console errors.** Visible gloss coverage is
+  now the full link count: **486 of 1,045 published summaries** (up from 366 this morning and 87
+  before the MO build), and the 439 merge-repointed links from the backfill are visible too.

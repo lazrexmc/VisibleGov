@@ -7,20 +7,20 @@
 ## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
-published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live (quotes
-1,217/1,217 verbatim, anon probe PASS, real-browser render with zero console errors).** Reader
-coverage: 486 of 1,045 published summaries link to a published gloss, **366 actually render one**
-(inline rendering needs the term text verbatim in the body) — up from 87. **Next-work menu,
-Lance's call:** (a) **rendering fallback** — a "Referenced laws" list under each summary for
-linked glosses that didn't match inline (lifts renderable coverage to 486 immediately, plus the
-merge-repointed links; highest-leverage reader item left); (b) **279 flagged MO glosses** await
+published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering
+fallback SHIPPED the same day (d02e83c):** every linked published gloss now renders — inline where
+the term text appears, otherwise in a collapsed "Referenced laws and terms (N)" list under the
+summary with the same receipt (gloss + verbatim quote + Source); live-verified on HB 2336 (68
+entries, zero console errors). **Visible gloss coverage: 486 of 1,045 published summaries** (was
+87 before the MO build). **Next-work menu, Lance's call:** (b) **279 flagged MO glosses** await
 his flag review (review page, trust-model process-auditor role) — 47 parked nonexistent
-sections carry their evidence in glossary_notes; (c) **692 USC mappable drafts** are still
+sections carry their evidence in glossary_notes; (c) **692 USC mappable drafts** still
 ungloss'd — same runner with the citation filter widened, ~$5, on his go; (d) the daily
-scheduler now mints gloss-ready MO drafts at insert time — a periodic gloss run will be needed
-(not scheduled; per-run approval). Runner: `scripts/gloss-batch-mo.mjs`; stop/resume and PID
-conventions in PLAYBOOK lesson 43. API balance: roughly $5–6 of the $20 remains (scheduler
-draws ~$0.35/day under its own $5/wk cap) — never assume a reload.
+scheduler mints gloss-ready MO drafts at insert time — a periodic gloss run will be needed (not
+scheduled; per-run approval); (e) the custom domain (Lance's console work, docs/CLOUDFLARE_DEPLOY.md).
+Runner: `scripts/gloss-batch-mo.mjs`; stop/resume and PID conventions in PLAYBOOK lesson 43. API
+balance: roughly $5–6 of the $20 remains (scheduler draws ~$0.35/day under its own $5/wk cap) —
+never assume a reload.
 
 **✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
 CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
