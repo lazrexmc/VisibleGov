@@ -5506,3 +5506,21 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   1,067 published, drafts 55 -> 51, retired 567 -> 573. Wave DY — the LAST drainable wave: the two
   strike-2 retries (via the disk-envelope path, objections checked fresh before launch) + HB 2365,
   HB 1686, HB 1472 (3.2-4.2k chars).
+- **The 18 "no-objection" drafts were never no-objection — 11 published by a $0 re-record through
+  today's gates, 7 are the sub-floor class** (2026-08-22, while wave DY ran): the drain builder
+  skips a draft when its latest on-disk envelope yields no computable objection, and all 18 had
+  verifications on file — 13 `support:flagged` with ZERO refuted verdicts and 0 uncovered
+  provisions (= verdict-BINDING flags from the 08-08/09 waves, the parens/section-word class the
+  gate fixes 92816ff/e4f4915 cleared; the 08-10 re-record swept only AN/AO/AP, never the AA-AM
+  era) and 5 `completeness:incomplete` sub-floor yields. Assembled each draft's latest
+  hash-matching envelope by code (records-recheck-18.json) and ran `record --replace-drafts`:
+  dry-run 11 would-publish / 7 MalformedSummaryError; live run e599d0ce **published 11** — SJRES 11,
+  HR 1041, HJRES 140, HJRES 87, HR 2096, HR 131, HR 30, HR 6359, HR 26, SJR 3, HB 340 (content
+  verified clean by the original sonnet pass, coverage complete; the old drafts retired with audit
+  notes) — and refused 7 honestly with nothing written: HB 64, HB 606, SB 626, HB 1607 (the four
+  unparked 08-18), HB 656, HB 930, SB 396 — "sub-floor key_provisions without a well-formed
+  corroboration run." Those seven are stuck between lanes (not fresh for the scheduler because
+  they carry drafts; no objection for the re-author path), so a FRESH-mode subagent wave (DZ,
+  corroboration stage included) is the only $0 way through — built by code from the DB with
+  hash-checked texts. Live after the re-record: **1,067 -> 1,078 published, drafts 51 -> 40,
+  retired 573 -> 584.**
