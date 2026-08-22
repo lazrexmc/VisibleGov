@@ -5524,3 +5524,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   corroboration stage included) is the only $0 way through — built by code from the DB with
   hash-checked texts. Live after the re-record: **1,067 -> 1,078 published, drafts 51 -> 40,
   retired 573 -> 584.**
+- **Wave DY: 4 of 5 published — both strike-3 bills cleared; HB 2365 flagged on a real
+  inference** (2026-08-22, run wf_95a64a3b-85b, 20 agents / 0 errors / ~10 min; record run
+  75ae6154 `--replace-drafts`, status succeeded): HB 1473 and HB 1743 (strike 3, re-authored
+  against DX's fresh "Section A caption" objections) came back 10/10 and 9/9 supported with full
+  coverage and published; HB 1686 (10/10) and HB 1472 (8/8) published. HB 2365's re-author
+  produced one refuted bullet — it claimed the bill makes the report a program DESE "provides on
+  an ongoing basis," which the verifier rejected as an inference contradicted by the section's
+  own six-year sunset (the bill title says "permanent"; the text says "six years after August
+  28, 2022 unless reauthorized") — exactly the editorializing the verifier exists to catch, so
+  it stays a draft. Rebuild afterward: **re-authorable pool = 1 (HB 2365, strike 1)** → wave EA
+  launched on the DY objection; the 7 disk-path `noObjections` skips are the sub-floor bills
+  already running in fresh-mode wave DZ. Live after DY: **1,082 published / 36 drafts / 589
+  retired.** Side check while here: a status query joined on the embedded identifier showed "HB
+  1473 published 2026-08-15" next to today's publish — a paginated scan (1,082 published rows,
+  1,082 distinct bill ids, 0 bills with >1 published) confirms it is a different bill row that
+  shares the identifier (a prior-session HB 1473), not a duplicate publish.
