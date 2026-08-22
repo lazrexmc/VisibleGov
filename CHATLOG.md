@@ -5481,3 +5481,14 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (six superseded drafts retired with audit notes). Wave DW (6 bills, 2.6-3.1k chars) built and
   launched next; the ladder continues smallest-first until the 15 remaining re-authorable drafts
   are converted or parked (3-strike rule, parks seeded into the scheduler's parked.json).
+- **Drain wave DW — 6/6 PUBLISHED** (2026-08-22, one 11.7KB launch, 25 agents 0 errors, 1.18M
+  tokens, run wf_8a0b6cb2; record run be59d9d6, --replace-drafts): SCR 34 Newtonia Battlefields
+  (3 verdicts clean; the inscribed-copies clause added, stated_purpose now verbatim), HB 1589
+  child-pornography 500-foot restriction (7; the refuted "expands" inference rewritten to what
+  Section A itself says), SCR 24 Victims of Communism Memorial Day (3; both Further-Resolved
+  clauses added), SJR 33 income-tax-cap amendment (6; the Section B ballot-summary bullet added),
+  HB 1697 cottage-food internet sales (11; the 196.298 definition bullet added), SB 655 LAGERS
+  public-safety classes (8; the repealed-subsection-4 geographic restriction added). Live: 1,057 ->
+  1,063 published, drafts 61 -> 55, retired 561 -> 567. Wave DX (6 bills, 3.1-3.5k chars, one
+  objection each: SCR 28, HB 1473, HB 1984, HB 1743, SCR 25, HB 3021) built and launched; 3
+  re-authorable remain after it.
