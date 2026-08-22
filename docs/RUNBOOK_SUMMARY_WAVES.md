@@ -85,3 +85,10 @@ form:** `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> <N> --pointer`
 pointer files and a ~600-byte-per-bill args file. The launch call is retyped by hand, and a
 14KB inline prior lost one character in transit on 2026-08-22 — the wave died at `JSON.parse`
 before any agent ran. Read the args file and pass it verbatim either way.
+
+**After editing `summary-wave.js`, launch by path, not by name:** `Workflow({scriptPath:
+'F:\\VisibleGov\\.claude\\workflows\\summary-wave.js', args})`. `Workflow({name:
+'summary-wave-3'})` served a session-cached pre-edit copy on 2026-08-22 and the pointer stubs
+fell through to the FRESH author branch without any error (PLAYBOOK lesson 47). Verify: the
+launch output's "Script file" is the repo path, and the first author transcript contains
+"RE-AUTHORING" and "Read the JSON file".

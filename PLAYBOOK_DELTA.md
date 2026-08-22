@@ -952,3 +952,22 @@ consumer (an agent with file tools) dereferences itself (lesson 40's mechanism, 
 DEFAULT for re-author waves via `build-drain-wave.mjs --pointer`, not a fallback for oversized
 priors). Corollary: when a launch fails at parse, look for the transcription error in the
 LAUNCH, not in the generated file — the file was fine.
+
+## Lesson 47 — `Workflow({name})` can serve a session-cached copy of the script; after editing a workflow, launch it by `scriptPath` and verify the persisted script carries the edit (2026-08-22)
+
+Right after committing the `reAuthor_file` pointer mode into `.claude/workflows/summary-wave.js`,
+wave EB was launched the usual way — `Workflow({name: 'summary-wave-3', args})`. It ran, $0,
+no error — and both author agents were authoring FRESH: no "RE-AUTHORING", no prior draft, no
+objections, no pointer read. The harness had resolved the name to a copy of the script cached
+earlier in the session; the persisted per-run script file (`…/workflows/scripts/summary-wave-3-
+<runId>.js`) had zero occurrences of the new helper, and the stubs — carrying only
+`reAuthor_file` — fell through the old `bill.reAuthor ? … : bill.checkpoint_file ? … : fresh`
+chain into the fresh branch. Nothing failed loudly, which is the dangerous part: the wave would
+have produced verifiable summaries on the wrong lane and charged a strike against bills whose
+objections were never applied. Mechanics: (1) after editing a workflow file, launch with
+`Workflow({scriptPath: '<repo path>', args})` — the tool reads that file from disk and says so
+("Script file: F:\…\summary-wave.js"); (2) before trusting any run of an edited workflow, grep
+the persisted script in the run's "Script file" path for the edit, and grep the first agent
+transcript for a prompt phrase unique to the new branch; (3) a silent fallthrough is a design
+smell — an item that carries a field the script does not recognise should throw, not author
+fresh (captured in TODO, not yet built).

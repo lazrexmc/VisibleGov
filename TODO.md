@@ -1159,6 +1159,14 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-22) Drain workflow: unknown manifest fields should THROW, not fall through to fresh
+  authoring.** `summary-wave.js` picks the author branch by `preAuthored` → `reAuthor ||
+  reAuthor_file` → `checkpoint_file` → fresh; an item that carries a field the running script
+  does not recognise (what happened when a cached pre-edit copy received `reAuthor_file` stubs,
+  PLAYBOOK lesson 47) silently authors fresh. Add a guard at the top of the author stage: if an
+  item has any key outside the known set, throw with the key name. Small, TDD-able against the
+  manifest shape; do it the next time the workflow is touched.
+
 - **(2026-08-22) MO Senate journal parser quarantines 2026-session days on `bill_refs` — the
   completeness-critical pipeline has a live gap.** 20 days quarantined (was 12 on 08-03): 14 are
   2026 session (`26info`), 6 are 2018. Every failure record reads `category: bill_refs — "block N:

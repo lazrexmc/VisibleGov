@@ -5581,3 +5581,16 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   builder drops nothing silently (an earlier composition check that "found 13 unparked" had
   parsed the PARKED set with a naive quote regex that the set's own comments defeated; a UUID
   regex gives 28/28).
+- **EB's second launch ran the OLD workflow from a session cache — fresh authoring on the wrong
+  lane, caught from the transcripts and relaunched by scriptPath** (2026-08-22, run
+  wf_6a1040c5-037 stopped; relaunched as wf_3d16b55e-d3d). I checked the new run's agent
+  transcripts for pointer-file reads before trusting it and found none — and no "RE-AUTHORING",
+  no "PRIOR DRAFT" either: the persisted per-run script had zero occurrences of `reAuthorBlock`.
+  `Workflow({name:'summary-wave-3'})` had resolved to a copy cached before the edit, so the two
+  ~450-byte stubs (only `reAuthor_file`) fell through the old `reAuthor ? … : checkpoint_file ?
+  … : fresh` chain into the fresh branch — no error, $0, but the objections were never applied
+  and a flag would have counted as a strike the bills never earned. Stopped it (TaskStop, 2
+  agents in flight) and relaunched with `scriptPath` pointing at the repo file, which the tool
+  reads from disk ("Script file: F:\VisibleGov\.claude\workflows\summary-wave.js"). PLAYBOOK
+  lesson 47 + a runbook addendum; a TODO capture for the design smell (an item carrying a field
+  the script does not recognise should throw, not author fresh).
