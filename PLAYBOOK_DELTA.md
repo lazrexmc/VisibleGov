@@ -888,3 +888,30 @@ by grepping command lines. (2) After any "stop," re-read the job's own checkpoin
 few minutes later: a state file that keeps moving is a process that is still alive, whatever the
 process table says. (3) Disclose an unpaused process and any spend it incurred immediately and
 plainly; the checkpoint design made this one recoverable, not invisible.
+
+## Lesson 44 — A spend cap that only gates BEFORE each submission cannot stop a single batch; project every batch from the data on disk, and calibrate the projection HIGH against a real run (2026-08-21)
+
+The USC glossary drain was estimated at ~$5.2 against a $5.62 balance and a $8 cap. It spent
+$8.31. Two separate mistakes, both cheap to avoid:
+1. **The estimate was a per-term rate carried over from a different corpus.** The MO probe's
+   $0.0063/term was applied to 669 USC terms without looking at the USC bank that was ALREADY
+   ON DISK — its excerpts averaged 11,056 chars vs MO's 4,371 (2.5x). A one-line script over
+   excerpts.json would have said "this bank is bigger than the whole MO bank." Rule: never
+   estimate a billed run from a rate; estimate it from the actual inputs you have banked.
+2. **The cap was checked only before each submission.** Three author rounds spent $3.07; the
+   verify batch was then submitted as ONE unit and cost $5.24 — there was no point at which any
+   check could fire. A cap is meaningless for a step whose cost is larger than the remainder
+   unless the step's cost is PROJECTED before it is submitted. Rule: before every submission,
+   project that submission's cost from its inputs and refuse if spent + projected > cap; the
+   up-front check should cover the minimum path (first author pass + verify) times a retry
+   allowance, so a run cannot sink its author rounds and then be refused at verify.
+3. **Calibrate the projection in the HIGH direction against a real run, and pin it with a
+   test.** The first projection used a flat 500-token output allowance for every phase; replayed
+   against the actual run it came out 25% LOW for verify (a verify result restates every sentence
+   with verdict, reason, and quote — ~1,000 output tokens/item) and would still have allowed the
+   batch. The replay caught it before commit; a calibration test now asserts the projection never
+   falls below the measured actuals, so a quiet price-table or prompt change cannot re-open the
+   hole. A projection that errs 25% high costs a larger --budget-usd; one that errs 25% low costs
+   real money the operator did not approve.
+4. **Disclose the overspend first, then the results.** The glosses were sound (every gate
+   passed) — that does not change the order of the report.

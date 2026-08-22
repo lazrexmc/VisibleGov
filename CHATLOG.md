@@ -5250,3 +5250,51 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   blockquote, and the revisor.mo.gov Source link; zero console errors.** Visible gloss coverage is
   now the full link count: **486 of 1,045 published summaries** (up from 366 this morning and 87
   before the MO build), and the 439 merge-repointed links from the backfill are visible too.
+
+- **"the 692 USC drafts" -> "I have 5.62 in my balance for credits, proceed" -> the USC glossary
+  drain RAN TO COMPLETION and OVERSPENT; Lance mid-pass: "out of api credits" (2026-08-21
+  evening; every exchange logged):** the $0 phase had already landed (commit 12e166b widened
+  `scripts/gloss-batch-mo.mjs` with `--source mo|usc` — routing by the STORED citation shape,
+  separate run labels + checkpoint dirs; the free fetch-only sweep banked 669 of the 692 USC
+  mappable drafts, 23 honest failures: 14 UscSectionNotFoundError e.g. `30 U.S.C. 28-28`, 9
+  OversizeExcerptError e.g. `42 U.S.C. 1396a` at 273k chars). I stated ~$5.2 against his $5.62,
+  he said proceed. Launched with a PID file (PID 12784) and `--budget-usd 8` (the runner's flat
+  internal estimate needed >= $6.33 to start). **Result:** author-1 (Haiku) 289/669 passed the
+  gates ($1.28) -> author-2 warned retry +228 ($0.78) -> author-3 Sonnet +148 ($1.01) -> 665
+  authored, 4 failed all three rounds (Indian Self-Determination and Education Assistance Act
+  25 U.S.C. 450b(e); National Historic Preservation Act of 1966 16 U.S.C. 470; National Security
+  Act of 1947 50 U.S.C. 414; Section 212(a)(2) 8 U.S.C. 1182(a) — left as drafts) -> verify
+  (Sonnet, 665) $5.24 -> **525 clean / 140 flagged / 0 verify failures. Spend $8.31 — over the
+  $8 cap AND over the $5.62 balance.** Run record `ingestion_runs` 7bf4cc93. **Why, plainly
+  (both are my errors):** (1) the estimate reused the MO probe's per-term rate ($0.0063) without
+  measuring the bank already on disk — USC excerpts average 11,056 chars vs 4,371 for MO (2.5x;
+  the 669-term USC bank is 7.40M chars, MORE text than the 1,499-term MO bank's 6.55M); (2) the
+  cap only gated BEFORE each submission — verify was submitted at $3.07 spent and its $5.24
+  landed after; a cap cannot stop a single batch that costs more than the remainder. The data
+  itself is sound: every mechanical gate passed. **Publish ($0):** auto-publish dry-run 525
+  eligible -> live 525/525 published (run b76459e7, 0 failed). Glossary published 1,333 ->
+  **1,858** (1,217 RSMo + 641 USC, incl. the 116 pre-existing). **Live verification:** 665/665
+  quotes verbatim in their banked excerpts (assertQuoteVerbatim re-run), 0 URL/hash mismatches;
+  anon public-surface probe all PASS; real browser on HR 6644: 35 inline glosses + "Referenced
+  laws and terms (26)", 36 uscode.house.gov receipts with verbatim quotes, zero console errors.
+  **Visible gloss coverage: 649 of 1,045 published summaries** (from 486 this morning, 87
+  before the MO build). Lance, mid-pass: **"out of api credits"** — confirms depletion; no runner
+  is alive (the PID exited 0); the scheduler's next 6 AM tick hits `classifyBillingError`, logs
+  `BALANCE DEPLETED — reload required`, and skips without retrying (designed); **no billed call
+  of any kind until Lance reloads AND gives an explicit go.** **Fixes, TDD, same pass:**
+  `projectBatchSpendUsd` projects every batch FROM THE BANK ON DISK (chars/4 + 600 overhead
+  tokens, phase-specific output allowances: 300 author / 1,000 verify — a verify result restates
+  every sentence with verdict, reason, and quote), `assertWithinBudget` runs before EVERY new
+  submission (resumed, already-submitted batches are sunk cost and pass through), and the
+  up-front check multiplies the minimum path by a x1.25 retry allowance so a run cannot sink its
+  author rounds and then be refused at verify. The first cut used a flat 500-token output
+  allowance and projected verify at $3.92 — 25% LOW — and would STILL have allowed today's batch;
+  the replay against the real banks caught it before commit, recalibrated, and a calibration test
+  now pins both phases to today's actuals (author-1 >= $1.28, verify >= $5.24). Replay after:
+  USC projected run $9.03 vs $8.31 actual (refused under an $8 cap — correctly); MO $15.53 vs
+  $12.45 (would have needed a $16 cap — conservative by ~25%, the acceptable direction).
+  `recordFetchFailure`/`clearFetchFailure` dedupe by term id (the resume had reported 46 failures
+  for 23 terms). PLAYBOOK lesson 44 records the trap. **Open after this:** Lance's flag review
+  now holds 279 MO + 140 USC = 419 flagged glosses; the 4 USC author failures and 23 fetch
+  failures stay drafts with reasons; the domain decision (visiblegov.us / .net / the subdomain)
+  is still his call; the API balance is $0.

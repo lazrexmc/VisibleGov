@@ -11,8 +11,12 @@ the autonomous daily scheduler under code-enforced caps). NEW (2026-08-21): the 
 glossary is LIVE — 1,217 RSMo section glosses published through the Batch-API runner for
 $12.45, each with a verbatim statute quote and a revisor.mo.gov source link (glossary
 published 116 → 1,333), and every linked gloss now renders on the bill page — inline or in a
-"Referenced laws and terms" list (486 of 1,045 summaries show one); see `TODO.md` RESUME HERE
-for what is next.** *(Fresh
+"Referenced laws and terms" list. The same evening the **federal (U.S.C.) glossary drain
+completed too: 525 glosses published (glossary published → 1,858; 649 of 1,045 summaries now
+show a gloss) — at $8.31, over both the $8 cap and the remaining balance, so the API balance is
+$0 and the billed path is CLOSED** (the runner now projects each batch's cost from the banked
+text before submitting; `PLAYBOOK_DELTA.md` lesson 44); see `TODO.md` RESUME HERE for what is
+next.** *(Fresh
 session? Read the RESUME HERE block at the top of `TODO.md` — it is verified against the live
 database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,
@@ -73,8 +77,11 @@ RESUME HERE block.
   See `docs/CLOUDFLARE_DEPLOY.md` for the runbook and `TODO.md`'s RESUME HERE block for current
   status.
 - **Standing policy: every model-calling run is mechanically gated on explicit per-run owner
-  approval with cost stated.** Current spend state (2026-08-10): the platform API balance is
-  **depleted** — Lance authorized spending the final ~$2 on 2026-08-09 ($1.98 across three
+  approval with cost stated.** Current spend state (2026-08-21): the platform API balance is
+  **depleted again** — Lance loaded $20 on 2026-08-17; the scheduler ($1.96), a gloss probe
+  ($0.10), the MO glossary drain ($12.45), and the USC glossary drain ($8.31, which overran its
+  cap — disclosed in `CHATLOG.md` 2026-08-21) consumed it; the scheduler's next tick logs
+  `BALANCE DEPLETED` and skips. Earlier (2026-08-10): the balance was — Lance authorized spending the final ~$2 on 2026-08-09 ($1.98 across three
   budget-capped runs) with the instruction *"Once depleted, pause waves as I do not auto reload
   credits"* — so the billed path is CLOSED. The subagent wave lane ran its authorized campaign
   to completion on 2026-08-10 and is now idle; nothing new runs, and no new funds get spent,

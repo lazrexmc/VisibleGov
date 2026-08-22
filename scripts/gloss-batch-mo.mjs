@@ -78,6 +78,60 @@ export function batchSpendUsd(model, usage) {
   return ((usage.input_tokens * p.in + usage.output_tokens * p.out) / 1e6) * BATCH_DISCOUNT;
 }
 
+// Pre-submission cost projection FROM THE BANK ON DISK (2026-08-21, after the USC run spent $8.31
+// against an $8 cap: the cap only gated before each submission, and one verify batch cost $5.24,
+// so nothing could stop it; the up-front estimate was a flat MO-derived per-term rate while the
+// USC excerpts averaged 2.5x the MO length). ~4 chars/token for statute text; the overhead covers
+// the system prompt + instructions + (for verify) the sentences JSON; the output allowance is
+// PHASE-SPECIFIC — a verify result restates every sentence with its verdict, reason, and quote,
+// so it runs ~3x an authored gloss. CALIBRATED against the 2026-08-21 USC run (669 excerpts,
+// mean 11,056 chars): author-1 projects $1.62 vs $1.28 actual (+27%); verify projects $5.57 vs
+// $5.24 actual (+6%). A first cut with a flat 500-token output allowance projected verify at
+// $3.92 — 25% LOW — and would still have allowed the batch; the calibration test in
+// tests/gloss-batch-mo.test.js pins both phases to today's actuals so that cannot silently
+// recur. Projections must err high, never low. The default output allowance is the larger
+// (verify) one, so a call site that forgets to pass one over-projects rather than under.
+export const PROJECTION_CHARS_PER_TOKEN = 4;
+export const PROJECTION_OVERHEAD_TOKENS = 600;
+export const PROJECTION_AUTHOR_OUTPUT_TOKENS = 300;
+export const PROJECTION_VERIFY_OUTPUT_TOKENS = 1000;
+export const PROJECTION_OUTPUT_TOKENS = PROJECTION_VERIFY_OUTPUT_TOKENS;
+// Up-front, the minimum path (author-1 + verify over everything) is multiplied by this before
+// the cap check: without it a run can sink the author rounds and then be refused at verify,
+// leaving paid-for glosses unverified. 1.25 covers the measured retry share (USC: rounds 2-3 were
+// $1.79 of $8.31).
+export const PROJECTION_RETRY_ALLOWANCE = 1.25;
+export function projectBatchSpendUsd(model, excerptTexts, {
+  overheadTokens = PROJECTION_OVERHEAD_TOKENS, outputTokens = PROJECTION_OUTPUT_TOKENS,
+} = {}) {
+  const p = priceOf(priceableModelId(model));
+  let usd = 0;
+  for (const text of excerptTexts) {
+    const inputTokens = Math.ceil(String(text).length / PROJECTION_CHARS_PER_TOKEN) + overheadTokens;
+    usd += ((inputTokens * p.in + outputTokens * p.out) / 1e6) * BATCH_DISCOUNT;
+  }
+  return usd;
+}
+// The cap is enforced HERE, before money leaves: a batch whose projected cost would carry the
+// run past --budget-usd is refused in full (checkpointed state makes a later --resume with a
+// larger cap or a --max-terms slice the honest continuation).
+export function assertWithinBudget({ label, spentUsd, projectedUsd, budgetUsd }) {
+  if (spentUsd + projectedUsd > budgetUsd) {
+    throw new Error(`budget: ${label} projected $${projectedUsd.toFixed(2)} on top of $${spentUsd.toFixed(2)} already spent would exceed the $${budgetUsd} cap — refusing to submit`);
+  }
+}
+
+// Fetch-failure bookkeeping keyed by term id: a resumed sweep re-attempts every unfetched term,
+// so a failure must REPLACE its earlier entry (the first USC resume reported 46 failures for 23
+// terms) and a term that fetches on a later pass must drop off the list.
+export function recordFetchFailure(state, entry) {
+  state.fetchFailures = (state.fetchFailures ?? []).filter((f) => f.id !== entry.id);
+  state.fetchFailures.push(entry);
+}
+export function clearFetchFailure(state, id) {
+  state.fetchFailures = (state.fetchFailures ?? []).filter((f) => f.id !== id);
+}
+
 export function buildAuthorRequest(term, excerptText, { model, withRetryWarning = false } = {}) {
   const base = buildGlossUserMessage(term.term, excerptText);
   return {
@@ -213,6 +267,7 @@ async function main() {
     try {
       const { url, excerptText, hash } = await fetchGlossSource(term.citation);
       excerpts[term.id] = { url, excerptText, hash };
+      clearFetchFailure(state, term.id);
       saveJson('excerpts.json', excerpts);
     } catch (err) {
       if (err instanceof MoBotPageError) {
@@ -233,13 +288,13 @@ async function main() {
         }
       } else if (err instanceof MoPageIdentityError) {
         identityErrors += 1;
-        state.fetchFailures.push({ id: term.id, citation: term.citation, reason: `${err.name}: ${err.message}` });
+        recordFetchFailure(state, { id: term.id, citation: term.citation, reason: `${err.name}: ${err.message}` });
         saveJson('state.json', state);
         if (identityErrors >= IDENTITY_ABORT_THRESHOLD) {
           throw new Error(`${identityErrors} identity errors — template-drift signal, aborting the sweep honestly rather than hammering ${candidates.length} pages`);
         }
       } else {
-        state.fetchFailures.push({ id: term.id, citation: term.citation, reason: `${err.name}: ${err.message}` });
+        recordFetchFailure(state, { id: term.id, citation: term.citation, reason: `${err.name}: ${err.message}` });
         saveJson('state.json', state);
       }
     }
@@ -248,9 +303,15 @@ async function main() {
   console.error(`fetched: ${fetched.length}; parked: ${state.parked.length}; fetch failures: ${state.fetchFailures.length}`);
   if (args.fetchOnly) { console.log(JSON.stringify({ fetched: fetched.length, parked: state.parked.length, failures: state.fetchFailures.length })); return; }
 
-  // ---- budget guard before any submission (probe-derived worst-case per call, batched) ----
-  const estimate = fetched.length * (0.0008 + 0.0055) * 1.5;
-  if (estimate > args.budgetUsd) throw new Error(`estimate $${estimate.toFixed(2)} exceeds budget $${args.budgetUsd} — refusing to submit`);
+  // ---- budget guard before any submission: projected from THE BANK ON DISK, not a per-term rate.
+  // Minimum path = author-1 over everything + verify over everything; each later batch re-checks
+  // its own projection against what has actually been spent (assertWithinBudget) before submitting.
+  const bankTexts = fetched.map((t) => excerpts[t.id].excerptText);
+  const minimumPathUsd = projectBatchSpendUsd(AUTHOR_MODEL, bankTexts, { outputTokens: PROJECTION_AUTHOR_OUTPUT_TOKENS })
+    + projectBatchSpendUsd(GLOSS_VERIFIER_MODEL, bankTexts, { outputTokens: PROJECTION_VERIFY_OUTPUT_TOKENS });
+  const projectedRunUsd = minimumPathUsd * PROJECTION_RETRY_ALLOWANCE;
+  console.error(`projected run (author-1 + verify over ${fetched.length} banked excerpts = $${minimumPathUsd.toFixed(2)}, x${PROJECTION_RETRY_ALLOWANCE} retry allowance): $${projectedRunUsd.toFixed(2)}; cap $${args.budgetUsd}; already spent $${spend.total.toFixed(2)}`);
+  assertWithinBudget({ label: 'projected run', spentUsd: spend.total, projectedUsd: projectedRunUsd, budgetUsd: args.budgetUsd });
 
   // ---- phase AUTHOR: round 1 (haiku) -> round 2 (haiku + warning) -> round 3 (sonnet) ----
   const authored = new Map(); // term id -> {glossJson, sentences, authorModel}
@@ -263,7 +324,9 @@ async function main() {
   ];
   for (const round of rounds) {
     if (pending.length === 0) break;
-    if (spend.total >= args.budgetUsd) throw new Error(`budget exhausted ($${spend.total.toFixed(2)}) before ${round.label}`);
+    if (!state.batches[round.label]) { // a resumed, already-submitted batch is sunk cost; only NEW submissions are gated
+      assertWithinBudget({ label: round.label, spentUsd: spend.total, projectedUsd: projectBatchSpendUsd(round.model, pending.map((t) => excerpts[t.id].excerptText), { outputTokens: PROJECTION_AUTHOR_OUTPUT_TOKENS }), budgetUsd: args.budgetUsd });
+    }
     const requests = pending.map((t) => buildAuthorRequest(t, excerpts[t.id].excerptText, { model: round.model, withRetryWarning: round.warn }));
     const results = await runBatch(anthropic, requests, round.label, state, spend);
     const next = [];
@@ -280,8 +343,10 @@ async function main() {
   for (const term of pending) authorFailures.push({ id: term.id, citation: term.citation, reason: 'failed all three author rounds' });
 
   // ---- phase VERIFY (sonnet, batch) ----
-  if (spend.total >= args.budgetUsd) throw new Error(`budget exhausted ($${spend.total.toFixed(2)}) before verify`);
   const verifyTerms = fetched.filter((t) => authored.has(t.id));
+  if (!state.batches.verify) {
+    assertWithinBudget({ label: 'verify', spentUsd: spend.total, projectedUsd: projectBatchSpendUsd(GLOSS_VERIFIER_MODEL, verifyTerms.map((t) => excerpts[t.id].excerptText), { outputTokens: PROJECTION_VERIFY_OUTPUT_TOKENS }), budgetUsd: args.budgetUsd });
+  }
   const verifyRequests = verifyTerms.map((t) => buildVerifyRequest(t, authored.get(t.id).sentences, excerpts[t.id].excerptText));
   const verifyResults = await runBatch(anthropic, verifyRequests, 'verify', state, spend);
 

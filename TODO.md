@@ -6,6 +6,23 @@
 
 ## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
+**✅ USC GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21 evening) — ⚠️ API BALANCE IS $0 (Lance:
+"out of api credits"); BILLED PATH CLOSED.** 525 federal statute glosses published (641 USC
+published in total with the pre-existing 116); glossary published 1,333 → **1,858**; 140 USC
+glosses flagged for Lance's review (with the 279 MO ones = **419 awaiting his flag review**);
+4 author failures + 23 fetch failures (14 nonexistent sections, 9 oversize) stay drafts with
+reasons. Live-verified: 665/665 quotes verbatim, anon probe PASS, HR 6644 renders 35 inline +
+26 referenced with zero console errors. **Visible gloss coverage: 649 of 1,045 published
+summaries.** **The run spent $8.31 against an $8 cap and a $5.62 balance** — my estimate reused
+the MO per-term rate while USC excerpts average 2.5x the length, and the cap only gated before
+each submission (one $5.24 verify batch landed after the last check). Fixed same pass (TDD):
+the runner now projects every batch from the bank on disk before submitting, with a calibration
+test pinned to today's actuals (PLAYBOOK lesson 44). **The scheduler's next tick will log
+`BALANCE DEPLETED` and skip — designed; nothing bills until Lance reloads AND says go.**
+Next-work menu, Lance's call: (b) flag review (419); (d) periodic gloss runs as the scheduler
+mints MO terms (per-run approval, needs funds); (e) custom domain — decision pending between
+visiblegov.us / .net / the documented subdomain (see CHATLOG 2026-08-21).
+
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
 published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering
 fallback SHIPPED the same day (d02e83c):** every linked published gloss now renders — inline where
@@ -14,13 +31,13 @@ summary with the same receipt (gloss + verbatim quote + Source); live-verified o
 entries, zero console errors). **Visible gloss coverage: 486 of 1,045 published summaries** (was
 87 before the MO build). **Next-work menu, Lance's call:** (b) **279 flagged MO glosses** await
 his flag review (review page, trust-model process-auditor role) — 47 parked nonexistent
-sections carry their evidence in glossary_notes; (c) **692 USC mappable drafts** still
-ungloss'd — same runner with the citation filter widened, ~$5, on his go; (d) the daily
+sections carry their evidence in glossary_notes; (c) ~~692 USC mappable drafts~~ **DONE the same evening — see the block above** ($8.31,
+not the ~$5 estimated here: the USC excerpts are 2.5x longer); (d) the daily
 scheduler mints gloss-ready MO drafts at insert time — a periodic gloss run will be needed (not
 scheduled; per-run approval); (e) the custom domain (Lance's console work, docs/CLOUDFLARE_DEPLOY.md).
 Runner: `scripts/gloss-batch-mo.mjs`; stop/resume and PID conventions in PLAYBOOK lesson 43. API
-balance: roughly $5–6 of the $20 remains (scheduler draws ~$0.35/day under its own $5/wk cap) —
-never assume a reload.
+balance: **$0 as of 2026-08-21 evening** (the USC drain drew it past zero; Lance: "out of api
+credits") — never assume a reload.
 
 **✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
 CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked

@@ -32,6 +32,13 @@ accountable with real information instead of spin.
 > statute glossary is LIVE** (2026-08-21: 1,217 RSMo glosses published for $12.45 via the
 > Batch-API runner; glossary 116 → 1,333; PLAYBOOK lessons 41-43 record what the audit and the
 > run taught — incl. lesson 43: stop background runners by PID, never by command-line grep).
+> **Update 2026-08-21 (evening):** the **federal (U.S.C.) glossary drain is LIVE too** — 525
+> glosses published (glossary published 1,858; 649 of 1,045 summaries show a gloss) — but the run
+> spent **$8.31 against an $8 cap and a $5.62 balance** (USC excerpts are 2.5x MO's; the cap only
+> gated before each submission). **The API balance is $0 ("out of api credits") — the billed path
+> is CLOSED; the scheduler's next tick logs BALANCE DEPLETED and skips by design.** The runner now
+> projects each batch from the banked text before submitting (lesson 44). 419 flagged glosses
+> await Lance's review.
 >
 > **Two traps that will cost you a session if you hit them cold:**
 > 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct
