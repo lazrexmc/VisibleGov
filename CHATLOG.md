@@ -5446,3 +5446,38 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (`npm run status` prints awaiting-review and retired separately — DATA_INVENTORY's banner
   point 3 is stale). No code changed; one TODO INBOX capture (the collision + a docs-refresh
   debt list) committed so none of this is lost.
+
+- **"What's recommended next" -> status paste -> "I now own the domain visiblegov.us as well, I have
+  to go for a long AFK, I'll set it up later" -> "drain any items that are drainable" (2026-08-22,
+  morning):** recommendation given (domain + three hygiene items his; then a $0 Batch-API summary
+  runner; then the docs-refresh pass and the refresh-collision classification; review queues
+  optional). Reading his `npm run status` paste against yesterday: the $7 reload TOOK — tick
+  2026-08-22T11:00 spent $0.39, published 6 (week $2.35/$5, 18 published) — and the recency fix is
+  live: all 12 lane bills were 2026-session (live-checked by session). Two anomalies investigated
+  ($0): (1) open reconciliation flags 107 -> 356 (+30/+20/+27 on 08-18/19/20; now 168
+  no_tally_corresponding_primary, 101 hard_mismatch, 69 primary_cast_data_not_comparable, 14
+  soft, 4 ambiguous; 187 legiscan-vs-mo-senate-web) and (2) quarantined MO Senate journal days
+  12 -> 20 — the same root cause: every quarantine record is `category: bill_refs — "no bill
+  reference found in motion - needs human review"` after 3 attempts, and 14 of the 20 are
+  2026-session days, so LegiScan's 2026 Senate roll calls have no journal counterpart to match.
+  A real gap in the permanently-completeness-critical pipeline — captured in TODO INBOX with the
+  fix path (pull two quarantined 2026 journals, find the motion phrasing the extractor misses, TDD
+  the parser with those days as fixtures, replay the quarantined days), NOT chased mid-drain.
+  **Domain DECIDED: `visiblegov.us`** (he bought it) — docs/CLOUDFLARE_DEPLOY.md Phases 3-4
+  rewritten for the apex (a new zone; the HPHP subdomain plan and its clean-sweep text are
+  superseded), TODO head + memory updated, commit 1f44a2d. **Drain lane RE-OPENED on his words
+  (he is AFK; the $0 subagent re-author lane is the one drainable queue — flags, parks, and the 419
+  flagged glosses are his rulings, and a gloss run is billed so it waits for a stated cost + go):**
+  pool = 21 re-authorable drafts (all DB-path: this week's scheduler gate refusals), 18
+  no-objection drafts (not drainable), 28 parked. **Drain wave DV — 6/6 PUBLISHED** (2026-08-22,
+  one 9.6KB launch, 27 agents 0 errors, 1.30M tokens, run wf_b9d03490; record run ad395916,
+  --replace-drafts): SB 1613 Frankie Muse Freeman Day (3 verdicts clean; the biographical
+  provision added), SB 1629 underground facilities (4; both sewer exemptions + the 2025->2026
+  cutoff added), SB 944 sheriff's attorney salary (6; at-the-pleasure + designation-removal
+  bullets added), HB 2547 surveillance cameras (3; the removed chief-permission path added),
+  HB 2592 probation/parole voting rights (7; the refuted "removes" inference rewritten to what
+  115.133(2)(2) itself says), HB 2408 deaf-blind grants (6; RFP and cap bullets re-cited to the
+  top-level subsection). Live: 1,051 -> 1,057 published, drafts 67 -> 61, retired 555 -> 561
+  (six superseded drafts retired with audit notes). Wave DW (6 bills, 2.6-3.1k chars) built and
+  launched next; the ladder continues smallest-first until the 15 remaining re-authorable drafts
+  are converted or parked (3-strike rule, parks seeded into the scheduler's parked.json).
