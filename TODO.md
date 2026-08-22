@@ -45,8 +45,19 @@ recency fix is live: all 12 lane bills were 2026-session, 6 published for $0.39 
 ⚠️ NEW 2026-08-22 (INBOX): the MO Senate journal parser is quarantining 2026-session days on a
 `bill_refs` failure class (14 of 20 quarantined days are 26info) — the +249 reconciliation flags
 since 08-18 are mostly LegiScan 2026 Senate roll calls with no journal counterpart. Real gap in
-the completeness-critical pipeline; captured, not chased. Drain lane RE-OPENED 2026-08-22 on
-Lance's "drain any items that are drainable" (AFK) — see CHATLOG for the wave ledger.
+the completeness-critical pipeline; captured, not chased. ✅ **DRAIN LANE RAN TO EMPTY
+2026-08-22 on Lance's "drain any items that are drainable" (AFK): live 1,090 published /
+28 drafts / 600 retired (1,067 → 1,090 today, all $0 subagent path).** Ledger: the 18
+"no-objection" drafts were the old verdict-binding flag class — re-recorded through today's
+gates, 11 published; DY 4/5; DZ (fresh mode + corroboration) 5/7 — the four bills unparked
+08-18 are all published; EA 1/1; EB 1/2; HB 1607 PUBLISHED on its final attempt (EC). re-authorable pool = 0; the
+remaining 28 drafts are exactly the 28 PARKED bills (every one with a written reason) — NOTHING is
+drainable at $0 until the scheduler mints new refusals. Two process fixes shipped on the way:
+`reAuthor_file` pointer mode (`build-drain-wave.mjs --pointer`; a retyped 14KB inline prior
+lost one character and killed a launch — PLAYBOOK 46) and "launch edited workflows by
+scriptPath, never by name" (a session-cached pre-edit script authored on the wrong lane
+silently — PLAYBOOK 47; the fallthrough guard is an INBOX item). Resume the lane only when
+`node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` reports candidates.
 
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
 published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering

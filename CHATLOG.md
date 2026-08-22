@@ -5610,3 +5610,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   with no meeting qualifier, both at 319.129) plus a [GUIDANCE — FINAL ATTEMPT] objection telling
   the author to keep every verified bullet word-for-word. If EC flags, HB 1607 parks with this
   trail. Live after EB: **1,089 published / 29 drafts / 599 retired.**
+- **Wave EC: HB 1607 PUBLISHED on its final attempt — and the drain lane is EMPTY** (2026-08-22,
+  run wf_f98a27ba-49a by scriptPath, 5 agents / 0 errors / ~6 min; record run 74dd6167
+  `--replace-drafts`, succeeded). The pre-fix + [GUIDANCE] treatment converted: 30/30 supported
+  (the split chairman / vice-chairman bullets both held, the board-composition bullet stayed
+  word-for-word, the thin provisions yield carried a well-formed corroboration run). Final
+  rebuild: **re-authorable pool = 0**; live **1,090 published / 28 drafts / 600 retired**; the 28
+  drafts are exactly the 28 PARKED bills (verified by UUID against the DB). Day's ledger under
+  Lance's "drain any items that are drainable" (AFK), all $0 subagent path: 18-draft re-record 11
+  → DY 4/5 → DZ 5/7 → EA 1/1 → EB 1/2 → EC 1/1 = **+23 published (1,067 → 1,090)**; zero new
+  parks; the four bills unparked on 08-18 (HB 606, HB 64, SB 626, HB 1607) all published. Two
+  process fixes shipped on the way and are the new standing mechanics: re-author priors travel as
+  `reAuthor_file` pointers (`build-drain-wave.mjs --pointer`, PLAYBOOK 46) and edited workflows
+  launch by `scriptPath` (PLAYBOOK 47). Close-out written to TODO RESUME HERE, README status, and
+  the spend-hold memory. Nothing is drainable until the scheduler's own refusals mint new
+  candidates; Lance's own items (visiblegov.us Phases 3-4, 419 gloss flags, 28 parks, 356
+  reconciliation flags) are untouched and his.

@@ -5,9 +5,11 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-19): DEPLOYED and live at https://visiblegov.pages.dev — 1,037 plain-language
-summaries published (the draft drain completed 2026-08-18; every future summary flows through
-the autonomous daily scheduler under code-enforced caps). NEW (2026-08-21): the Missouri statute
+**Status (2026-08-22): DEPLOYED and live at https://visiblegov.pages.dev — 1,090 plain-language
+summaries published (the $0 drain lane ran to empty on 2026-08-22: every remaining draft is a
+parked bill with a written reason; every future summary flows through the autonomous daily
+scheduler under code-enforced caps, and the drain lane reopens only when the scheduler's own
+refusals give it candidates). NEW (2026-08-21): the Missouri statute
 glossary is LIVE — 1,217 RSMo section glosses published through the Batch-API runner for
 $12.45, each with a verbatim statute quote and a revisor.mo.gov source link (glossary
 published 116 → 1,333), and every linked gloss now renders on the bill page — inline or in a
@@ -82,7 +84,8 @@ RESUME HERE block.
   **depleted again** — Lance loaded $20 on 2026-08-17; the scheduler ($1.96), a gloss probe
   ($0.10), the MO glossary drain ($12.45), and the USC glossary drain ($8.31, which overran its
   cap — disclosed in `CHATLOG.md` 2026-08-21) consumed it; Lance loaded $7 more the same evening, which the scheduler draws from under its
-  $5/ISO-week ledger while every other billed call still needs per-run approval. Earlier
+  $5/ISO-week ledger while every other billed call still needs per-run approval (the
+  2026-08-22 drain spent $0 — subagent path only). Earlier
   (2026-08-10): the balance was — Lance authorized spending the final ~$2 on 2026-08-09 ($1.98 across three
   budget-capped runs) with the instruction *"Once depleted, pause waves as I do not auto reload
   credits"* — so the billed path is CLOSED. The subagent wave lane ran its authorized campaign
