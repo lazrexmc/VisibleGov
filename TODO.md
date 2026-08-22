@@ -37,9 +37,16 @@ each submission (one $5.24 verify batch landed after the last check). Fixed same
 the runner now projects every batch from the bank on disk before submitting, with a calibration
 test pinned to today's actuals (PLAYBOOK lesson 44). **The scheduler's next tick will log
 `BALANCE DEPLETED` and skip — designed; nothing bills until Lance reloads AND says go.**
-Next-work menu, Lance's call: (b) flag review (419); (d) periodic gloss runs as the scheduler
-mints MO terms (per-run approval, needs funds); (e) custom domain — decision pending between
-visiblegov.us / .net / the documented subdomain (see CHATLOG 2026-08-21).
+Next-work menu, Lance's call: (b) flag review (419 glosses); (d) periodic gloss runs as the
+scheduler mints MO terms (per-run approval, needs funds); (e) **custom domain DECIDED 2026-08-22:
+`visiblegov.us` (Lance owns it) — Phases 3-4 in docs/CLOUDFLARE_DEPLOY.md rewritten for the apex;
+his console work after his AFK.** ✅ 2026-08-22 morning tick confirmed the $7 reload took and the
+recency fix is live: all 12 lane bills were 2026-session, 6 published for $0.39 (week $2.35/$5).
+⚠️ NEW 2026-08-22 (INBOX): the MO Senate journal parser is quarantining 2026-session days on a
+`bill_refs` failure class (14 of 20 quarantined days are 26info) — the +249 reconciliation flags
+since 08-18 are mostly LegiScan 2026 Senate roll calls with no journal counterpart. Real gap in
+the completeness-critical pipeline; captured, not chased. Drain lane RE-OPENED 2026-08-22 on
+Lance's "drain any items that are drainable" (AFK) — see CHATLOG for the wave ledger.
 
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
 published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering
@@ -1151,6 +1158,21 @@ session's own direct work, not assumed.**
     from bioguide at render time, by design). Both confirmed by design, not decay.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
+
+- **(2026-08-22) MO Senate journal parser quarantines 2026-session days on `bill_refs` — the
+  completeness-critical pipeline has a live gap.** 20 days quarantined (was 12 on 08-03): 14 are
+  2026 session (`26info`), 6 are 2018. Every failure record reads `category: bill_refs — "block N:
+  no bill reference found in motion - needs human review"` after 3 attempts (e.g.
+  `RDay6805151864-1889.failed.json`, 2026-05-15). Consequence, measured: open
+  `vote_reconciliation_flags` jumped 107 → 356 (30/20/27 minted on 08-18/19/20), now 168
+  `no_tally_corresponding_primary` + 101 `hard_mismatch` + 69 `primary_cast_data_not_comparable`
+  + 14 soft + 4 ambiguous; 187 are `legiscan vs mo-senate-web` — LegiScan's 2026 Senate roll calls
+  with no journal vote to match because the day is quarantined. Next step (its own build, on
+  Lance's go): pull two quarantined 2026 journals, find the motion phrasing the
+  `bill_refs` extractor misses (likely a 2026 wording change — conference reports / emergency
+  clauses / "the bill" without a number), fix the parser TDD with those days as fixtures, and
+  replay the quarantined days (`*.failed.json` markers hold them out; replay = delete the marker
+  or use the adapter's replay path). The flags will then re-match or become genuine rulings.
 
 - **(2026-08-22) Post-tick aggregate refresh collides with pg_cron — real, benign, UNRECORDED
   until now.** The ingest scheduler's `scripts/refresh-aggregates.js` call after a write-tick

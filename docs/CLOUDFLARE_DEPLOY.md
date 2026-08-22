@@ -1,6 +1,8 @@
 # Cloudflare Pages deploy — runbook
 
-**Status (2026-08-05): DEPLOYED and VERIFIED LIVE at https://visiblegov.pages.dev.** Phase 1
+**Status (2026-08-05): DEPLOYED and VERIFIED LIVE at https://visiblegov.pages.dev.** *(Update
+2026-08-22: custom domain DECIDED — `visiblegov.us`, owned by Lance; Phases 3-4 below rewritten
+for it; the console work is his, when he is back.)* Phase 1
 (create the Pages project) and Phase 2 (verify on `.pages.dev`) are DONE — 21 mechanical curl checks
 pass and the full product loop was confirmed in a real browser with zero console errors. **What
 remains is Phase 3 (nameservers) and Phase 4 (custom domain)**, both console/DNS work in Lance's own
@@ -143,11 +145,22 @@ the first attempt, nothing at all) stays live.
 
 ---
 
-## Phase 3 — Move the zone to Cloudflare (nameservers)
+## Phase 3 — Put the zone on Cloudflare (nameservers)
 
-Context, decided 2026-08-05: Lance owns `helpingpeoplehelpingpeople.com`, and it currently serves
-only a disposable caard.io one-pager he is fine losing. Moving nameservers **moves the entire
-zone**, not just the subdomain — the one-pager will stop resolving once its records are gone.
+> **DECIDED 2026-08-22: the custom domain is `visiblegov.us`** — Lance bought it ("I now own the
+> domain visiblegov.us as well"; setup deferred to after his AFK). This REPLACES the 2026-07-28
+> subdomain plan (`visiblegov.helpingpeoplehelpingpeople.com`): the HPHP zone is no longer
+> involved at all, so the "clean sweep / delete the caard.io records" text below does not apply —
+> a freshly registered `visiblegov.us` zone carries only registrar parking cruft. The apex
+> (`visiblegov.us`) is the target, with `www` as a redirect/alias. Everything else in Phases 3-4
+> (add site → delete imported cruft → set nameservers at the registrar → wait for Active → attach
+> in Pages → re-run every Phase-2 check against the new host) is unchanged in shape.
+
+Context (historical, 2026-08-05, for the old subdomain plan): Lance owns
+`helpingpeoplehelpingpeople.com`, and it currently serves only a disposable caard.io one-pager he
+is fine losing. Moving nameservers **moves the entire zone**, not just the subdomain — the
+one-pager will stop resolving once its records are gone. **Superseded 2026-08-22 — not needed
+for `visiblegov.us`; keep that zone where it is.**
 
 **The trap (LinkedUmp §4.3, "Registrar cruft fights your DNS"):** when Cloudflare imports the
 existing zone it pulls in whatever the registrar had — commonly a parking `A` record, a parking
@@ -172,12 +185,14 @@ the Pages custom-domain attachment.
 
 ## Phase 4 — Attach the custom domain
 
-Decided 2026-07-28: the target is **`visiblegov.helpingpeoplehelpingpeople.com`** (a subdomain).
-Now that the apex is free, using the apex instead is a live option — but it is a *product* decision
-(the domain name does not match the VisibleGov brand), not a technical one, and the subdomain
-remains the standing decision unless Lance changes it.
+~~Decided 2026-07-28: the target is `visiblegov.helpingpeoplehelpingpeople.com` (a subdomain).~~
+**Superseded 2026-08-22: the target is the apex `visiblegov.us`** (Lance bought it; the .com is
+squatted at ~$1,995 and .org is taken — CHATLOG 2026-08-21). Attach the apex, then add `www`
+as a second custom domain (Pages issues certificates for both; point `www` at the apex with a
+Cloudflare redirect rule or a second Pages custom domain — either is fine, pick one and re-run
+the checks against both hosts).
 
-1. Pages project → **Custom domains** → **Set up a custom domain** → enter the subdomain.
+1. Pages project → **Custom domains** → **Set up a custom domain** → enter `visiblegov.us`.
 2. With the zone already on Cloudflare (Phase 3), the required DNS record is created for you.
 3. Wait for the certificate to issue (status goes Active).
 4. Re-run **every** `curl` check from Phase 2 against the custom domain. Headers, redirects, the
