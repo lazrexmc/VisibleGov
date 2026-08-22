@@ -5559,3 +5559,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   departments, and moves the sunset from three years after August 28, 2019 to six years after
   August 28, 2022 unless reauthorized. 9/9 supported, coverage 6/6. Live after DZ+EA: **1,088
   published / 30 drafts / 597 retired.** Rebuild: re-authorable pool = HB 930 + HB 1607 only.
+- **Wave EB's first launch died at JSON.parse before any agent ran — a retyping error in a 14KB
+  inline prior — so re-author priors now ship as file pointers** (2026-08-22, run wf_15ef96fc-b70,
+  0 agents, $0). The builder wrote wave-EB-args.json (HB 930 + HB 1607, 14,224 bytes: two prior
+  drafts of 13 and 21 bullets plus one objection each); I read it and retyped it into the
+  `Workflow` launch as the args value, and one character drifted — a stray backslash before the
+  final quote (`eight.\"]}}]`) — so the workflow's own `JSON.parse(args)` threw "Unterminated
+  string." The generated file was fine; the transcription was not. That is the general failure
+  mode: anything retyped into a launch call is a transcription with a per-character error rate,
+  and 14KB gives it room. Fix, built and tested: the workflow (`.claude/workflows/summary-wave.js`)
+  now accepts `reAuthor_file` — a repo-relative JSON file `{prior_summary, objections}` the author
+  agent Reads (lesson 40's mechanism, same authoring contract; inline `reAuthor` still works) —
+  and `scripts/build-drain-wave.mjs --pointer` banks each prior to
+  `reauthor-<WAVE>-<bill_id>.json` and emits a ~450-byte stub per bill. Verified by code: both
+  pointer files are byte-identical to the DZ envelopes' summaries; the EB args file is now 903
+  bytes. Workflow syntax checked the way the harness runs it (async-function body — `node
+  --check` rejects its top-level `return` by design). Suite 2,573 pass / 0 fail (extracted line).
+  Runbook section "Re-author priors: inline or pointer" + PLAYBOOK lesson 46. Commit 1e89d4d.
+  EB relaunched from the 903-byte stub (run wf_6a1040c5-037). Also verified from the DB while
+  waiting: the 30 remaining drafts are exactly the 28 PARKED bills + HB 930 + HB 1607 — the
+  builder drops nothing silently (an earlier composition check that "found 13 unparked" had
+  parsed the PARKED set with a naive quote regex that the set's own comments defeated; a UUID
+  regex gives 28/28).
