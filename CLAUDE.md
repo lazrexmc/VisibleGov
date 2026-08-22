@@ -35,8 +35,9 @@ accountable with real information instead of spin.
 > **Update 2026-08-21 (evening):** the **federal (U.S.C.) glossary drain is LIVE too** — 525
 > glosses published (glossary published 1,858; 649 of 1,045 summaries show a gloss) — but the run
 > spent **$8.31 against an $8 cap and a $5.62 balance** (USC excerpts are 2.5x MO's; the cap only
-> gated before each submission). **The API balance is $0 ("out of api credits") — the billed path
-> is CLOSED; the scheduler's next tick logs BALANCE DEPLETED and skips by design.** The runner now
+> gated before each submission). **The balance hit $0 ("out of api credits"); Lance then loaded
+> $7 more the same evening — the scheduler resumes under its ledger carve-out; every other billed
+> call still needs explicit per-run approval with a cost stated.** The runner now
 > projects each batch from the banked text before submitting (lesson 44). 419 flagged glosses
 > await Lance's review.
 >

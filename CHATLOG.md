@@ -5298,3 +5298,25 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   now holds 279 MO + 140 USC = 419 flagged glosses; the 4 USC author failures and 23 fetch
   failures stay drafts with reasons; the domain decision (visiblegov.us / .net / the subdomain)
   is still his call; the API balance is $0.
+
+- **"I loaded $7 more" -> "Do all bills have plain text summaries?" (2026-08-21, late evening):**
+  recorded as a balance update, NOT a go — nothing was billed. Live checks ($0) for what the $7
+  actually meets: (1) the registered scheduler resumes on its own at the next 6 AM tick under its
+  standing ledger carve-out — this ISO week has $3.04 of $5.00 left (spent $1.96, 12 published =
+  ~$0.16 per published summary incl. gate refusals/corroboration; the week resets Monday
+  2026-08-24), so the $7 is roughly two weeks of ticks if nothing else runs; (2) the glossary
+  backlog is effectively EMPTY for a billed run — `planGlossing` shows 30 candidates, all
+  structural leftovers (3 MO banked-but-never-glossed, 4 USC author failures, 23 USC fetch
+  failures), 4,932 needs_mapping (bill-internal/unparseable references, not fetchable), nothing
+  newly minted since the drains — so no gloss run is warranted and none was proposed. **Answer
+  to the summaries question, from `npm run status`: no.** 38,256 bills total; the accountability
+  set (bills that got a passage/3rd-reading vote) is 3,343, of which 3,320 have official text on
+  hand and **744 carry a published summary (22%)**; **2,518 are READY (text, no summary)**;
+  1,045 summaries published overall (the rest are 2025-session resolutions from the manifest
+  campaign), 61 awaiting review, 555 retired-superseded. Only the scheduler produces new ones
+  now (~$0.16 each at this week's measured rate; the 2026-08-09 billed probe measured $0.041 per
+  published summary on a different bill mix) — draining the 2,518 is a low-hundreds-of-dollars
+  job at either rate, stated as orientation only: per lesson 44 a real run is projected from its
+  actual inputs, never from a rate. Docs/memory updated to "balance ~$7 (console is the truth —
+  if the overspend left a negative balance the net is lower); billed path: scheduler only,
+  everything else per-run approval."

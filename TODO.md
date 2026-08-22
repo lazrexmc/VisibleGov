@@ -6,8 +6,14 @@
 
 ## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
 
-**✅ USC GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21 evening) — ⚠️ API BALANCE IS $0 (Lance:
-"out of api credits"); BILLED PATH CLOSED.** 525 federal statute glosses published (641 USC
+**✅ USC GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21 evening) — API balance went to $0 (Lance:
+"out of api credits"), then Lance loaded **$7 more** the same evening (console is the truth; if
+the overspend left a negative balance the net is lower). BILLED PATH: the scheduler resumes on
+its own under its ledger ($3.04 of $5.00 left this ISO week, resets Mon 2026-08-24; ~$0.16 per
+published summary this week, so ~2 weeks of ticks); EVERYTHING ELSE still needs per-run
+approval. Gloss backlog is effectively empty (30 structural leftovers, nothing newly minted) —
+no gloss run warranted. Summary coverage (live): 744 of the 3,343 accountability-set bills
+(22%) have a published summary; 2,518 are ready (text, no summary); 1,045 published overall.** 525 federal statute glosses published (641 USC
 published in total with the pre-existing 116); glossary published 1,333 → **1,858**; 140 USC
 glosses flagged for Lance's review (with the 279 MO ones = **419 awaiting his flag review**);
 4 author failures + 23 fetch failures (14 nonexistent sections, 9 oversize) stay drafts with
@@ -36,8 +42,9 @@ not the ~$5 estimated here: the USC excerpts are 2.5x longer); (d) the daily
 scheduler mints gloss-ready MO drafts at insert time — a periodic gloss run will be needed (not
 scheduled; per-run approval); (e) the custom domain (Lance's console work, docs/CLOUDFLARE_DEPLOY.md).
 Runner: `scripts/gloss-batch-mo.mjs`; stop/resume and PID conventions in PLAYBOOK lesson 43. API
-balance: **$0 as of 2026-08-21 evening** (the USC drain drew it past zero; Lance: "out of api
-credits") — never assume a reload.
+balance: **~$7 as of 2026-08-21 late evening** (went to $0 after the USC drain — "out of api
+credits" — then "I loaded $7 more"; the scheduler draws ~$0.35–0.70/tick from it) — never
+assume a further reload.
 
 **✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
 CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
