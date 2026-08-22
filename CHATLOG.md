@@ -5540,3 +5540,22 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   1473 published 2026-08-15" next to today's publish — a paginated scan (1,082 published rows,
   1,082 distinct bill ids, 0 bills with >1 published) confirms it is a different bill row that
   shares the identifier (a prior-session HB 1473), not a duplicate publish.
+- **Wave DZ (fresh mode, the 7 sub-floor drafts): 5 of 7 published — the four bills unparked on
+  08-18 are all through** (2026-08-22, run wf_5a21fa86-300, 33 agents / 0 errors / ~11.5 min —
+  the extra agents are the corroboration stage firing for the five sub-floor yields; record run
+  98f85e46 `--replace-drafts`, succeeded). SB 396 (12/12 supported), HB 606 (9/9), HB 64
+  (16/16), SB 626 (24/24), HB 656 (7/7) published — each with full coverage and, where the
+  checker's key-provision list was under the floor, a well-formed corroboration run (which is
+  exactly what the re-record could not supply). HB 930 and HB 1607 flagged on one refuted bullet
+  each, both real: HB 930's bullet 12 narrowed the vendor-disqualification rule to "retail sales
+  of tangible personal property in the state" and dropped the text's disjunctive "or makes sales
+  for storage, use, or consumption in this state" prong; HB 1607's bullet 12 counted the
+  petroleum storage tank board as nine citizen seats where the text caps it at eight (the
+  aboveground-tank owner is the third of the "three" retail/aboveground members, not a fourth
+  category). Strike 1 for both → wave EB.
+- **Wave EA: HB 2365 published on strike 2** (2026-08-22, run wf_3588df97-9ad, 4 agents; record
+  run ef85ad12, succeeded): the re-author dropped the "ongoing basis" inference and states the
+  change as the text does — removes the three-year-pilot language and two collaborating
+  departments, and moves the sunset from three years after August 28, 2019 to six years after
+  August 28, 2022 unless reauthorized. 9/9 supported, coverage 6/6. Live after DZ+EA: **1,088
+  published / 30 drafts / 597 retired.** Rebuild: re-authorable pool = HB 930 + HB 1607 only.
