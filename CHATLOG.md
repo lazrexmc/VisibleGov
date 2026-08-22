@@ -5408,3 +5408,41 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   not built):** the drivers that mint sessions still write no date — re-run
   `src/cli/sync-session-dates.js` (dry-run, review, `--apply`) when a new session appears; both
   consumers fall back to the name/identifier year and say so meanwhile (TODO). PLAYBOOK lesson 45.
+
+- **"reread the chatlog in full detail to ensure you are up to speed as well as the readme and any
+  other items to catch up, especially items in /docs folder" (2026-08-22, ~05:00Z):** read the
+  whole trail myself — CHATLOG (5,410 lines), PLAYBOOK_DELTA (lessons 1-45), TODO end to end,
+  CLAUDE.md, README, and all nine living docs in docs/ (CONTROLLER_BRIEFING, DATA_INVENTORY,
+  SCHEDULED_SUMMARIES, SCHEDULED_INGESTION, CLOUDFLARE_DEPLOY, RUNBOOK_SUMMARY_WAVES, ARTIFACTS,
+  DISASTER_RECOVERY, VOTERTABLES_JOIN_GAMEPLAN) — and ran a 14-reader + synthesizer workflow
+  over the 38 dated files (2 audits, 1 adjudication, 4 research, 15 specs, 16 plans) against a
+  live-state brief, then live-checked the claims that mattered. **Verified findings:** (1) the
+  specs/plans/research are honest historical records but nearly every "Status:" line is stale —
+  30 of 53 flagged contradictions would mislead a fresh reader who trusts a dated doc over
+  TODO's RESUME HERE (the scheduled-summaries spec still says PARKED/not started; the MVP spec
+  still says "nothing publishes without his click"; the glossary spec's "Background block"
+  rendering never shipped; CLOUDFLARE_DEPLOY Phase 4 still says the subdomain is decided;
+  DISASTER_RECOVERY knows only ONE Windows task and omits MO text ingest, the backfill-*.js
+  family, sync-session-dates.js and the gloss runner; RUNBOOK_SUMMARY_WAVES reads as the live
+  engine though the lane closed 2026-08-18; VOTERTABLES Phase 1 proposes the address lookup that
+  already shipped 2026-08-05; CONTROLLER_BRIEFING §1 states the API-approval suspension as in
+  effect — inverted; ARTIFACTS' cache table omits seven dirs incl. the cost-bearing
+  scheduled-summaries/parked.json; neither 2026-08-03 audit records its dispositions). (2) One
+  NEW, previously unrecorded operational fact, which I first wrongly "refuted" from
+  ingestion_runs and then confirmed from the scheduler's own logs: **the ingest scheduler's
+  post-tick `scripts/refresh-aggregates.js` call fails with "canceling statement due to lock
+  timeout" on about half its attempts (16/29, 12/28, 16/26 per day, 08-19..21), every one after
+  the `mo-house-xml` tick that lands at :00 — the exact minute pg_cron's `*/30`
+  `refresh_vote_aggregates()` job holds the matview locks.** Benign for the data (pg_cron's own
+  refresh succeeded on all 184 `refresh-aggregates` rows of the last 3 days, so the charts are
+  fresh) but invisible in `ingestion_runs` for the known reason — migration 0027's
+  exception handler can never record a failure — and it sets `aggregatesHealthy:false` on ~half
+  of write-ticks, which would make any alerting on that flag noisy. Captured in TODO INBOX with
+  the cheap fix (treat a lock-timeout that lands within a minute of a :00/:30 boundary as the
+  benign pg_cron-owns-it class, or skip the post-tick call when a pg_cron refresh finished in the
+  last N minutes), not built. (3) Also confirmed live: `HEALTHCHECK_PING_URL` is unset (the
+  dead-man ping is inert), the next scheduled-summaries tick (08-22 11:00Z) has not fired yet so
+  "did the $7 reload take" is still tomorrow's check, and the lesson-36 gauge fix IS done
+  (`npm run status` prints awaiting-review and retired separately — DATA_INVENTORY's banner
+  point 3 is stale). No code changed; one TODO INBOX capture (the collision + a docs-refresh
+  debt list) committed so none of this is lost.

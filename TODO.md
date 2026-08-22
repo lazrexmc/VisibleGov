@@ -1152,6 +1152,35 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-22) Post-tick aggregate refresh collides with pg_cron — real, benign, UNRECORDED
+  until now.** The ingest scheduler's `scripts/refresh-aggregates.js` call after a write-tick
+  fails with `canceling statement due to lock timeout` on ~half its attempts (16/29, 12/28, 16/26
+  per day, 08-19..21; parsed from the scheduler's own logs), always after the `mo-house-xml` tick
+  at :00 — when pg_cron's `*/30` refresh holds the matview locks. Data is fine (pg_cron's refresh
+  succeeded on all 184 `refresh-aggregates` rows in 3 days) but `ingestion_runs` shows NO
+  failure (0027's handler gap) and `aggregatesHealthy:false` fires on half of write-ticks, so the
+  flag is noisy for any future alerting. Cheap fix options: classify a lock-timeout within ~60s
+  of a :00/:30 boundary as the benign "pg_cron owns this refresh" class (log, not unhealthy), or
+  skip the post-tick call when a pg_cron `refresh-aggregates` row finished in the last N minutes.
+  Capture only — not built.
+- **(2026-08-22) docs/ refresh debt (from the full catch-up read + a 14-reader workflow; each
+  verified against live state):** DISASTER_RECOVERY knows only ONE Windows task — add the
+  `VisibleGov Scheduled Summaries` task, MO text ingest (`ingest-legiscan-texts.js`), the
+  `backfill-*.js` family, `sync-session-dates.js`, the gloss runner, and correct "`correct-data.js
+  all` runs six"; SCHEDULED_SUMMARIES lines 132/170 still say never-billed/not-registered, and it
+  lacks the 08-18 corroboration stage and the 08-22 recency-first fallback + WARNING line;
+  CLOUDFLARE_DEPLOY Phase 4 says the subdomain is decided (it is UNDECIDED: .us / .net /
+  subdomain); ARTIFACTS' cache table omits seven dirs incl. `scheduled-summaries/parked.json`
+  (cost-bearing), `summary-scheduler-logs/`, `wave3/`, `gloss-batch-{mo,usc}/`,
+  `openstates-people/`; RUNBOOK_SUMMARY_WAVES needs a "lane CLOSED 2026-08-18, scheduler owns
+  summaries" banner; VOTERTABLES_JOIN_GAMEPLAN Phase 1 (address lookup) already shipped
+  2026-08-05 — strike before Lance reviews; CONTROLLER_BRIEFING §1 still states the 08-03
+  API-approval suspension as in effect (inverted by depletion + the scheduler carve-out);
+  DATA_INVENTORY banner point 3 (gauge over-count) is fixed and its glossary section is
+  pre-drain; both 2026-08-03 audits need a disposition table (what was fixed/refused/remains);
+  no operator runbook exists for the Batch-API gloss runner or the bills catalog page. One
+  bounded docs pass on Lance's go; nothing here changes code.
+
 - ~~**(2026-08-21) `sessions.start_date` is NULL for 19 Missouri sessions**~~ **RESOLVED
   2026-08-22 (CHATLOG): it was 30 of 31, and the claim "the scheduler is unaffected (it sorts by
   text size)" was WRONG — `scheduled-summaries.js` also orders recency-first on
