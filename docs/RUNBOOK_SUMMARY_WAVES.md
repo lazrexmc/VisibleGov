@@ -75,3 +75,13 @@ Division of labor that minimizes $ per published bill:
   anyone's backlog.
 - PowerShell `Set-Content`/`-replace` round-trips MANGLE this repo's UTF-8 em-dashes — edit docs
   with the Write/Edit tools, never shell string-replacement.
+
+## Re-author priors: inline or pointer (2026-08-22)
+
+A re-author manifest item carries either `reAuthor: {prior_summary, objections}` INLINE or
+`reAuthor_file: ".superpowers/artifacts/wave3/reauthor-<WAVE>-<bill_id>.json"` — a pointer to a
+JSON file with the same two keys that the author agent Reads (lesson 40). **Prefer the pointer
+form:** `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> <N> --pointer` writes the
+pointer files and a ~600-byte-per-bill args file. The launch call is retyped by hand, and a
+14KB inline prior lost one character in transit on 2026-08-22 — the wave died at `JSON.parse`
+before any agent ran. Read the args file and pass it verbatim either way.

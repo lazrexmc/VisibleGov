@@ -938,3 +938,17 @@ sessions, so the comparator saw '' for 95% of rows and fell through to its tiebr
    stray entries in three regular sessions, which is why the second source is also guarded (a date
    outside the session's year is reported, never written). Write the earlier-attested date, name
    the source per row, and keep "both sources agree" for identical dates only.
+
+## Lesson 46 — Anything a human (or a model) retypes into a launch call is a transcription, not a copy; keep the retyped part tiny and point at the rest (2026-08-22)
+
+Wave EB's manifest was 14KB of inline prior-draft JSON, read from the generated file and
+retyped into the workflow launch call "verbatim." One character drifted — a stray backslash
+before the final quote — and the run died at `JSON.parse` before a single agent started.
+$0 lost, but the failure mode is general: a file read back and re-emitted by hand is a
+transcription with a per-character error rate, and a 14KB payload gives that rate a lot of
+characters to work with. The fix is not "be more careful" — it is to make the retyped part
+too small to corrupt: bank the bulk to a file by code and pass a stub with a pointer the
+consumer (an agent with file tools) dereferences itself (lesson 40's mechanism, now the
+DEFAULT for re-author waves via `build-drain-wave.mjs --pointer`, not a fallback for oversized
+priors). Corollary: when a launch fails at parse, look for the transcription error in the
+LAUNCH, not in the generated file — the file was fine.

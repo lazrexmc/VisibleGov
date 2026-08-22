@@ -50,6 +50,16 @@ const COVERAGE_SCHEMA = {
 
 const VERBATIM_RULE = 'MECHANICAL GROUNDING RULE (a code gate rejects violations whole): every `section` string you emit MUST appear VERBATIM as a substring of the bill text (e.g. "Sec. 2" only if the text prints "Sec. 2"; never invent dotted ranges like "233.295.2-3" or normalize the text\'s own spelling). Every quote field must be copied exactly from the text.'
 
+// A re-author prior travels either INLINE (`reAuthor: {prior_summary, objections}`) or as a
+// POINTER (`reAuthor_file`: a repo-relative JSON file with the same two keys that the author
+// agent Reads). Lesson 40 pattern; the pointer form exists because the manifest is retyped into
+// the launch call by hand — on 2026-08-22 a 14KB inline prior lost ONE character in transit and
+// the whole wave died at JSON.parse before any agent ran. `build-drain-wave.mjs --pointer` emits
+// the pointer form. Same authoring contract either way.
+const reAuthorBlock = (bill) => (bill.reAuthor
+  ? `A PRIOR DRAFT of this summary exists (below) with SPECIFIC OBJECTIONS from the verification gates. Author a corrected summary: keep what the text genuinely supports, fix every objection. Never copy a prior claim without re-checking it against the text yourself.\n\nPRIOR DRAFT:\n${JSON.stringify(bill.reAuthor.prior_summary)}\n\nOBJECTIONS TO FIX (each MUST be resolved):\n${bill.reAuthor.objections.map((o, i) => `${i + 1}. ${o}`).join('\n')}`
+  : `A PRIOR DRAFT of this summary exists with SPECIFIC OBJECTIONS from the verification gates. Read the JSON file at ${REPO}/${bill.reAuthor_file} — its "prior_summary" key is the prior draft and its "objections" array lists the objections; treat them exactly as you would an inline PRIOR DRAFT and OBJECTIONS list. Author a corrected summary: keep what the text genuinely supports, fix EVERY objection in that array. Never copy a prior claim without re-checking it against the text yourself. If that file is missing or unreadable, author fresh from the bill text alone.`)
+
 phase('Summarize')
 
 const results = await pipeline(
@@ -60,13 +70,13 @@ const results = await pipeline(
   // The item should also carry author_model/author_provenance for the record envelope.
   (bill) => (bill.preAuthored
     ? Promise.resolve({ summary: bill.preAuthored })
-    : bill.reAuthor
+    : (bill.reAuthor || bill.reAuthor_file)
       // Re-author-with-objections lane: a prior draft failed named mechanical gates. Opus authors
       // FRESH from the official text (the prior draft is reference material, never ground truth),
       // with the exact objections to fix. Envelope author becomes opus/subagent — honest, since
       // this is a new authorship.
       ? agent(
-        `You are the AUTHOR stage of VisibleGov's trust-model-v3 summary chain, RE-AUTHORING a summary whose previous draft failed mechanical verification gates. Read the system-prompt contract in ${REPO}/src/lib/summarizer.js (the SYSTEM_PROMPT constant, around line 68) and follow it EXACTLY (facts only, every point cites its section, no party framing, plain language, stated_purpose ONLY verbatim from the bill's own purpose/findings language else empty string, referenced_terms only what the text itself names).\n\nRead the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier} — ${JSON.stringify(bill.title)}). The text is your ONLY source of truth.\n\nA PRIOR DRAFT of this summary exists (below) with SPECIFIC OBJECTIONS from the verification gates. Author a corrected summary: keep what the text genuinely supports, fix every objection. Never copy a prior claim without re-checking it against the text yourself.\n\nPRIOR DRAFT:\n${JSON.stringify(bill.reAuthor.prior_summary)}\n\nOBJECTIONS TO FIX (each MUST be resolved):\n${bill.reAuthor.objections.map((o, i) => `${i + 1}. ${o}`).join('\n')}\n\nADDITIONAL MECHANICAL RULES the code gates enforce:\n- stated_purpose, when non-empty, must be a VERBATIM substring of the bill text (whitespace may collapse; words/characters may not change). If the bill's purpose language cannot be quoted verbatim, return "".\n- Every field is SINGLE-LINE: no newline characters inside point/section/stated_purpose/term/citation_raw.\n- ${VERBATIM_RULE}\n\nProduce the corrected summary per the schema.`,
+        `You are the AUTHOR stage of VisibleGov's trust-model-v3 summary chain, RE-AUTHORING a summary whose previous draft failed mechanical verification gates. Read the system-prompt contract in ${REPO}/src/lib/summarizer.js (the SYSTEM_PROMPT constant, around line 68) and follow it EXACTLY (facts only, every point cites its section, no party framing, plain language, stated_purpose ONLY verbatim from the bill's own purpose/findings language else empty string, referenced_terms only what the text itself names).\n\nRead the bill text at ${REPO}/${bill.text_file} (bill ${bill.identifier} — ${JSON.stringify(bill.title)}). The text is your ONLY source of truth.\n\n${reAuthorBlock(bill)}\n\nADDITIONAL MECHANICAL RULES the code gates enforce:\n- stated_purpose, when non-empty, must be a VERBATIM substring of the bill text (whitespace may collapse; words/characters may not change). If the bill's purpose language cannot be quoted verbatim, return "".\n- Every field is SINGLE-LINE: no newline characters inside point/section/stated_purpose/term/citation_raw.\n- ${VERBATIM_RULE}\n\nProduce the corrected summary per the schema.`,
         { label: `reauthor:${bill.identifier}`, phase: 'Summarize', model: 'opus', schema: SUMMARY_SCHEMA }
       ).then((summary) => ({ summary }))
     : bill.checkpoint_file

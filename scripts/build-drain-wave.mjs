@@ -238,6 +238,20 @@ console.log('re-authorable drafts:', candidates.length,
   `(disk-envelope ${candidates.length - dbCandidates}, db ${dbCandidates})`);
 console.log('skipped (disk path):', JSON.stringify(skipped), '| skipped (db path):', JSON.stringify(dbSkipped));
 const wave = candidates.slice(0, batchSize);
-writeFileSync(`${DIR}/wave-${waveName}-args.json`, JSON.stringify(wave), 'utf8');
+// --pointer (lesson 40): bank each prior to reauthor-<WAVE>-<bill_id>.json and ship a small stub
+// carrying `reAuthor_file` instead of the inline `reAuthor`, so the launch call never has to
+// carry — and retype — a multi-KB prior verbatim (2026-08-22: one lost character in a 14KB
+// inline prior killed wave EB at JSON.parse before any agent ran). The workflow accepts both.
+const usePointer = process.argv.includes('--pointer');
+const shipped = usePointer
+  ? wave.map((o) => {
+    const rel = `.superpowers/artifacts/wave3/reauthor-${waveName}-${o.bill_id}.json`;
+    writeFileSync(`${DIR}/reauthor-${waveName}-${o.bill_id}.json`, JSON.stringify(o.reAuthor), 'utf8');
+    const { reAuthor, ...rest } = o;
+    return { ...rest, reAuthor_file: rel };
+  })
+  : wave;
+writeFileSync(`${DIR}/wave-${waveName}-args.json`, JSON.stringify(shipped), 'utf8');
+if (usePointer) console.log('pointer mode: priors banked to', wave.map((o) => `reauthor-${waveName}-${o.bill_id}.json`).join(', '));
 console.log(`wave ${waveName}:`, wave.length, '| sizes', wave[0]?.text_length, '-', wave[wave.length - 1]?.text_length);
 console.log(wave.map((o) => `${o.identifier}(${o.reAuthor.objections.length})`).join(', '));
