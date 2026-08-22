@@ -5320,3 +5320,35 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   actual inputs, never from a rate. Docs/memory updated to "balance ~$7 (console is the truth —
   if the overspend left a negative balance the net is lower); billed path: scheduler only,
   everything else per-run approval."
+
+- **"proceed as recommended" -> $0 projection of the summary backlog from its ACTUAL texts (no
+  submission); mid-pass "plugin:github:github mcp server says failed and I cannot resolve it"
+  (2026-08-21, late):** ran the real planner read-only (`summary-queue.js plan --dry-run`), joined
+  sessions, and projected every bill two ways — the scheduler's own `estimateBillCostUsd`
+  (the padded gate a run is held to: $0.665 fixed output ceiling + chars/4 x $7/Mtok) and a
+  realistic per-attempt figure from the text size (chars/4 x $5/Mtok for haiku-in once + sonnet-in
+  twice, + $0.065 fixed outputs), calibrated against this week's seven scheduler ticks: $1.957
+  over 31 attempts (12 published + 19 gate refusals) = $0.063/attempt, $0.163/published; the
+  formula gives ~$0.075 for bills that size — ~20% high, the acceptable direction. **Backlog:
+  2,521 ready bills, 2,517 of them Missouri (federal is essentially done: 4 left, 3 monsters);
+  319 monsters over 100k chars (none over the 400k hard ceiling); median 15k chars, mean 40k.**
+  Recency had to be parsed from session NAMES: **19 MO sessions carry no `start_date` (2,388 of
+  the 2,521 bills) — so `scripts/export-summary-wave.mjs`'s documented "newest session first"
+  sort is a no-op for 95% of the queue (only 2022 is dated); the scheduler is unaffected (it
+  sorts by size, not recency). Captured in TODO INBOX, not chased.** By year: 2026 session 194
+  bills (26 monsters) — ceiling $145, realistic ~$24 per attempt-pass; 2025: 198 / $151 / ~$27;
+  2024: 51 / $40 / ~$8; everything (2015-2026): ceiling $1,855, realistic ~$291 per pass. At
+  this week's 39% first-pass yield (refusals become drafts the conversion lane re-authors with
+  objections, historically ~80% convert), a 2026-session pass is ~$24 for ~75 first-pass
+  publishes plus ~120 drafts. **What the $7 meets:** ~2 weeks of scheduler ticks (~25-30
+  summaries, smallest-first) — NOT a session drain. Recommendation recorded: let the scheduler
+  run; a dedicated 2026-session drain needs ~$30-40 realistic and should wait for the
+  session-date fix so recency ordering is real (and a Batch-API summary runner, which does not
+  exist yet — the chain is interactive — would halve it). No decision taken; nothing billed.
+  **GitHub MCP diagnosis ($0, read-only):** the plugin's server is HTTP
+  (`https://api.githubcopilot.com/mcp/`) authenticated by
+  `Authorization: Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}` — and that variable is NOT set in
+  Lance's environment (GITHUB_TOKEN/GH_TOKEN also unset), so every connection fails. `gh` itself
+  is logged in (keyring token), but the plugin never consults `gh`. Fix is his: create a PAT
+  (repo scope), `setx GITHUB_PERSONAL_ACCESS_TOKEN "<token>"` as a user env var, restart VS
+  Code. The token is never to be pasted into chat or committed anywhere.

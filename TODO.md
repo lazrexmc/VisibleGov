@@ -13,7 +13,13 @@ its own under its ledger ($3.04 of $5.00 left this ISO week, resets Mon 2026-08-
 published summary this week, so ~2 weeks of ticks); EVERYTHING ELSE still needs per-run
 approval. Gloss backlog is effectively empty (30 structural leftovers, nothing newly minted) —
 no gloss run warranted. Summary coverage (live): 744 of the 3,343 accountability-set bills
-(22%) have a published summary; 2,518 are ready (text, no summary); 1,045 published overall.** 525 federal statute glosses published (641 USC
+(22%) have a published summary; 2,518 are ready (text, no summary); 1,045 published overall.
+$0 PROJECTION of that backlog from its actual texts (CHATLOG 2026-08-21 late): 2,521 ready,
+2,517 Missouri, 319 monsters; the 2026 session alone is 194 bills ≈ $24 realistic per
+attempt-pass (gate ceiling $145); everything ≈ $291 realistic ($1,855 ceiling); this week's
+scheduler measured $0.063/attempt, $0.163/published, 39% first-pass yield. The $7 ≈ two weeks
+of scheduler ticks, not a drain. ⚠️ Found on the way: 19 MO sessions have no `start_date`, so
+the exporter's recency-first sort is a no-op for 2,388 of 2,521 queued bills (INBOX).** 525 federal statute glosses published (641 USC
 published in total with the pre-existing 116); glossary published 1,333 → **1,858**; 140 USC
 glosses flagged for Lance's review (with the 279 MO ones = **419 awaiting his flag review**);
 4 author failures + 23 fetch failures (14 nonexistent sections, 9 oversize) stay drafts with
@@ -1139,6 +1145,14 @@ session's own direct work, not assumed.**
     from bioguide at render time, by design). Both confirmed by design, not decay.
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
+
+- **(2026-08-21) `sessions.start_date` is NULL for 19 Missouri sessions (2,388 of the 2,521
+  ready-to-summarize bills)** — `scripts/export-summary-wave.mjs`'s "newest session first" sort
+  silently degrades to arbitrary order for 95% of the queue (only 2022 Regular Session is dated).
+  The scheduler is unaffected (it sorts by text size). Fix options: ingest LegiScan's
+  `year_start`/`session` dates into `sessions.start_date`, or have the exporter fall back to the
+  year parsed from `sessions.name` (the projection script did exactly that). Do before any
+  recency-first drain of the backlog.
 
 > "I'd like to expose all the politicians by breaking down the bills and laws they propose into
 > layman terms so that everyone can easily read them and their purpose and then we can all see how
