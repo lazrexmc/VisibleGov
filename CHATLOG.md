@@ -5594,3 +5594,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   reads from disk ("Script file: F:\VisibleGov\.claude\workflows\summary-wave.js"). PLAYBOOK
   lesson 47 + a runbook addendum; a TODO capture for the design smell (an item carrying a field
   the script does not recognise should throw, not author fresh).
+- **Wave EB (the first pointer-mode run): HB 930 published; HB 1607 flagged on a NEW single
+  refutation — final attempt EC built with the pre-fix + [GUIDANCE] treatment** (2026-08-22,
+  run wf_3d16b55e-d3d by scriptPath, 10 agents / 0 errors / ~9.5 min; record run a4564601
+  `--replace-drafts`, succeeded). HB 930 came back 17/17 supported with the storage/use/
+  consumption prong restored as its own clause and the affiliate definition split into its own
+  bullet; corroboration well-formed; published. HB 1607: 28 of 29 supported — the DZ board-count
+  fix held (eight appointees, aboveground owner as the third tank-owner seat) — but bullet 25
+  carried the chairman clause's "at its first meeting" qualifier over onto the vice-chairman
+  election, which subsection 12 never states; the verifier refused the inference. That is the
+  rotating-single-refutation pattern (each round fixes the named bullet and a rephrase of a
+  previously-verified one produces the next), the class that parked SB 6 and HB 814. EC is
+  attempt 3 = FINAL under the 3-strike rule: the pointer file's prior now carries a mechanical
+  pre-fix (bullet 25 split into the chairman-at-first-meeting bullet and a vice-chairman bullet
+  with no meeting qualifier, both at 319.129) plus a [GUIDANCE — FINAL ATTEMPT] objection telling
+  the author to keep every verified bullet word-for-word. If EC flags, HB 1607 parks with this
+  trail. Live after EB: **1,089 published / 29 drafts / 599 retired.**
