@@ -5492,3 +5492,17 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   1,063 published, drafts 61 -> 55, retired 561 -> 567. Wave DX (6 bills, 3.1-3.5k chars, one
   objection each: SCR 28, HB 1473, HB 1984, HB 1743, SCR 25, HB 3021) built and launched; 3
   re-authorable remain after it.
+- **Drain wave DX — 4/6 published, 2 flagged at strike 2** (2026-08-22, one 13.3KB launch, 25
+  agents 0 errors, 1.21M tokens, run wf_0a672421; record run a625fb1b, --replace-drafts): clean —
+  SCR 28 WWII Medal of Honor state funeral (2 verdicts; the inscribed-copies clause added), HB 1984
+  MoDOT/Highway Patrol retirement board (11; the retiree-transition bullet rewritten to the single
+  transportation retiree the text names), SCR 25 Article V term-limits application (5;
+  stated_purpose emptied per the verbatim rule), HB 3021 economic-recovery tax credit appropriation
+  (7; the "Missouri income tax due" definition added). Flagged honestly, one attempt each
+  remaining: HB 1473 LAGERS eligibility (10 verdicts, 1 refuted — bullet 0 attributed the "local
+  government employees' retirement system" subject to Section A, which only repeals/enacts; the
+  AN-ACT-caption attribution class) and HB 1743 Missouri CROWN Act (9 verdicts, 1 refuted — the
+  demanded short-title bullet overstated what 160.083's own text establishes). Live: 1,063 ->
+  1,067 published, drafts 55 -> 51, retired 567 -> 573. Wave DY — the LAST drainable wave: the two
+  strike-2 retries (via the disk-envelope path, objections checked fresh before launch) + HB 2365,
+  HB 1686, HB 1472 (3.2-4.2k chars).
