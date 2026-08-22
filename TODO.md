@@ -18,8 +18,14 @@ $0 PROJECTION of that backlog from its actual texts (CHATLOG 2026-08-21 late): 2
 2,517 Missouri, 319 monsters; the 2026 session alone is 194 bills ≈ $24 realistic per
 attempt-pass (gate ceiling $145); everything ≈ $291 realistic ($1,855 ceiling); this week's
 scheduler measured $0.063/attempt, $0.163/published, 39% first-pass yield. The $7 ≈ two weeks
-of scheduler ticks, not a drain. ⚠️ Found on the way: 19 MO sessions have no `start_date`, so
-the exporter's recency-first sort is a no-op for 2,388 of 2,521 queued bills (INBOX).** 525 federal statute glosses published (641 USC
+of scheduler ticks, not a drain. ✅ **Session dates FIXED (2026-08-22, run 0fb39207):** it was 30
+of 31 MO sessions with a NULL `start_date` (not 19), and BOTH recency-first consumers — the
+exporter AND the daily scheduler's `sortQueueRecencyFirst` — had silently degraded; all 30 now
+carry a sourced date (constitution / OpenStates / LegiScan recorded actions, each named in the
+run record), both consumers fall back to the name-year and report it, and the next scheduler
+tick takes 2026-session bills first. Re-run `node --env-file=.env
+src/cli/sync-session-dates.js` (dry-run, then `--apply`) whenever a new session is minted — the
+session-minting drivers still write no date (build queue).** 525 federal statute glosses published (641 USC
 published in total with the pre-existing 116); glossary published 1,333 → **1,858**; 140 USC
 glosses flagged for Lance's review (with the 279 MO ones = **419 awaiting his flag review**);
 4 author failures + 23 fetch failures (14 nonexistent sections, 9 oversize) stay drafts with
@@ -1146,13 +1152,18 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
-- **(2026-08-21) `sessions.start_date` is NULL for 19 Missouri sessions (2,388 of the 2,521
-  ready-to-summarize bills)** — `scripts/export-summary-wave.mjs`'s "newest session first" sort
-  silently degrades to arbitrary order for 95% of the queue (only 2022 Regular Session is dated).
-  The scheduler is unaffected (it sorts by text size). Fix options: ingest LegiScan's
-  `year_start`/`session` dates into `sessions.start_date`, or have the exporter fall back to the
-  year parsed from `sessions.name` (the projection script did exactly that). Do before any
-  recency-first drain of the backlog.
+- ~~**(2026-08-21) `sessions.start_date` is NULL for 19 Missouri sessions**~~ **RESOLVED
+  2026-08-22 (CHATLOG): it was 30 of 31, and the claim "the scheduler is unaffected (it sorts by
+  text size)" was WRONG — `scheduled-summaries.js` also orders recency-first on
+  `sessions.start_date`. Fixed by `src/cli/sync-session-dates.js` (30 rows written from named
+  sources, run 0fb39207) plus a name-year fallback + undated-count reporting in both consumers.**
+- **(2026-08-22) Session-minting drivers still write no `start_date`** — `ingest-legiscan`
+  (`ensureAndPatchSessionRow`), `ingest-mo-house` (explicit `start_date: null`), `ingest-mo-senate`
+  mint session rows with only identifier + name, so the next new session (January 2027 regular,
+  any special) will be undated until `sync-session-dates.js --apply` is re-run. Cheapest honest
+  wiring: a `scheduled-ingest.js` registry entry that runs the CLI's dry-run weekly and logs when
+  it has patches, or a note in its runbook to re-run after any session-minting ingest. Until
+  then both consumers fall back to the session's name/identifier year and say so.
 
 > "I'd like to expose all the politicians by breaking down the bills and laws they propose into
 > layman terms so that everyone can easily read them and their purpose and then we can all see how

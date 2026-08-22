@@ -46,6 +46,7 @@ import {
 } from '../src/lib/billed-summary-chain.js';
 import { loadDraftObjections } from '../src/lib/draft-objections.js';
 import { MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
+import { sessionRecencyKey } from '../src/lib/session-dates.js';
 import { pickCurrentTextRow } from '../src/cli/summary-queue.js';
 
 export const WEEKLY_CAP_USD = 5.00;
@@ -288,6 +289,8 @@ async function runTickLocked(deps) {
   }
   const rawQueue = planResult?.parsed?.queue ?? [];
   const sessionStartByBill = await deps.loadSessionStartByBill();
+  const unorderedQueued = rawQueue.filter((q) => !sessionStartByBill.has(q.bill_id)).length;
+  if (unorderedQueued > 0) deps.appendLog(`WARNING: ${unorderedQueued} of ${rawQueue.length} queued bills have no session recency key (no start_date and no parseable session year) — they sort last; run src/cli/sync-session-dates.js`);
   const sortedQueue = sortQueueRecencyFirst(rawQueue, sessionStartByBill);
   // planQueue already excluded anything > MAX_TEXT_CHARS; this only splits what's left into
   // normal-sized (fresh) vs. oversize-but-summarizable (monster).
@@ -576,17 +579,30 @@ async function selectRecentRunsReal(client) {
   return data ?? [];
 }
 
-async function loadSessionStartByBillReal(client) {
-  const { data: sessions, error: sErr } = await selectAll(client, 'sessions', 'id,start_date');
+// Recency key per bill for sortQueueRecencyFirst: the session's real start_date, else the year
+// parsed from the session's identifier/name (src/lib/session-dates.js sessionRecencyKey).
+// Found 2026-08-21 (adversarial review of the session-dates fix): 30 of 31 MO sessions carried
+// a NULL start_date, so this loader returned a key for almost no bill and the "recency-first"
+// sort silently degraded to passage-then-smallest-first for every tick since the scheduler went
+// live. The fallback keeps an undated session in its year; `src/cli/sync-session-dates.js`
+// fills the dates from traceable sources. Bills whose session has neither a date nor a
+// parseable year get no key (they sort last) and are counted on the returned Map's
+// `unordered` property so the tick log can say so instead of hiding it.
+export async function loadSessionStartByBillReal(client) {
+  const { data: sessions, error: sErr } = await selectAll(client, 'sessions', 'id,identifier,name,start_date');
   if (sErr) throw new Error(`sessions lookup failed: ${sErr.message}`);
   const { data: bills, error: bErr } = await selectAll(client, 'bills', 'id,session_id');
   if (bErr) throw new Error(`bills lookup failed: ${bErr.message}`);
-  const startById = new Map((sessions ?? []).map((s) => [s.id, s.start_date]));
+  const keyById = new Map((sessions ?? []).map((s) => [s.id, sessionRecencyKey(s)]));
   const out = new Map();
+  let unordered = 0;
+  let fallback = 0;
   for (const b of bills ?? []) {
-    const start = startById.get(b.session_id);
-    if (start) out.set(b.id, start);
+    const k = keyById.get(b.session_id);
+    if (k && k.key) { out.set(b.id, k.key); if (!k.dated) fallback += 1; } else unordered += 1;
   }
+  Object.defineProperty(out, 'unordered', { value: unordered, enumerable: false });
+  Object.defineProperty(out, 'fallback', { value: fallback, enumerable: false });
   return out;
 }
 

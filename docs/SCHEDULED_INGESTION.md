@@ -157,6 +157,12 @@ Each invocation:
   CLI) does its network work before it records anything — a persistent upstream failure there used
   to leave no durable trace at all, which would have let that one source win the "most overdue"
   pick on every tick forever. The scheduler now closes that gap itself (see step 3 above).
+- **Never dates a session it mints.** Every driver here that creates a `sessions` row (legiscan,
+  mo-house-xml, mo-senate) writes identifier + name only — no `start_date`. Recency-first ordering
+  in the summary exporter and the summary scheduler depends on that column, so after any ingest
+  that mints a new session, run `node --env-file=.env src/cli/sync-session-dates.js` (dry-run),
+  review, then `--apply` (2026-08-22; until then both consumers fall back to the session's
+  name-year and log how many rows needed it).
 - **Never guesses a LegiScan session id.** If `sessions.legiscan_session_id` isn't on file for the
   current MO session, the `legiscan` source is reported `resolvable: false` and skipped, with the
   reason logged — never a "most recent session" heuristic. See *Known gap* below for why.

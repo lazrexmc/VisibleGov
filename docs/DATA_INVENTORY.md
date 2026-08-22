@@ -201,7 +201,7 @@ Counts are the 2026-08-03 snapshot (re-verified live; supersedes 2026-08-02). **
 | Table | Rows | What it is |
 |---|---:|---|
 | `jurisdictions` | 2 | The only two governments covered: `us-congress`, `mo-legislature`. |
-| `sessions` | 32 (was 33) | Legislative sessions. 1 federal (119th Congress) + 31 Missouri. **Down by one: the duplicate MO 2026 session (`'2026'`) was merged into `'261'` and deleted — see structural defect #1, now RESOLVED.** |
+| `sessions` | 32 (was 33) | Legislative sessions. 1 federal (119th Congress) + 31 Missouri. **`start_date` is sourced for every Missouri session as of 2026-08-22** (30 were NULL before; regular sessions carry the Mo. Const. art. III §20 convening date, specials the earlier of OpenStates' published start and the session's first recorded LegiScan bill action — see `src/cli/sync-session-dates.js`; `end_date` is only set where OpenStates supplied one, and is not used for ordering). **Down by one: the duplicate MO 2026 session (`'2026'`) was merged into `'261'` and deleted — see structural defect #1, now RESOLVED.** |
 | `bills` | ★ ~38,254 | One row per bill per session. Most were never voted on. |
 | `bill_texts` | 3,630 | Stored official bill text with a SHA-256 hash and source URL. Exactly one version per bill. |
 | `bill_actions` | 1,051 (was 1,020) | Legislative history / action steps. **Covers only 142 bills (0.4%)** — see gaps. Grew but the coverage ratio barely moved. |

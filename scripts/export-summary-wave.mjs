@@ -7,6 +7,8 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
+import { selectAll } from '../src/lib/db.js';
+import { sessionRecencyKey } from '../src/lib/session-dates.js';
 
 const N = Number(process.argv[2]) > 0 ? Number(process.argv[2]) : 12;
 const OUT = '.superpowers/artifacts/wave3';
@@ -24,27 +26,29 @@ if (fullQueue.length === 0) throw new Error('planner returned an empty queue');
 
 const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-async function pageAll(table, cols) {
-  let rows = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await c.from(table).select(cols).range(from, from + 999);
-    if (error) throw new Error(`${table} lookup failed: ${error.message}`);
-    rows = rows.concat(data ?? []);
-    if ((data ?? []).length < 1000) break;
-  }
-  return rows;
-}
-
-const sessions = await pageAll('sessions', 'id,start_date');
-const sessionStart = new Map(sessions.map((s) => [s.id, s.start_date ?? '']));
-const billSessionRows = await pageAll('bills', 'id,session_id');
-const billSession = new Map(billSessionRows.map((b) => [b.id, sessionStart.get(b.session_id) ?? '']));
+// Recency key per session: the real start_date, else the year parsed from the session's own
+// identifier/name (src/lib/session-dates.js). Found 2026-08-21: 30 of 31 MO sessions carried a
+// NULL start_date, so this sort had silently degraded to arbitrary order for 95% of the queue.
+// Undated sessions are now counted and REPORTED (stderr + the exported summary), never hidden;
+// `src/cli/sync-session-dates.js` fills the dates from traceable sources.
+// Both reads go through selectAll (ORDER BY id + range) — an unordered .range() scan over ~38k
+// bills can skip or duplicate rows between pages, and a skipped bill would silently sort last.
+const { data: sessions, error: sessErr } = await selectAll(c, 'sessions', 'id,identifier,name,start_date');
+if (sessErr) throw new Error(`sessions lookup failed: ${sessErr.message}`);
+const sessionKey = new Map(sessions.map((s) => [s.id, sessionRecencyKey(s)]));
+const { data: billSessionRows, error: billErr } = await selectAll(c, 'bills', 'id,session_id');
+if (billErr) throw new Error(`bills lookup failed: ${billErr.message}`);
+const billSession = new Map(billSessionRows.map((b) => [b.id, sessionKey.get(b.session_id) ?? { key: '', dated: false }]));
+const queueBillsNotFound = fullQueue.filter((q) => !billSession.has(q.bill_id)).length;
+const undatedQueueItems = fullQueue.filter((q) => billSession.has(q.bill_id) && !billSession.get(q.bill_id).dated).length;
+if (queueBillsNotFound > 0) console.error(`WARNING: ${queueBillsNotFound} queued bill id(s) not found in the bills read — they sort last; investigate before trusting this order`);
+if (undatedQueueItems > 0) console.error(`WARNING: ${undatedQueueItems} of ${fullQueue.length} queued bills belong to a session with no start_date — ordered by name/identifier year only; run src/cli/sync-session-dates.js`);
 
 const queue = [...fullQueue]
   .sort((a, b) => {
-    const sa = billSession.get(a.bill_id) ?? '';
-    const sb = billSession.get(b.bill_id) ?? '';
-    if (sa !== sb) return sb.localeCompare(sa); // newest session first; missing dates sort last
+    const sa = billSession.get(a.bill_id)?.key ?? '';
+    const sb = billSession.get(b.bill_id)?.key ?? '';
+    if (sa !== sb) return sb.localeCompare(sa); // newest session first; missing keys sort last
     if (a.priority !== b.priority) return a.priority === 'passage' ? -1 : 1;
     return (a.text_length ?? Infinity) - (b.text_length ?? Infinity);
   })
@@ -64,10 +68,14 @@ for (const item of queue) {
     bill_text_hash: item.bill_text_hash,
     text_length: current.content.length,
     text_file: `${OUT}/bills/${item.bill_id}.txt`,
-    session_start: billSession.get(item.bill_id) || null,
+    // session_start is a REAL date or null — never the synthetic sort key; the key and whether a
+    // fallback was used are carried separately so the manifest never presents a pseudo-date.
+    session_start: billSession.get(item.bill_id)?.dated ? billSession.get(item.bill_id).key : null,
+    session_sort_key: billSession.get(item.bill_id)?.key || null,
+    session_dated: billSession.get(item.bill_id)?.dated ?? false,
   });
 }
 writeFileSync(`${OUT}/manifest.json`, JSON.stringify(manifest, null, 2), 'utf8');
 const bySession = {};
-for (const m of manifest) bySession[m.session_start ?? 'unknown'] = (bySession[m.session_start ?? 'unknown'] ?? 0) + 1;
-console.log(JSON.stringify({ exported: manifest.length, sessions: bySession, identifiers: manifest.map((m) => m.identifier) }));
+for (const m of manifest) { const k = m.session_start ?? (m.session_sort_key ? `${m.session_sort_key.slice(0, 4)} (undated session)` : 'unknown'); bySession[k] = (bySession[k] ?? 0) + 1; }
+console.log(JSON.stringify({ exported: manifest.length, sessions: bySession, undated_queue_items: undatedQueueItems, queue_bills_not_found: queueBillsNotFound, identifiers: manifest.map((m) => m.identifier) }));

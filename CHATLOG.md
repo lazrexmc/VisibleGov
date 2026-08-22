@@ -5352,3 +5352,59 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   is logged in (keyring token), but the plugin never consults `gh`. Fix is his: create a PAT
   (repo scope), `setx GITHUB_PERSONAL_ACCESS_TOKEN "<token>"` as a user env var, restart VS
   Code. The token is never to be pasted into chat or committed anywhere.
+
+- **"fix it then" -> Missouri session start dates FIXED, applied, verified (2026-08-22, early):**
+  scouted first ($0): it was **30 of 31** MO sessions with a NULL `start_date`, not 19 (19 was the
+  subset with queued bills); every row carries a `legiscan_session_id`; the one writer that ever
+  had dates (`src/cli/ingest.js` via OpenStates `parseSessions`) uses insert-if-absent so it never
+  patched rows the LegiScan/House/Senate drivers had already minted. **Sources, in authority
+  order:** (1) Mo. Const. art. III §20 (revisor.mo.gov, fetched): "The general assembly shall meet
+  on the first Wednesday after the first Monday in January" — deterministic for every REGULAR
+  session (`convenesOn`), and OpenStates' published dates agree for all 13 regular sessions it
+  lists except 2018, where it publishes the Dec 1 prefiling date; (2) OpenStates' live session
+  list (26 sessions, 2012-2026, specials as `YYYYS<n>`) for specials; (3) the earliest recorded
+  bill action inside each session's own cached LegiScan dataset (34 files decoded locally) — it
+  agrees with OpenStates on 7 specials and is EARLIER on 4 (2017 S1 05-22 vs 06-01, 2017 S2 06-12
+  vs 07-25, 2018 S1 05-18 vs 05-21 — the impeachment session did convene May 18 —, 2022 S1 09-14
+  vs 09-15), so a special takes the earlier of the two with the source named, and it dates the 3
+  specials OpenStates lacks (2010/2011/2013). Only `start_date` is written; `end_date` never
+  (OpenStates' end dates mix May 30 with the bill-deadline Friday and carry a typo: 2022S1 ends
+  2021-09-23). **Built (TDD):** `src/lib/session-dates.js` (pure: convenesOn, classifiers,
+  planSessionDates, sessionRecencyKey), `src/cli/sync-session-dates.js` (dry-run default,
+  `--apply` fill-null-only with a returning guarded update, run-recorded with every source, the
+  OpenStates payload sha256 and the bill/action/file each LegiScan date rests on), the exporter
+  now sorts on the real date with a name/identifier-year fallback and REPORTS undated and
+  not-found queue items. **Adversarial review (ultracode workflow, 3 lenses x 2 skeptics per
+  finding, 49 agents): 23 findings confirmed, 0 refuted.** The one rated HIGH corrected me: the
+  daily scheduler ALSO orders recency-first on `sessions.start_date` (`sortQueueRecencyFirst`,
+  no fallback) — so every tick since it went live had degraded to passage-then-smallest-first;
+  my "scheduler unaffected (it sorts by text size)" note in TODO/CHATLOG was wrong and is struck
+  here. Fixed the same pass: the scheduler's loader now uses the same recency key (fallback
+  counted on the Map's non-enumerable `unordered`/`fallback` properties; a tick-log WARNING when
+  any queued bill has no key). Other confirmed findings fixed: a LegiScan date outside the
+  session's year is a stray — reported, never written (the 2017/2021/2023 REGULAR datasets carry
+  2016-01-06 / 2020-11-20 / 2022-10-17 strays, which is exactly why); "both sources" is claimed
+  only on an IDENTICAL date (a later first reading neither contradicts nor corroborates — noted
+  as such); the plan note names the bill/action/file behind each LegiScan date; MO House session
+  codes ('261') must agree with the name year or the row is unclassified; envelope files without
+  zip/session_id are reported, not dropped; duplicate cache files per session are reconciled
+  (minimum, disagreements reported); an empty OpenStates list is refused; `--openstates-file`
+  requires a path; `partialResult` names the committed rows and the failing patch, a mid-run
+  failure records status `partial`, and a closeRun failure can no longer mask the original
+  error; the exporter reads through ordered `selectAll` (unordered `.range()` paging could skip
+  rows), never writes the synthetic sort key into `session_start` (real date or null +
+  `session_sort_key` + `session_dated`), and counts queue bills not found separately. Tests:
+  session-dates (14), sync-session-dates (6, incl. a scratch-cache test over the real MO 2018
+  envelopes), scheduled-summaries-session-key (1); suite 2,573/0 clean shell. **Applied
+  (Lance's "fix it then" = the go; dry-run reviewed first):** run `0fb39207`, **30 written, 0
+  skipped, 0 unmatched** — 16 from the constitution, 7 from LegiScan's recorded actions, 7
+  corroborated by both; OpenStates payload sha256 ba85a7f0…; verified live: 0 NULL start_dates
+  among 31 MO sessions, every date inside its session's year, `end_date` untouched. **Effect:**
+  the backlog projection now orders by real dates (0 undated; the top 100 ready bills are all
+  2026-session and contain no monsters — 900k chars total, ceiling $68); the exporter's N=5 run
+  picked five 2026-session bills with `undated_queue_items: 0`; the scheduler's next tick will
+  take 2026-session bills first (smallest first within the session), which is the documented
+  intent (Lance, 2026-08-09: "hitting the current session bills first"). **Still open (captured,
+  not built):** the drivers that mint sessions still write no date — re-run
+  `src/cli/sync-session-dates.js` (dry-run, review, `--apply`) when a new session appears; both
+  consumers fall back to the name/identifier year and say so meanwhile (TODO). PLAYBOOK lesson 45.

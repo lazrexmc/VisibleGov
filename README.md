@@ -133,6 +133,15 @@ the existing `vote_duplicates` mechanism; neither row is ever deleted). Omit bot
 with a recorded ruling and no dedup write. One supplied id must belong to the flag being
 adjudicated — the tool refuses unrelated ids rather than superseding an innocent vote row.
 
+**Keep session start dates filled (recency-first ordering depends on them):** both the wave
+exporter and the daily scheduler order "newest session first" on `sessions.start_date`, and the
+drivers that mint session rows write no date — 30 of 31 Missouri sessions were silently undated
+until 2026-08-22. Dry-run first, always: `node --env-file=.env src/cli/sync-session-dates.js`
+prints every row it would date with its source (Mo. Const. art. III §20 for regular sessions;
+the earlier of OpenStates and the LegiScan dataset's first recorded bill action for specials);
+`--apply` fills NULLs only and records a run naming each source. If `export-summary-wave.mjs` or
+a scheduler tick logs `WARNING: ... no start_date`, re-run it.
+
 **Check live data state:** `npm run status` (`scripts/data-status.js`) prints the current real
 counts and per-source freshness — the only source of truth for "what's true right now"; see
 `docs/DATA_INVENTORY.md` for what each number *means*.

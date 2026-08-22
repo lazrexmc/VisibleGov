@@ -915,3 +915,26 @@ $8.31. Two separate mistakes, both cheap to avoid:
    real money the operator did not approve.
 4. **Disclose the overspend first, then the results.** The glosses were sound (every gate
    passed) — that does not change the order of the report.
+
+## Lesson 45 — A sort key that is NULL for most rows degrades silently; measure the key's coverage, and grep for EVERY consumer before claiming a blast radius (2026-08-22)
+
+"Recency-first" had been the documented ordering for both the summary exporter and the daily
+scheduler for two weeks. It was never true: `sessions.start_date` was NULL for 30 of 31 Missouri
+sessions, so the comparator saw '' for 95% of rows and fell through to its tiebreaks
+(passage-first, smallest-first). Nothing errored, nothing warned, and the output looked plausible
+— small bills from every year. Three rules:
+1. **When an ordering or filter rests on a column, measure that column's coverage first** (one
+   `count(*) where col is null`). A key that is mostly NULL is not an ordering; it is a tiebreak
+   wearing an ordering's name. Now both consumers fall back to a parseable year AND report how
+   many rows needed the fallback — a degraded sort must say so.
+2. **"Only X consumes this" is a claim; grep for it.** The first write-up said "the scheduler is
+   unaffected (it sorts by text size)" from memory of one comment. The adversarial review grepped
+   and found `sortQueueRecencyFirst` keyed on the same column with no fallback. Blast-radius
+   claims go in docs only after `grep -rn <column>` across site/, src/, scripts/, and views.
+3. **A backfill from "the obvious source" deserves a second, independent source before it is
+   written.** OpenStates' published special-session dates looked authoritative; the session's own
+   LegiScan dataset (already cached locally) showed four of them were days-to-weeks LATE — a
+   recorded bill action proves the session had begun. And the same datasets carried out-of-year
+   stray entries in three regular sessions, which is why the second source is also guarded (a date
+   outside the session's year is reported, never written). Write the earlier-attested date, name
+   the source per row, and keep "both sources agree" for identical dates only.
