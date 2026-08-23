@@ -80,13 +80,16 @@ day-writing slot (~every 1.5–1.75 h, not per tick: on 08-23 days landed at 07:
 (INBOX) — Lance's call. After replay + the next LegiScan tick: `node --env-file=.env
 scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply` on his go) closes the
 `no_tally_corresponding_primary` flags whose journal twin now exists (176 open).
-⏳ **2024 MO House votes (2026-08-23): built, tested, awaiting migration 0032** — LegiScan prints
-all 275 as `0000-00-00` (source defect, confirmed via getRollCall); the House XML export does not
-serve 2024 (current GA only, verified in Lance's browser); 185 are dated by an exact printed
-AYES/NOES match against the bill history (Tier 1, Lance's pick), receipt in
-`votes.vote_date_provenance`. **Lance: apply `supabase/migrations/0032_vote_date_provenance.sql`**,
-then `node --env-file=.env src/cli/ingest-legiscan.js --dataset-file <scratchpad>/dataset-2122-envelope.json`
-($0) stores them; until then the ingest refuses them (counted `datesDerivedGated`).
+✅ **2024 MO House votes RECOVERED (2026-08-23): migration 0032 applied by Lance, re-ingest done
+— 185 votes + 30,105 casts live.** LegiScan prints all 275 as `0000-00-00` (source defect,
+confirmed via getRollCall); the House XML export does not serve 2024 (current GA only, verified in
+Lance's browser); 185 are dated by an exact printed AYES/NOES match against the bill history
+(Tier 1), each with its receipt in `votes.vote_date_provenance`. Run: `--dataset-file` on the
+cached session-2122 envelope, **0 LegiScan queries, $0**, status `partial` (exit 2) because the 90
+undatable roll calls are refused by design. Live: MO 2024 casts 2,500 → 32,470; public_votes
+carries all 185, public_vote_feed all 32,470. The 90 refused = 79 with no action printing that
+tally, 10 whose tally a sibling roll call shares, 1 whose only tallied action is the other
+chamber's.
 
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
 published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering
@@ -151,12 +154,10 @@ text (ingestion) remain from earlier inventories. Waves are built from LIVE unat
   contain its own latest commit hash). Suite 2,300+ green (`node --test` in a clean shell for
   the exact count — see the `.env` trap below; last full run 2,389/0 after the parens-gate fix,
   commit 92816ff).
-- Migrations: **32 files on disk (0001-0031 + 0018a), ALL applied live.** Nothing is awaiting an
-  apply (0030/0031 verified live 2026-08-05). **(Superseded 2026-08-23: 33 files on disk —
-  0001-0031 + 0018a applied; `0032_vote_date_provenance.sql` is DRAFTED and NOT applied —
-  live check: `votes.vote_date_provenance` does not exist yet. Draft-then-apply: Lance applies
-  it, then the 2024 MO House re-ingest in the block above / ledger item 23 stores the 185
-  tally-dated roll calls. CLAUDE.md trap #2 carries the same correction.)**
+- Migrations: **33 files on disk (0001-0032 + 0018a), ALL applied live.** Nothing is awaiting an
+  apply (0030/0031 verified live 2026-08-05; `0032_vote_date_provenance.sql` applied by Lance
+  2026-08-23, and the 2024 MO House re-ingest ran the same hour — 185 votes + 30,105 casts).
+  CLAUDE.md trap #2 carries the same statement.
 - Data (2026-08-10 `npm run status`): votes 10,266 · vote_casts 1,470,602 · bills 38,256 ·
   legislators 1,607.
 - Scheduler healthy: sources ticking through 2026-08-08+ (us-congress and mo-legislature both
@@ -253,11 +254,11 @@ counts on this list are dated — `npm run status` OPERATOR QUEUE is the live fi
   review queue *(2026-08-10 figures; 2026-08-23: 32 drafts = 28 parked with written reasons + 4
   fresh scheduler refusals; glossary 522 draft-mappable / 4,964 needs_mapping / 1,858 published of
   7,344, plus 419 flagged glosses awaiting Lance's flag review)*.
-- **Migration `0032_vote_date_provenance.sql` — DRAFTED 2026-08-23, NOT applied** (live:
-  `votes.vote_date_provenance` absent). Draft-then-apply: Lance's apply, then the $0 re-ingest of
-  session 2122 from the cached dataset stores the 185 tally-dated 2024 MO House roll calls
-  (RESUME HERE ⏳ entry; ledger item 23). Until then `npm run status` shows 2024 MO casts at
-  ~2,500 against 55k–205k for every other year.
+- ~~**Migration `0032_vote_date_provenance.sql` — DRAFTED, NOT applied**~~ **DONE 2026-08-23:**
+  Lance applied it and the $0 re-ingest of session 2122 from the cached dataset stored the 185
+  tally-dated 2024 MO House roll calls with their receipts (0 LegiScan queries; status `partial`
+  by design — the 90 undatable roll calls stay refused). `npm run status` now shows 2024 MO casts
+  at 32,470, up from ~2,500.
 - **MO House XML export serves only the CURRENT General Assembly** (verified 2026-08-23 in
   Lance's browser: 241 of 242 prior-GA loads are the HTTP-200 error page) — there is no
   prior-GA backfill path through `mo-house-xml`; LegiScan is the only source for earlier years.
@@ -1081,7 +1082,8 @@ session's own direct work, not assumed.**
     printing that tally anywhere in the bill's history, 10 whose tally is shared by a sibling roll
     call on the same bill and chamber, 1 whose only tallied action belongs to the other chamber.
     A stage-day inference would have reached ~84 of the 79-class; declined — "never a guess".
-    **Migration 0032 awaits Lance's apply; then re-ingest session 2122 from the cached dataset.**
+    **DONE 2026-08-23: Lance applied migration 0032 and the $0 session-2122 re-ingest stored all
+    185 with their receipts — 30,105 casts, 0 gated, 0 conflicts, 0 unresolved casts.**
 
 24. **Giant bills (11 over the 400k-char gate).** HRB 2467 (561k), HRB 1 (550k), SRB 975 (751k) and
     8 others refused rather than truncated during the text run. Options unchanged: raise toward the

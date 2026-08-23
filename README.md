@@ -29,9 +29,9 @@ text before submitting; `PLAYBOOK_DELTA.md` lesson 44); see `TODO.md` RESUME HER
 next.** IN-FLIGHT (2026-08-23, three threads, all in `TODO.md` RESUME HERE): the MO Senate
 journal parser's `bill_refs` quarantine was root-caused and fixed (commit 5ced4eb) and the
 quarantined days are being replayed — that quarantine is behind about half of the open
-reconciliation flags (see the Runbook); the 2024 MO House roll calls are being dated from
-LegiScan's own printed bill history (commit 2e420d9, see the votes bullet below); and migration
-`0032` is DRAFTED, committed, and NOT yet applied. *(Fresh
+reconciliation flags (see the Runbook); and the 2024 MO House roll calls are now dated from
+LegiScan's own printed bill history (commit 2e420d9 + migration `0032`, applied 2026-08-23 — see
+the votes bullet below). *(Fresh
 session? Read the RESUME HERE block at the top of `TODO.md` — it is verified against the live
 database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,
@@ -79,10 +79,7 @@ RESUME HERE block.
   "casts by year"): LegiScan prints every 2024 House roll call with a `0000-00-00` date, the
   ingest refuses to invent one, and the House's own XML export serves only the current General
   Assembly (verified in a browser 2026-08-23), so the `mo-house-xml` adapter cannot fill it either.
-  IN-FLIGHT (2026-08-23, commit 2e420d9): about two-thirds of the 275 (185 — 184 before the
-  pre-commit adversarial review added one) are datable from the bill's own printed history — an
-  exact AYES/NOES match against one dated same-chamber action — and land, each with its receipt,
-  once migration `0032` is applied; the rest stay refused by design.
+  RECOVERED 2026-08-23 (commits 2e420d9 + migration 0032, applied by Lance): 185 of the 275 are now stored under a date derived from the one dated, tallied action in the bill's own history printing their exact AYES/NOES, each carrying that action as its receipt; the other 90 stay refused by design.
   `docs/DATA_INVENTORY.md` GAP 1 has the breakdown.
 - **~38k bills · 3,630 official bill texts · 46,268 sponsorships · 1,607 legislator rows.** Text
   coverage is deliberately targeted, not broad: **99.3% of the bills that got a passage vote**
@@ -228,11 +225,8 @@ this repo and no automated apply step. After Lance confirms a migration ran, ver
 correctly with a live, read-only check — `node --env-file=.env scripts/probe-public-surface.js`
 covers the public read-surface shape/grants; a targeted REST call or `data-status.js` covers
 anything else. Never assume "drafted" means "applied," and never assume a migration file's
-committed text is still what's live — always confirm. **Pending as of 2026-08-23:
-`0032_vote_date_provenance.sql`** (drafted and committed in 2e420d9; a live
-`select vote_date_provenance from votes limit 1` still errors "column does not exist"). Until it
-lands, `src/cli/ingest-legiscan.js` refuses the derived-date 2024 MO House votes rather than store
-a date without its receipt (counted `datesDerivedGated`); after it lands, re-run the ingest against
+committed text is still what's live — always confirm. **Nothing is pending as of 2026-08-23:**
+`0032_vote_date_provenance.sql` was applied that day and the re-ingest ran against
 the cached 2024 dataset (`--dataset-file <envelope>`, $0, no API query — the envelope is the cached
 `.superpowers/artifacts/legiscan-datasets/2122-*.json` wrapped as `{ "status": "OK", "dataset": <that
 file> }`; `TODO.md` RESUME HERE names a session-scratchpad copy, which may need re-wrapping) to

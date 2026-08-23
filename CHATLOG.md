@@ -5778,3 +5778,31 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   asserts shape, containment, lexicographic order (which the nickname precedence depends on), a
   floor of 31, and the presence of session 1608. Suite **2,630 pass / 0 fail**. The trust page's
   2024 sentence is date-stamped and says what will change, since applying 0032 makes it false.
+- **Lance: "0032 has ran in supabase" → the 2024 Missouri House vote gap is CLOSED** (2026-08-23).
+  Verified the column live, then ran the re-ingest against the cached session-2122 envelope:
+  `node --env-file=.env src/cli/ingest-legiscan.js --dataset-file <envelope>` — **0 LegiScan
+  queries, $0**, ~9 minutes. Result: **185 MO House roll calls stored with a receipt each, 30,105
+  casts, 0 unresolved casts, 0 gated, 0 legislative-day conflicts, 0 pre-existing collisions, 0
+  cross-check flags** (no primary-source 2024 House rows exist to contradict them — house.mo.gov
+  never served that General Assembly). Status closed `partial` (exit 2) **by design**: the 90
+  undatable roll calls are counted as reconciliation failures and stay refused — 79 whose tally no
+  action in the bill's history prints, 10 whose tally a sibling roll call on the same bill and
+  chamber shares, 1 whose only tallied action belongs to the other chamber. Live afterwards:
+  **2024 MO casts 2,500 → 32,470** (the year had been the one hole between 55k and 205k for every
+  neighbour), `votes` carrying a receipt 0 → 185, `public_votes` 185 of them, `public_vote_feed`
+  all 32,470 — so the votes are on legislator profiles and year charts, not just in the base
+  table. Sample receipt, stored verbatim: HB 1488, 2024-02-08, 113-39 — `{"source":
+  "legiscan_history_tally_match", "printed_date": "0000-00-00", "legislative_day": 22, "action":
+  {"date": "2024-02-08", "action": "Third Read and Passed (H) - AYES: 113 NOES: 39 PRESENT: 0",
+  "chamber": "H", "chamber_source": "action_suffix"}}`. **The public trust page was wrong the
+  moment this landed** — its "what is not here" paragraph declared 2024 House roll calls absent —
+  so it was rewritten first: it now says two-thirds are here, describes the rule in plain language
+  ("where the same source's own record of the bill prints that vote's exact yea-nay count beside a
+  dated action, and only one such action exists"), and says the rest are not shown at all rather
+  than shown under a guess. Then swept every "0032 drafted / awaiting apply" claim out of README,
+  CLAUDE.md (trap 2), TODO (RESUME HERE, the migrations line, the genuinely-open list, ledger item
+  23), ARTIFACTS, CONTROLLER_BRIEFING (3 places), DATA_INVENTORY (GAP 1 + the
+  numbers-that-look-alarming entry), DISASTER_RECOVERY (the apply-all note + the migration table
+  row) and the VoterTables gameplan — 17 edits; the only surviving "drafted" mentions are
+  deliberate history (strike-throughs and the standing caveat about the trap itself having lagged).
+  Suite 2,630 pass / 0 fail; line endings byte-match HEAD on every touched file.

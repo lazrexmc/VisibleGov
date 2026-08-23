@@ -15,8 +15,8 @@ of this date) — when he does, record each answer there, dated, and move this l
 posture: no phase involves an LLM or any billed API call** (the Census geocoder is free and
 keyless; the SoS files are documents) — the standing no-API-spend hold and the per-run
 approval rule do not gate this work; only Lance's explicit go does. None of the repo's
-in-flight work on 2026-08-23 (the MO Senate journal replay, the drafted migration 0032 for
-vote-date provenance, the 2024 MO House roll-call dating) touches anything in this plan.
+in-flight work on 2026-08-23 (the MO Senate journal replay, migration 0032 for vote-date
+provenance, the 2024 MO House roll-call dating) touches anything in this plan.
 
 ## What each side actually has today (verified against both databases 2026-08-17; re-verified 2026-08-23)
 

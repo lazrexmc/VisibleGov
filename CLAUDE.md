@@ -33,16 +33,15 @@ accountable with real information instead of spin.
 >    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
 >    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
 >    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
-> 2. **Migrations 0001-0031 (+ 0018a) are APPLIED. `0032_vote_date_provenance.sql` is DRAFTED and
->    AWAITS LANCE'S APPLY (2026-08-23)** — it adds `votes.vote_date_provenance jsonb`, the receipt
->    for the 185 LegiScan 2024 House roll calls dated by a printed tally match (184 before the
->    pre-commit adversarial review's chamber-suffix fix — commit 2e420d9, CHATLOG 2026-08-23);
->    the ingest refuses those votes (counted `datesDerivedGated`) until it lands. Older text saying any OTHER migration
->    is "drafted, awaiting Lance" is stale. **Standing caveat: whoever drafts a migration edits this
->    trap (and the migration count in the Status paragraph below) in the same commit** — this trap
->    still read "nothing awaits an apply" while 0032 sat drafted-but-uncommitted on 2026-08-23 (and
->    the Status paragraph's count lagged a commit longer), which is exactly the misdirection it
->    exists to prevent.
+> 2. **All 33 migrations (0001-0032 + 0018a) are APPLIED.** `0032_vote_date_provenance.sql`
+>    was applied by Lance on 2026-08-23 and the LegiScan 2024 re-ingest ran the same hour: 185 MO
+>    House roll calls that the source prints with the `0000-00-00` date sentinel are now stored
+>    under a date derived from the one dated, tallied action in the bill's own history that prints
+>    their exact AYES/NOES, each carrying that action in `votes.vote_date_provenance`; the other 90
+>    stay refused. Older text saying any migration is "drafted, awaiting Lance" is stale.
+>    **Standing caveat: whoever drafts a migration edits this trap (and the migration count in the
+>    Status paragraph below) in the same commit** — this trap read "nothing awaits an apply" while
+>    0032 sat drafted on 2026-08-23, which is exactly the misdirection it exists to prevent.
 >
 > **Newer traps, pointers only — `PLAYBOOK_DELTA.md` lessons 43-50 (2026-08-21..23):** verify a
 > background runner's liveness by PID, never by command-line grep (43); a spend cap that only gates
@@ -153,7 +152,8 @@ deliberately deprioritized as low-value (plus a separate, still-open `mo_house_i
 cross-era-collision risk, TODO 31, any such fix would need to navigate). Also (verified in Lance's
 browser 2026-08-23): the House XML export serves only the current General Assembly, so earlier
 sessions cannot be backfilled from it — the undated 2024 House roll calls are instead dated from
-LegiScan's own printed history behind drafted migration 0032 (trap 2 above). **Prior "most MO House
+LegiScan's own printed history, stored 2026-08-23 with a receipt per vote (migration 0032,
+trap 2 above). **Prior "most MO House
 per-legislator vote data structurally incomplete" framing was itself wrong and is corrected here:**
 live-verified directly that all 159 CURRENT MO House legislators have at least one real MO House
 vote on their profile page via LegiScan's own coverage — the gap was specifically "zero votes *from

@@ -284,12 +284,9 @@ Re-registration is Lance's step — an agent never runs `schtasks`. The ingestio
 - `CHATLOG.md`, `TODO.md`, `PLAYBOOK_DELTA.md`, `README.md`, `CLAUDE.md` — the decision trail.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` — the approved designs.
 - `supabase/migrations/` — the schema, 0001–0032 (plus the out-of-sequence `0018a_refresh_timeout.sql`),
-  33 files total. 0001–0031 (+0018a) are applied live (verified 2026-08-05);
-  **`0032_vote_date_provenance.sql` was drafted 2026-08-23 (commit 2e420d9) and awaits Lance's
-  apply** — live-checked 2026-08-23: `votes.vote_date_provenance` does not exist yet. *(Superseded
-  2026-08-23: the 2026-08-05 wording "all 32 are applied live — nothing awaits an apply" was true
-  until 0032 was drafted.)* `TODO.md`'s RESUME HERE block is the live source of truth if this
-  drifts again.
+  33 files total, **all applied live** (0001–0031 +0018a verified 2026-08-05;
+  `0032_vote_date_provenance.sql` applied by Lance 2026-08-23 and confirmed by a live column
+  check). `TODO.md`'s RESUME HERE block is the live source of truth if this drifts again.
 - `tests/fixtures/` — captured real payloads (incl. the LegiScan API manual PDF the status codebook
   was extracted from, and the congress-legislators excerpts).
 
