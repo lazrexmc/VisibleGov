@@ -58,6 +58,15 @@ lost one character and killed a launch — PLAYBOOK 46) and "launch edited workf
 scriptPath, never by name" (a session-cached pre-edit script authored on the wrong lane
 silently — PLAYBOOK 47; the fallthrough guard is an INBOX item). Resume the lane only when
 `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` reports candidates.
+✅ **MO Senate journal `bill_refs` quarantine FIXED 2026-08-23 (commit 5ced4eb):** root-caused
+(the parser knew one motion grammar; the journal prints the bill outside the motion for four
+families + non-bill roll calls), 20/20 days parse 137/137 blocks against agent-verified ground
+truth, adversarial review's 23 findings addressed, suite 2,611/0. **Replay IN PROGRESS:** all 20
+failure markers removed; the 14 2026-session days drain through the scheduler one per tick
+(~7 h from 06:00Z); 2018: 1 of 6 replayed manually, then the 52-day 2018 backlog discovery
+(INBOX) — Lance's call. After replay + the next LegiScan tick: `node --env-file=.env
+scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply` on his go) closes the
+`no_tally_corresponding_primary` flags whose journal twin now exists (176 open).
 
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
 published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering
@@ -1183,11 +1192,17 @@ session's own direct work, not assumed.**
   bill_id NULL + a `kind` so legislator profiles can show confirmation/resolution votes (real
   accountability signal: SR 640 was a 23-11 contested roll call), or keep them out. Needs the
   profile/aggregate consumers audited first.
-- **(2026-08-23) Scheduler: prior-year journal backlog has no automatic drain path.** The ingest
-  registry runs `ingest-mo-senate.js --year <current>` only; the six un-quarantined 2018 days
-  need manual `--year 2018 --limit 1` runs (each honours the durable 30-min cooldown against the
-  scheduler's own ticks). Options: a `--years` list, or a second registry entry for the prior
-  year that only runs when it has pending days.
+- **(2026-08-23) Scheduler: prior-year journal backlog has no automatic drain path — and the
+  2018 backlog is 52 DAYS, not 6.** The ingest registry runs `ingest-mo-senate.js --year
+  <current>` only. The first manual `--year 2018 --limit 1` replay (2026-08-23 05:30Z,
+  RDay160131222-234: 0 votes / 3 non-bill / 0 failures, done) reported `total_pending_days: 52`
+  — the 2018 session's journal days were never processed beyond the July backfill sample, so
+  the five remaining quarantined 2018 days sit inside a 52-day chronological worklist that
+  `--limit 1` walks in index order (a day per 30-min ToU slot ≈ 26 hours of runs). The parser
+  is verified on all six offline (137/137 harness). Decision for Lance: drain 2018 fully (a
+  second registry entry for the prior year that runs when it has pending days — ~2 days of
+  ticks), or leave 2018 Senate floor votes to LegiScan's coverage. Not a regression; the gap
+  predates today.
 - **(2026-08-23) Run `scripts/resolve-matched-reconciliation-flags.mjs --apply` after the journal
   replay completes AND the next LegiScan tick has re-cross-checked** (it re-processes all 604
   roll calls daily from the cached dataset and writes new vote_duplicates pairs). Dry-run first;
