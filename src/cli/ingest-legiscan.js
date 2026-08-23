@@ -441,6 +441,29 @@ export async function retractLegiscanVoteIfStored(client, sourceKey) {
   return { retracted: true, voteId: existing.id };
 }
 
+// The House roll-call PDF link prints the legislative day: '.../rollcalls/047.012.pdf' = day 47.
+// Senate links ('RDay<N>...pdf#...') are journal pages, not this scheme -> null.
+const HOUSE_ROLLCALL_PDF_DAY_RE = /\/rollcalls\/(\d{1,3})\.\d{1,3}\.pdf$/i;
+export function legislativeDayOf(billRecord, rollCallId) {
+  const entry = (billRecord?.votes ?? []).find((v) => v.roll_call_id === rollCallId);
+  const m = HOUSE_ROLLCALL_PDF_DAY_RE.exec(String(entry?.state_link ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
+// Read back the row standing under a source_key: id + vote_date + the 0032 receipt, falling back
+// to `id` alone while the column does not exist yet (PGRST204), so printed-date stores keep
+// working before the migration and the gate above stays the only place that refuses.
+async function selectStoredVote(client, sourceKey) {
+  const full = await client.from('votes').select('id,vote_date,vote_date_provenance').eq('source_key', sourceKey).single();
+  if (!full.error) return full.data;
+  if (isMissingColumnError(full.error, 'vote_date_provenance')) {
+    const { data, error } = await client.from('votes').select('id').eq('source_key', sourceKey).single();
+    if (error) throw new Error(`ingest-legiscan: vote lookup failed for ${sourceKey}: ${error.message}`);
+    return { id: data.id, vote_date: null, vote_date_provenance: null };
+  }
+  throw new Error(`ingest-legiscan: vote lookup failed for ${sourceKey}: ${full.error.message}`);
+}
+
 function emptyRollCallResult() {
   return {
     votes: 0,
@@ -448,6 +471,15 @@ function emptyRollCallResult() {
     casts: 0,
     reconciliationFailures: 0,
     reconciliationFailureDetails: [],
+    // 2026-08-23: sentinel-dated roll calls dated from the bill history (Tier 1 tally match) and
+    // stored WITH their receipt; `datesDerivedGated` counts the ones refused because migration
+    // 0032's votes.vote_date_provenance column is not there yet (re-run stores them).
+    datesDerived: 0, // stored this run WITH their receipt (verified by reading the row back)
+    datesDerivedGated: 0, // refused: 0032's column absent
+    datesDerivedConflicts: 0, // refused: contradicted another derived date on the same legislative day, or day order
+    datesDerivedPreexisting: 0, // a row already stood under the source_key; the derivation was not written
+    datesSuperseded: 0, // a previously derived date replaced by a now-printed one
+    datesDerivedDetails: [],
     crossCheckFlags: {
       total: 0,
       tally_unique_match: 0,
@@ -467,7 +499,10 @@ function emptyRollCallResult() {
   };
 }
 
-async function ingestLegiscanRollCalls(client, runId, {
+// Exported (2026-08-23) so the migration-0032 gate and the derived-date path can be tested against
+// a real-fixture roll-call set without a full dataset envelope; runLegiscanIngest remains the only
+// production caller.
+export async function ingestLegiscanRollCalls(client, runId, {
   allRollCalls, rollCallsToProcess, legiscanSessionId, billRecordByLegiscanBillId, legislatorIdByPeopleId,
   sessionYears,
   crossCheckFn = crossCheckAgainstPrimarySource,
@@ -500,6 +535,14 @@ async function ingestLegiscanRollCalls(client, runId, {
   const toProcessIds = new Set(rollCallsToProcess.map((rc) => rc.roll_call_id));
   const reconciled = []; // every roll call in the FULL dataset that reconciles — the grouping pool
   const reconciledToProcess = []; // the subset actually cross-checked/stored this run
+  // 2026-08-23: every roll call of a bill, for deriveDateFromHistory's two-sided uniqueness (a
+  // sibling printing the same tally makes any single history action ambiguous as to WHICH vote).
+  const rollCallsByBillId = new Map();
+  for (const rc of allRollCalls) {
+    const list = rollCallsByBillId.get(rc.bill_id) ?? [];
+    list.push(rc);
+    rollCallsByBillId.set(rc.bill_id, list);
+  }
   for (const rollCall of allRollCalls) {
     const isSelected = toProcessIds.has(rollCall.roll_call_id);
     // checkVoteId3Sighting runs unconditionally for a selected roll call, even one that goes on to
@@ -509,7 +552,12 @@ async function ingestLegiscanRollCalls(client, runId, {
 
     let legiscanTallies;
     try {
-      legiscanTallies = reconcileLegiscanTallies(rollCall, sessionYears);
+      // 2026-08-23: the bill's own printed history lets a sentinel-dated roll call be dated by an
+      // exact tally match (deriveDateFromHistory, Tier 1 only) — the record is already in hand, so
+      // this costs nothing and never fetches. A roll call whose bill is not in the dataset keeps
+      // the plain refusal path.
+      const history = billRecordByLegiscanBillId.get(rollCall.bill_id)?.record?.history ?? null;
+      legiscanTallies = reconcileLegiscanTallies(rollCall, sessionYears, { history, siblingRollCalls: rollCallsByBillId.get(rollCall.bill_id) ?? [] });
     } catch (err) {
       if (err instanceof LegiscanRollCallReconcileError || err instanceof VoteIdMapError
         || err instanceof LegiscanRollCallDateError) {
@@ -553,6 +601,52 @@ async function ingestLegiscanRollCalls(client, runId, {
   // Phase 2: group by (bill, chamber, date) tuple over the FULL reconciled pool (Finding 4) — the
   // same correspondence key crossCheckAgainstPrimarySource itself matches on.
   const tupleGroups = groupReconciledRollCallsByTuple(reconciled);
+
+  // Phase 2b (2026-08-23): legislative-day gate over the DERIVED dates in this run. A House roll
+  // call's PDF link prints its legislative day ('.../rollcalls/047.012.pdf' = day 47, roll call
+  // 12), a second printed source the derivation can be held to: every derived date on one
+  // legislative day must be the same calendar date, and legislative days must not run backwards
+  // in time. Any group that contradicts either is refused whole (counted datesDerivedConflicts)
+  // — never "pick one". The day number rides in the receipt as `legislative_day`.
+  const derivedByDay = new Map();
+  for (const entry of reconciledToProcess) {
+    const prov = entry.legiscanTallies.dateProvenance;
+    if (!prov) continue;
+    const day = legislativeDayOf(entry.billEntry.record, entry.legiscanTallies.rollCallId);
+    prov.legislative_day = day;
+    if (day === null) continue;
+    const key = `${entry.legiscanTallies.chamber}|${day}`;
+    const group = derivedByDay.get(key) ?? { chamber: entry.legiscanTallies.chamber, day, entries: [] };
+    group.entries.push(entry);
+    derivedByDay.set(key, group);
+  }
+  const refusedConflicts = new Set();
+  const groups = [...derivedByDay.values()];
+  for (const g of groups) {
+    const dates = [...new Set(g.entries.map((e) => e.legiscanTallies.date))];
+    if (dates.length > 1) for (const e of g.entries) refusedConflicts.add(e);
+  }
+  for (const chamber of new Set(groups.map((g) => g.chamber))) {
+    const ordered = groups.filter((g) => g.chamber === chamber && !g.entries.some((e) => refusedConflicts.has(e))).sort((a, b) => a.day - b.day);
+    for (let i = 1; i < ordered.length; i += 1) {
+      if (ordered[i].entries[0].legiscanTallies.date < ordered[i - 1].entries[0].legiscanTallies.date) {
+        for (const e of [...ordered[i - 1].entries, ...ordered[i].entries]) refusedConflicts.add(e);
+      }
+    }
+  }
+  if (refusedConflicts.size > 0) {
+    for (const e of refusedConflicts) {
+      result.datesDerivedConflicts += 1;
+      if (result.datesDerivedDetails.length < 10) {
+        result.datesDerivedDetails.push({
+          rollCallId: e.legiscanTallies.rollCallId, conflict: true, date: e.legiscanTallies.date, legislative_day: e.legiscanTallies.dateProvenance.legislative_day, action: e.legiscanTallies.dateProvenance.action.action,
+        });
+      }
+    }
+    const keep = reconciledToProcess.filter((e) => !refusedConflicts.has(e));
+    reconciledToProcess.length = 0;
+    reconciledToProcess.push(...keep);
+  }
 
   // Phase 3: cross-check + store, one roll call at a time, over the --limit-selected subset only.
   // Sequential — same precedent as ensureLegiscanBillRows/ensureLegiscanPeople; a roll call's own
@@ -606,13 +700,57 @@ async function ingestLegiscanRollCalls(client, runId, {
       source_url: rollCallSourceUrl(billEntry.record, legiscanTallies.rollCallId),
       source_key: buildLegiscanVoteSourceKey(legiscanSessionId, legiscanTallies.rollCallId),
       run_id: runId,
+      // A derived date NEVER lands without its receipt (migration 0032). The key is only present
+      // when the date was derived, so every printed-date vote inserts exactly as before — with or
+      // without the column.
+      ...(legiscanTallies.dateProvenance ? { vote_date_provenance: legiscanTallies.dateProvenance } : {}),
     };
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await insertIfAbsent(client, 'votes', [voteRow], 'source_key');
+    } catch (err) {
+      if (legiscanTallies.dateProvenance && isMissingColumnError(err.cause ?? err, 'vote_date_provenance')) {
+        // Migration 0032 not applied yet: refuse to store this vote (its date is derived and the
+        // receipt has nowhere to live), count it, and move on — re-running after the migration
+        // lands stores it. Never silently stored without provenance. The run closes 'partial'.
+        result.datesDerivedGated += 1;
+        if (result.datesDerivedDetails.length < 10) {
+          result.datesDerivedDetails.push({ rollCallId: legiscanTallies.rollCallId, gated: true, date: legiscanTallies.date, action: legiscanTallies.dateProvenance.action.action });
+        }
+        continue;
+      }
+      throw err;
+    }
+    // The row that now stands under this source_key. insertIfAbsent is insert-if-absent (ON
+    // CONFLICT DO NOTHING), so a pre-existing row may differ from what was just offered: read
+    // vote_date and the receipt back (falling back to `id` alone while 0032's column is absent)
+    // and reconcile the two honestly rather than assume the write landed.
     // eslint-disable-next-line no-await-in-loop
-    await insertIfAbsent(client, 'votes', [voteRow], 'source_key');
-    // eslint-disable-next-line no-await-in-loop
-    const { data: voteSel, error: voteSelErr } = await client.from('votes').select('id')
-      .eq('source_key', voteRow.source_key).single();
-    if (voteSelErr) throw new Error(`ingest-legiscan: vote lookup failed for ${voteRow.source_key}: ${voteSelErr.message}`);
+    const stored = await selectStoredVote(client, voteRow.source_key);
+    const voteSel = { id: stored.id };
+    if (legiscanTallies.dateProvenance) {
+      const storedDate = String(stored.vote_date ?? '').slice(0, 10);
+      if (stored.vote_date_provenance && storedDate === legiscanTallies.date) {
+        result.datesDerived += 1;
+        if (result.datesDerivedDetails.length < 10) {
+          result.datesDerivedDetails.push({ rollCallId: legiscanTallies.rollCallId, date: legiscanTallies.date, printed_date: legiscanTallies.dateProvenance.printed_date, legislative_day: legiscanTallies.dateProvenance.legislative_day, action: legiscanTallies.dateProvenance.action.action });
+        }
+      } else {
+        // A row already existed (a prior printed-date store, or a different derivation) — the
+        // derived date was NOT written; count it as pre-existing, never as "stored with receipt".
+        result.datesDerivedPreexisting += 1;
+        if (result.datesDerivedDetails.length < 10) {
+          result.datesDerivedDetails.push({ rollCallId: legiscanTallies.rollCallId, preexisting: true, stored_date: storedDate, stored_has_receipt: Boolean(stored.vote_date_provenance), derived_date: legiscanTallies.date });
+        }
+      }
+    } else if (stored.vote_date_provenance && String(stored.vote_date ?? '').slice(0, 10) !== legiscanTallies.date) {
+      // The source now PRINTS a date for a roll call previously stored under a derived one: the
+      // printed date supersedes the derivation and the receipt is cleared.
+      // eslint-disable-next-line no-await-in-loop
+      const { error: supErr } = await client.from('votes').update({ vote_date: legiscanTallies.date, vote_date_provenance: null }).eq('id', stored.id);
+      if (supErr) throw new Error(`ingest-legiscan: superseding derived date failed for ${voteRow.source_key}: ${supErr.message}`);
+      result.datesSuperseded += 1;
+    }
 
     // Severity/dedup follow-up (2026-08-03): a clean primary-source correspondence marks the
     // duplicate additively — both rows stay stored, forever, fully traceable (vote_duplicates,
@@ -882,6 +1020,14 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
     casts: rollCallResult.casts,
     reconciliationFailures: rollCallResult.reconciliationFailures,
     reconciliationFailureDetails: rollCallResult.reconciliationFailureDetails,
+    // 2026-08-23: derived-date accounting (migration 0032) — surfaced here so ingestion_runs.detail,
+    // the console JSON, and the status decision all see it.
+    datesDerived: rollCallResult.datesDerived,
+    datesDerivedGated: rollCallResult.datesDerivedGated,
+    datesDerivedConflicts: rollCallResult.datesDerivedConflicts,
+    datesDerivedPreexisting: rollCallResult.datesDerivedPreexisting,
+    datesSuperseded: rollCallResult.datesSuperseded,
+    datesDerivedDetails: rollCallResult.datesDerivedDetails,
     crossCheckFlags: rollCallResult.crossCheckFlags,
     queriesUsed: detail.queries_used,
     quarantinedVotes: rollCallResult.quarantinedVotes,
@@ -1126,7 +1272,9 @@ async function main() {
 
     const result = await runLegiscanIngest(client, runId, args);
 
-    const status = (result.counts.reconciliationFailures === 0 && result.counts.parseFailures === 0) ? 'succeeded' : 'partial';
+    // A gated or conflicting derived date is a refusal the operator must see: 'partial', exit 2.
+    const status = (result.counts.reconciliationFailures === 0 && result.counts.parseFailures === 0
+      && (result.counts.datesDerivedGated ?? 0) === 0 && (result.counts.datesDerivedConflicts ?? 0) === 0) ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, buildSuccessCloseDetail(result.counts));
     console.log(JSON.stringify({
       mode: 'live', run_id: runId, status, source: SOURCE, counts: result.counts,

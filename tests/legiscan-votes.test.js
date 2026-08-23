@@ -15,6 +15,8 @@ import {
   PRESENT_CATEGORY_CAVEAT,
   LegiscanRollCallDateError,
   assertRollCallDateWithinSession,
+  LEGISCAN_MISSING_DATE_SENTINELS,
+  deriveDateFromHistory,
 } from '../src/adapters/legiscan-votes.js';
 import { decodeDatasetZip, extractDatasetFiles } from '../src/adapters/legiscan-dataset.js';
 
@@ -1273,4 +1275,167 @@ test('VOTE_TEXT_BY_ID: vote_id 3 accepts BOTH evidenced live forms ("NV") and th
     { people_id: 2, vote_id: 3, vote_text: 'N.V.' },
   ] };
   assert.throws(() => reconcileLegiscanTallies(bad), (e) => e.name === 'VoteIdMapError');
+});
+
+// ---- 2026-08-23: dating LegiScan's undated roll calls from the bill's own printed history ----
+//
+// LegiScan prints every 2024 MO House floor roll call (275 of the session's 351) with the date
+// sentinel 0000-00-00 — in the bulk dataset AND from getRollCall (spot-checked live 2026-08-23) —
+// so the date guard above refused them all. The bill's HISTORY, in the same dataset, prints the
+// floor actions WITH dates and tallies: "2024-03-27 Third Read and Passed (H) - AYES: 108 NOES: 46".
+// Tier 1 rule (Lance, 2026-08-23, "proceed as you would recommend"): a sentinel-dated roll call
+// takes the date of the ONE House/Senate action whose printed AYES/NOES equal its own yea/nay;
+// zero or several matches -> still refused. Fixture: four real 2024 bills + their 23 roll calls.
+const undated2024 = JSON.parse(readFileSync(`${FIXDIR}/mo-2024-undated-rollcalls.json`, 'utf8'));
+const bill2024 = (number) => undated2024.bills.find((b) => b.bill_number === number);
+const rc2024 = (id) => undated2024.rollCalls.find((r) => r.roll_call_id === id);
+const years2024 = { yearStart: undated2024.session.year_start, yearEnd: undated2024.session.year_end };
+
+test('deriveDateFromHistory: exactly one dated House action printing this roll call\'s AYES/NOES -> that date, with the action as the receipt (HB 1413 third reading, 108-46)', () => {
+  const d = deriveDateFromHistory(rc2024(1416690), bill2024('HB1413').history);
+  assert.equal(d.date, '2024-03-27');
+  assert.equal(d.source, 'legiscan_history_tally_match');
+  assert.equal(d.action.date, '2024-03-27');
+  assert.match(d.action.action, /^Third Read and Passed \(H\) - AYES: 108 NOES: 46/);
+  assert.equal(d.action.chamber, 'H');
+});
+
+test('deriveDateFromHistory: a perfection vote whose "Perfected (H)" action prints no tally -> null (never a stage-day guess)', () => {
+  assert.equal(deriveDateFromHistory(rc2024(1408305), bill2024('HB1413').history), null);
+});
+
+test('deriveDateFromHistory: two dated actions with the same tally (HB 1912, 151-0 third reading AND 151-0 adoption of SS) -> null, ambiguity is refused', () => {
+  assert.equal(deriveDateFromHistory(rc2024(1399425), bill2024('HB1912').history), null);
+  assert.equal(deriveDateFromHistory(rc2024(1441817), bill2024('HB1912').history), null);
+});
+
+test('deriveDateFromHistory: the acting chamber is the action text\'s (H)/(S) suffix, never LegiScan\'s history tag; the same tally printed twice anywhere in the history is ambiguous', () => {
+  // Real shape (HB 2634, 2024): "Third Read and Passed (S) - AYES: 23 NOES: 10" carries the TAG H.
+  const senateActionTaggedHouse = [{ date: '2024-04-09', action: 'Third Read and Passed (S) - AYES: 23 NOES: 10 PRESENT: 0', chamber: 'H' }];
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 23, nay: 10 }, senateActionTaggedHouse), null, 'a House vote never takes a Senate action\'s date, whatever the tag says');
+  const s = deriveDateFromHistory({ roll_call_id: 1, chamber: 'S', date: '0000-00-00', yea: 23, nay: 10 }, senateActionTaggedHouse);
+  assert.equal(s.date, '2024-04-09');
+  assert.equal(s.action.chamber, 'S');
+  assert.equal(s.action.chamber_source, 'action_suffix');
+  // Two actions printing the same tally — one per chamber — are ambiguous for BOTH chambers
+  // (ambiguity is counted over the whole history before any chamber filter).
+  const both = [
+    { date: '2024-04-09', action: 'Third Read and Passed (S) - AYES: 23 NOES: 10 PRESENT: 0', chamber: 'S' },
+    { date: '2024-03-04', action: 'Third Read and Passed (H) - AYES: 23 NOES: 10 PRESENT: 0', chamber: 'H' },
+  ];
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 23, nay: 10 }, both), null);
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'S', date: '0000-00-00', yea: 23, nay: 10 }, both), null);
+  // A suffix-less action ("Truly Agreed To and Finally Passed - AYES ...") counts only when its tag
+  // agrees with the roll call's chamber.
+  const tafpTaggedH = [{ date: '2024-05-09', action: 'Truly Agreed To and Finally Passed - AYES: 148 NOES: 0 PRESENT: 0', chamber: 'H' }];
+  const t = deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 148, nay: 0 }, tafpTaggedH);
+  assert.equal(t.date, '2024-05-09');
+  assert.equal(t.action.chamber_source, 'history_tag');
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 148, nay: 0 }, [{ ...tafpTaggedH[0], chamber: 'S' }]), null);
+});
+
+test('deriveDateFromHistory: two-sided uniqueness — a sibling roll call of the same bill and chamber printing the same tally refuses both (HB 2634\'s 106-48 pair), while a lone sibling-free tally dates', () => {
+  const hb2634 = bill2024('HB2634');
+  // the real history already prints a suffix-less 106-48 ("Truly Agreed To and Finally Passed",
+  // tagged S) — drop it so the doctored (H) action is the ONLY 106-48 candidate and the sibling
+  // rule, not ambiguity, is what decides
+  const withoutTafp = hb2634.history.filter((h) => !/AYES: 106 NOES: 48/.test(h.action));
+  const doctored = [...withoutTafp, { date: '2024-04-24', action: 'House Adopts (H) - SS#2 AYES: 106 NOES: 48 PRESENT: 0', chamber: 'H' }];
+  const siblings = undated2024.rollCalls.filter((r) => r.bill_id === hb2634.bill_id);
+  assert.equal(deriveDateFromHistory(rc2024(1433443), doctored, siblings), null, '1433443 shares 106-48 with 1433445');
+  assert.equal(deriveDateFromHistory(rc2024(1433445), doctored, siblings), null);
+  assert.equal(deriveDateFromHistory(rc2024(1433443), doctored, []).date, '2024-04-24', 'without siblings the same action would date it — the sibling rule is what refuses');
+  // the real 1433444 (106-49) is unique among its siblings and its action is House-suffixed but
+  // tagged S in LegiScan's data — dated 2024-04-24 by the suffix rule
+  const real = deriveDateFromHistory(rc2024(1433444), hb2634.history, siblings);
+  assert.equal(real.date, '2024-04-24');
+  assert.equal(real.action.chamber_source, 'action_suffix');
+});
+
+test('deriveDateFromHistory: a candidate whose own date is a sentinel or not a real calendar date never matches; yea/nay must be genuine non-negative integers', () => {
+  const action = (date) => [{ date, action: 'Third Read and Passed (H) - AYES: 108 NOES: 46 PRESENT: 0', chamber: 'H' }];
+  const rc = { roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 108, nay: 46 };
+  assert.equal(deriveDateFromHistory(rc, action('0000-00-00')), null);
+  assert.equal(deriveDateFromHistory(rc, action('1969-12-31')), null);
+  assert.equal(deriveDateFromHistory(rc, action('2024-13-45')), null);
+  assert.equal(deriveDateFromHistory(rc, action('2024-02-30')), null);
+  assert.equal(deriveDateFromHistory(rc, action('2024-02-29')).date, '2024-02-29');
+  const zero = [{ date: '2024-02-29', action: 'Motion Adopted (H) - AYES: 0 NOES: 0 PRESENT: 0', chamber: 'H' }];
+  for (const bad of [{ yea: null, nay: null }, { yea: '', nay: '' }, { yea: [0], nay: [0] }, { yea: false, nay: false }, { yea: -0.5, nay: 0 }]) {
+    assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', ...bad }, zero), null, JSON.stringify(bad));
+  }
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 0, nay: 0 }, zero).date, '2024-02-29');
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: '0', nay: '0' }, zero).date, '2024-02-29');
+});
+
+test('reconcileLegiscanTallies: the 1969-12-31 sentinel derives like 0000-00-00 does, and a refused DERIVED date is reported as derived, not printed', () => {
+  const rc = { ...rc2024(1416690), date: '1969-12-31' };
+  const r = reconcileLegiscanTallies(rc, years2024, { history: bill2024('HB1413').history });
+  assert.equal(r.date, '2024-03-27');
+  assert.equal(r.dateProvenance.printed_date, '1969-12-31');
+  assert.throws(() => reconcileLegiscanTallies(rc, years2024), (err) => err instanceof LegiscanRollCallDateError && err.reason === 'outside_session_years' && err.derived === false);
+  const wrongYear = [{ date: '2019-03-27', action: 'Third Read and Passed (H) - AYES: 108 NOES: 46 PRESENT: 0', chamber: 'H' }];
+  assert.throws(() => reconcileLegiscanTallies(rc, years2024, { history: wrongYear }), (err) => err instanceof LegiscanRollCallDateError && err.reason === 'outside_session_years' && err.derived === true && /derived date 2019-03-27/.test(err.message));
+});
+
+test('deriveDateFromHistory: the tally must match as whole numbers (AYES: 108 never matches yea 10 or 1080), and a reconsideration action carrying a tally is a legitimate match (HB 1886, 131-5)', () => {
+  const history = [{ date: '2024-03-01', action: 'Third Read and Passed (H) - AYES: 108 NOES: 46 PRESENT: 0', chamber: 'H' }];
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 10, nay: 46 }, history), null);
+  assert.equal(deriveDateFromHistory({ roll_call_id: 1, chamber: 'H', date: '0000-00-00', yea: 108, nay: 4 }, history), null);
+  const d = deriveDateFromHistory(rc2024(1391718), bill2024('HB1886').history);
+  assert.equal(d.date, '2024-02-22');
+  assert.match(d.action.action, /Motion to Reconsider Adopted \(H\).*AYES: 131 NOES: 5/);
+});
+
+test('deriveDateFromHistory: a printed date is never overridden — only the known sentinels are derived', () => {
+  const dated = rc2024(1441522); // Senate third reading, 2024-05-08, printed
+  assert.equal(dated.date, '2024-05-08');
+  assert.equal(deriveDateFromHistory(dated, bill2024('HB1912').history), null);
+  assert.deepEqual(LEGISCAN_MISSING_DATE_SENTINELS, ['0000-00-00', '1969-12-31']);
+});
+
+test('reconcileLegiscanTallies: with the bill history, a sentinel-dated roll call reconciles under the derived date and carries dateProvenance', () => {
+  const r = reconcileLegiscanTallies(rc2024(1416690), years2024, { history: bill2024('HB1413').history });
+  assert.equal(r.date, '2024-03-27');
+  assert.equal(r.dateProvenance.source, 'legiscan_history_tally_match');
+  assert.equal(r.dateProvenance.printed_date, '0000-00-00');
+  assert.equal(r.dateProvenance.action.date, '2024-03-27');
+  assert.match(r.dateProvenance.action.action, /AYES: 108 NOES: 46/);
+  assert.equal(r.tallies.yea, 108);
+  assert.equal(r.tallies.nay, 46);
+  assert.equal(r.casts.length, r.tallies.total);
+});
+
+test('reconcileLegiscanTallies: a printed date carries NO dateProvenance; a sentinel with no unique tally match is still refused by the session-years guard', () => {
+  const printed = reconcileLegiscanTallies(rc2024(1441522), years2024, { history: bill2024('HB1912').history });
+  assert.equal(printed.date, '2024-05-08');
+  assert.equal(printed.dateProvenance, null);
+  // '0000-00-00' has the YYYY-MM-DD SHAPE, so the pre-existing guard refuses it one step later as
+  // outside_session_years (year 0) — unchanged behaviour, with or without the history in hand.
+  assert.throws(() => reconcileLegiscanTallies(rc2024(1408305), years2024, { history: bill2024('HB1413').history }), (err) => err instanceof LegiscanRollCallDateError && err.reason === 'outside_session_years');
+  assert.throws(() => reconcileLegiscanTallies(rc2024(1408305), years2024), (err) => err instanceof LegiscanRollCallDateError && err.reason === 'outside_session_years');
+});
+
+test('reconcileLegiscanTallies: a derived date still has to fall inside the dataset\'s own session years', () => {
+  const rc = { ...rc2024(1416690) };
+  const history = [{ date: '2019-03-27', action: 'Third Read and Passed (H) - AYES: 108 NOES: 46 PRESENT: 0', chamber: 'H' }];
+  assert.throws(() => reconcileLegiscanTallies(rc, years2024, { history }), (err) => err instanceof LegiscanRollCallDateError && err.reason === 'outside_session_years');
+});
+
+test('2024 corpus (fixture): the Tier 1 rule dates exactly the roll calls it should — 9 of the 20 undated, never an ambiguous or tally-less one', () => {
+  const dated = [];
+  const refused = [];
+  for (const rc of undated2024.rollCalls.filter((r) => r.date === '0000-00-00')) {
+    const bill = undated2024.bills.find((b) => b.bill_id === rc.bill_id);
+    const siblings = undated2024.rollCalls.filter((r) => r.bill_id === rc.bill_id);
+    const d = deriveDateFromHistory(rc, bill.history, siblings);
+    (d ? dated : refused).push(rc.roll_call_id);
+  }
+  // ground truth read off the fixture's own history actions (2026-08-23): 8 dated, 12 refused —
+  // 1387728 (108-47) has no tallied action; 1389792 shows some 'Perfected (H)' actions DO print a
+  // tally (150-0) and are then legitimately matched.
+  // 1433444 (HB 2634, 106-49) joins after the review hardening: its "House Adopts (H) - SS#2"
+  // action is House-suffixed but tagged S by LegiScan; the suffix rule dates it 2024-04-24.
+  assert.deepEqual(dated, [1416690, 1387729, 1391718, 1427484, 1389792, 1441818, 1402442, 1402443, 1433444]);
+  assert.equal(refused.length, 11);
 });

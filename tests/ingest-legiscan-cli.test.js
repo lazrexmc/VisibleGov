@@ -14,6 +14,7 @@ import {
   runLegiscanIngest, resolveDatasetBytes, assertRunUnderBudget, runLegiscanBudgetGate, dryRunReportFromDb,
   planFromParsedDataset, retractLegiscanVoteIfStored, recordQueryUsage,
   buildSuccessCloseDetail, buildFailureCloseDetail, closeRunOnFailure,
+  ingestLegiscanRollCalls,
 } from '../src/cli/ingest-legiscan.js';
 import {
   QueryBudgetExceededError, DatasetHashMismatchError, getMonthlyQueryUsage, ATTRIBUTION,
@@ -1578,3 +1579,184 @@ test('dryRunReportFromDb: reports ledger + session + vote-count state from the D
   assert.equal(report.counts.votes_total, 2);
   assert.match(report.note, /zero live queries/);
 });
+
+// ---- 2026-08-23: sentinel-dated roll calls dated from the bill history (Tier 1 tally match) ----
+//
+// Real 2024 (session 2122) fixture: four bills, 23 roll calls — 3 Senate roll calls with printed
+// dates, 20 House roll calls printed as 0000-00-00. The adapter dates 8 of the 20 by an exact
+// AYES/NOES match against one dated House action (legiscan-votes.test.js pins which); the other 12
+// stay refused. The driver stores a derived-date vote ONLY with its receipt in
+// votes.vote_date_provenance (migration 0032) and refuses it — counted, never silent — while the
+// column does not exist.
+const undated2024 = JSON.parse(readFileSync(`${FIXDIR}/mo-2024-undated-rollcalls.json`, 'utf8'));
+function seed2024Bills(tables) {
+  const map = new Map();
+  for (const b of undated2024.bills) {
+    const row = { id: `bill-${b.bill_id}`, identifier: b.bill_number, session_id: 'sess-2024', title: b.title };
+    tables.bills.push(row);
+    // a deep copy: tests doctor state_links and must never leak into each other (or into the
+    // envelope-building test below, which reads the fixture objects directly)
+    map.set(b.bill_id, { rowId: row.id, record: structuredClone(b) });
+  }
+  return map;
+}
+const args2024 = (billRecordByLegiscanBillId) => ({
+  allRollCalls: undated2024.rollCalls,
+  rollCallsToProcess: undated2024.rollCalls,
+  legiscanSessionId: 2122,
+  billRecordByLegiscanBillId,
+  legislatorIdByPeopleId: new Map(),
+  sessionYears: { yearStart: 2024, yearEnd: 2024 },
+});
+
+test('ingestLegiscanRollCalls: a sentinel-dated roll call with a unique tally match stores under the derived date WITH its receipt; the 12 without one stay refused; printed dates carry no receipt', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  const result = await ingestLegiscanRollCalls(client, 'run-2024', args2024(seed2024Bills(tables)));
+
+  assert.equal(result.datesDerived, 9);
+  assert.equal(result.datesDerivedGated, 0);
+  assert.equal(result.datesDerivedConflicts, 0);
+  assert.equal(result.datesDerivedPreexisting, 0);
+  assert.equal(result.votes, 12, '3 printed Senate roll calls + 9 derived House roll calls');
+  assert.equal(result.reconciliationFailures, 11, 'the sentinel-dated roll calls with no unique tally match are refused exactly as before');
+  assert.equal(tables.votes.length, 12);
+
+  const derived = tables.votes.find((v) => v.source_key === 'legiscan-2122-rollcall-1416690');
+  assert.equal(derived.vote_date, '2024-03-27');
+  assert.equal(derived.chamber, 'house');
+  assert.equal(derived.vote_date_provenance.source, 'legiscan_history_tally_match');
+  assert.equal(derived.vote_date_provenance.printed_date, '0000-00-00');
+  assert.equal(derived.vote_date_provenance.action.date, '2024-03-27');
+  assert.match(derived.vote_date_provenance.action.action, /^Third Read and Passed \(H\) - AYES: 108 NOES: 46/);
+  assert.equal(derived.vote_date_provenance.action.chamber_source, 'action_suffix');
+  assert.equal(derived.vote_date_provenance.legislative_day, 47, 'the House PDF link .../rollcalls/047.012.pdf prints legislative day 47');
+
+  const printed = tables.votes.find((v) => v.source_key === 'legiscan-2122-rollcall-1441522');
+  assert.equal(printed.vote_date, '2024-05-08');
+  assert.equal('vote_date_provenance' in printed, false, 'a printed-date row never carries the column at all');
+
+  assert.ok(!tables.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1408305'), 'a perfection vote with no tallied action is not stored');
+  assert.ok(!tables.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1399425'), 'an ambiguous tally (two 151-0 actions) is not stored');
+  assert.equal(result.datesDerivedDetails.length, 9);
+  assert.equal(result.datesDerivedDetails[0].printed_date, '0000-00-00');
+});
+
+test('ingestLegiscanRollCalls: before migration 0032 (no vote_date_provenance column) every derived-date vote is REFUSED and counted as gated — never stored without its receipt; printed-date votes still store', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  const billRecordByLegiscanBillId = seed2024Bills(tables);
+  const realFrom = client.from.bind(client);
+  client.from = (table) => {
+    const api = realFrom(table);
+    if (table !== 'votes') return api;
+    return {
+      ...api,
+      upsert: (rows, opts) => {
+        const list = Array.isArray(rows) ? rows : [rows];
+        if (list.some((r) => 'vote_date_provenance' in r)) {
+          return Promise.resolve({ error: { code: 'PGRST204', message: "Could not find the 'vote_date_provenance' column of 'votes' in the schema cache" } });
+        }
+        return api.upsert(rows, opts);
+      },
+    };
+  };
+  const result = await ingestLegiscanRollCalls(client, 'run-2024-gated', args2024(billRecordByLegiscanBillId));
+
+  assert.equal(result.datesDerivedGated, 9);
+  assert.equal(result.datesDerived, 0);
+  assert.equal(result.votes, 3, 'only the printed-date Senate roll calls store');
+  assert.equal(tables.votes.length, 3);
+  assert.ok(tables.votes.every((v) => !('vote_date_provenance' in v)));
+  assert.equal(result.reconciliationFailures, 11);
+  assert.equal(result.datesDerivedDetails[0].gated, true);
+  assert.equal(result.datesDerivedDetails[0].date, '2024-03-27');
+
+  // The migration lands: the SAME fake tables, now accepting the column — a re-run stores the nine
+  // with their receipts and leaves the three printed-date rows alone.
+  client.from = realFrom;
+  const again = await ingestLegiscanRollCalls(client, 'run-2024-after-0032', args2024(billRecordByLegiscanBillId));
+  assert.equal(again.datesDerived, 9);
+  assert.equal(again.datesDerivedGated, 0);
+  assert.equal(again.votes, 12);
+  assert.equal(tables.votes.length, 12);
+  assert.equal(tables.votes.filter((v) => v.vote_date_provenance).length, 9);
+});
+
+test('ingestLegiscanRollCalls: a row already standing under the source_key is never overwritten by a derivation — counted as pre-existing, not as stored-with-receipt', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  const billRecordByLegiscanBillId = seed2024Bills(tables);
+  tables.votes.push({ id: 'vote-pre', source_key: 'legiscan-2122-rollcall-1416690', vote_date: '2024-03-26', chamber: 'house', bill_id: 'bill-1790721' });
+  const result = await ingestLegiscanRollCalls(client, 'run-pre', args2024(billRecordByLegiscanBillId));
+  assert.equal(result.datesDerivedPreexisting, 1);
+  assert.equal(result.datesDerived, 8);
+  const row = tables.votes.find((v) => v.source_key === 'legiscan-2122-rollcall-1416690');
+  assert.equal(row.vote_date, '2024-03-26', 'untouched');
+  assert.equal('vote_date_provenance' in row, false);
+  const d = result.datesDerivedDetails.find((x) => x.rollCallId === 1416690);
+  assert.equal(d.preexisting, true);
+  assert.equal(d.stored_has_receipt, false);
+});
+
+test('ingestLegiscanRollCalls: a printed date now arriving for a roll call stored under a DERIVED date supersedes it and clears the receipt', async () => {
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  const billRecordByLegiscanBillId = seed2024Bills(tables);
+  tables.votes.push({ id: 'vote-derived', source_key: 'legiscan-2122-rollcall-1441522', vote_date: '2024-05-07', chamber: 'senate', bill_id: 'bill-1790721', vote_date_provenance: { source: 'legiscan_history_tally_match', printed_date: '0000-00-00', action: { date: '2024-05-07', action: 'x', chamber: 'S' } } });
+  const result = await ingestLegiscanRollCalls(client, 'run-sup', args2024(billRecordByLegiscanBillId));
+  assert.equal(result.datesSuperseded, 1);
+  const row = tables.votes.find((v) => v.source_key === 'legiscan-2122-rollcall-1441522');
+  assert.equal(row.vote_date, '2024-05-08', 'the printed date wins');
+  assert.equal(row.vote_date_provenance, null);
+});
+
+test('ingestLegiscanRollCalls: legislative-day gate — two derived dates on one House legislative day, or days running backwards, refuse the whole group (never pick one)', async () => {
+  // HB 1886: 1387729 derives 2024-02-19 (day 025 in its PDF link), 1391718 derives 2024-02-22,
+  // 1427484 derives 2024-04-15. Doctor the PDF links so the first two share a legislative day.
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  const billRecordByLegiscanBillId = seed2024Bills(tables);
+  const hb1886 = billRecordByLegiscanBillId.get(undated2024.bills.find((b) => b.bill_number === 'HB1886').bill_id);
+  const relink = (rollCallId, day) => {
+    const v = hb1886.record.votes.find((x) => x.roll_call_id === rollCallId);
+    v.state_link = `https://documents.house.mo.gov/billtracking/bills241/rollcalls/${String(day).padStart(3, '0')}.001.pdf`;
+  };
+  relink(1387729, 30);
+  relink(1391718, 30);
+  const result = await ingestLegiscanRollCalls(client, 'run-conflict', args2024(billRecordByLegiscanBillId));
+  assert.equal(result.datesDerivedConflicts, 2);
+  assert.equal(result.datesDerived, 7);
+  assert.ok(!tables.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1387729'));
+  assert.ok(!tables.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1391718'));
+  assert.ok(tables.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1427484'), 'an unconflicted day still stores');
+  assert.ok(result.datesDerivedDetails.some((d) => d.conflict === true && d.legislative_day === 30));
+
+  // order: a LATER legislative day carrying an EARLIER date refuses both neighbours
+  const { client: c2, tables: t2 } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  const map2 = seed2024Bills(t2);
+  const rec2 = map2.get(hb1886.record.bill_id).record;
+  const relink2 = (rollCallId, day) => { rec2.votes.find((x) => x.roll_call_id === rollCallId).state_link = `https://documents.house.mo.gov/billtracking/bills241/rollcalls/${String(day).padStart(3, '0')}.001.pdf`; };
+  relink2(1427484, 50); // 2024-04-15 on day 50
+  relink2(1387729, 60); // 2024-02-19 on day 60 -> backwards
+  const r2 = await ingestLegiscanRollCalls(c2, 'run-order', args2024(map2));
+  assert.equal(r2.datesDerivedConflicts, 2);
+  assert.ok(!t2.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1427484'));
+  assert.ok(!t2.votes.some((v) => v.source_key === 'legiscan-2122-rollcall-1387729'));
+});
+
+test('runLegiscanIngest: derived-date counters reach the closed run\'s counts, and a gated run (no 0032 column) closes with datesDerivedGated surfaced', async () => {
+  const entries = [];
+  for (const b of undated2024.bills) entries.push({ name: `MO/2122/bill/${b.bill_number}.json`, data: Buffer.from(JSON.stringify({ bill: { ...structuredClone(b), status: 1, url: 'https://legiscan.com/MO/bill/x', state_link: 'https://house.mo.gov/x', sponsors: [], texts: [], session: { session_id: 2122 } } })) });
+  for (const rc of undated2024.rollCalls) entries.push({ name: `MO/2122/vote/${rc.roll_call_id}.json`, data: Buffer.from(JSON.stringify({ roll_call: rc })) });
+  const zip = buildStoredZip(entries).toString('base64');
+  const envelope = { dataset: { state_id: 26, session_id: 2122, year_start: 2024, year_end: 2024, session_title: '2024 Regular Session', session_name: '2024 Regular Session', special: 0, dataset_date: '2024-12-08', dataset_hash: 'test-2024', zip } };
+  const file = join(tmpdir(), `vg-2024-envelope-${process.pid}.json`);
+  writeFileSync(file, JSON.stringify(envelope));
+  const { client, tables } = makeFakeLegiscanClient({ sessions: seedProdSessions() });
+  tables.ingestion_runs.push({ id: 'run-2024-full', source: 'legiscan', status: 'running', detail: {} });
+  const result = await runLegiscanIngest(client, 'run-2024-full', { datasetFile: file, session: null, limit: null });
+  assert.equal(result.counts.datesDerived, 9);
+  assert.equal(result.counts.datesDerivedGated, 0);
+  assert.equal(result.counts.datesDerivedConflicts, 0);
+  assert.equal(result.counts.datesSuperseded, 0);
+  assert.equal(result.counts.datesDerivedDetails.length, 9);
+  assert.equal(result.counts.votes, 12);
+  assert.equal(result.counts.reconciliationFailures, 11);
+});
+

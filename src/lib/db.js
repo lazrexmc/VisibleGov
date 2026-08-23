@@ -38,7 +38,9 @@ export async function closeRun(client, runId, status, detail = {}) {
 export async function insertIfAbsent(client, table, rows, onConflict) {
   if (rows.length === 0) return;
   const { error } = await client.from(table).upsert(rows, { onConflict, ignoreDuplicates: true });
-  if (error) throw new Error(`insertIfAbsent(${table}) failed: ${error.message}`);
+  // `cause` keeps the raw PostgREST error (with its `.code`) reachable for typed gates such as
+  // isMissingColumnError, which otherwise see only the wrapped message text (2026-08-23).
+  if (error) throw new Error(`insertIfAbsent(${table}) failed: ${error.message}`, { cause: error });
 }
 
 // Detects "relation does not exist", whether reported as a raw Postgres error (undefined_table,

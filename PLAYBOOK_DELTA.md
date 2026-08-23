@@ -999,3 +999,20 @@ can recognise mechanically as legitimately bill-less, the honest output is a typ
 that is reported and counted, not a failure. Corollary for the data model: votes.bill_id was
 nullable from day one ("some votes are procedural") and nothing ever used it — the schema knew
 something the parser did not.
+
+## Lesson 50 — A documented fallback that was never exercised is a hope, not a plan; and "not derivable" is only true for the derivation you actually tried (2026-08-23)
+
+TODO 23 carried, for three weeks, the line "all 275 are House roll calls the primary house.mo.gov
+pipeline supplies WITH real dates — so they arrive on that source's own timeline." Nobody had
+ever run that pipeline for 2024; when the question finally came ("why is 2024 missing?"), one
+browser click showed the House XML export serves only the current General Assembly. The fallback
+was a sentence, not a path. Two mechanics: (1) when a ruling defers a gap to "source B will cover
+it," verify source B serves that era BEFORE the ruling is filed — a single polite fetch, or a human
+click where the ToU forbids scripting; (2) the same ruling said the dates were "not honestly
+derivable," and the evidence was one perfection vote whose history printed no tally. Floor
+passage actions in the same history print the tally and the date. "Not derivable" had been
+tested against one derivation on one example; a corpus pass (275 roll calls, offline, minutes)
+found a printed, exact, tally-keyed match for 184 of them. Before accepting that a gap is
+permanent, enumerate the derivations the source's own printed data allows and measure each over
+the whole corpus — and spot-check the per-item endpoint before concluding a bulk-export sentinel
+is the source's final word (here it was, but that is a query, not an assumption).

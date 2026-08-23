@@ -67,6 +67,13 @@ failure markers removed; the 14 2026-session days drain through the scheduler on
 (INBOX) — Lance's call. After replay + the next LegiScan tick: `node --env-file=.env
 scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply` on his go) closes the
 `no_tally_corresponding_primary` flags whose journal twin now exists (176 open).
+⏳ **2024 MO House votes (2026-08-23): built, tested, awaiting migration 0032** — LegiScan prints
+all 275 as `0000-00-00` (source defect, confirmed via getRollCall); the House XML export does not
+serve 2024 (current GA only, verified in Lance's browser); 184 are dated by an exact printed
+AYES/NOES match against the bill history (Tier 1, Lance's pick), receipt in
+`votes.vote_date_provenance`. **Lance: apply `supabase/migrations/0032_vote_date_provenance.sql`**,
+then `node --env-file=.env src/cli/ingest-legiscan.js --dataset-file <scratchpad>/dataset-2122-envelope.json`
+($0) stores them; until then the ingest refuses them (counted `datesDerivedGated`).
 
 **✅ MO GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21): 1,217 Missouri statute glosses
 published ($12.45 of the $15 cap); glossary published 116 → 1,333; verified live.** ✅ **Rendering
@@ -1001,12 +1008,18 @@ session's own direct work, not assumed.**
     votes. Not wrong, just thin; the site labels dates honestly. Widening means more Congress.gov
     roll-call ingestion (free, polite, slow).
 
-23. **The 275 undated 2024 MO House roll calls (accepted, ledgered).** Refused at ingest because
-    they carry LegiScan's `0000-00-00` sentinel and their real dates are NOT honestly derivable
-    (sample: a 104-45 perfection vote whose bill history prints no matching tally). All 275 are
-    House roll calls the primary house.mo.gov pipeline supplies WITH real dates — so they arrive on
-    that source's own 30-min-ToU timeline. Decision if ever revisited: leave refused (recommended)
-    vs. store with a null date + honest "date unrecorded" display.
+23. **The 275 undated 2024 MO House roll calls — 184 RECOVERED 2026-08-23 by a printed tally
+    match, 91 stay refused.** Refused at ingest because they carry LegiScan's `0000-00-00`
+    sentinel (the per-roll-call API prints it too — spot-checked live). CORRECTION of the 07-30
+    premise: the House XML export serves only the current General Assembly (251 loads, 241/242
+    are the HTTP-200 error page — verified in Lance's browser), so they were NEVER going to
+    "arrive via house.mo.gov." The 07-30 "not derivable" check tested a perfection action, which
+    prints no tally; floor passage actions in the bill history DO ("Third Read and Passed (H) -
+    AYES: 108 NOES: 46", dated). Tier 1 rule (Lance, 2026-08-23): exactly one dated same-chamber
+    action with the roll call's own AYES/NOES → that date, receipt stored in
+    `votes.vote_date_provenance` (migration 0032). 184 match; 84 would need a stage-day
+    inference (declined — "never a guess"); 10 ambiguous; 5 tally-less concurrence votes.
+    **Migration 0032 awaits Lance's apply; then re-ingest session 2122 from the cached dataset.**
 
 24. **Giant bills (11 over the 400k-char gate).** HRB 2467 (561k), HRB 1 (550k), SRB 975 (751k) and
     8 others refused rather than truncated during the text run. Options unchanged: raise toward the

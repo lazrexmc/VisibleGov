@@ -5691,3 +5691,37 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   quarantined 2018 days sit inside a 52-day chronological worklist — draining it is ~26 hours of
   30-min ToU slots, a product decision (captured in TODO), not part of this fix. The 14 2026
   days drain through the scheduler from its 06:00Z tick, one per tick.
+- **"why is 2024 votes missing?" → root-caused live, the House route proven dead, and the dates
+  recovered from LegiScan's own printed history — Tier 1 only, on Lance's "proceed as you would
+  recommend"** (2026-08-23). Cause: LegiScan prints every 2024 MO House floor roll call (275 of
+  the session's 351; the 76 Senate ones are dated) as `0000-00-00` — in the bulk dataset AND from
+  `getRollCall` (one live spot-check query on roll call 1408305: still `0000-00-00`), so it is
+  the source's record, not an export artifact; the 07-30 date guard refused them rather than
+  invent a date (TODO 23). Lance chose option 1 (the House's own source); brainstorming-path
+  investigation killed it cleanly: the House XML export serves only the current (103rd) General
+  Assembly — Lance's own browser got XML for `251-BillList.XML` (2025) and the HTTP-200
+  "application error" page for `241`/`242` — so 2024 is not there at all, and TODO 23's "they
+  arrive later via house.mo.gov" premise was never true (the House adapter is pinned to session
+  261, holds zero votes dated 2023-2025, and its slot is fully used by the 2026 crawl — 56 of the
+  last 65 ticks each detail one of 2,099 bills). What replaced it: the 07-30 check had only
+  tested perfection actions, which print no tally; the bill HISTORY prints floor passage WITH
+  dates and tallies ("2024-03-27 Third Read and Passed (H) - AYES: 108 NOES: 46"). Offline, over
+  the 275: exactly one dated same-chamber action with the same AYES/NOES → **184** (printed
+  match); a single dated stage action but no tally → 84 (stage-day inference); ambiguous → 10;
+  none → 5 (HB 2634's concurrence votes). Recommended and approved: **Tier 1 only** —
+  `deriveDateFromHistory` in legiscan-votes.js (exact whole-number AYES/NOES match, own chamber,
+  one match or nothing; printed dates never touched; both sentinels `0000-00-00` and
+  `1969-12-31`), wired into `reconcileLegiscanTallies(rollCall, sessionYears, {history})` which
+  returns `dateProvenance`; ingest-legiscan.js passes the bill's history (already in hand — zero
+  fetches), stores `votes.vote_date_provenance` = `{source, printed_date, action}` only when
+  derived, and **refuses a derived-date vote while the column is missing** (isMissingColumnError
+  gate, counted `datesDerivedGated`) so a derived date can never land without its receipt.
+  **Migration 0032 drafted (`votes.vote_date_provenance jsonb`, no anon grant) — awaiting
+  Lance's apply (draft-then-apply).** TDD on a real fixture (four 2024 bills + their 23 roll
+  calls, extracted by code from the cached dataset): 10 adapter tests incl. a corpus pin (8 of
+  the 20 undated date, 12 refused — ground truth read off the histories, which also showed some
+  "Perfected (H)" actions DO print a tally) and 2 CLI tests (stored with receipt; gated without
+  the column). `0000-00-00` has the YYYY-MM-DD shape, so the pre-existing guard refuses it as
+  `outside_session_years` (year 0), not `unparseable_date` — unchanged. Next, after the
+  migration: `ingest-legiscan --dataset-file <wrapped cached 2122 envelope>` ($0, no API query)
+  to store the 184 + their casts; then correct TODO 23 / DATA_INVENTORY GAP 1. **Adversarial review before commit (3 lenses, 23 agents, 19 findings confirmed by execution, 1 refuted) — all 19 addressed, and the rule re-measured by a known-truth replay (every cached session, printed dates blanked, derived, compared): 16 wrong → 11, all of them a one-day journal skew (nine on the single 2018-05-18 TAFP day; 0.31% of derived dates), the cross-chamber, mis-tag and sibling classes gone.** The two HIGHs: LegiScan's history `chamber` TAG is not the acting chamber (it disagrees with the action text's (H)/(S) suffix on hundreds of entries — HB 2634's "Third Read and Passed (S)" is tagged H), so the acting chamber is now the SUFFIX (a suffix-less action counts only when its tag agrees); and uniqueness was one-sided — two of a bill's own roll calls sharing a tally would both have taken the one printed action's date, so the bill's sibling roll calls now veto (two-sided uniqueness). Mediums: ambiguity counted over the whole history BEFORE any filter; candidate dates must be real calendar dates and never a sentinel; yea/nay must be genuine integers (null coerced to 0); the counters now reach run detail and a gated/conflicting run closes `partial` (exit 2); an upsert no-op is never counted as stored (the row is read back); a later printed date supersedes a derived one and clears the receipt; a legislative-day gate — the House PDF link prints the day ('rollcalls/047.012.pdf') — refuses any derived date that contradicts another on the same day or breaks day order; the migration header's 'not granted to anon' claim was false (0001's table-level policy) and is rewritten honestly with the measured residual and the public-view receipt gap captured; `insertIfAbsent` now preserves the PostgREST error as `cause`; a refused derived date is reported as 'derived', not 'printed'. Net effect on 2024: 184 → 185 datable (1433444 joins via its suffix). 72 + 67 tests in the two LegiScan suites, incl. a run-level test that the counters land in the closed run's counts.

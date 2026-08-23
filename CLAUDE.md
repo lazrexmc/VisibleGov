@@ -47,9 +47,11 @@ accountable with real information instead of spin.
 >    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
 >    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
 >    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
-> 2. **All 32 migrations (0001-0031 + 0018a) are APPLIED.** Nothing awaits an apply. Older text
->    anywhere in this repo saying a migration is "drafted, awaiting Lance" is stale. `0031` was the
->    last — it fixed a live anon-timeout on profile vote lists found on deploy night.
+> 2. **Migrations 0001-0031 (+ 0018a) are APPLIED. `0032_vote_date_provenance.sql` is DRAFTED and
+>    AWAITS LANCE'S APPLY (2026-08-23)** — it adds `votes.vote_date_provenance jsonb`, the receipt
+>    for the 184 LegiScan 2024 House roll calls dated by a printed tally match; the ingest refuses
+>    those votes (counted `datesDerivedGated`) until it lands. Older text saying any OTHER migration
+>    is "drafted, awaiting Lance" is stale.
 
 **Status (2026-08-04): backend live and accurate — two independent audits ran end-to-end 2026-08-03
 (an 8-domain accuracy audit, then a senior-engineering-lens audit), 4 + 19 findings fixed and

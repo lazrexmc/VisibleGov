@@ -185,18 +185,118 @@ export class LegiscanRollCallDateError extends Error {
 
 const ROLL_CALL_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+// ---- dating a sentinel-dated roll call from the bill's own printed history (2026-08-23) ----
+//
+// LegiScan prints two missing-date sentinels: '0000-00-00' (every 2024 MO House floor roll call —
+// 275 of that session's 351 — in the bulk dataset AND from getRollCall, spot-checked live) and
+// '1969-12-31' (a handful of older MO roll calls; caught by the session-years guard). Both mean
+// "LegiScan never captured this date." The bill's history in the same dataset prints the floor
+// actions WITH dates and tallies: "2024-03-27 Third Read and Passed (H) - AYES: 108 NOES: 46".
+//
+// Rule (Lance, 2026-08-23, Tier 1 only): a sentinel-dated roll call takes the date of the ONE
+// action, in the roll call's own chamber, whose printed AYES/NOES equal its own yea/nay as whole
+// numbers. Zero matches (perfection actions print no tally) or several (two actions sharing a
+// tally) -> null -> the caller's existing refusal. A printed date is never touched. This is a
+// printed-statement match, not a stage-day inference; the matched action is returned verbatim as
+// the receipt the caller stores (votes.vote_date_provenance, migration 0032).
+//
+// REVIEW HARDENING (2026-08-23, 19 confirmed findings, all by execution): (1) the history entry's
+// `chamber` TAG is not the acting chamber — it disagrees with the action text's own "(H)"/"(S)"
+// suffix on hundreds of real entries ("Third Read and Passed (S) - AYES: 23 NOES: 10" tagged H),
+// so the acting chamber is read from the SUFFIX, and a suffix-less action ("Truly Agreed To and
+// Finally Passed - AYES: ...") counts only when its tag agrees with the roll call's chamber;
+// (2) uniqueness is TWO-SIDED — exactly one tallied action in the whole history (counted BEFORE
+// any chamber/date filter, so a mis-tagged or malformed duplicate still registers as ambiguity)
+// AND no other roll call of the same bill and chamber prints the same yea/nay, otherwise one of
+// them would take a receipt for a motion it was not; (3) a candidate's date must be a real
+// calendar date and not itself a sentinel; (4) yea/nay must be genuine non-negative integers (a
+// null or '' coerces to 0 and would match a 0-0 action). A known-truth replay over every cached
+// session (printed dates blanked, then derived and compared) is the measure of this rule — see
+// CHATLOG 2026-08-23 for the numbers; the residual disagreement class is a one-day journal skew
+// that the driver's legislative-day gate addresses.
+export const LEGISCAN_MISSING_DATE_SENTINELS = ['0000-00-00', '1969-12-31'];
+const HISTORY_TALLY_RE = /\bAYES:\s*(\d+)\s+NOES:\s*(\d+)\b/;
+const ACTION_CHAMBER_SUFFIX_RE = /\((H|S)\)/;
+
+function asNonNegativeInteger(value) {
+  if (typeof value === 'number') return Number.isInteger(value) && value >= 0 ? value : null;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
+function chamberLetter(value) {
+  const c = String(value ?? '').trim().toUpperCase();
+  return c === 'H' || c === 'S' ? c : null;
+}
+
+function isRealCalendarDate(date) {
+  const m = ROLL_CALL_DATE_PATTERN.exec(date);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
+
+// siblingRollCalls: the OTHER roll calls of the same bill (the driver passes every roll call it
+// holds for the bill; the bill record's own votes[] index works too — both carry yea/nay/chamber).
+export function deriveDateFromHistory(rollCall, history, siblingRollCalls = []) {
+  const printed = String(rollCall?.date ?? '').trim();
+  if (!LEGISCAN_MISSING_DATE_SENTINELS.includes(printed)) return null;
+  const chamber = chamberLetter(rollCall?.chamber);
+  const yea = asNonNegativeInteger(rollCall?.yea);
+  const nay = asNonNegativeInteger(rollCall?.nay);
+  if (!chamber || yea === null || nay === null) return null;
+
+  // Two-sided uniqueness, side one: no sibling roll call of this bill and chamber prints the same
+  // tally (a second one would make any single printed action ambiguous as to WHICH vote it was).
+  for (const sibling of (Array.isArray(siblingRollCalls) ? siblingRollCalls : [])) {
+    if (sibling?.roll_call_id === rollCall?.roll_call_id) continue;
+    if (chamberLetter(sibling?.chamber) !== chamber) continue;
+    if (asNonNegativeInteger(sibling?.yea) === yea && asNonNegativeInteger(sibling?.nay) === nay) return null;
+  }
+
+  // Side two: exactly one tallied action in the WHOLE history — counted before any other filter.
+  const candidates = [];
+  for (const entry of (Array.isArray(history) ? history : [])) {
+    const tally = HISTORY_TALLY_RE.exec(String(entry?.action ?? ''));
+    if (!tally || Number(tally[1]) !== yea || Number(tally[2]) !== nay) continue;
+    candidates.push(entry);
+  }
+  if (candidates.length !== 1) return null;
+
+  const [entry] = candidates;
+  const actionText = String(entry?.action ?? '');
+  const suffix = ACTION_CHAMBER_SUFFIX_RE.exec(actionText);
+  const actingChamber = suffix ? suffix[1] : chamberLetter(entry?.chamber);
+  if (actingChamber !== chamber) return null;
+  const date = String(entry?.date ?? '').trim();
+  if (LEGISCAN_MISSING_DATE_SENTINELS.includes(date) || !isRealCalendarDate(date)) return null;
+  return {
+    date,
+    source: 'legiscan_history_tally_match',
+    action: {
+      date, action: actionText, chamber: actingChamber, chamber_source: suffix ? 'action_suffix' : 'history_tag',
+    },
+  };
+}
+
 // assertRollCallDateWithinSession — the guard itself, exported so a caller can run it standalone.
 // `sessionYears` is `{ yearStart, yearEnd }` straight off the dataset envelope's own year_start/
 // year_end fields (src/cli/ingest-legiscan.js already reads them for sessionWindow); null means
 // "no bounds known", in which case only the SHAPE of the date is checked. Both branches throw the
 // same typed error with a `reason`, so the driver routes them through one catch.
-export function assertRollCallDateWithinSession(rollCallId, date, sessionYears = null) {
+// `derived`: the date came from deriveDateFromHistory rather than the roll call's own print — the
+// message and meta say so, so a refused derived date is never reported as a "printed" one.
+export function assertRollCallDateWithinSession(rollCallId, date, sessionYears = null, { derived = false } = {}) {
+  const label = derived ? 'derived date' : 'printed date';
   const match = typeof date === 'string' ? ROLL_CALL_DATE_PATTERN.exec(date.trim()) : null;
   if (!match) {
     throw new LegiscanRollCallDateError(
-      `legiscan-votes: roll call ${rollCallId}: date ${JSON.stringify(date)} is not a printed `
+      `legiscan-votes: roll call ${rollCallId}: ${label} ${JSON.stringify(date)} is not a `
         + 'YYYY-MM-DD calendar date — a vote that cannot be placed in time is never stored',
-      { rollCallId, date, reason: 'unparseable_date' },
+      {
+        rollCallId, date, reason: 'unparseable_date', derived,
+      },
     );
   }
   if (!sessionYears || sessionYears.yearStart == null) return date.trim();
@@ -205,12 +305,12 @@ export function assertRollCallDateWithinSession(rollCallId, date, sessionYears =
   const yearEnd = Number(sessionYears.yearEnd ?? sessionYears.yearStart);
   if (year < yearStart || year > yearEnd) {
     throw new LegiscanRollCallDateError(
-      `legiscan-votes: roll call ${rollCallId}: printed date ${date} (year ${year}) falls outside `
+      `legiscan-votes: roll call ${rollCallId}: ${label} ${date} (year ${year}) falls outside `
         + `this dataset's own session years ${yearStart}-${yearEnd} — the source contradicts itself, `
         + 'so the roll call is refused rather than stored under a date the session cannot have had '
-        + '(LegiScan prints 1969-12-31 as its own missing-date sentinel)',
+        + '(LegiScan prints 1969-12-31 and 0000-00-00 as its own missing-date sentinels)',
       {
-        rollCallId, date, year, yearStart, yearEnd, reason: 'outside_session_years',
+        rollCallId, date, year, yearStart, yearEnd, reason: 'outside_session_years', derived,
       },
     );
   }
@@ -236,7 +336,10 @@ export function assertRollCallDateWithinSession(rollCallId, date, sessionYears =
 // printed vote_text disagrees with VOTE_TEXT_BY_ID's own label for it) throws VoteIdMapError naming
 // both values — this is a data-integrity signal distinct from an unrecognized vote_id, but shares
 // the same typed-error class since both mean "this cast's vote_id cannot be trusted as printed."
-export function reconcileLegiscanTallies(rollCall, sessionYears = null) {
+// Third parameter (2026-08-23): `history` = the bill's own history[] and `siblingRollCalls` = the
+// bill's other roll calls; both only matter for a sentinel-dated roll call (deriveDateFromHistory).
+// The returned object carries `dateProvenance` (null when the date was printed).
+export function reconcileLegiscanTallies(rollCall, sessionYears = null, { history = null, siblingRollCalls = [] } = {}) {
   const rollCallId = rollCall?.roll_call_id;
   const rawVotes = Array.isArray(rollCall?.votes) ? rollCall.votes : [];
 
@@ -246,7 +349,20 @@ export function reconcileLegiscanTallies(rollCall, sessionYears = null) {
   // typed refusal is cheaper to read in the run detail than a tally report about a 1969 vote.
   // `sessionYears` is optional at THIS layer (the shape check still runs without it) but the driver
   // always supplies it — see ingestLegiscanRollCalls, which requires it.
-  assertRollCallDateWithinSession(rollCallId, rollCall?.date, sessionYears);
+  // 2026-08-23: a sentinel-dated roll call may be dated from the bill's own printed history when
+  // the caller supplies it (deriveDateFromHistory above) — otherwise the sentinel falls into the
+  // same guard and is refused exactly as before. The derived date is still held to the session
+  // years; the receipt rides out as `dateProvenance` (null whenever the date was printed).
+  let date = rollCall?.date;
+  let dateProvenance = null;
+  if (history && LEGISCAN_MISSING_DATE_SENTINELS.includes(String(date ?? '').trim())) {
+    const derived = deriveDateFromHistory(rollCall, history, siblingRollCalls);
+    if (derived) {
+      dateProvenance = { source: derived.source, printed_date: String(date).trim(), action: derived.action };
+      date = derived.date;
+    }
+  }
+  assertRollCallDateWithinSession(rollCallId, date, sessionYears, { derived: dateProvenance !== null });
 
   const counted = {
     yea: 0, nay: 0, not_voting: 0, absent: 0,
@@ -316,7 +432,8 @@ export function reconcileLegiscanTallies(rollCall, sessionYears = null) {
     rollCallId,
     legiscanBillId: rollCall.bill_id,
     chamber: mapLegiscanChamber(rollCall.chamber),
-    date: rollCall.date,
+    date,
+    dateProvenance,
     question: rollCall.desc,
     tallies: {
       yea: counted.yea, nay: counted.nay, not_voting: counted.not_voting, absent: counted.absent, total: countedTotal,
