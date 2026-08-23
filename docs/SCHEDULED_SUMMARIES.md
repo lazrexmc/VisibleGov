@@ -10,6 +10,18 @@ and `src/lib/billed-summary-chain.js` during the final whole-branch review's fix
 replaced roughly a dozen claims that had drifted false, several of them carried over verbatim from
 `docs/SCHEDULED_INGESTION.md`'s description of a DIFFERENT script with different mechanics). If
 this script changes again, re-check this doc against it — do not trust prose over code.**
+(Re-checked 2026-08-23 against the live task, the live `ingestion_runs` rows, and the code at
+commit 2e420d9; every correction from that pass is marked inline with its date.)
+
+**Policy linkage (CLAUDE.md "Standing policies"):** this runner's ledger + caps ARE the standing
+per-run approval for billed calls — for `scripts/scheduled-summaries.js` ONLY. Every other billed
+call in this repo still needs Lance's explicit per-run go with a cost stated. Funding context,
+in flight as of 2026-08-23: the API balance hit $0 on the evening of 2026-08-21 (spent by the
+USC glossary drain, not by this runner) and Lance reloaded about $7 the same evening; the
+2026-08-22 tick confirmed the reload took. At the measured ~$0.33-0.39 per tick that is roughly
+19 ticks — two to three weeks — if nothing else bills. Nothing in this repo can read the balance — the
+Anthropic console is the only truth for it; `npm run status` knows only what THIS runner has
+spent against its own cap.
 
 ## What it does
 
@@ -25,13 +37,31 @@ Each invocation (one tick, typically once a day, early morning):
    "Recovery properties" below for exactly what that constant does and does not enforce.
 2. Computes this ISO week's spend from `ingestion_runs` rows (`source='scheduled-summaries'`,
    last 10 days) and checks it against the weekly cap (`SUMMARY_WEEKLY_CAP_USD`, $5.00 default) and
-   per-tick cap (`SUMMARY_TICK_CAP_USD`, $1.00 default). If the remaining allowance for this tick
+   per-tick cap (`SUMMARY_TICK_CAP_USD`, $1.00 default). **The week is the UTC ISO-8601 week**
+   (`currentWeekKey`: Thursday-anchored, keys like `2026-W34`), so the $5.00 window resets at
+   **Monday 00:00 UTC** — Sunday evening Central — never on a local-calendar boundary. A Monday
+   6 AM Central tick is already the new week's first tick and opens at $0.00 spent (2026-W34 was
+   2026-08-17..23; the 2026-08-24 tick opens 2026-W35). If the remaining allowance for this tick
    would fall below the smallest plausible bill cost (`WORST_BILL_FLOOR_USD`, $0.05), the tick ends
    right here: it logs `budget exhausted for <week>` and exits 0 — **no run row is opened, nothing
    is spent.**
 3. Asks `src/cli/summary-queue.js plan --dry-run` (a separate, read-only, $0 child process — no
-   API calls) for the priority-ordered queue of summarizable bills, splits it into **fresh**
-   (unsummarized, ≤100,000 chars), **conversion** (draft-only bills that already have mechanical
+   API calls; given a 15-minute child timeout instead of the 8-minute default every other child
+   in this repo gets, because plan mode loads every bills/votes/bill_texts/summaries row) for
+   the queue of summarizable bills, **then re-sorts it recency-first** (`sortQueueRecencyFirst`:
+   the bill's session `start_date` descending, then passage priority, then smallest text first)
+   so current-session bills sit at the head of the paid queue. The recency key is
+   `sessions.start_date`, falling back to the year parsed from the session's identifier/name
+   (`src/lib/session-dates.js`); a bill whose session has neither sorts last, and if any queued
+   bill is in that state the tick logs a second line — `WARNING: N of M queued bills have no
+   session recency key ... run src/cli/sync-session-dates.js`. **Data dependency:** re-run
+   `node --env-file=.env src/cli/sync-session-dates.js` (dry-run first, then `--apply`) whenever
+   a new session is minted — the session-minting drivers still write no `start_date`. (Found
+   2026-08-21: 30 of 31 MO sessions were undated, so the recency sort had silently degraded to
+   passage-then-smallest-first for every tick since launch; the `--apply` ran late that evening
+   — run `0fb39207`, 04:10Z on 08-22, 30 dates written — and the 2026-08-22 tick confirmed all
+   12 lane bills were 2026-session.) It then splits the sorted queue into
+   **fresh** (unsummarized, ≤100,000 chars), **conversion** (draft-only bills that already have mechanical
    verifier objections on file — a re-author lane, capped at the 50 oldest-flagged
    `MAX_CONVERSIONS_EXAMINED` per tick so hundreds of routinely-ineligible drafts don't get
    re-examined forever), and **monster** (unsummarized, >100,000 chars, at most one per tick)
@@ -43,13 +73,22 @@ Each invocation (one tick, typically once a day, early morning):
    (`estimateBillCostUsd`), checked against the allowance still remaining. A bill that fails any of
    these is skipped — honestly recorded in the run's `skipped` list, no API call ever made for it.
    A bill that passes all of them runs the full chain (`src/lib/billed-summary-chain.js`: Haiku
-   author → Sonnet verify → Sonnet provisions → Sonnet coverage, or Haiku re-author for the
-   conversion lane), checkpointed per stage as it goes (see "Recovery properties"). **There is no
-   mid-chain budget check** — once a bill's chain starts, it runs to completion (or throws); the
+   author → Sonnet verify → Sonnet provisions → **(conditional) Sonnet provisions-corroboration**
+   → Sonnet coverage, or Haiku re-author for the conversion lane), checkpointed per stage as it
+   goes (see "Recovery properties"). The corroboration stage (added 2026-08-18, spec
+   `docs/superpowers/specs/2026-08-18-completeness-floor-corroboration-design.md`) fires only
+   when the provisions yield is at least 1 but under the length-scaled floor
+   (`minKeyProvisionsFor` in `src/lib/verifier.js`: 1 under 2,500 chars, 2 under 5,000, else
+   3) — one independent blind re-extraction with the same prompt, 4,000 `max_tokens`; the record
+   gate then accepts the thin check only if the two runs mechanically agree. Its output rides
+   the envelope as `completeness_corroboration`. `estimateBillCostUsd` was deliberately NOT
+   raised for it — one provisions-sized call sits inside the estimator's existing padding.
+   **There is no mid-chain budget check** — once a bill's chain starts, it runs to completion (or throws); the
    caps are enforced entirely by deciding whether to START a bill, never by interrupting one
    partway through, and never by shrinking any one call's own token ceiling (every stage's
-   `max_tokens` is a fixed constant — 16,000 for the Haiku author, 32,000/4,000/3,000 for the three
-   Sonnet stages — independent of how much budget remains).
+   `max_tokens` is a fixed constant — 16,000 for the Haiku author, 32,000/4,000/4,000/3,000 for
+   the Sonnet verify/provisions/corroboration/coverage stages — independent of how much budget
+   remains).
 5. Hands every bill that produced a real result to `src/cli/summary-queue.js record` (a separate
    child process per lane — the ONLY thing that ever writes a summary row; this script never writes
    to `summaries` directly), which runs the same mechanical publish/flag gates every other
@@ -60,6 +99,14 @@ Each invocation (one tick, typically once a day, early morning):
    a non-billing chain error, a crashed record CLI, or the API balance running out) and a detail
    object (spend, published/gate-refusal/record-failure counts, per-lane counts, the full skip
    list). Appends one dated log line — see "Reading the logs" below for the exact shapes.
+   **In practice every tick closes `partial`** — every live tick since 2026-08-17 has. The
+   pre-bill estimate guard skips the couple of thousand queued bills a $1 tick cannot fund, and
+   those skips count as non-routine (only the conversion lane's no-objections skip carries
+   `routine: true`), so `partial` is the steady state for as long as the queue is deeper than one
+   tick's budget; `succeeded` has never occurred live and cannot until the queue fits in a tick.
+   Read `partial` as healthy. The real anomaly signals live in the detail object: any `skipped`
+   reason that is NOT the `pre-bill cost estimate` one, a non-zero `record_failures`,
+   `balance_depleted: true`, or counts out of line with the baseline under "Reading the logs".
 
 ## What it will never do
 
@@ -97,10 +144,20 @@ Each invocation (one tick, typically once a day, early morning):
   mechanical gates (schema validation, hash-provenance, citation checks, completeness checks) are
   exactly the same ones every other summarization path in this repo uses — nothing scheduler-specific
   is exempted.
-- **Never crashes silently.** A throwing plan-CLI call, a throwing record-CLI call, and a throwing
-  bill chain are all caught, not left to propagate — each lands as an honest log line and/or a
-  recorded skip rather than an uncaught exception that would exit the process with no diagnostic
-  trail (see "Recovery properties" and the fix-wave notes below).
+- **Never crashes silently on the paid path.** A throwing plan-CLI call, a throwing record-CLI
+  call, and a throwing bill chain are all caught, not left to propagate — each lands as an honest
+  log line and/or a recorded skip rather than an uncaught exception that would exit the process
+  with no diagnostic trail (see "Recovery properties" and the fix-wave notes below). **The one
+  exception (noted 2026-08-23): the pre-tick DB calls are not wrapped** — `selectRecentRunsReal`
+  (`ingestion_runs`), `loadSessionStartByBillReal` (`sessions` + `bills`),
+  `loadSummaryRowsReal` (`summaries`), and the `openRun` insert itself each throw on a Supabase
+  error, and that throw propagates
+  out of `runTickLocked` (the lock is still released by its `finally`) to `main().catch`, which
+  prints to stderr and exits 1 — **no log-file line at all**, and under the InteractiveToken
+  console window the stderr vanishes when the window closes. All four run before the first paid
+  call, so nothing is spent and no run row is stranded; the only trace is Task Scheduler's "Last Result"
+  being non-zero (History tab). A day with no log entry is therefore ambiguous between "the task
+  never fired" and "a pre-tick DB call failed" — check Last Result before concluding either.
 
 ## ⚠️ Budget is real — these caps are published Terms of Service with yourself
 
@@ -126,12 +183,14 @@ to under-charge a PRIOR crashed tick that actually ran under the real $1.00 cap)
 | `MAX_CONVERSIONS_EXAMINED` | 50 (not env-overridable) | How many draft-only bills the conversion lane examines per tick, oldest-flagged first, before assembling the rest of the tick |
 | `WORST_BILL_FLOOR_USD` | $0.05 | The floor a tick's remaining allowance must clear just to open a run row at all |
 
-## Before you register: one throttled manual tick first
+## If you ever re-register from scratch: one throttled manual tick first
 
-The runner has been tested end-to-end against fakes (`tests/scheduled-summaries.test.js`), but has
-never yet made a single real, paid API call. **Before registering the daily task, run exactly one
-deliberately throttled manual tick by hand** — this is Lance's own step; do not run it on his
-behalf:
+**(Superseded 2026-08-17 as an open instruction: the runner went live that day — see "Status" —
+and has made paid calls on every tick since. This procedure now applies to a fresh registration
+on a rebuilt machine or after a long disable, not to any step anyone still owes.)** The runner
+is tested end-to-end against fakes (`tests/scheduled-summaries.test.js`); before (re-)registering
+the daily task, run exactly one deliberately throttled manual tick by hand — this is Lance's
+own step; do not run it on his behalf:
 
 ```
 SUMMARY_TICK_CAP_USD=0.70 node --env-file=.env scripts/scheduled-summaries.js
@@ -156,8 +215,12 @@ on the order of $0.04, not $0.67. After it finishes:
    today's date, a real `spent this week` figure above $0.00, and (if the one bill it attempted
    published cleanly) `published this week` at 1.
 2. Check the day's log file under `.superpowers/artifacts/summary-scheduler-logs/` — one line
-   should appear, of the `tick=<id> attempted=1 published=... spent=$...` shape described under
-   "Reading the logs" below.
+   should appear, of the `tick=<id> attempted=<roughly the whole queue> published=... spent=$...`
+   shape described under "Reading the logs" below. `attempted` counts every bill the per-bill
+   loop examined, INCLUDING the unpaid estimate-guard skips, so it reads in the thousands, not 1
+   (corrected 2026-08-23; the 2026-08-17 $0.70 tick actually logged `attempted=2269 published=1
+   gate_refusals=1 spent=$0.0474`). The bills actually funded are the run row's `detail.lanes`
+   and `per_call_count`.
 3. Only once both of those look right, proceed to registration below (and remember to unset
    `SUMMARY_TICK_CAP_USD` afterward, or the daily runs will stay throttled to $0.70/tick — a real
    per-tick budget of $1.00 needs the env var absent, not present-and-small).
@@ -167,9 +230,12 @@ on the order of $0.04, not $0.67. After it finishes:
 Run every day at 6 AM local time. The exact schedule is your call; 6 AM was chosen to
 (a) avoid overnight API rate-limit surprises and (b) give you a daily morning summary to review.
 
-> **Status (as of this writing): NOT YET REGISTERED.** This section is the command to run; do it
-> once (after the one throttled manual tick above), and this whole scheduled runner comes to life.
-> Until then, the scheduler is built but dormant.
+> **Status: REGISTERED and running daily since 2026-08-17** (superseded 2026-08-23: the original
+> "NOT YET REGISTERED" note here stood from the build until registration day). Live
+> `schtasks /query` on 2026-08-23: Enabled, Daily 6:00 AM, Start Date 8/17/2026, Last Result 0,
+> Next Run 8/24/2026, and one `ingestion_runs` row per day from 2026-08-18 on (08-17 itself
+> holds the three hand-fired ticks). Keep this command for
+> re-registration after a machine rebuild — see "Status" at the bottom for activation day.
 
 **Command line — use Command Prompt, NOT PowerShell.** (Start menu → type `cmd` → "Command
 Prompt". Windows 11's default terminal is PowerShell, where this command's quoting breaks
@@ -185,11 +251,13 @@ schtasks /create /tn "VisibleGov Scheduled Summaries" /tr "\"C:\Program Files\no
 `%SystemRoot%\system32`, not the repo — a RELATIVE `--env-file=.env scripts\scheduled-summaries.js`
 (the earlier form of this command) would resolve against `system32` and fail to find either file.
 Only `node.exe`'s own path needs to be absolute for THAT reason alone; the `--env-file` and script
-arguments need it too, for the same reason. As a belt-and-braces second safety net (not a
-replacement for the absolute paths above — Task Scheduler's working directory should never be load
--bearing for this command), also set "Start in" to `F:\VisibleGov` via the GUI after creating the
-task (Properties → General tab, or see the GUI walkthrough below) — redundant with the absolute
-paths, but harmless, and it's one click.
+arguments need it too, for the same reason. (Earlier text here also recommended setting "Start
+in" to `F:\VisibleGov` via the GUI as a belt-and-braces second safety net — **superseded
+2026-08-23: on this machine the GUI cannot save this task at all** (see "Modifying this task"
+below), so that click is not possible; live `schtasks /query` shows `Start In: N/A` and it was
+never set. Nothing depends on it thanks to the absolute paths. If you ever want it anyway, add
+`<WorkingDirectory>F:\VisibleGov</WorkingDirectory>` inside `<Exec>` in the saved XML and
+re-create from that.)
 
 Expected output: `SUCCESS: The scheduled task "VisibleGov Scheduled Summaries" has successfully
 been created.`
@@ -202,12 +270,28 @@ been created.`
   hands-off across reboots.
 - `/f` overwrites a prior registration with the same name — safe to re-run this command if you
   ever change the schedule or the cap values.
+- **Flags the registration carries silently** (from the XML `schtasks /create` produced, verified
+  2026-08-23 against the live task): `DisallowStartIfOnBatteries=true` and
+  `StopIfGoingOnBatteries=true` — a tick will not start, and a running one is killed, on battery
+  power (moot on a desktop; it matters the day this runs on a laptop or a UPS reports "on
+  battery", and a kill from there is the same stranded-lock / `running`-row case as the
+  console-window kill below); `MultipleInstancesPolicy=IgnoreNew` — Task Scheduler's own second
+  overlap guard, alongside the script's lock file; `StartWhenAvailable=true` (set by XML
+  re-create 2026-08-17, see "Missed runs"); no `ExecutionTimeLimit` element (72-hour default,
+  next section).
+- **Triggering a tick by hand through the real Task Scheduler environment:**
+  `schtasks /run /tn "VisibleGov Scheduled Summaries"`. This is a REAL, full-budget paid tick (up
+  to $1.00), not a dry run, so it is Lance's call, never an agent's. Done once with his explicit
+  go on 2026-08-17 (tick d744297c, 24 paid calls, $0.4836) to validate the registered pathway
+  end-to-end; it is also the way to make up a missed day by hand. Expect the black node console
+  window (section below) and leave it alone.
 
 **GUI equivalent**, if preferred: Task Scheduler → Create Task → General: name it "VisibleGov
 Scheduled Summaries"; Triggers → New → "On a schedule" → Daily at **06:00** (or your preferred
 time); Actions → New → Program: `C:\Program Files\nodejs\node.exe`, Arguments:
 `--env-file=F:\VisibleGov\.env F:\VisibleGov\scripts\scheduled-summaries.js`, Start in:
-`F:\VisibleGov` (the belt-and-braces safety net mentioned above).
+`F:\VisibleGov` (optional — see the superseded "Start in" note above; and note the GUI could not
+save this task on this machine once it existed, see "Modifying this task" below).
 
 ### ⚠️ Check the task's own "Stop the task if it runs longer than" setting — it must EXCEED 30 minutes
 
@@ -307,11 +391,17 @@ Two places to check, and they answer different questions:
    entries are already landing in *tomorrow's* dated file. If the file you'd expect looks stale or
    is missing entirely, check the next day's filename before assuming the scheduler stopped.
 
-   A normal, successful tick logs exactly ONE line, of this shape:
+   A normal, successful tick logs one summary line, of this shape (plus one `WARNING: N of M
+   queued bills have no session recency key ...` line before it if any queued bill's session has
+   neither a `start_date` nor a parseable year — see "What it does" step 3; that warning means run `src/cli/sync-session-dates.js`,
+   not that the tick failed; corrected 2026-08-23 from "exactly ONE line"):
    ```
-   2026-08-16T11:03:22.104Z tick=<run-id> attempted=3 published=2 gate_refusals=1 spent=$0.3120 week=2026-W33 total=$1.2340/5.00
+   2026-08-23T11:04:47.004Z tick=<run-id> attempted=2188 published=4 gate_refusals=2 spent=$0.3530 week=2026-W34 total=$2.6980/5.00
    ```
-   (the leading timestamp is when the tick FINISHED, not when it started). A tick that stopped
+   (a real line from the 2026-08-23 tick; the leading timestamp is when the tick FINISHED, not
+   when it started; `attempted` counts every bill examined, including the ~2,000 unpaid
+   estimate-guard skips — the bills actually funded are `detail.lanes` / `per_call_count` on
+   the run row). A tick that stopped
    early for a normal, expected reason logs a single SHORT line instead, with no `tick=` field —
    one of:
    - `already running (<reason>) — skipping this tick` — another invocation was still in progress.
@@ -322,13 +412,42 @@ Two places to check, and they answer different questions:
    A tick that ran out of API balance mid-run logs TWO lines: an immediate
    `BALANCE DEPLETED — reload required` the moment the billing error is detected, followed by the
    normal per-tick summary line (ending in `[BALANCE DEPLETED]`) once the tick finishes closing out
-   whatever it already recorded. **A `--dry-run` invocation writes NO log line once it acquires the
-   lock** — from there it never touches the log, the database, or the API (if the lock is already
-   held it logs `already running — skipping this tick`, same as a real tick would); see "Dry-run
+   whatever it already recorded. **A `--dry-run` invocation writes no per-tick summary line and
+   no run row** — but it CAN still log the short `budget exhausted for <week>`,
+   `plan CLI failed: ...`, or session-key `WARNING:` lines, exactly as a live tick would at those
+   same points, because all three sit before the dry-run early return (corrected 2026-08-23;
+   earlier text said "no log line" at all). It reads the database but never writes to it and
+   never touches the API (if the lock is already held it logs
+   `already running (<reason>) — skipping this tick`, same as a real tick would); see "Dry-run
    usage" below.
 
-   If the most recent entry in the latest log file is more than ~24 hours old, the scheduled task
-   itself has stopped firing (check Task Scheduler's History tab, not this repo).
+   If the most recent entry in the latest log file is more than ~24 hours old, either the
+   scheduled task itself has stopped firing OR a pre-tick DB read threw before anything was
+   logged (see "Never crashes silently" above — that path exits 1 with stderr only). Check Task
+   Scheduler's History tab / "Last Result" first: a run with a non-zero Last Result and no log
+   line means the task fired and died on a pre-tick read; no run at all means it never fired.
+   Neither question is answered by anything in this repo.
+
+   **What healthy looks like** (baseline from the live ticks 2026-08-18..23 — re-measure rather
+   than trusting these past a few weeks): one tick a day starting 11:00Z and finishing ~11:05Z
+   (08-18's started 46 minutes late, at 11:46Z); `status=partial`
+   every time (see "What it does" step 6); `attempted` ≈ the whole queue (~2,200);
+   `detail.lanes.fresh` 6-12 bills funded, `conversion` 0 so far (the conversion entries sit
+   BEHIND the ~2,200 fresh entries in the loop, so by the time one is reached the remaining
+   allowance is already under the estimator's floor — the $0 drain lane has been re-authoring
+   the draft pool instead), `monster` 0; 24-48 paid calls; spend ~$0.33-0.39 per tick; 0-6
+   published and 1-7 gate refusals per tick; `record_failures` 0 except on a self-park day (see
+   "Unparking a bill"). The spend settles there, not at $1.00, because every bill estimates at
+   least $0.665 (`COST_ESTIMATE_OUTPUT_CEILING_USD`): once spend passes ~$0.335 no further bill
+   can clear the estimate guard. Over its first week (all nine ticks 2026-08-17..23) the scheduler
+   funded 64 bills for $2.70 — about $0.04 per funded bill and $0.12 per published summary — and
+   published 22 first-pass (~34%); 26 were gate-refused to draft (the conversion lane or the $0
+   drain lane re-author those later), 7 self-parked as malformed checks (4 since unparked), and
+   the rest closed on the record CLI's non-gate outcomes, which the log line does not count.
+   (CHATLOG's 2026-08-21 mid-week figure — $0.063 per bill, $0.163 per published, 39% — counted
+   only published + gate-refused outcomes.) A tick that spends $0.00 with
+   `lanes.fresh` 0, `published` 0 for several days running, or any `BALANCE DEPLETED` line is the
+   thing to look at.
 
 2. **`npm run status`'s SUMMARY SCHEDULER block.** This is the real ledger — **there is no
    separate `billing-ledger.json` file; it does not exist anywhere in this codebase.** The ground
@@ -337,12 +456,17 @@ Two places to check, and they answer different questions:
    invocation, and prints:
    ```
    SUMMARY SCHEDULER
-     last tick ........................ 2026-08-16T11:03:22 status=succeeded
-     spent this week ................. $1.23 of $5.00
-     published this week ............ 2
+     last tick ........................ 2026-08-23T11:00:40 status=partial
+     spent this week ................. $2.70 of $5.00
+     published this week ............ 22
+     parked (structural failures) .... 31
    ```
-   (the `parked (structural failures)` line only appears at all once the parked count is above
-   zero — omitted here since a fresh scheduler has parked nothing yet)
+   (live output 2026-08-23 — `status=partial` is the steady state, see "What it does" step 6;
+   the `parked (structural failures)` line only appears at all once the parked count is above
+   zero, and it has been present since the drain-lane seeding on 2026-08-17 (the first
+   self-parks landed later that same day). The earlier example
+   here showed `succeeded` with no parked line — the pre-launch expectation, not anything a live
+   tick has ever produced.)
 
    Nothing "refreshes" or "pushes" these numbers from inside the scheduler — `data-status.js`
    queries Postgres directly, itself, every time you run it, the same way it reports every other
@@ -364,6 +488,12 @@ To resume:
 2. **No code changes needed.** The next tick (tomorrow morning) will pick up where it left off,
    probing the balance again on its first billable API call.
 
+**History (as of 2026-08-23): this path has never fired live.** The balance did hit $0 on the
+evening of 2026-08-21 — spent by the USC glossary drain, not by this runner — but that fell
+between that day's 6 AM tick and the next one, Lance reloaded about $7 the same evening, and
+the 2026-08-22 tick ran normally. Nothing in this repo can read the balance; the Anthropic
+console is the only truth for it.
+
 ## Unparking a bill
 
 If a bill is parked (marked as permanently unpublishable due to structural incompleteness,
@@ -374,22 +504,51 @@ attempted again. To unpark it (e.g., after a verifier gate fix or a text source 
 2. Find the bill's row (keyed by `bill_id`).
 3. Delete that entire row.
 4. The next tick will see the bill as unsummarized again and attempt it.
+5. **If the bill is ALSO in the drain lane's PARKED set** (`scripts/build-drain-wave.mjs`),
+   remove it there too — otherwise the next `seed-scheduler-parks.mjs` run re-parks it (the
+   seeder only ever ADDS; it never removes an entry). Unparking a drain-lane bill is therefore
+   always two edits: the PARKED set AND the `parked.json` row.
+
+**The scheduler's own self-park class.** Besides the seeded drain parks, the scheduler parks a
+bill itself when `summary-queue.js record` returns a `MalformedSummaryError` for it — the reason
+reads `completeness check for bill X is malformed — the checker's own output cannot be
+trusted: ...` (a checker that cited a section not in the bill text, or a corroboration run that
+disagreed with the primary). Those rows carry NO `source` tag in `parked.json` (seeded rows
+carry `source: drain-lane-seed-<date>`), which is how to tell them apart. Record so far: 4
+self-parks on 2026-08-17 (tick d744297c — SRES 377/690/520/412, the old fixed-floor catch-22)
+were deleted after the 2026-08-18 gate fix, per that spec's "Unpark the scheduler side" step;
+3 more on 2026-08-19 (SRES 412 again, HJR 114, SJR 41) stand as of 2026-08-23. A self-park's
+reason text is the gate's verbatim explanation — read it before deciding the bill deserves a
+retry; the park exists because paying for the same mechanical refusal again is the one thing
+the budget must never do. (A third, transient source tag — `tiny-bill-stopgap-2026-08-17`,
+688 sub-5k-char bills pre-parked by `scripts/park-tiny-fresh-bills.mjs` on a stale premise
+(the length-scaled floor already existed in `verifier.js`) — was undone the same day: 687
+removed within the hour, the last one (HRES 1299) on 2026-08-18 with the corroboration-gate
+rollout; it may still appear in old logs.)
 
 The parked set is kept as a JSON file (not a database table) so it can be edited locally without
 server access, and so a decision to unpark survives power loss and reboots (unlike an in-memory
 registry).
 
 **Seeded from the drain lane's parks (2026-08-17):** the drain lane's PARKED set in
-`scripts/build-drain-wave.mjs` (27 bills, each parked after exhausted supervised retries, with
-written reasons) was seeded into `parked.json` via `node scripts/seed-scheduler-parks.mjs` —
+`scripts/build-drain-wave.mjs` (27 bills at the time, each parked after exhausted supervised
+retries, with written reasons; **28 as of 2026-08-18** after 4 were unparked by the
+completeness-floor fix and 5 new parks were added (four 3-strike, one 2-strike malformed via
+the corroboration gate) — the file is authoritative, count
+it rather than trusting this sentence) was seeded into `parked.json` via
+`node scripts/seed-scheduler-parks.mjs` —
 without this, those bills are conversion-lane-eligible (they all have drafts + verifications on
 file) and the lane's oldest-flagged-first ordering puts them at the FRONT of the paid queue, so
 the scheduler would have spent budget re-attempting bills that already failed three supervised
 attempts each. Verified by dry-run after seeding: lanes dropped 2,269 → 2,261 and zero parked
 IDs remain in the assembly. The seeder is merge-safe and idempotent (never overwrites an
-existing entry) — **re-run it whenever the drain lane parks new bills**, and after any loss of
+existing entry) — **re-run it whenever the drain lane parks new bills** (done on 2026-08-18 in
+three passes as that day's drain waves parked bills — +2, +1, +2, all tagged
+`drain-lane-seed-2026-08-18`), and after any loss of
 the gitignored artifacts tree (the script and the PARKED set it reads are both committed, so
-the park list is always recoverable). If `parked.json` exists but can't be read on a given tick (corrupt, a transient
+the park list is always recoverable). `parked.json` is therefore seeds PLUS the scheduler's own
+self-parks — 31 entries on 2026-08-23 (23 + 5 seeded, 3 self-parks); `npm run status` prints
+the live count. If `parked.json` exists but can't be read on a given tick (corrupt, a transient
 filesystem error), that tick treats the park list as UNKNOWN for its own purposes rather than
 silently empty — it will not merge-write over a file it couldn't actually read, so a newly
 park-worthy bill from that same tick simply doesn't get parked yet (logged honestly; it gets parked
@@ -411,20 +570,24 @@ This will:
   (fresh, conversions, at most one monster) — using the SAME plan CLI, the SAME queue data, and the
   SAME lane-assembly logic a live tick would.
 - Spend **zero dollars** (no Anthropic client is even constructed on `--dry-run` — see `main()`).
-- Open **no run row** in the database, write **no log line**, and spawn **no `record` child
+- Open **no run row** in the database, write **no per-tick summary line** (it can still write
+  the short budget-exhausted / plan-failed / session-key-WARNING lines a live tick would write
+  at those same points — see "Reading the logs"), and spawn **no `record` child
   process**.
 - Report the assembled lanes, computed allowance, and weekly spend — what the next live tick would
   actually work with — **without making any writes or API calls.**
 - Exit 0.
 
 Dry-run is safe to run while the scheduled task is running; it will skip if the lock is already
-held (logging `already-running`, same as a real tick would). The report includes the real queue and
+held (logging `already running (<reason>) — skipping this tick` and reporting
+`outcome: 'already-running'`, same as a real tick would). The report includes the real queue and
 budget state, so it can be run multiple times a day without side effects.
 
 ## Recovery properties
 
 **Checkpoints are per-stage files, not ledger rows — and they DO cause the SAME bill to be
-retried, not skipped.** Every completed (paid) chain stage — author, verify, provisions, coverage —
+retried, not skipped.** Every completed (paid) chain stage — author, verify, provisions, the
+conditional provisions-corroboration (2026-08-18), coverage —
 is written immediately to its own JSON file under
 `.superpowers/artifacts/scheduled-summaries/stages/<bill_id>-<hash8>.json`
 (`saveCheckpoint`/`loadCheckpoint` in `src/lib/billed-summary-chain.js`), keyed so a text revision
@@ -462,12 +625,32 @@ recorded as a skip in that run's own detail, and the tick still closes its `inge
 honestly rather than leaving it stranded at `running` with no diagnostic trail at all. In both
 cases, `main()` still exits 0 — an expected, logged stop, not a Task-Scheduler-visible crash.
 
+**What a tick leaves on disk for diagnosis** (all under the gitignored `.superpowers/artifacts/`):
+
+- `scheduled-summaries/records-<runId>-<lane>.json` — the exact envelopes handed to
+  `summary-queue.js record`, one file per non-empty lane (`fresh` / `drafts`), written BEFORE
+  the record CLI is spawned and kept even when that CLI throws or returns nothing parseable — so
+  a "record failed" tick can be replayed by hand with
+  `node --env-file=.env src/cli/summary-queue.js record --file <that path>` (add
+  `--replace-drafts` for a `drafts` file) once the cause is fixed.
+- `scheduled-summaries/stages/<bill_id>-<hash8>.json` — the per-stage checkpoints above (about
+  60 files on 2026-08-23; they accumulate one per bill-text attempted and are harmless to keep).
+- `scheduled-summaries/parked.json` — the park list ("Unparking a bill").
+- `summary-scheduler-logs/YYYY-MM-DD.log` — the one-line-per-tick log ("Reading the logs").
+- `summary-scheduler.lock.json` — present only while a tick runs (or after a hard kill, until
+  reclaimed).
+- `scheduled-summaries-task.xml` — the saved Task Scheduler definition (contains the machine SID).
+
+The run row itself (`ingestion_runs`, `source='scheduled-summaries'`) is the ledger; its
+`detail` carries the full `skipped` list with reasons, `lanes`, and `per_call_count`.
+
 ## How to pause / remove it
 
 ```
 schtasks /change /tn "VisibleGov Scheduled Summaries" /disable   # pause (keeps the registration)
 schtasks /change /tn "VisibleGov Scheduled Summaries" /enable    # resume
 schtasks /delete /tn "VisibleGov Scheduled Summaries" /f         # remove entirely
+schtasks /run    /tn "VisibleGov Scheduled Summaries"            # fire a REAL paid tick now (Lance's call only)
 ```
 
 If the machine ever loses power mid-run, the lock file self-heals: a lock older than its own
@@ -499,3 +682,14 @@ remains:
    logged-out runs. Until then: never close the black node window a tick opens.
 3. Monitor the logs and the SUMMARY SCHEDULER block as the daily runs accumulate.
 4. Re-check the cost-estimate constants when Sonnet intro pricing ends (2026-08-31).
+
+**Update 2026-08-23 (live-verified):** six consecutive unattended 6 AM ticks (2026-08-18..23,
+one `ingestion_runs` row each — 08-18's fired 46 minutes late; Task Scheduler Last Result 0,
+Next Run 8/24/2026 6:00 AM) after 08-17's three hand-fired ticks ($0.10, $0.70, and the
+`schtasks /run` validation); ISO week 2026-W34 stands at roughly $2.70 of $5.00 with 22 published after
+its last tick — run `npm run status` for live figures. Item 2 above (the `/ru` switch) is still
+open: the task still runs as `InteractiveToken` with its visible console window. Item 4 stands.
+Changes since activation that this doc now reflects: the conditional provisions-corroboration
+stage (2026-08-18), the recency-first sort's session-date dependency and WARNING line
+(2026-08-21/22), the `partial`-is-steady-state reading, the self-park class and two-edit
+unpark, the silent Task XML flags, and the `schtasks /run` manual trigger.

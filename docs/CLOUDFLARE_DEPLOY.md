@@ -6,7 +6,12 @@ for it; the console work is his, when he is back.)* Phase 1
 (create the Pages project) and Phase 2 (verify on `.pages.dev`) are DONE — 21 mechanical curl checks
 pass and the full product loop was confirmed in a real browser with zero console errors. **What
 remains is Phase 3 (nameservers) and Phase 4 (custom domain)**, both console/DNS work in Lance's own
-Cloudflare account.
+Cloudflare account (plus one nameserver switch in his Namecheap account, the registrar for
+`visiblegov.us`). *(Re-verified 2026-08-23: every Phase 2 curl check (#1-#5) still passes on
+`.pages.dev`, the `.html` → extensionless 308s still hold, and an anonymous `public_vote_feed`
+profile query returns 200 in well under a second — the 08-05 evidence is no longer the only proof;
+see the dated line in Phase 2. Nothing under `site/` names a host, so Phases 3-4 change no code —
+see "No code changes for Phase 4" below.)*
 
 > **Two real bugs surfaced during Phase 2 — the verification earned its cost.** (1) Every
 > `_redirects` rule was broken: Pages 308-canonicalizes `.html`, so targets pointing at `.html`
@@ -38,8 +43,8 @@ result ambiguous between the deploy and the DNS.
 | `site/404.html` | ✅ built 2026-08-05, JS-free |
 | `revoke execute ... from authenticated` | ✅ migration `0030`, applied + verified live 2026-08-05 |
 | Site verified end-to-end in a real browser against live data | ✅ 2026-08-03 (Playwright, zero console errors) |
-| Suite green | ✅ 2,328 / 0 |
-| LegiScan CC BY 4.0 attribution present | ✅ full text + license link on `trust.html`; every page's footer links to `/trust#attribution` |
+| Suite green | ✅ green — 2,328 / 0 at deploy time (2026-08-05); 2,600+ / 0 on 2026-08-23; run `node --test` in a clean shell for the current count (exact counts in docs go stale — CLAUDE.md) |
+| LegiScan CC BY 4.0 attribution present | ✅ full text + license link on `trust.html`; every data page's footer (built at runtime by `mountFooter` in `site/js/render.js`) links to `/trust#attribution`. The JS-free `404.html` deliberately has no footer and links to `/trust` only — it displays no LegiScan data, so the attribution obligation does not attach to it |
 
 ### ✅ The one thing that had no production evidence — now VERIFIED
 
@@ -66,7 +71,7 @@ Settings — these exact values:
 
 | Field | Value | Why |
 |---|---|---|
-| **Project name** | e.g. `visiblegov` | **pick deliberately — this becomes the permanent `<name>.pages.dev` URL** and is the first field in the wizard; renaming later means a new URL |
+| **Project name** | `visiblegov` — the actual value, not an example: it is what makes the live URL `https://visiblegov.pages.dev`, and a rebuild must reuse it to reproduce that URL | **pick deliberately — this becomes the permanent `<name>.pages.dev` URL** and is the first field in the wizard; renaming later means a new URL |
 | Repository | `lazrexmc/VisibleGov` | private repo; authorize Cloudflare's GitHub app for it |
 | Production branch | `main` | |
 | Framework preset | **None** | a preset injects an assumed build command you'd then have to clear |
@@ -93,7 +98,8 @@ The first deploy fires automatically on project creation — it is not a separat
 
 Do all of this against the `https://<project>.pages.dev` URL. **Verify at the origin with
 `curl`, not a browser screenshot** — Pages ignores a `Cache-Control` override in `_headers` for
-assets, so a browser can show you a cached lie (LinkedUmp §292).
+assets, so a browser can show you a cached lie (LinkedUmp PLAYBOOK_DELTA §8.2, "Launch-to-live traps"
+item 2 — the same item this repo's PLAYBOOK_DELTA §7 lesson 5 cites).
 
 ```bash
 BASE=https://<project>.pages.dev
@@ -117,6 +123,14 @@ curl -sI "$BASE/person/whatever" # expect 200 (rewrites to the extensionless /pe
 # 5. The new 404 page
 curl -si "$BASE/no-such-page" | head -12   # expect 404 + text/html + "Page not found"
 ```
+
+**Re-run 2026-08-23 against `https://visiblegov.pages.dev` — all pass** (recorded so the
+2026-08-05 run is not the only evidence): #1 all three security headers on `/`; #2 geocode 200
+with all three headers; #3 geocode 400 with all three headers; #4 `/trust` and `/person/whatever`
+both 200; #5 `/no-such-page` 404, `text/html`, "Page not found". Also: `/person.html` and
+`/trust.html` each 308 to their extensionless path (the canonicalization behind the lesson-32
+`_redirects` fix), and an anonymous REST query of `public_vote_feed` for one legislator (200-row
+limit) returned HTTP 200 in ~0.2s — migration 0031's fix is still holding under the anon role.
 
 Then, in a real browser, walk the product claim end-to-end (the same loop verified locally on
 2026-08-03): directory → click a legislator → see real recorded votes → click a bill from a vote →
@@ -160,7 +174,21 @@ Context (historical, 2026-08-05, for the old subdomain plan): Lance owns
 `helpingpeoplehelpingpeople.com`, and it currently serves only a disposable caard.io one-pager he
 is fine losing. Moving nameservers **moves the entire zone**, not just the subdomain — the
 one-pager will stop resolving once its records are gone. **Superseded 2026-08-22 — not needed
-for `visiblegov.us`; keep that zone where it is.**
+for `visiblegov.us`; keep that zone where it is.** The HPHP clean-sweep rationale that step 2
+used to carry lives here now (moved 2026-08-23 — it was zone-specific, and a reader following
+step 2 literally would have applied a superseded justification to the wrong zone):
+
+- *(superseded 2026-08-22)* Nothing on the HPHP zone needed preserving — Lance confirmed
+  2026-08-05 (CHATLOG, the 2026-08-05 HPHP-email entry): no email functions of any kind, and the
+  only content was a disposable caard.io one-pager. That confirmation is what made the step a
+  clean sweep rather than a judgment call *on that zone*: the usual danger is dropping `MX`
+  records and silently killing email someone set up (or a registrar added by default), and it
+  did not exist there.
+- *(superseded 2026-08-22)* So, on HPHP: parking `A`, parking `www` CNAME, SPF `TXT`, any
+  `eforward`/`MX`, and the caard.io records would all have gone.
+
+**That confirmation was about `helpingpeoplehelpingpeople.com` only and does not transfer to
+`visiblegov.us`** — the .us zone gets its own look in step 2 below.
 
 **The trap (LinkedUmp §4.3, "Registrar cruft fights your DNS"):** when Cloudflare imports the
 existing zone it pulls in whatever the registrar had — commonly a parking `A` record, a parking
@@ -168,17 +196,25 @@ existing zone it pulls in whatever the registrar had — commonly a parking `A` 
 move (registrar email forwarding only works on the registrar's own DNS), and leftover records fight
 the Pages custom-domain attachment.
 
-1. Cloudflare dashboard → **Add a site** → enter the domain → Free plan.
-2. Cloudflare shows the records it imported. **Delete all of them.**
-   - **Nothing on this zone needs preserving** — Lance confirmed 2026-08-05: no email functions of
-     any kind, and the only content is a disposable caard.io one-pager. That confirmation is what
-     makes this step a clean sweep rather than a judgment call: the usual danger here is dropping
-     `MX` records and silently killing email that someone set up (or that a registrar added by
-     default), and that danger does not exist on this domain.
-   - So: parking `A`, parking `www` CNAME, SPF `TXT`, any `eforward`/`MX`, and the caard.io records
-     all go. Leftover records fight the Pages custom-domain attachment (LinkedUmp §4.3) — a clean
-     zone is the goal, not a minimal edit.
-3. Cloudflare gives you two nameservers. Set them at the current registrar, replacing what's there.
+1. Cloudflare dashboard → **Add a site** → enter `visiblegov.us` → Free plan.
+2. Cloudflare shows the records it imported. **Delete all of them — for the reason that is true of
+   THIS zone** *(rewritten 2026-08-23; the HPHP-specific bullets that used to sit here are in the
+   historical paragraph above)*:
+   - `visiblegov.us` is a fresh registration — RDAP (checked 2026-08-23): registrar NameCheap,
+     Inc., registered 2026-08-22T13:19Z — and nothing has ever been set up on it: no email, no
+     site, no record anyone added on purpose. As of 2026-08-23 it resolves only to registrar
+     parking (`A 162.255.119.110`; nameservers `dns1`/`dns2.registrar-servers.com`).
+   - So what Cloudflare imports should be registrar cruft only: the parking `A`, probably a
+     parking `www` CNAME, and whatever default `MX`/`TXT` Namecheap adds. **Read the imported
+     list and confirm it is only that before deleting.** If a record is there that Lance does not
+     recognise, stop and ask rather than assume — the 2026-08-05 "no email to preserve"
+     confirmation was about a different zone and does not cover this one.
+   - Leftover records fight the Pages custom-domain attachment (LinkedUmp §4.3) — a clean zone is
+     the goal, not a minimal edit.
+3. Cloudflare gives you two nameservers. Set them at **Namecheap** (the registrar for
+   `visiblegov.us`): the domain's **Manage** page → the **Nameservers** setting → switch from
+   Namecheap BasicDNS to **Custom DNS** and enter the two Cloudflare hosts, replacing
+   `dns1`/`dns2.registrar-servers.com`.
 4. Wait for Cloudflare to report the zone **Active** (usually minutes; can take longer).
 
 ---
@@ -186,11 +222,18 @@ the Pages custom-domain attachment.
 ## Phase 4 — Attach the custom domain
 
 ~~Decided 2026-07-28: the target is `visiblegov.helpingpeoplehelpingpeople.com` (a subdomain).~~
-**Superseded 2026-08-22: the target is the apex `visiblegov.us`** (Lance bought it; the .com is
-squatted at ~$1,995 and .org is taken — CHATLOG 2026-08-21). Attach the apex, then add `www`
+**Superseded 2026-08-22: the target is the apex `visiblegov.us`** (Lance bought it — CHATLOG
+2026-08-22 morning entry, "I now own the domain visiblegov.us as well"; registered
+2026-08-22T13:19Z at Namecheap per RDAP). *(Citation corrected 2026-08-23: this line originally
+cited "CHATLOG 2026-08-21" and said "the .com is squatted at ~$1,995 and .org is taken" — the
+08-21 CHATLOG entry only lists the candidates `visiblegov.us / .net / the subdomain`, and no
+CHATLOG, TODO, or memory entry records the .com/.org pricing; that aside is kept here as
+unrecorded, not as a cited fact.)* Attach the apex, then add `www`
 as a second custom domain (Pages issues certificates for both; point `www` at the apex with a
-Cloudflare redirect rule or a second Pages custom domain — either is fine, pick one and re-run
-the checks against both hosts).
+Cloudflare redirect rule or a second Pages custom domain — either is fine; the choice is still
+open, see "Open decisions" below — and re-run the checks against both hosts:
+`https://visiblegov.us` in full, and `https://www.visiblegov.us` either in full (second custom
+domain) or for its redirect to the apex (redirect rule)).
 
 1. Pages project → **Custom domains** → **Set up a custom domain** → enter `visiblegov.us`.
 2. With the zone already on Cloudflare (Phase 3), the required DNS record is created for you.
@@ -199,6 +242,38 @@ the checks against both hosts).
    geocode Function, and the 404 page are all origin/host-sensitive — passing on `.pages.dev` does
    not prove them on the custom domain.
 
+**No code changes for Phase 4** (verified 2026-08-23): nothing under `site/` names a host — a grep
+for `pages.dev`, `visiblegov.us`, and `helpingpeople` returns nothing — and the CSP in
+`site/_headers` (and its Function-side copy in `site/js/security-headers.js`, confirmed carrying
+the same Supabase `connect-src` origin on the live geocode response) hardcodes only the Supabase
+origin, which does not change. `site/config.js` carries the Supabase URL and anon key, which are
+host-independent. So Phases 3-4 are entirely console work; the step-4 re-run checks the
+*platform's* behaviour on the new host (certificate, `_headers` injection, `_redirects`, the
+Function route), not any code path.
+
+**Docs to flip when Phase 4 lands** (listed 2026-08-23; as of that date each of these names
+`visiblegov.us` as the *pending* custom domain — most beside a struck-through or
+"(Superseded 2026-08-22)" mention of the 2026-07-28 subdomain — so the work is flipping "pending"
+to "done", not correcting the target; grep `visiblegov.us` and `helpingpeoplehelpingpeople`, line
+numbers drift):
+- `README.md` — the status paragraph ("Only the custom domain remains — DECIDED 2026-08-22 as the
+  apex `visiblegov.us` ..."), the site bullet ("custom domain (`visiblegov.us`, decided
+  2026-08-22) still pending"), and this runbook's entry in the file list ("what remains is console
+  work (Phases 3-4 ...)").
+- `CLAUDE.md` — the RESUME banner's "What remains: the custom-domain phases (nameservers + attach
+  ~~...~~ — superseded 2026-08-22: the apex `visiblegov.us` ...)" and the standing-rules bullet's
+  "Only the custom-domain phases remain".
+- `TODO.md` — RESUME HERE item (e) ("custom domain DECIDED 2026-08-22: `visiblegov.us` ... his
+  console work after his AFK") and the Cloudflare-deploy NOW entry under it, whose "Remaining, per
+  `docs/CLOUDFLARE_DEPLOY.md`" sentence still reads the subdomain + clean sweep before its
+  "(Superseded 2026-08-22 ...)" note, plus the HPHP context paragraph in its item 4.
+- Memory `deploy-last-backend-first.md` — its "What remains (the ONLY open deploy work)" paragraph
+  still names the HPHP subdomain with the clean-sweep framing (the `.us` decision is only in the
+  2026-08-22 update line at the bottom), and `MEMORY.md`'s index line says "deferred past his
+  AFK" — rewrite both to done.
+- This runbook — the status banner at the top, the Phase 3 "DECIDED" callout, and the "After
+  deploy" ladder.
+
 One LinkedUmp lesson explicitly checked and **not applicable here**: *"different origins = different
 sessions — `*.pages.dev` and the custom domain each hold their own login."* That concerns auth
 sessions; this site has no login at all (anon key only, RLS is the wall), so both hostnames can
@@ -206,7 +281,7 @@ coexist without confusion.
 
 ---
 
-## Open decision (not blocking any phase)
+## Open decisions (not blocking any phase)
 
 **Preview deployments.** Pages auto-builds a public preview for every branch/PR by default. Because
 `site/config.js` hardcodes the real production anon key, every preview is a fully live copy of the
@@ -217,6 +292,13 @@ to be world-readable, the anon key is designed to be public, RLS is the actual w
 auth session to get confused across origins. The only mild downsides are duplicate content for
 search engines and the chance someone shares a stale preview URL. Restrict it later if either
 becomes a real annoyance.
+
+**`www` wiring** (added 2026-08-23; Lance's call, not decided as of this date). Two equally fine
+ways to give `www.visiblegov.us` a home: (a) a Cloudflare redirect rule sending it to
+`https://visiblegov.us` — one host serves content, and the Phase 4 re-run checks the apex in full
+and only checks that `www` redirects; or (b) `www` attached as a second Pages custom domain — two
+hosts serve content, and every Phase 2 check runs against both. Record the choice here when made
+so the Phase 4 re-run has a fixed host list.
 
 ---
 

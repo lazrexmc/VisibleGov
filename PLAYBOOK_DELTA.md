@@ -1,10 +1,82 @@
 # PLAYBOOK_DELTA — what VisibleGov inherits, and what it will add
 
-*Companion docs (to be created as the project takes shape): `CHATLOG.md` (word-for-word decision
-trail), `CLAUDE.md` (this project's own working rules), `TODO.md` (backlog). This file is seeded
-2026-07-27, before any VisibleGov code exists — it's the distilled, reusable lessons pulled from
-Lance's other projects, read BEFORE the first line of VisibleGov gets written, per his own
-established method.*
+*Companion docs: `CHATLOG.md` (word-for-word decision trail), `CLAUDE.md` (this project's own
+working rules), `TODO.md` (backlog — its RESUME HERE block is the only live-verified status). This
+file was seeded 2026-07-27, before any VisibleGov code existed — the distilled, reusable lessons
+pulled from Lance's other projects, read BEFORE the first line of VisibleGov got written, per his
+own established method — and has carried VisibleGov's own lessons since (§7 and the numbered
+lessons after it). Seed-time framing updated 2026-08-23; an index of the lessons follows.*
+
+---
+
+## Index of lessons (added 2026-08-23)
+
+**Numbering convention.** Lessons 1-13 are the numbered list items under "§7. VisibleGov's own
+delta" — cite them as "§7 lesson N" or plainly "lesson N". From 14 on, each lesson is its own H2,
+`## Lesson N — <title> (<date>)`, so `grep -n '^## Lesson 27 '` jumps straight to it (a
+`grep '^## Lesson 9'` finds nothing — lesson 9 is a list item). The form switched at 14 (commit
+44c5799, 2026-07-31): from there, entries are multi-paragraph write-ups — a failure narrative, the
+diagnosis, then the rule — which a list item cannot hold. §3-§6 are INHERITED lessons from the
+sibling projects and are cited by section ("§3.3", "§5.2"), never by lesson number. This file is
+past the Read tool's 25k-token single-Read cap (a cold Read truncates partway through), so page it
+with offset/limit or jump by grep.
+
+| # | Date | Lesson |
+|---|------|--------|
+| 1 | §7 | `node --test <dir>` breaks on Node 24 / Windows — run bare `node --test` |
+| 2 | §7 | Never let the audited model grade its own completeness — derive the verdict mechanically |
+| 3 | §7 | HTML-strip traps in government text — strip the known marker before decoding, never bracket-strip decoded text |
+| 4 | §7 | Supabase edge blocks secret keys on browser-like user agents — use curl/node |
+| 5 | §7 | Read LinkedUmp's deploy lessons in place (deploy done 2026-08-05; registrar cruft still applies to the custom domain) |
+| 6 | §7 | Append controller rulings INTO the brief file |
+| 7 | §7 | Attribute cross-process effects before judging honesty |
+| 8 | §7 | Verify the actual counterfactual before overruling a subagent |
+| 9 | §7 | Additive pipeline stages must never fail the primary product |
+| 10 | §7 | Sentence-splitting legal text: over-split, never silent merge |
+| 11 | §7 | Control characters don't survive tool-write escaping — generate sentinels at runtime |
+| 12 | §7 | Hotfixes get task reviews too — urgency is when review matters most |
+| 13 | §7 | A shared surname is not identity; write plan predicates as MUST/NEVER, not slash-alternatives |
+| 14 | 07-31 | `&&` after a `grep` is not a test gate — gate on the extracted fail count |
+| 15 | 07-31 | A schema bound is a request, not a guarantee — re-verify at the gate |
+| 16 | 07-31 | Audit output exists to be read, not to be `ok: true` |
+| 17 | 07-31 | Correcting production data: source the mapping, guard the write |
+| 18 | 08-01 | Never hand-transcribe machine-readable lists into agent dispatches |
+| 19 | 08-01 | Government sources say "not found" with HTTP 200 + a human-readable page |
+| 20 | 08-02 | This project's Supabase endpoint never populates `count` on `.update().select()` |
+| 21 | 08-02 | A regex capture group is a string; a JSON field of the same name may not be |
+| 22 | 08-02 | A status flag is not the invariant if more than one writer can set it |
+| 23 | 08-03 | Grepping a function's branches for a marker proves only the branches that HAVE it |
+| 24 | 08-03 | An existing test can encode an architectural boundary a new design missed |
+| 25 | 08-03 | The Bash tool strips a layer of backslash-escaping before Node sees a `-e` command |
+| 26 | 08-04 | RPC calls hit a ~120s edge-gateway timeout (fixed by pg_cron, 0027); grep CHATLOG before re-diagnosing |
+| 27 | 08-04 | Postgres `statement_timeout` is armed ONCE, from the GUC ambient at statement start |
+| 28 | 08-04 | The `LEFT JOIN ... WHERE x IS NULL` anti-join can be catastrophically misestimated by the planner |
+| 29 | 08-04 | Run a plain `EXPLAIN` BEFORE any empirical timing investigation |
+| 30 | 08-05 | A contaminated SHELL turns correct tests red — never `source .env` before `node --test` |
+| 31 | 08-05 | "Relative to what?" — every path field in a deploy console is silently asking it |
+| 32 | 08-05 | A static host applies its OWN URL semantics before your rules run |
+| 33 | 08-05 | Fix every object that carries a bad idiom and extend the guard to the whole class |
+| 34 | 08-06 | `state` + `chamber` do not identify a legislature; `jurisdiction_id` does |
+| 35 | 08-09 | Quote-bearing text for a native exe goes through a FILE, never an argument (PowerShell 5.1) |
+| 36 | 08-09 | A negative-predicate gauge silently absorbs every status value invented after it |
+| 37 | 08-10 | Diagnose a silently-dead background task from its disk artifacts; resume from journaled state |
+| 38 | 08-10 | Park a failing STRUCTURAL CLASS, not one instance at a time |
+| 39 | 08-16 | A tool-call parameter can be silently truncated in transport (~50KB) |
+| 40 | 08-17 | Too big to send: bank it to a file and send a pointer |
+| 41 | 08-19 | A test fake that mirrors return shapes but not CONSTRAINTS passes every concurrency test |
+| 42 | 08-19 | A verbatim-quote check is only as strong as the excerpt's provenance |
+| 43 | 08-21 | Killing a background SHELL does not kill its node child; verify liveness by PID |
+| 44 | 08-21 | A spend cap that only gates BEFORE submission cannot stop a batch; project from disk, calibrate HIGH |
+| 45 | 08-22 | A mostly-NULL sort key degrades silently; measure coverage, grep every consumer |
+| 46 | 08-22 | Anything retyped into a launch call is a transcription; keep it tiny, point at the rest |
+| 47 | 08-22 | `Workflow({name})` can serve a cached script; launch edited workflows by `scriptPath` |
+| 48 | 08-23 | A grammar verified on two fixtures is a hypothesis; ground-truth EVERY quarantined instance |
+| 49 | 08-23 | "Needs human review" is honest only if a human could resolve it; a bill-less roll call is a typed record |
+| 50 | 08-23 | A never-exercised fallback is a hope; "not derivable" is true only of the derivation tried |
+
+Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
+2026-07-29 — lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
+lesson lands, add its row here in the same commit.
 
 ---
 
@@ -54,8 +126,9 @@ to the next.
 **The compounding claim:** promotion-gates-and-drift-detection (league) + grounding-against-a-real-
 source (Pokemon) + canon-and-handoff (IBTP) + stack-and-security (Glizzness) + the rapid-launch
 loop (LinkedUmp) all land on VisibleGov at once, for the first time merged into one seed document.
-VisibleGov's own job is to prove the method works on a FIFTH domain - public civic data - and add
-its own delta back to this chain.
+VisibleGov's own job is to prove the method works on a SIXTH domain - public civic data - and add
+its own delta back to this chain. *(The seed text said "FIFTH"; five prior domains are listed
+above, so VisibleGov is the sixth — arithmetic corrected 2026-08-23.)*
 
 ---
 
@@ -97,7 +170,12 @@ it is. Revisit this section before shipping any summarization or scoring logic.
 3. **Provenance-tag every derived write.** Every stored bill summary / vote record should carry
    which ingestion run, which source snapshot, and which model/prompt version produced it - so a
    bad batch can be traced and re-run without guessing. Don't backfill provenance for old rows
-   retroactively with guessed metadata; leave them untagged and move on.
+   retroactively with guessed metadata; leave them untagged and move on. *(Concrete instance for
+   DATES, 2026-08-23: a vote date printed on the roll call and a date derived from the same
+   source's tallied history action are different provenances — migration
+   `0032_vote_date_provenance.sql` (DRAFTED, awaiting Lance's apply as of 2026-08-23) adds
+   `votes.vote_date_provenance`, NULL for printed dates and a verbatim receipt for derived ones,
+   and the ingest refuses to store a derived date until the column exists. See lesson 50.)*
 4. **Startup recovery and steady-state polling are different code paths.** Collect everything once
    on process start (catch up after downtime), then poll incrementally after that - don't conflate
    the two.
@@ -186,7 +264,10 @@ it is. Revisit this section before shipping any summarization or scoring logic.
    Cloudflare funnels to Workers (use Pages → Connect to Git); registrar DNS cruft fights
    custom domains; Pages ignores `_headers` Cache-Control on assets — verify deploys at the
    ORIGIN with curl+cachebuster, never a browser screenshot; never combine `?v=` pins with
-   revalidation headers.
+   revalidation headers. *(Deploy DONE 2026-08-05 — lessons 31-33 record what it taught;
+   `docs/CLOUDFLARE_DEPLOY.md` is the runbook. §4.3's registrar-DNS-cruft warning is the part
+   still live: it applies to the pending `visiblegov.us` custom-domain phase, decided 2026-08-22,
+   Lance's console work.)*
 6. **Append controller rulings INTO the brief file.** A reviewer flagged an honest implementer for a "fabricated citation" that was actually verbatim from the controller dispatch - invisible to the reviewer because dispatches are not files. Rulings that extend a brief belong in the brief.
 7. **Attribute cross-process effects before judging honesty.** A background driver loop auto-running newly-committed code wrote an artifact the reviewer pinned on the implementer. Long-lived loops reload code per invocation; check process logs before concluding anyone lied.
 8. **Verify the actual counterfactual before overruling a subagent.** The controller "verified"
@@ -493,7 +574,9 @@ would buy time but not remove the ceiling — the durable fix is running the ref
 all (`select cron.schedule('refresh-vote-aggregates', '*/30 * * * *', 'select
 refresh_vote_aggregates();');` is the current, confirmed-live Supabase Cron syntax as of this
 writing — verify against `https://supabase.com/docs/guides/cron` again if this project revisits it
-later, since Supabase's own docs explicitly warn this area changes).
+later, since Supabase's own docs explicitly warn this area changes). *(Done: that exact statement
+shipped as migration `0027_pg_cron_refresh_aggregates.sql`, applied and confirmed live by Lance
+2026-08-04; lesson 27 picks up from the job's first runs. Status note added 2026-08-23.)*
 
 **The costlier miss: this exact problem — the RPC call to THIS SAME function timing out no matter
 what — already happened once, earlier the SAME session, and was already solved.** CHATLOG.md
@@ -755,15 +838,19 @@ Two corollaries that cost real time here:
 
 ## Lesson 35 — Quote-bearing text for a native exe goes through a FILE, never an argument (Windows PowerShell 5.1) (2026-08-09)
 
-Lesson 25 caught PowerShell mangling `node -e` one-liners; the same failure has a second face:
+Lesson 25 caught the Bash tool stripping escapes from `node -e` one-liners; the same failure class
+(a shell layer rewriting text before the target program sees it) has a second face, in PowerShell:
 **any argument containing embedded double quotes gets re-tokenized when PowerShell 5.1 hands it to
 a native executable** — even from inside a single-quoted here-string, which protects the text from
 PowerShell's *parser* but not from its broken native-argument *marshalling*. Live failure: a
 `git commit -m @'...'@` whose message quoted a gate reason (`"(SEC. 2)" vs "SEC. 2"`) exploded into
 multiple arguments; git treated the fragments as pathspecs and the commit failed. The general rule:
 prose destined for a native tool — commit messages, PR bodies, JSON payloads — gets WRITTEN TO A
-FILE (with the Write tool, not `Set-Content`, per lesson 25) and passed by path: `git commit -F
-<file>`, `--body-file`, `--file`. Arguments are for identifiers; files are for text.
+FILE (with the Write tool, not `Set-Content` — the cmdlet's value is itself a PowerShell argument,
+and it defaults to the system ANSI codepage) and passed by path: `git commit -F <file>`,
+`--body-file`, `--file`. Arguments are for identifiers; files are for text. *(Attribution corrected
+2026-08-23: this lesson used to credit lesson 25 with a PowerShell failure; lesson 25 is about the
+Bash tool, not PowerShell.)*
 
 ## Lesson 36 — A negative-predicate gauge silently absorbs every status value invented after it (2026-08-09)
 
@@ -818,8 +905,10 @@ prior days, so the ceiling is real but fuzzy. Two mechanics: (1) treat any singl
 parameter approaching ~50KB as at-risk — split the payload (two 3-bill launches instead of one
 6-bill launch) rather than betting on the limit; (2) the failure signature to recognize is
 instant death with a parse error and 0 work done — the launch acknowledgment is an enqueue
-receipt, not a delivery receipt. Related but distinct from the 25k-token Read cap (lesson
-band): that one truncates what you READ, this one truncates what you SEND.
+receipt, not a delivery receipt. Related but distinct from the Read tool's 25k-token cap (not a
+numbered lesson — it is the tool's own truncation notice, and the reason this file now carries an
+index at the top; a dangling "(lesson band)" reference here was fixed 2026-08-23): that one
+truncates what you READ, this one truncates what you SEND.
 
 ## Lesson 40 — When a payload is too big to send, bank it to a file and send a pointer — agents can Read what transport can't carry (2026-08-17)
 
@@ -888,6 +977,18 @@ by grepping command lines. (2) After any "stop," re-read the job's own checkpoin
 few minutes later: a state file that keeps moving is a process that is still alive, whatever the
 process table says. (3) Disclose an unpaused process and any spend it incurred immediately and
 plainly; the checkpoint design made this one recoverable, not invisible.
+
+*Where the recipe lives (added 2026-08-23): nowhere greppable yet — no launcher script exists and
+`scripts/gloss-batch-mo.mjs` has no PID handling; the relaunch was done by hand and is recorded in
+CHATLOG.md (2026-08-21: "Relaunched with Start-Process -PassThru and the PID written to
+.superpowers/artifacts/gloss-batch-mo/runner.pid so a future stop is real" — the exact command
+was not journaled). The shape, PowerShell 5.1:
+`$p = Start-Process node -ArgumentList '--env-file=.env','scripts/<runner>.mjs'
+-PassThru; Set-Content <artifacts-dir>/runner.pid $p.Id` — stop with `Stop-Process -Id (Get-Content
+<pid-file>) -Force` (`taskkill /PID <pid> /T /F` if the runner spawns children), then confirm
+`Get-Process -Id <pid>` errors AND the checkpoint files have stopped moving. The closest in-repo
+relative is the scheduler's lock file (`acquireLock` in `scripts/scheduled-ingest.js` writes
+`process.pid` into its lock JSON) — a lock, not a launch recipe, but the same liveness idea.*
 
 ## Lesson 44 — A spend cap that only gates BEFORE each submission cannot stop a single batch; project every batch from the data on disk, and calibrate the projection HIGH against a real run (2026-08-21)
 
@@ -1000,6 +1101,25 @@ that is reported and counted, not a failure. Corollary for the data model: votes
 nullable from day one ("some votes are procedural") and nothing ever used it — the schema knew
 something the parser did not.
 
+*(Status 2026-08-23, same day: the fix is merged — commit 5ced4eb; all 20 quarantined days parse,
+137/137 ground-truthed blocks, suite green — so the quarantined set is 0 and replay is in
+progress: the first live 2018 day completed as non-bill (0979a57's "0/3/0" is 0 votes written /
+3 non-bill roll calls / 0 failures; the day's done marker reads `votes: 0, non_bill_votes: 3,
+gated: false`), the 14 2026-session days drain through the scheduler one per day-writing slot
+(~every 1.5-1.75 h on 08-23, not every tick — `total_pending_days` 14 → 11 by 12:30Z; TODO's
+RESUME HERE carries the live remainder), and the replay surfaced a 52-day 2018 journal backlog
+(TODO INBOX, Lance's call). Two corrections to the corollary above: (a) the journal's non-bill
+blocks are classified and COUNTED (`nonBillVotes`), not stored — the adapter says "for now, never
+stored as votes"; (b) "nothing ever used it" was already wrong when written — the federal Senate
+adapter stores bill-less roll calls (cloture, motion-to-proceed and confirmation votes on
+nominations, PN numbers) with a NULL `bill_id`: hundreds are live, all 119th-Congress (451 at
+2026-08-23, one of them a House vote; re-count live for current), and `site/js/person-page.js`
+renders them without a bill link — the question text itself (e.g. "On the Cloture Motion —
+PN13-11"), falling back to "(procedural vote, no associated bill)" only when a row has no
+question. The schema knew, one adapter was already using it; the journal parser was the one that
+did not. What the replay itself teaches is not yet a lesson. Cadence, done-marker fields and the
+person-page wording corrected on review, 2026-08-23.)*
+
 ## Lesson 50 — A documented fallback that was never exercised is a hope, not a plan; and "not derivable" is only true for the derivation you actually tried (2026-08-23)
 
 TODO 23 carried, for three weeks, the line "all 275 are House roll calls the primary house.mo.gov
@@ -1012,7 +1132,8 @@ click where the ToU forbids scripting; (2) the same ruling said the dates were "
 derivable," and the evidence was one perfection vote whose history printed no tally. Floor
 passage actions in the same history print the tally and the date. "Not derivable" had been
 tested against one derivation on one example; a corpus pass (275 roll calls, offline, minutes)
-found a printed, exact, tally-keyed match for 184 of them. Before accepting that a gap is
+found a printed, exact, tally-keyed match for 185 of them (184 before an adversarial review
+hardened the rule). Before accepting that a gap is
 permanent, enumerate the derivations the source's own printed data allows and measure each over
 the whole corpus — and spot-check the per-item endpoint before concluding a bulk-export sentinel
 is the source's final word (here it was, but that is a query, not an assumption).

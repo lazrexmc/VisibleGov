@@ -31,7 +31,7 @@
 -- Visibility: anon holds a TABLE-level select on votes (0001's anon_read policy; 0025 scoped only
 -- summaries/glossary_terms), so this column is anon-readable on apply — acceptable, it is public
 -- source text. The public views (public_votes / public_vote_feed, 0023/0031) list columns
--- explicitly and do NOT include it, so the site will serve the 184 derived dates without an
+-- explicitly and do NOT include it, so the site will serve the 185 derived dates without an
 -- inline receipt until the view and bill page carry it — a captured TODO, not an oversight.
 -- Draft-then-apply: Lance applies.
 

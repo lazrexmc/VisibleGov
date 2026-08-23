@@ -5725,3 +5725,56 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   `outside_session_years` (year 0), not `unparseable_date` — unchanged. Next, after the
   migration: `ingest-legiscan --dataset-file <wrapped cached 2122 envelope>` ($0, no API query)
   to store the 184 + their casts; then correct TODO 23 / DATA_INVENTORY GAP 1. **Adversarial review before commit (3 lenses, 23 agents, 19 findings confirmed by execution, 1 refuted) — all 19 addressed, and the rule re-measured by a known-truth replay (every cached session, printed dates blanked, derived, compared): 16 wrong → 11, all of them a one-day journal skew (nine on the single 2018-05-18 TAFP day; 0.31% of derived dates), the cross-chamber, mis-tag and sibling classes gone.** The two HIGHs: LegiScan's history `chamber` TAG is not the acting chamber (it disagrees with the action text's (H)/(S) suffix on hundreds of entries — HB 2634's "Third Read and Passed (S)" is tagged H), so the acting chamber is now the SUFFIX (a suffix-less action counts only when its tag agrees); and uniqueness was one-sided — two of a bill's own roll calls sharing a tally would both have taken the one printed action's date, so the bill's sibling roll calls now veto (two-sided uniqueness). Mediums: ambiguity counted over the whole history BEFORE any filter; candidate dates must be real calendar dates and never a sentinel; yea/nay must be genuine integers (null coerced to 0); the counters now reach run detail and a gated/conflicting run closes `partial` (exit 2); an upsert no-op is never counted as stored (the row is read back); a later printed date supersedes a derived one and clears the receipt; a legislative-day gate — the House PDF link prints the day ('rollcalls/047.012.pdf') — refuses any derived date that contradicts another on the same day or breaks day order; the migration header's 'not granted to anon' claim was false (0001's table-level policy) and is rewritten honestly with the measured residual and the public-view receipt gap captured; `insertIfAbsent` now preserves the PostgREST error as `cause`; a refused derived date is reported as 'derived', not 'printed'. Net effect on 2024: 184 → 185 datable (1433444 joins via its suffix). 72 + 67 tests in the two LegiScan suites, incl. a run-level test that the counters land in the closed run's counts.
+- **Documentation audited end to end and corrected — 15 documents, 192 findings, 172 upheld after
+  adversarial verification; every one applied or explicitly skipped** (2026-08-23, Lance: "once
+  complete audit the documentation thoroughly and make corrections and additions as needed").
+  Two workflow passes, both read-only-then-write: a READ pass (one reader + one adversarial
+  verifier per document, 30 agents) checked every checkable claim — counts, dates, status words,
+  file paths, commands, flags, migration numbers — against `npm run status`, live queries, the
+  code, and git, and listed what each doc should carry but did not; then a FIX pass (one editor +
+  one checker per document, 30 agents) applied them, each editor re-reading the current file first
+  because several findings had already been fixed by the morning's commits. Scope: README,
+  CLAUDE.md, TODO (RESUME HERE + INBOX), PLAYBOOK_DELTA, the nine `docs/*.md`, the public
+  `site/trust.html`, and the auto-memory files. CHATLOG was excluded by rule (append-only).
+  **What was actually wrong** — the recurring shape is "a status word that was true when written":
+  README and CLAUDE.md still named the superseded `visiblegov.helpingpeoplehelpingpeople.com`
+  subdomain and quoted 710 published / 359 drafts / 107 flags (live: 1,094 / 32 / 364);
+  `docs/SCHEDULED_SUMMARIES.md` said the daily task was "NOT YET REGISTERED" and had "never made a
+  single real, paid API call" when it has ticked daily since 2026-08-17 and spent $2.70 this ISO
+  week; `docs/CONTROLLER_BRIEFING.md` still had 4 identity flags open (0), `vote_duplicates`
+  excluding nothing (66 rows, 66 votes excluded from public views), MO terms undated (192/194
+  dated 2026-08-06), and the glossary "never billed end-to-end" (1,742 glosses since);
+  `docs/DISASTER_RECOVERY.md` — the rebuild runbook — omitted the summaries scheduler, the MO
+  bill-text ingest (`ingest-legiscan-texts.js`, without which the summary pipeline has nothing to
+  read), and `sync-session-dates.js`, and mis-stated what `correct-data.js all` runs (6 of 11);
+  `docs/DATA_INVENTORY.md` still said 116 glossary terms and "no new glossing has run";
+  `docs/VOTERTABLES_JOIN_GAMEPLAN.md` called a feature that shipped 2026-07-30 a proposal and
+  claimed the site had no address→district lookup while `site/index.html` has carried one since
+  deploy; `docs/ARTIFACTS.md` documented 8 of 16 cache directories and told operators "do not
+  raise that interval" about a MINIMUM interval (raising it is the compliant direction — lowering
+  it is the ToU violation). **The public trust page was the most important one to get right** and
+  four of its claims were too broad: the per-position tally reconciliation is a Missouri-source
+  rule (the federal adapters store casts as the Clerk's and LIS's own files list them and never
+  compare against the printed totals), a flagged summary is not "waiting for the maintainer to
+  read it personally" (it is held back unpublished and re-authored with the verifier's objections,
+  publishing only on a clean fresh check, with the replaced draft kept as a rejected attempt), an
+  open flag does not hide either record (both are stored and shown; a LegiScan row is hidden only
+  once paired as a duplicate), and "every published fact carries a link to the official source" is
+  false for a few hundred house.mo.gov roll-call rows and a few dozen bills that have no
+  source URL on file — each now says what is actually done. Two attributions were missing (the
+  Clerk of the U.S. House, OpenStates) and are added, and a new "what is not here" paragraph
+  states the coverage floors so a gap is not read as a record. **Three things I fixed myself after
+  the agents finished:** (1) five files and the 0032 migration header still said "184 of 275"
+  while the commit said 185 — I settled it by running the shipped rule over the cached 2024
+  dataset: **185 datable, 90 refused (79 no action prints that tally, 10 a sibling roll call
+  shares it, 1 wrong acting chamber), 0 legislative-day conflicts** — and unified every file on
+  the measured numbers (DATA_INVENTORY's breakdown had also summed to 99, not 91); (2) four files
+  (`site/trust.html`, ARTIFACTS, CONTROLLER_BRIEFING, DISASTER_RECOVERY) came back converted to
+  CRLF against LF at HEAD — reverted, and every edited file now byte-matches HEAD's line endings;
+  (3) the full suite went red on `backfill-nicknames-cli.test.js` asserting the real
+  `legiscan-datasets` cache holds *exactly* 34 files — the registered ingest scheduler had cached
+  a new `dataset_hash` for session 2239 at 11:45 that morning, making it 35. That test pinned the
+  ENVIRONMENT's size, not the function's contract, and had already been bumped 31→32→33→34; it now
+  asserts shape, containment, lexicographic order (which the nickname precedence depends on), a
+  floor of 31, and the presence of session 1608. Suite **2,630 pass / 0 fail**. The trust page's
+  2024 sentence is date-stamped and says what will change, since applying 0032 makes it false.

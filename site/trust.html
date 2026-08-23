@@ -22,23 +22,34 @@
     <section aria-label="The pipeline">
       <h2 id="pipeline">From official record to this page</h2>
       <p>Every fact on this site starts as a document published by an official source: LegiScan's
-        bulk data service and the Missouri Senate's own journals for Missouri Senate roll calls,
-        the house.mo.gov XML data service for Missouri House bills and votes, and Congress.gov,
-        the Clerk of the U.S. House, and the U.S. Senate's Legislative Information System for
-        federal bills and votes. Nothing on this site is entered by hand from a news story, a
-        press release, or anyone's recollection of what happened.</p>
-      <p>Before an individual legislator's recorded vote ("cast") on a roll call is stored, the
-        count of casts for each position — yea, nay, not voting, absent — must match the tally
-        the source itself printed for that roll call. If the counts don't match, nothing is
-        quietly corrected or averaged to make them fit: the mismatched roll call is held back, or,
-        when two independent sources genuinely disagree about the same roll call, it is flagged
-        for a human to read both sources and decide (see "Reconciliation flags and quarantined
-        data" below). A cast is never invented to make a tally add up.</p>
+        bulk data service for Missouri House and Senate roll calls, cross-checked wherever a
+        matching record exists against the Missouri Senate's own journals and the house.mo.gov XML
+        data service (which serves only the current General Assembly), and Congress.gov, the Clerk
+        of the U.S. House, and the U.S. Senate's Legislative Information System for federal bills
+        and votes. Nothing on this site is entered by hand from a news story, a press release, or
+        anyone's recollection of what happened.</p>
+      <p>Before an individual legislator's recorded vote ("cast") on a Missouri roll call is
+        stored, the count of casts for each position — yea, nay, not voting, absent — must match
+        the tally the source itself printed for that roll call. If the counts don't match, nothing
+        is quietly corrected or averaged to make them fit: the mismatched roll call is held back,
+        or, when two independent sources genuinely disagree about the same roll call, it is flagged
+        and kept open until it is resolved as described under "Reconciliation flags and quarantined
+        data" below. A cast is never invented to make a tally add up. Federal roll calls are stored
+        cast by cast as the Clerk of the U.S. House's and the U.S. Senate's own roll-call files
+        list them (a cast whose member cannot be matched to this site's roster is counted as
+        unresolved and left out, never guessed); this site does not currently compare those casts
+        against the totals printed in the same file, so that check does not apply to federal
+        votes.</p>
       <p>A bill's plain-language summary is authored only from that bill's own official text —
         never from a model's general knowledge of the subject, and never from news coverage or
         commentary about the bill. Before a summary publishes, a second, independent model reads
         the same official text and tries to find anything the summary claims that the text does
-        not actually support — an adversarial check, not a second opinion that simply agrees.</p>
+        not actually support — an adversarial check, not a second opinion that simply agrees.
+        Summaries have been produced on two lanes, and the stored record of every summary names the
+        models used: on one, claude-opus-5 authors and claude-sonnet-5 verifies; on the other —
+        budget-capped API runs, today a small daily batch under a fixed weekly spending cap —
+        claude-haiku-4-5 authors and claude-sonnet-5 verifies. The checks and publication rules
+        below are the same on both.</p>
       <p>A summary publishes automatically only after it clears mechanical completeness checks —
         every required field present, the stated purpose verified as a verbatim excerpt of the
         bill's own text, and every point carrying a citation that matches the section the verifier
@@ -46,42 +57,70 @@
         model reading each point against its cited section and trying to refute it, never simply
         agreeing. Neither model's own report is trusted directly; the completeness checks and the
         "clean" result are both re-derived mechanically in code from what the models actually
-        produced, not read off a claim either model makes about itself. Anything the verification
-        flags waits in a queue for this project's maintainer to read personally before it can
-        publish — a flagged item is never quietly waved through, and the page says so wherever it
-        applies.</p>
-      <p>Every published fact carries its own receipt: a link to the official source, and, where
-        the fact is drawn from a larger document, the quoted excerpt it was drawn from. That
-        excerpt is recorded by the checking model as the passage it relied on; the link beside it
-        goes to the official source so you can confirm the wording yourself, which is the check
-        that actually settles it. Nothing here asks you to trust a rating or a label in place of
-        the source.</p>
+        produced, not read off a claim either model makes about itself. (Ten summaries published
+        in July 2026, before the completeness check existed, were verified on the adversarial
+        support check only and have not been re-checked as of 2026-08-23.) Anything the
+        verification flags is never published as it stands: the flagged draft is held back,
+        unpublished, and the bill may be re-authored with the verifier's specific objections as
+        instructions, publishing only if a fresh adversarial check on the new draft comes back
+        clean; the draft it replaces is then kept in the record as a rejected attempt, never
+        deleted. A bill that has already had two drafts rejected, or whose text breaks the checks
+        structurally, is not re-authored automatically: its draft is held, unpublished, for this
+        project's maintainer to review. A bill page with no published summary says so plainly; a
+        draft that has not cleared verification is never shown.</p>
+      <p>Every published summary point and every glossary entry carries its own receipt: the
+        quoted excerpt it was drawn from, and a link to the official source wherever one is on
+        file. For a summary, that excerpt is the passage the checking model relied on; for a
+        glossary entry, it is the passage the authoring model quoted, mechanically checked to be a
+        verbatim substring of the source text before it can be stored. The link goes to the
+        official source so you can confirm the wording yourself, which is the check that actually
+        settles it. Every glossary entry has that link. Bills and votes link to the official
+        document wherever the source supplied one; as of 2026-08-23 a few hundred Missouri
+        roll-call rows from the house.mo.gov feed and a few dozen bills with a published summary
+        have no source link on file, and those pages show no link rather than a guessed one.
+        Nothing here asks you to trust a rating or a label in place of the source.</p>
     </section>
 
     <section aria-label="Reconciliation flags and quarantined data">
       <h2 id="flags">Reconciliation flags and quarantined data</h2>
       <p>A <strong>reconciliation flag</strong> means two of this project's independent data
-        sources recorded the same roll call differently — for example, LegiScan's tally and the
-        Missouri Senate's own printed journal disagree about how a specific legislator voted, or
-        about the final count. When that happens, the disagreement is not resolved by picking
-        whichever number looks right, or by averaging the two. It is recorded as an open flag and
-        set aside for a human to read both sources and decide. Any vote shown on this site
-        carrying a "⚑ reconciliation flag" badge links back to this page.</p>
+        sources could not be confirmed against each other for a roll call — for example,
+        LegiScan's tally and the Missouri Senate's own printed journal disagree about how a
+        specific legislator voted, or about the final count; or one source's own cast list is too
+        incomplete to compare; or LegiScan records a roll call for which the Missouri source has no
+        record whose tallies correspond to it. When that happens, the disagreement is not resolved
+        by picking whichever number looks right, or by averaging the two. It is recorded as an open
+        flag. A flag is closed by a person reading both sources and deciding, or — in one
+        mechanical case only, when the missing Missouri record later arrives and matches LegiScan's
+        tallies exactly — by recording that match inside the flag itself; a flag is never deleted.
+        (As of 2026-08-23 no flag has yet been closed mechanically, and the Missouri Senate journal
+        days affected by a since-fixed parsing fault are being re-read; flags raised while that
+        fault stood stay open until they are closed as above.) Any vote shown on this site carrying
+        a "⚑ reconciliation flag" badge links back to this page.</p>
       <p>While a flag is open, this site does not blend or split the difference between the
-        disagreeing sources — it displays the record from this project's designated primary
-        source for that chamber, shown exactly as printed. This is <strong>primary-source-first
-        display</strong>: the badge is the reader's signal that a second source disagrees, so you
-        can go compare both original documents yourself, rather than trust a number this site
-        invented to reconcile them.</p>
-      <p>Missouri Senate roll-call detail — which legislator cast which vote — comes from scanned
-        journal documents that have to be mechanically extracted before they can be checked
-        against LegiScan's own tallies. When a given journal day's extraction cannot be
-        automatically confirmed against the printed tally (a parsing failure, an unreadable page,
-        a mismatch that cannot be resolved without a person looking at the source), that day is
-        <strong>quarantined</strong>: held out of the published record rather than guessed at, and
-        counted honestly as a day "pending human review," never silently dropped and never
-        silently published as if it had been confirmed. The data-freshness table below shows the
-        current quarantined-day count for every source that has one.</p>
+        disagreeing sources, and it does not hold either record back on the strength of the
+        disagreement alone: both records are stored and shown, each exactly as its source printed
+        it — the Missouri source's record carries the badge and the LegiScan record is listed
+        beside it unchanged; nothing is merged. That holds whether the two sources print
+        contradictory yea or nay totals, differ only on who was absent or not voting, or cannot be
+        paired at all. A LegiScan record is hidden in one case only: when it has been paired with
+        a Missouri record as the same roll call — mechanically, when a later pass of the same check
+        finds their tallies agree, or by a person closing a flag and recording the pairing. Then
+        the Missouri source's own record is the one displayed and the LegiScan copy is kept but
+        hidden from public pages, marked as its duplicate so the pairing stays traceable; neither
+        row is deleted. This is <strong>primary-source-first display</strong>: the badge is the
+        reader's signal that a second source could not be confirmed against the first, so you can
+        go compare both original documents yourself, rather than trust a number this site invented
+        to reconcile them.</p>
+      <p>Missouri Senate roll-call detail — which legislator cast which vote — comes from the
+        Senate's journal PDFs, whose text has to be mechanically extracted and reassembled before
+        it can be checked against LegiScan's own tallies. When a given journal day's extraction
+        cannot be automatically confirmed against the printed tally (a parsing failure, an
+        unreadable page, a mismatch that cannot be resolved without a person looking at the
+        source), that day is <strong>quarantined</strong>: held out of the published record rather
+        than guessed at, and counted honestly as a day "pending human review," never silently
+        dropped and never silently published as if it had been confirmed. The data-freshness table
+        below shows the current quarantined-day count for every source that has one.</p>
       <p>The same discipline runs in both directions: a fact is never invented to fill a gap, and
         a fact is never suppressed just because it is inconvenient. A dispute or a gap is shown as
         a dispute or a gap, with a path back to the primary documents so it can be checked
@@ -99,8 +138,9 @@
 
     <section aria-label="Data freshness">
       <h2 id="freshness">Data freshness</h2>
-      <p>What is ingested, from where, and through when — the same table every page's own
-        freshness box is drawn from, shown here in full for every source this project tracks.</p>
+      <p>What is ingested, from where, and through when — the same table a legislator's profile
+        page draws its freshness box from, shown here in full for every source this project
+        tracks.</p>
       <div id="freshness-table"></div>
     </section>
 
@@ -109,6 +149,20 @@
       <p class="counts-caption">These five counts are fetched live from the same database the
         site reads — not a cached snapshot, not a rounded estimate.</p>
       <div id="counts-list"></div>
+      <p>What is not here, so a gap is not mistaken for a record: Missouri roll-call coverage
+        begins with the 2015 session (Missouri Senate roll calls with 2016) and federal coverage
+        with the 119th Congress (January 2025); earlier years are not on this site. The Missouri
+        Senate's own journals are being read for the current session and, among earlier years,
+        were sampled only for 2018, so other years' Senate roll calls rest on LegiScan's record
+        alone. Missouri House roll calls from 2024 are, as of 2026-08-23, absent: LegiScan prints
+        no date for them, the house.mo.gov export serves only the current General Assembly, and
+        this site does not store a roll call under an invented date. Most of them can be dated
+        from the tally the same source prints beside a dated action in the bill's own history, and
+        will appear once that is in place, each carrying that action as its receipt; the rest —
+        where no printed tally identifies the day, or two votes on a bill share one — stay out.
+        Not every bill has a summary — as of 2026-08-23
+        roughly one in four bills with a recorded passage vote has a published one; a bill page
+        without a summary says so and shows the record it does have.</p>
     </section>
 
     <section aria-label="Attribution">
@@ -123,6 +177,9 @@
           requires this attribution wherever the data is shown.</li>
         <li><strong>Congress.gov</strong> (<a href="https://www.congress.gov">congress.gov</a>) —
           federal bill text, status, and sponsor data.</li>
+        <li><strong>Clerk of the U.S. House of Representatives</strong>
+          (<a href="https://clerk.house.gov">clerk.house.gov</a>) — U.S. House roll-call votes,
+          from the Clerk's published roll-call XML files.</li>
         <li><strong>U.S. Senate Legislative Information System (LIS)</strong>
           (<a href="https://www.senate.gov/legislative/LIS/">senate.gov/legislative/LIS</a>) —
           U.S. Senate roll-call votes.</li>
@@ -146,6 +203,12 @@
           (<a href="https://github.com/unitedstates/congress-legislators">github.com/unitedstates/congress-legislators</a>),
           released under a CC0 (public domain) dedication. Adopted as this site's source for
           federal legislators' real, per-term start and end dates.</li>
+        <li><strong>Open States</strong> (<a href="https://openstates.org">openstates.org</a>),
+          whose people data is released under a CC0 (public domain) dedication — the source for
+          Missouri legislators' term start dates (each verified against LegiScan's own record
+          before it is used), for the published start and end dates of some Missouri legislative
+          sessions, and for a small set of early Missouri vote-event rows ingested through its API
+          before LegiScan became this site's Missouri roll-call source.</li>
         <li><strong>Photographs</strong> — sourced from the Congressional Biographical Directory
           (bioguide.congress.gov) and served via the unitedstates/images mirror
           (<a href="https://unitedstates.github.io/images/congress/">unitedstates.github.io/images/congress</a>).</li>

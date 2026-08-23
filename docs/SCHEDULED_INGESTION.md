@@ -1,10 +1,26 @@
 # Scheduled ingestion — `scripts/scheduled-ingest.js`
 
 The first thing in this repo designed to run **unattended, on Lance's machine, forever**, with no
-human watching a single invocation. Everything about its design follows from that one fact. This
+human watching a single invocation (the first of two such tasks now — see the status note just
+below). Everything about its design follows from that one fact. This
 doc is what let him register it (his own step — an agent never runs `schtasks`) and is what he uses
 to keep an eye on it now that it's running.
 
+> **Current status as of 2026-08-23:** registered and running (Task Scheduler task `VisibleGov
+> Scheduled Ingestion`, every 15 minutes). Nearly every tick is `live` — the registry is
+> oversubscribed, so saturation is the normal state (the 2026-08-05 correction under *Registering
+> it*). The `pg_cron` aggregate refresh is healthy; this scheduler's own post-tick refresh collides
+> with it on :00/:30 ticks and logs a benign `lock timeout` about half the time (the 2026-08-23
+> notes under step 4 and item 5). The MO Senate journal replay is draining through `mo-senate-web`
+> (the section at the bottom of this file, dated 2026-08-23, is the newest material here; *What a
+> `mo-senate-web` tick actually does* explains the drain rate). **This is no longer the only
+> registered task:** `VisibleGov Scheduled Summaries` (`scripts/scheduled-summaries.js`, daily at
+> 06:00, its own lock file `.superpowers/artifacts/summary-scheduler.lock.json`, its own log
+> directory `summary-scheduler-logs/`, and a $5/ISO-week spend ledger computed from
+> `ingestion_runs`) is documented in `docs/SCHEDULED_SUMMARIES.md` — a fresh session reading Task
+> Scheduler history should expect two tasks. Everything from the next banner down is a dated
+> history layer; live numbers come from `npm run status`.
+>
 > **Status (updated 2026-08-02): ALREADY REGISTERED AND RUNNING.** Lance ran the registration
 > 2026-07-31 late night — see "Registering it" below for the exact command, kept for reference (a
 > reinstall, a new machine, or a schedule change would use the same one, with `/f` safely
@@ -63,6 +79,13 @@ to keep an eye on it now that it's running.
 > (fixed via migration 0029). All three applied and verified live 2026-08-04. **Current status: the
 > scheduler and its aggregate-refresh step are both healthy** — see item 5 under "How to verify it
 > is alive" for the full three-layer history and live verification evidence.
+>
+> **Superseded in one respect, 2026-08-23:** "both healthy" still holds for the scheduler and for
+> the `pg_cron` leg, but the scheduler's OWN post-tick refresh (step 4) now fails with `canceling
+> statement due to lock timeout` on roughly half of its attempts — every one on a :00/:30 tick,
+> where `pg_cron`'s `*/30` refresh already holds the matview locks. Benign (pg_cron owns that
+> refresh; the data is not stale) but `aggregatesHealthy:false` is noisy — captured in TODO.md
+> 2026-08-22 with two cheap fix options, not yet built. Details under step 4 and item 5.
 
 ## What it does
 
@@ -97,7 +120,10 @@ Each invocation:
      work), that row would otherwise be stranded at `status='running'` forever — lying about state
      to anyone reading it (`public_freshness` included) while still silently advancing due-ness.
      The scheduler closes it honestly instead: `status='failed'`, `detail.scheduler_kill: true`,
-     scoped so it can only ever touch a row this exact tick could plausibly have created.
+     scoped so it can only ever touch a row this exact tick could plausibly have created (the
+     scope starts `ORPHAN_CLOSE_SKEW_GRACE_MS` — 5 minutes — before the tick's own start time, so
+     a local clock running slightly ahead of the database's cannot hide the row; safe because
+     every registry interval is ≥30 minutes, so no older `running` row can fall inside that window).
 4. If that run's own recorded counts show it actually wrote rows, refreshes the vote aggregates
    (`scripts/refresh-aggregates.js`) — the same standing practice every ingest batch has always
    followed, so the profile charts never silently drift behind the vote lists. A tick whose only
@@ -110,6 +136,23 @@ Each invocation:
    `pg_cron` is now the primary, structural guarantee that aggregates stay current; this
    scheduler's own post-tick call remains an additional, more immediate refresh right after a tick
    that actually wrote new rows, and still uses the same underlying function.
+   > **Known collision, noted here 2026-08-23 (captured in TODO.md 2026-08-22; not yet fixed).**
+   > When a write-tick lands on a :00/:30 boundary — the Task Scheduler ticks at :00/:15/:30/:45,
+   > and in practice the `mo-house-xml` tick, the one that most often writes rows, lands on
+   > :00/:30 about half the time — this post-tick call runs at the same instant as `pg_cron`'s `*/30`
+   > refresh and fails with `canceling statement due to lock timeout`
+   > (`aggregatesResult.parsed.mode: 'failed'`, `aggregatesHealthy: false`). On 2026-08-22 and
+   > 2026-08-23 that was roughly half of all attempts (12 of 23, then 12 of 20 by 14:30Z), every
+   > failure on a :00/:30 tick, every :15/:45 attempt `refreshed`. **This is benign:** `pg_cron`
+   > owns that refresh and completes it, so the matviews are current — confirm from the `pg_cron`
+   > leg, not from this flag: the newest `source='refresh-aggregates'` rows in `ingestion_runs`
+   > (or the `refresh-aggregates` line of `npm run status`) should read `succeeded` within the
+   > last ~30 minutes. Only a lock-timeout failure on a :15/:45 tick, or a refresh failing some
+   > other way, deserves a second look. Two cheap fixes are on file in TODO.md (classify a lock
+   > timeout within ~60s of a :00/:30 boundary as the benign "pg_cron owns this refresh" class and
+   > log it without marking the tick unhealthy, or skip the post-tick call when a `pg_cron` row
+   > finished in the last N minutes) — capture only, not built.
+   >
    > **Caveat added 2026-08-05 (phase-2 deep audit) — this "primary guarantee" currently has NO
    > working automated failure signal.** Migration 0027's `EXCEPTION` handler can never actually
    > record a failure: PL/pgSQL implicitly savepoints the `BEGIN` block, so any error rolls back
@@ -118,7 +161,14 @@ Each invocation:
    > `ingestion_runs`.** Downstream, `public_freshness` therefore keeps showing
    > `source='refresh-aggregates'` as `succeeded` with a quietly aging `finished_at`, and
    > `npm run status` prints it with no staleness threshold — so a broken pg_cron job (failing
-   > ticks, unscheduled job, disabled extension) is invisible to every automated surface. Nothing
+   > ticks, unscheduled job, disabled extension) is invisible to every automated surface. (A
+   > related reading trap, noted 2026-08-23: 0027's bookkeeping takes `started_at` from the
+   > column default and sets `finished_at = now()` inside the same transaction, and Postgres's
+   > `now()` is transaction-start time — so every `pg_cron` row has `started_at == finished_at`
+   > to the microsecond. Such a row proves the job fired and committed; the zero duration is not
+   > a skip and says nothing about how long the refresh took — the ~19s baseline comes from
+   > manual `npm run refresh:aggregates` wall-clock and `cron.job_run_details`, not from these
+   > rows.) Nothing
    > reads `cron.job_run_details`; the scheduler's own `aggregatesHealthy` only exists on ticks
    > where the scheduler itself wrote rows; the `/fail` healthcheck ping requires the opt-in
    > `HEALTHCHECK_PING_URL` (inert until set). This is the same silent-failure class that already
@@ -159,7 +209,8 @@ Each invocation:
   pick on every tick forever. The scheduler now closes that gap itself (see step 3 above).
 - **Never dates a session it mints.** Every driver here that creates a `sessions` row (legiscan,
   mo-house-xml, mo-senate) writes identifier + name only — no `start_date`. Recency-first ordering
-  in the summary exporter and the summary scheduler depends on that column, so after any ingest
+  in the summary exporter and the summary scheduler (`scripts/scheduled-summaries.js`, the sibling
+  registered task — `docs/SCHEDULED_SUMMARIES.md`) depends on that column, so after any ingest
   that mints a new session, run `node --env-file=.env src/cli/sync-session-dates.js` (dry-run),
   review, then `--apply` (2026-08-22; until then both consumers fall back to the session's
   name-year and log how many rows needed it).
@@ -193,6 +244,24 @@ had scheduled ingestion, so new federal roll calls simply never arrived.
 `US_CONGRESS_MIN_INTERVAL_MS` / `US_SENATE_MIN_INTERVAL_MS` / `LEGISCAN_MIN_INTERVAL_MS` can be
 raised via `.env` if Lance ever wants these to run less often; any value below the defaults above
 is silently floored back up to them.
+
+### What a `mo-senate-web` tick actually does (2026-08-23)
+
+`--limit 1` is one *slot*, not always one journal day. `ingest-mo-senate.js` spends its slot in a
+fixed priority order and closes the run as soon as one slot is consumed: (1) a **roster** refetch
+if the cached roster is older than 24 hours (`MO_SENATE_ROSTER_MAX_AGE_MS`; run detail
+`counts.slot: 'roster'`); else (2) a **journal-index** refetch if the cached index is older than
+60 minutes (`MO_SENATE_INDEX_MAX_AGE_MS`; `counts.slot: 'journal-index'`); else (3) **one journal
+day** (no `slot` key — the day's own counts instead). Because this source runs about hourly under
+saturation (see *Registering it*), its runs alternate journal-index / journal-day — expect roughly
+one journal day per 1.5-2 hours, not one per tick (observed 2026-08-23: day runs at 07:30Z,
+09:15Z, 10:45Z, 12:30Z). Run-detail fields worth reading on a day run: `total_pending_days` (what
+remains in this year's worklist), `quarantined_days` (days parked on a `.failed.json` marker; `[]`
+is healthy), `non_bill_votes`, `attribution`, and `attributed_from_context` (see the section at the
+bottom of this file). The registry passes `--year <current>` only, so a **prior year's journal
+backlog has no automatic drain path** — the 2018 session's worklist was found to hold 52
+unprocessed days on 2026-08-23 and needs manual `--year 2018 --limit 1` runs (or a registry
+decision — TODO.md, Lance's call).
 
 ## Per-source timeouts — why legiscan is different
 
@@ -313,8 +382,12 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    behind UTC, so any time after ~7pm Central (6-7pm during daylight time), "today's" log entries
    are already landing in *tomorrow's* dated file. If the file you'd expect looks stale or is
    missing entirely, check the next day's filename before assuming the scheduler stopped. A
-   healthy scheduler shows an entry roughly every 15 minutes, alternating between `nothing-due`,
-   `already-running`, and occasional `live` runs as each source's cooldown elapses; if the most
+   healthy scheduler shows an entry roughly every 15 minutes, almost all of them `live` — the
+   registry is oversubscribed, so some source is nearly always due (see the 2026-08-05 correction
+   under *Registering it*; on 2026-08-22: 86 `live` / 10 `nothing-due` / 0 `already-running`
+   across 96 ticks) — with `nothing-due` only in quiet gaps and `already-running` rarely (the
+   "alternating `nothing-due`/`already-running`/`live`" wording in the 2026-08-02 banner above
+   described the first day after registration; superseded 2026-08-23); if the most
    recent entry across both today's-UTC and tomorrow's-UTC files is more than ~20 minutes old, the
    scheduled task itself has stopped firing (check Task Scheduler's history, not this repo).
 2. **`npm run status`'s freshness block.** Reads `public_freshness` directly from the database —
@@ -469,6 +542,18 @@ Two independent signals, on purpose — one from the scheduler's own perspective
    class that produced the earlier 14-hour outage. The honest fix (per the audit and TODO.md): drop
    the exception handler and rely on `cron.job_run_details` for observability. See `TODO.md` for the
    fix-later plan and the audit's fuller framing.)
+   **Update 2026-08-23 — "both refresh paths healthy" no longer holds for the post-tick leg,
+   benignly.** The `pg_cron` leg is fine (its `refresh-aggregates` rows keep landing `succeeded` on
+   every `*/30` boundary). The scheduler's own post-tick call, however, fails with `canceling
+   statement due to lock timeout` on roughly half its attempts — every failure on a :00/:30 tick,
+   where it races `pg_cron`'s refresh for the same matview locks (2026-08-22: 12 of 23; 2026-08-23:
+   12 of 20 by 14:30Z; every :15/:45 attempt `refreshed`). So the reading rule above —
+   "`aggregatesResult.parsed.mode` is the real outcome" — needs one qualifier: a `lock timeout`
+   failure within ~60s of a :00/:30 boundary is the benign pg_cron-owns-this-refresh collision, not
+   a failure streak. Confirm health from the `pg_cron` rows (`ingestion_runs` where
+   `source='refresh-aggregates'`, newest first, or the `refresh-aggregates` line of `npm run
+   status` — `succeeded` within the last ~30 minutes), and see the 2026-08-23 note under step 4
+   for the two fix options captured in TODO.md 2026-08-22 (not built).
 
 Manual checks any time, safe to run for real (read-only, zero writes, zero external fetches):
 
@@ -488,14 +573,20 @@ schtasks /delete /tn "VisibleGov Scheduled Ingestion" /f         # remove entire
 If the machine ever loses power mid-run, the lock file self-heals: a lock older than its own
 declared max duration (10 minutes by default, `MAX_RUN_DURATION_MS`; up to ~76 minutes if a
 `legiscan` run was in progress — see *Per-source timeouts* above) is automatically reclaimed on
-the next tick, with a warning logged. You can also delete
+the next tick, with a warning logged. One guard on that reclaim (`MAX_LOCK_DURATION_MS`, 2 hours):
+a lock whose declared duration is missing, corrupt, or above that ceiling — a hand-edited file, a
+future bug — is judged by the 10-minute default instead of being honored, so a bad value can never
+wedge every later tick into a permanent `already-running` that Task Scheduler's history would show
+as a healthy exit 0. You can also delete
 `.superpowers/artifacts/scheduler.lock.json` by hand at any time if you want a clean next tick
 immediately rather than waiting out whichever window applies.
 
 ## Known gap: `legiscan` may report `resolvable: false`
 
 The scheduler looks up the current MO session's `legiscan_session_id` from the `sessions` table
-(keyed off `ingest-mo-house.js`'s own `DEFAULT_MO_HOUSE_SESSION`) rather than guessing — see
+(keyed off `src/adapters/mo-house-xml.js`'s `DEFAULT_MO_HOUSE_SESSION` — the same constant the
+House CLI falls through to; corrected 2026-08-23, it was never defined in `ingest-mo-house.js`)
+rather than guessing — see
 `resolveLegiscanSessionId`'s own comment in `scripts/scheduled-ingest.js`. As of this writing that
 resolves correctly (session `261` → LegiScan session `2239`). If it ever stops resolving, the
 `legiscan` source is skipped honestly (logged, `resolvable: false`, with a reason) rather than
@@ -522,8 +613,10 @@ the real session `'261'`/`legiscan_session_id 2239`) is now closed, verified aga
   self-correction closed a false-ambiguity risk the first cut of this fix would have introduced the
   next time MO calls a special session — see CHATLOG 2026-08-02.)
 
-**What this means for the scheduler:** `mo-senate-web` keeps running on its registered 30-minute
-cadence exactly as before — nothing about the scheduler itself changed — but it is no longer
+**What this means for the scheduler:** `mo-senate-web` keeps running on its 30-minute cooldown
+floor (in practice ~hourly under saturation — see the 2026-08-05 correction under *Registering it*;
+"30-minute cadence" was the original wording here) exactly as before — nothing about the
+scheduler itself changed — but it is no longer
 feeding a duplicate-session defect while it does. Re-verify this claim against `sessions` /
 TODO.md if this document is read long after 2026-08-02 and the fix's continued correctness matters
 (12 real scheduler ticks had run clean with zero duplicates recreated as of the 2026-08-02 check
@@ -531,14 +624,20 @@ that closed this item).
 
 ## MO Senate journal attribution kinds and non-bill roll calls (2026-08-23)
 
-`ingest-mo-senate.js` run detail now carries every attribution kind the parser can produce —
-`motion`, `preceding_taken_up`, `conference_committee_report`, `title_block`,
-`preceding_title_block`, `amendment_instruction`, `narrative_window` — and `non_bill_votes`
+`ingest-mo-senate.js` run detail now carries the attribution kinds the parser produced that run —
+`motion` and `preceding_taken_up` always (seeded at 0), plus any of `conference_committee_report`,
+`title_block`, `preceding_title_block`, `amendment_instruction`, `pending_amendment_recall`,
+`narrative_window` that actually occurred (a kind that did not occur is absent, not 0; corrected
+2026-08-23 — `pending_amendment_recall` was missing from this list) — and `non_bill_votes`
 (quorum calls, simple-resolution adoptions/amendments, journal amendments, appointment
 confirmations: recorded roll calls that are mechanically not votes on a bill; reported, never
 stored, never a failure). A day completes when `failures` is 0, so a day made only of non-bill
 roll calls completes. The 20 days quarantined on `bill_refs` through 2026-08-22 were this class;
 see CHATLOG 2026-08-23 and tests/mo-senate-journal-attribution.test.js. To replay a quarantined
 day after a parser fix: delete its `.failed.json` in `.superpowers/artifacts/mo-senate-journals/`
-and the day re-enters the worklist (the scheduler drains current-year days one per tick; prior
-years need a manual `--year <Y> --limit 1` run).
+and the day re-enters the worklist (the scheduler drains current-year days one per journal-day
+run — `mo-senate-web` runs about hourly under saturation and alternates a journal-index refetch
+with one journal day, so expect roughly one day per 1.5-2 hours, not one per tick; read
+`total_pending_days` in the run detail to see what remains — see *What a `mo-senate-web` tick
+actually does* above; prior years need a manual `--year <Y> --limit 1` run, and the 2018 worklist
+is 52 days long, per TODO.md 2026-08-23).

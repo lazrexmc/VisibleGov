@@ -1,10 +1,29 @@
 # Runbook — summary waves ($0 subagent path)
 
+> **LANE STATE (2026-08-23) — read this before running anything below.** Fresh summaries are
+> owned by the registered daily scheduler — `scripts/scheduled-summaries.js`, built 2026-08-15,
+> registered by Lance 2026-08-17, daily 6 AM, code-enforced $1.00/tick + $5.00/ISO-week ledger
+> (`docs/SCHEDULED_SUMMARIES.md`); the fresh-authoring subagent campaign this runbook was
+> written for completed 2026-08-10 and the lane was declared CLOSED 2026-08-18 (TODO's
+> docs-pass wording for this banner: "lane CLOSED 2026-08-18, scheduler owns summaries"). What
+> survives here is the **$0 drain / re-author lane** over flagged drafts (sections below), and
+> it ran to EMPTY on 2026-08-22: re-authorable pool 0, and the 28 drafts then open were exactly
+> the 28 PARKED bills, every one with a written reason. The 2026-08-23 6 AM tick has since minted
+> 4 new refusals — HB 1786, HB 1855, HB 1906, HB 3004 (live-verified 2026-08-23: 32 draft-only
+> bills, 28 parked, 4 in neither park list) — not yet triaged. Resume only when
+> `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` reports candidates —
+> the scheduler's own gate refusals are the only thing that mints new ones. Live counts
+> (published / awaiting review / retired, and the scheduler's week-to-date spend) come from
+> `npm run status`, never from a number typed into this file.
+
 **Lance's ruling (2026-08-07):** more plain-language summaries with zero work from him, dollars
 untouched — the engine is Claude-session subagent waves ("$0 sessions only"), scope = the queue's
 passage-priority bills first, then the rest. Flags accumulate silently in the review queue; they
 block nothing and he reviews them only if he ever feels like it. The billed autopilot
-(~$0.15/bill, ~$470 for the whole backlog) stays a standing offer, never assumed.
+(~$0.15/bill, ~$470 for the whole backlog) stays a standing offer, never assumed. *(Two parts
+of this ruling are superseded: the scope is recency-first since 2026-08-09, not passage-first —
+see step 1; and since the scheduler's registration the subagent path is the drain/re-author
+lane, not the engine — see the LANE STATE banner.)*
 
 Queue size at ruling time: 3,414 (3,121 passage). Wave 3 (2026-08-07, the first under this
 ruling): 12 bills → 7 auto-published + 5 flagged, 0 rejects, ~2.8M subagent tokens, ~28 min.
@@ -17,22 +36,58 @@ ruling): 12 bills → 7 auto-published + 5 flagged, 0 rejects, ~2.8M subagent to
    → writes `.superpowers/artifacts/wave3/manifest.json` + per-bill text files, hash-pinned at
    export time. Batch of 10-15 is the sweet spot (each bill ≈ 4 subagents ≈ ~230k tokens; mind
    the weekly plan limit).
-2. **Run the wave workflow**: `Workflow({ name: 'summary-wave', args: <manifest.json contents> })`
-   — the named workflow lives at `.claude/workflows/summary-wave.js`. Read the manifest file IN
-   FULL and pass its contents verbatim as `args`. (The script tolerates the harness delivering
-   args as a JSON string.) Per bill, 4 stages: opus authors from the official text; sonnet
-   adversarially verifies every bullet; a BLIND sonnet lists key provisions from the text only
-   (it must never see the summary — that separation IS the completeness check); a fourth maps
-   coverage from provisions + bullets only. Structured outputs enforce the schemas from
+   **Ordering (recency-first since 2026-08-09 — Lance: "hitting the current session bills
+   first"):** the full planner queue is sorted newest legislative session first (by
+   `sessions.start_date`); the planner's passage-first priority survives only as a tiebreak
+   within a session; smallest text first within that. Each manifest item carries
+   `session_start` (a real date or null), `session_sort_key`, and `session_dated`. If the
+   exporter prints `WARNING: N of M queued bills belong to a session with no start_date`, the
+   sort has degraded to name/identifier-year order — run `node --env-file=.env
+   src/cli/sync-session-dates.js` (dry-run, prints the plan), review, then `--apply`
+   (fill-null only, every value names its source). Found 2026-08-21 late (commit 38c9bca;
+   CHATLOG and PLAYBOOK log it as 2026-08-22): 30 of 31 MO sessions were undated and BOTH
+   recency consumers (this exporter and the scheduler's
+   `sortQueueRecencyFirst`) had silently degraded (PLAYBOOK lesson 45); the session-minting
+   ingest drivers still write no date, so re-run the sync after any new session is minted.
+2. **Run the wave workflow**: `Workflow({ name: 'summary-wave-3', args: <manifest.json contents> })`
+   — the registered name is `summary-wave-3` (`meta.name` in `.claude/workflows/summary-wave.js`);
+   after ANY edit to that file launch by `scriptPath` instead (last section, PLAYBOOK lesson 47).
+   Read the manifest file IN FULL and pass its contents verbatim as `args`. (The script tolerates
+   the harness delivering args as a JSON string.) Per bill, 4 agent stages plus a conditional
+   fifth: opus authors from the official text; sonnet adversarially verifies every bullet; a
+   BLIND sonnet lists key provisions from the text only (it must never see the summary — that
+   separation IS the completeness check); **Stage 3b (spec 2026-08-18, commit 27afe0b):** when
+   that blind list comes back sub-floor (<3 entries — the ceiling of the length-scaled floor), an
+   INDEPENDENT second blind provisions agent runs (fresh agent = fresh context) and its list
+   travels in the envelope as `completeness_corroboration`; a fourth maps coverage from
+   provisions + bullets only. Structured outputs enforce the schemas from
    `src/lib/summarizer.js` / `src/lib/verifier.js`.
+   **Which author branch runs is decided by the manifest item, in this order:** `preAuthored`
+   (a banked summary object — pure code, zero agents) → `reAuthor` / `reAuthor_file` (the
+   re-author-with-objections lane: opus authors FRESH from the text with the prior draft as
+   reference and the gates' exact objections as must-fixes) → `checkpoint_file` (bank-load: a
+   haiku agent transcribes the `summary` key of an `api-stages/<bill_id>.json` checkpoint
+   verbatim) → fresh opus authoring. `preVerified` (a prior wave's sonnet verdicts for the SAME
+   summary at the SAME hash — the re-check lane) turns stage 2 into a code no-op so the wave
+   spends agents only on provisions/coverage; the record gates re-derive `overall` from the
+   verdicts mechanically either way. Open gap (TODO, 2026-08-22): an item carrying a field the
+   running script does not recognise falls through to fresh authoring SILENTLY — it should throw;
+   not yet built.
 3. **Record** (mechanical gates decide publish/flag — never the agents, never the operator):
    build `{results: [envelopes]}` from the workflow result →
    `node --env-file=.env src/cli/summary-queue.js record --file <records.json> --dry-run` →
    inspect counts → re-run without `--dry-run`. Gates: schema shape, single-line fields,
    hash-provenance vs the stored text, verdict binding, stated-purpose verbatim grounding,
    completeness (length-scaled provision floor: 1 for <2.5k-char bills, 2 for <5k, 3 otherwise;
-   ceiling 7 — the 2026-08-08 wave-C catch-22 fix; grounded sections). CLEAN auto-publishes with
-   the trust-model-v3 note; anything else lands as a flagged/unverified draft.
+   ceiling 7 — the 2026-08-08 wave-C catch-22 fix; grounded sections; a sub-floor provisions
+   yield passes only with a well-formed independent corroboration run that agrees with it —
+   spec 2026-08-18 — and such a publish carries a `corroborated_thin: true` receipt plus the
+   corroborator's list in the same row). CLEAN auto-publishes with the trust-model-v3 note;
+   anything else lands as a flagged/unverified draft.
+   **Re-author and re-check waves record with `--replace-drafts`** (shipped 2026-08-08): the
+   bill's existing DRAFT at the same hash is superseded — retired to 'rejected' with an audit
+   note AFTER the new row lands; approved/published rows are never replaced, flag or no flag.
+   Without the flag a same-hash draft classifies as `alreadySummarized` and nothing is written.
 4. **Verify + log**: live summary counts by status; append the wave's numbers to `CHATLOG.md`.
 
 ## The hybrid pipeline (Lance's ruling, 2026-08-07 night: saturate the weekly subscription tokens; dollars only buy what subscription capacity can't)
@@ -49,9 +104,16 @@ Division of labor that minimizes $ per published bill:
   (`api:claude-haiku-4-5` author, `subagent:claude-sonnet-5` verifier — per-stage provenance
   fields, TDD'd).
 - **Yield reality (measured 2026-08-08, waves C+D):** draining Haiku-authored banked bills on
-  subscription publishes at ~1 in 20 (completeness gaps); fresh opus-authored waves publish at
-  ~55-75%. Lance's standing call: fresh opus waves first; the ~87 banked bills wait for a
-  re-author-with-objections enhancement.
+  subscription published 1 of 40 (wave C 0/20, wave D 1/20 — ~1 publish per ~3M subscription
+  tokens; completeness gaps); fresh opus-authored waves publish at ~55-75%. Lance's standing
+  call: fresh opus waves first; the ~87 banked bills wait for a re-author-with-objections
+  enhancement. *(Superseded the same night: the re-author-with-objections lane shipped
+  2026-08-08, commit d00efce — "Re-author priors" below. It does not reach the bank, though:
+  re-author needs an existing draft with gate objections, and a banked checkpoint has no summary
+  row at all. Counted live 2026-08-23: of the 125 author-only checkpoints in `api-stages/`, 85
+  still have NO summary row (the other 40 were published since through other lanes). They drain
+  only as `preAuthored` / `checkpoint_file` bank-load items, at the measured 1-of-40 yield — a
+  use of subscription capacity only when Lance frees it.)*
 - **Full-API runs** (`scripts/summary-probe-api.mjs` without `--author-only`, Sonnet checker
   default) remain for when Lance wants throughput beyond what the week's subscription can drain
   (~$0.04-0.10/bill smallest-first).
@@ -60,7 +122,15 @@ Division of labor that minimizes $ per published bill:
   other work owns the weekly tokens; waves take the leftovers). Superseded 2026-08-07 late by
   "use both until exhausted" for that night; check the CHATLOG for the latest standing state.
 - **The API platform balance is EXHAUSTED (2026-08-08)** — the billed path is closed until Lance
-  adds funds and gives a per-run yes.
+  adds funds and gives a per-run yes. *(Superseded — the chronology since: $1.98 spent 2026-08-09
+  on three budget-capped `summary-probe-api.mjs` runs, then $0; the USC glossary drain ran the
+  balance to $0 again on 2026-08-21 ($8.31 against an $8 cap — PLAYBOOK lesson 44); **Lance
+  loaded ~$7 the same evening**. Standing state as of 2026-08-23: `scripts/scheduled-summaries.js`
+  bills on its own under its $1.00/tick + $5.00/ISO-week ledger — that code-enforced ledger IS
+  its per-run approval (`docs/SCHEDULED_SUMMARIES.md`); EVERY other billed call,
+  `summary-probe-api.mjs` included, still needs Lance's per-run yes with the cost stated up
+  front; never assume a further reload. Week-to-date spend: `npm run status`, SUMMARY SCHEDULER
+  block.)*
 
 ## Standing traps
 
@@ -72,23 +142,69 @@ Division of labor that minimizes $ per published bill:
   routed away from API runs by the driver's `--max-chars`.
 - Never `source .env` in a shell that then runs `node --test` (repo standing rule).
 - The flagged-draft pile growing is EXPECTED and harmless — it is Lance's optional reading, not
-  anyone's backlog.
+  anyone's backlog. *(Superseded 2026-08-08: flagged drafts are the drain lane's INPUT — their
+  gate reasons become the objections `build-drain-wave.mjs` feeds the re-author lane, and the
+  daily scheduler's conversion lane reads the same pile. Only the PARKED set — `PARKED` in
+  `scripts/build-drain-wave.mjs` and the scheduler's
+  `.superpowers/artifacts/scheduled-summaries/parked.json`, every entry with a written reason —
+  is Lance's optional human-review reading.)*
 - PowerShell `Set-Content`/`-replace` round-trips MANGLE this repo's UTF-8 em-dashes — edit docs
   with the Write/Edit tools, never shell string-replacement.
+
+## The drain lane: `scripts/build-drain-wave.mjs` (promoted from the campaign scratchpad 2026-08-15, commit 306ee11)
+
+`node --env-file=.env scripts/build-drain-wave.mjs <WAVE> <N> [--pointer]` — for every bill whose
+ONLY summary state is a draft, reconstruct the mechanical gates' objections and batch the
+smallest bills first into `.superpowers/artifacts/wave3/wave-<WAVE>-args.json`. Objection
+sources, tried in order: (1) the on-disk envelope (`records-*.json` in the wave3 artifacts dir —
+the fast path for drafts this repo still has records files for); (2) the database (the
+2026-08-15 upgrade): the draft row's `body_md` parsed back plus its `summary_verifications` rows,
+through `src/lib/draft-objections.js`. Both paths compute the same three objection kinds the
+gates enforce — refuted verdicts, completeness coverage misses, an ungrounded stated_purpose —
+and a draft with no computable objection is skipped (it needs a re-verify or a fresh-mode wave,
+not re-authoring). It prints `draft-only bills in DB`, `envelopes on disk`, and the wave it
+built; zero candidates means the lane is empty (the state since 2026-08-22).
+
+**Strikes and parks (PLAYBOOK lesson 38 — park a failing CLASS, not one instance):** one retry
+after a first structural failure; park on the second identical failure; three attempts at most
+for anything. A park is a one-line human edit to the `PARKED` set in `build-drain-wave.mjs` with
+its reason written beside it (bill, failure class, date, what a human reviewer should confirm) —
+a parked list without reasons becomes a mystery blocklist within a month, and unparking is the
+same one-line edit (2026-08-18 unparked four bills whose park class the corroboration gate
+repaired). The daily scheduler keeps the same parks in
+`.superpowers/artifacts/scheduled-summaries/parked.json`: `node scripts/seed-scheduler-parks.mjs`
+copies the drain lane's set there (idempotent, never overwrites — re-run after parking anything
+new), and its conversion lane also skips any bill with >=2 prior rejected attempts.
+`scripts/park-tiny-fresh-bills.mjs` is the pattern for class-parking the scheduler's fresh
+queue into that file (`source=tiny-bill-stopgap-2026-08-17`) — but its one run was
+mispremised: it parked 688 bills against a floor of 3 when the length-scaled floor had already
+landed on 2026-08-08 (df771db), and the 687 length-lens entries were unparked the same day
+(CHATLOG 2026-08-17); the sub-floor class it was aimed at was then repaired properly by the
+2026-08-18 corroboration gate. Verify current state before parking a class.
 
 ## Re-author priors: inline or pointer (2026-08-22)
 
 A re-author manifest item carries either `reAuthor: {prior_summary, objections}` INLINE or
 `reAuthor_file: ".superpowers/artifacts/wave3/reauthor-<WAVE>-<bill_id>.json"` — a pointer to a
 JSON file with the same two keys that the author agent Reads (lesson 40). **Prefer the pointer
-form:** `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> <N> --pointer` writes the
-pointer files and a ~600-byte-per-bill args file. The launch call is retyped by hand, and a
-14KB inline prior lost one character in transit on 2026-08-22 — the wave died at `JSON.parse`
-before any agent ran. Read the args file and pass it verbatim either way.
+form:** `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> <N> --pointer` banks each prior
+to `reauthor-<WAVE>-<bill_id>.json` and writes a ~450-byte-per-bill stub into
+`.superpowers/artifacts/wave3/wave-<WAVE>-args.json` (commit 1e89d4d). The launch call is retyped
+by hand, and a 14KB inline prior lost one character in transit on 2026-08-22 — the wave died at
+`JSON.parse` before any agent ran (PLAYBOOK lesson 46: keep the retyped part too small to
+corrupt). Read the args file and pass it verbatim either way, and record the wave with
+`record --replace-drafts` (step 3). Two transport limits shaped this form: a single Workflow
+args parameter near ~50KB can be silently truncated — the launch acknowledgment is an enqueue
+receipt, not a delivery receipt (lesson 39); and `.claude/workflows/*.js` is pinned LF in
+`.gitattributes` (commit 216c131) because a CRLF copy of `summary-wave.js` blocks the Workflow
+permission layer (CHATLOG 2026-08-18, d48cac1).
 
 **After editing `summary-wave.js`, launch by path, not by name:** `Workflow({scriptPath:
 'F:\\VisibleGov\\.claude\\workflows\\summary-wave.js', args})`. `Workflow({name:
 'summary-wave-3'})` served a session-cached pre-edit copy on 2026-08-22 and the pointer stubs
 fell through to the FRESH author branch without any error (PLAYBOOK lesson 47). Verify: the
-launch output's "Script file" is the repo path, and the first author transcript contains
-"RE-AUTHORING" and "Read the JSON file".
+launch output's "Script file" is the repo path; grep the persisted per-run copy it names
+(`…/workflows/scripts/summary-wave-3-<runId>.js`) for the edit itself; and the first author
+transcript contains "RE-AUTHORING" and "Read the JSON file". The silent fallthrough is a
+design smell still open in TODO (2026-08-22): an item with a field the script does not
+recognise should throw, not author fresh.

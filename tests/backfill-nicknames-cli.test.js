@@ -50,22 +50,28 @@ test('real legiscan-datasets cache manifest: if the cache exists at all, session
 
 // ---- listCachedDatasetFiles ----
 
-test('listCachedDatasetFiles: the real repo cache dir has exactly the 34 cached dataset ZIPs this task is scoped to', (t) => {
-  // Bumped 31 -> 32 (2026-08-03), 32 -> 33 (2026-08-10), 33 -> 34 (2026-08-18): LegiScan datasets
-  // refresh weekly, so this real cache dir grows over time — this snapshot needs periodic bumps,
-  // same as every other "real cache dir" count in this test suite.
+test('listCachedDatasetFiles: every entry in the real repo cache dir is a dataset JSON under that dir, and the sessions this task needs are present', (t) => {
+  // Was `assert.equal(files.length, N)` and had to be bumped 31 -> 32 (2026-08-03) -> 33
+  // (2026-08-10) -> 34 (2026-08-18) -> would have been 35 (2026-08-23, when the registered
+  // ingest scheduler cached a new dataset_hash for the current session). That assertion tested
+  // the ENVIRONMENT's size, not this function's contract: it goes red on its own whenever the
+  // scheduler does its job, which reads exactly like a real break (it cost a diagnosis pass on
+  // 2026-08-23). Replaced with the invariants that actually matter — shape, containment,
+  // ordering, and the presence of the sessions the nickname backfill reads. The cache holds one
+  // file per (session, dataset_hash), so the current session legitimately accumulates versions.
   //
-  // Senior engineering audit (2026-08-03, finding 15): guarded to skip honestly (not fail
-  // confusingly at 0 !== 32) on a fresh clone, where this gitignored, weekly-mutating cache is
-  // absent entirely.
+  // Senior engineering audit (2026-08-03, finding 15): still guarded to skip honestly on a fresh
+  // clone, where this gitignored cache is absent entirely.
   const files = listCachedDatasetFiles(REAL_CACHE_DIR);
   if (files.length === 0) {
     t.skip('real legiscan-datasets cache not present locally (gitignored, expected on a fresh clone)');
     return;
   }
-  assert.equal(files.length, 34);
+  assert.ok(files.length >= 31, `expected the real cache to hold at least the 31 sessions ingested by 2026-08-03, saw ${files.length}`);
   assert.ok(files.every((f) => f.endsWith('.json')));
   assert.ok(files.every((f) => f.startsWith(`${REAL_CACHE_DIR}/`)));
+  assert.deepEqual(files, [...files].sort(), 'lexicographic order is part of the contract (multi-session nickname precedence)');
+  assert.ok(files.some((f) => f.includes('/1608-')), 'session 1608 must be cached — the fixture-backed session this suite reads');
 });
 
 test('listCachedDatasetFiles: a missing cache dir returns zero files honestly, never throws, never fetches', () => {

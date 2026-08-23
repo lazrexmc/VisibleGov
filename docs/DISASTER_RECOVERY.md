@@ -16,11 +16,14 @@ schema, infrastructure, and live data re-ingested from the original public sourc
 - The **code** (this git repository — CLIs, adapters, site, tests).
 - The **schema** (every Supabase/Postgres migration in `supabase/migrations/`, applied in order to
   a brand-new Supabase project).
-- The **infrastructure** (the Windows Task Scheduler job that drives ongoing ingestion, the
-  `pg_cron` job inside Postgres that keeps vote-aggregate charts fresh).
+- The **infrastructure** (the two Windows Task Scheduler jobs — the 15-minute ingestion tick and,
+  since 2026-08-17, the daily 6 AM billed-summary runner — and the `pg_cron` job inside Postgres
+  that keeps vote-aggregate charts fresh; all three are in Section 9).
 - The **live data**, by **re-ingesting it fresh from the original government/API sources**
-  (Congress.gov, senate.gov LIS, house.mo.gov XML/PDF, senate.mo.gov journals, LegiScan, and
-  optionally Anthropic's API for plain-language summaries/glossary).
+  (Congress.gov, senate.gov LIS, house.mo.gov XML/PDF, senate.mo.gov journals, LegiScan, the
+  statute text the glossary quotes — revisor.mo.gov and uscode.house.gov, fetched politely by
+  `src/adapters/mo-statutes.js` / `src/adapters/uscode.js` under the glossary runner in Section
+  6.8 — and optionally Anthropic's API for plain-language summaries/glossary).
 
 **This guide does NOT do:**
 - **Restore a point-in-time database backup.** This project has no backup/snapshot mechanism of
@@ -98,8 +101,9 @@ npm install
 ```
 
 This installs the runtime dependencies (`@anthropic-ai/sdk`, `@supabase/supabase-js`,
-`fast-xml-parser`, `pdfjs-dist`, `yauzl`) and the one dev dependency (`jsdom`, used only by the
-test suite). There is no build step — the site (`site/`) is plain HTML/CSS/vanilla JS served
+`fast-xml-parser`, `pdfjs-dist`, `yaml`, `yauzl` — the six in `package.json`; `yaml` serves
+`backfill-mo-term-dates.js`'s overrides file) and the one dev dependency (`jsdom`, used only by
+the test suite). There is no build step — the site (`site/`) is plain HTML/CSS/vanilla JS served
 as-is.
 
 ---
@@ -145,8 +149,12 @@ inside your local, gitignored `.env` file):
 `ANTHROPIC_API_KEY` (listed in `.env.example` as of 2026-08-05) is only needed if you plan to run
 the summarization/glossary pipeline — `summarize.js`, `verify.js`, `extract-terms.js`, `gloss.js`,
 `golden.js` all check for it and print `{"mode":"blocked","reason":"ANTHROPIC_API_KEY not set"}` and
-exit cleanly if it's missing (they do not crash, but they also do nothing). The ingestion and
-vote-data half of the project works without it.
+exit cleanly if it's missing (they do not crash, but they also do nothing). The CURRENT billed
+runners (Section 6.8) need it too: `scripts/scheduled-summaries.js` logs `ANTHROPIC_API_KEY not
+set — exiting without a tick` and exits 0 with no spend; `scripts/gloss-batch-mo.mjs` needs it for
+every batch it submits. A key alone is not enough — the account must also carry funds; the
+scheduler logs `BALANCE DEPLETED — reload required` and closes its tick `partial` when it does
+not. The ingestion and vote-data half of the project works without it.
 
 Every script that touches the network or the database in this repo is invoked as
 `node --env-file=.env <path>` — `package.json`'s `scripts` block already wires this in for every
@@ -161,7 +169,10 @@ Every schema change in this project lives in `supabase/migrations/*.sql` and is
 this repo. You paste each file's contents into your new Supabase project's **SQL Editor** and run
 it, **in order**, one at a time, confirming each succeeds before moving to the next.
 
-Apply these 32 files, in this exact order, by filename:
+Apply **every file in `supabase/migrations/`, in filename order.** The table below is a snapshot
+(as of 2026-08-23: 33 files on disk — the 32 below are applied to the original instance, and
+`0032` is drafted, awaiting Lance's apply); if the directory holds a file this table does not
+list, the directory wins — apply it in its filename position and update this table.
 
 | # | File | What it does |
 |---|---|---|
@@ -180,16 +191,16 @@ Apply these 32 files, in this exact order, by filename:
 | 13 | `0013_nickname.sql` | Identity-merge amendment: accounts for LegiScan's own printed nickname field so a full-name-variant match (e.g. "Bob" vs. "Robert") doesn't wrongly split one real person into two. |
 | 14 | `0014_bill_sponsors.sql` | Adds `bill_sponsors` (one row per bill/legislator sponsorship pair), distinguishing introducing sponsor from cosponsor. |
 | 15 | `0015_sponsor_types.sql` | Widens `bill_sponsors.sponsor_type` to LegiScan's actual printed sponsor-type vocabulary (adds Joint Sponsor and an unspecified/generic type beyond primary/cosponsor). |
-| 16 | `0016_public_read_surface.sql` | Defines the public read surface for the site: locks down two tables, adds one column, adds four public-facing views (`public_freshness`, `public_votes`, `public_vote_feed`, and a bill-facing view) that expose only named columns to `anon`. |
+| 16 | `0016_public_read_surface.sql` | Defines the public read surface for the site: locks down two tables, adds one column, adds four public-facing views (`public_vote_feed`, `public_freshness`, `public_verification_notes`, `public_reconciliation_flags`) that expose only named columns to `anon`. (`public_votes` does not exist until 0022.) |
 | 17 | `0017_vote_casts_legislator_index.sql` | Adds an index so a legislator-first vote-feed lookup over 1.4M+ `vote_casts` rows doesn't blow the anon role's statement timeout. |
 | 18 | `0018_vote_aggregates.sql` | Adds the three vote-aggregate **materialized** views (`public_position_totals`, `public_party_alignment`, `public_party_position_totals`) and the `refresh_vote_aggregates()` function that refreshes them. |
 | 19 | `0018a_refresh_timeout.sql` | Sets a function-level `statement_timeout` override on `refresh_vote_aggregates()` so a full `REFRESH ... CONCURRENTLY` pass over 1.4M+ rows doesn't die at PostgREST's ~8s role-level default. |
 | 20 | `0019_view_scoping_and_freshness.sql` | Whole-branch-review fix round: recreates the public views with correct owner-bypass posture and freshness scoping. |
 | 21 | `0020_completeness_checks.sql` | Adds the second verification axis (trust model v3): a `kind='completeness'` row alongside the existing adversarial-verification rows — proves a summary *covers* the bill, not just that each claim is true. |
 | 22 | `0021_bullet_citations.sql` | Exposes each summary bullet's exact supporting quote (`citations`) to the public bill page, so a reader can see the bill's literal words behind each claim. |
-| 23 | `0022_vote_duplicates.sql` | Adds `vote_duplicates` — a non-destructive grouping table marking which of two adapters' rows for the *same real floor vote* is the primary-source one, so vote-aggregate percentages don't silently double-count. Also redefines `refresh_vote_aggregates()` to exclude superseded votes. **Note:** the version of this file as originally applied by Lance had two stray `drop view ... cascade` lines that errored (`42809`) because the targets are materialized views, not plain views — the corrected file (with those two lines removed) is what's committed and what you should apply; the failed original attempt rolled back cleanly as one transaction, so there is nothing to clean up either way. |
+| 23 | `0022_vote_duplicates.sql` | Adds `vote_duplicates` — a non-destructive grouping table marking which of two adapters' rows for the *same real floor vote* is the primary-source one, so vote-aggregate percentages don't silently double-count. Also redefines `refresh_vote_aggregates()` to exclude superseded votes, and creates the `public_votes` view (first defined here, not in 0016). **Note:** the version of this file as originally applied by Lance had two stray `drop view ... cascade` lines that errored (`42809`) because the targets are materialized views, not plain views — the corrected file (with those two lines removed) is what's committed and what you should apply; the failed original attempt rolled back cleanly as one transaction, so there is nothing to clean up either way. |
 | 24 | `0023_vote_duplicates_rls_and_view_drift.sql` | Two fixes found by a comprehensive accuracy audit: enables RLS on `vote_duplicates` (0022 had created it with none — the only table in the schema missing it), and corrects the committed 0022 view definitions to match what was actually applied live. |
-| 25 | `0024_lock_down_legiscan_datasets.sql` | Revokes anon's `SELECT` on `legiscan_datasets` (an earlier migration had granted it unnecessarily — this is operational ledger data, not public-facing). |
+| 25 | `0024_lock_down_legiscan_datasets.sql` | Drops the `anon_read` RLS policy on `legiscan_datasets` — its only statement is `drop policy if exists anon_read on legiscan_datasets;`, a policy drop, not a `REVOKE`, so verify it by checking policies, not grants (an earlier migration had opened it unnecessarily — this is operational ledger data, not public-facing). |
 | 26 | `0025_scope_summaries_glossary_columns.sql` | Column-scopes anon access to `summaries` and `glossary_terms`: RLS already correctly restricted anon to *published rows*, but nothing restricted *columns* — a bare `select=*` was leaking internal pipeline metadata (`model`, `prompt_version`, `bill_text_hash`, `run_id`, `source_hash`, `needs_mapping`). Grants anon a named column list instead. **`model` deliberately stays public on `summaries`** — the site displays it as attribution. |
 | 27 | `0026_fix_refresh_aggregates_timeout_regression.sql` | Restores the `statement_timeout` override that 0022's `CREATE OR REPLACE FUNCTION` had silently dropped (Postgres resets a function's declared config on replace unless the replacing statement re-declares it) — folds it directly into the function body this time so a future replace can't drop it the same way again. |
 | 28 | `0027_pg_cron_refresh_aggregates.sql` | Moves the routine, scheduled aggregate refresh off the synchronous HTTP/RPC path entirely — schedules `refresh_vote_aggregates()` as a native `pg_cron` job every 30 minutes, directly inside Postgres (no gateway/HTTP timeout risk for the routine case). **⚠️ FRESH-REBUILD TRAP:** this file's own text reads `create extension if not exists pg_cron with schema cron;`, which **errors on a database where pg_cron is not already enabled** — pg_cron is a non-relocatable extension pinned to `pg_catalog`, so the `with schema cron` clause is rejected. It only worked on the original apply because the extension had already been toggled on via the Supabase dashboard (`IF NOT EXISTS` then skipped the clause). On a genuine rebuild: **enable pg_cron first** in Dashboard → Database → Extensions (search `pg_cron`, toggle on), *then* apply this migration and the `IF NOT EXISTS` is a harmless no-op. If applying cold via SQL instead, use `create extension if not exists pg_cron with schema pg_catalog;` (or drop the schema clause). |
@@ -197,6 +208,7 @@ Apply these 32 files, in this exact order, by filename:
 | 30 | `0029_fix_vote_duplicates_antijoin_planner_misestimate.sql` | Fixes a Postgres query-planner misestimation in the three vote-aggregate MATVIEWS' anti-join (`LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL`, which the planner catastrophically misestimated as excluding ~1 row instead of the true ~10,000+) by rewriting it as `NOT EXISTS (...)` — identical semantics, correct plan (Hash Join instead of a cascading Nested Loop). Without this, `refresh_vote_aggregates()` hangs past any reasonable timeout once `vote_casts` grows into the millions. |
 | 31 | `0030_revoke_refresh_aggregates_from_authenticated.sql` | Revokes `EXECUTE` on `refresh_vote_aggregates()` from the `authenticated` role. Every prior definition (0018/0022/0026/0027) revoked PUBLIC and `anon` but never `authenticated`, so Supabase's default function grant survived on this `SECURITY DEFINER` function despite 0018's comment claiming service-role-only. One statement, safe to re-run. |
 | 32 | `0031_fix_public_views_antijoin_planner_misestimate.sql` | The SAME anti-join fix as 0029, applied to the two plain VIEWS 0029's sweep missed — `public_vote_feed` and `public_votes` (live def from 0023) still carried `LEFT JOIN vote_duplicates ... WHERE vd.id IS NULL`. Once `vote_duplicates` had rows and `vote_casts` reached ~1.47M, the misplanned query crossed the **anon role's 3s `statement_timeout`** and every anonymous profile's vote list returned HTTP 500 — found on the first production browser walk. Rewrites both to `NOT EXISTS`, identical semantics. Without this, the deployed site's profile vote lists are broken for visitors. |
+| 33 | `0032_vote_date_provenance.sql` | **DRAFTED, NOT YET APPLIED as of 2026-08-23** — confirm it has been applied on the original instance (`CLAUDE.md` migration trap #2 and `TODO.md` RESUME HERE track it) before treating it as part of the applied set. Adds `votes.vote_date_provenance jsonb`, the receipt for a vote date that was NOT printed on the roll call but derived from the bill's own dated, tallied LegiScan history action (LegiScan prints every 2024 MO House roll call as `0000-00-00`; 185 of 275 are datable by an exact printed AYES/NOES match — Tier 1 only, never a guess; commit 2e420d9's pre-commit review raised the count from 184 to 185, and sibling docs written earlier that day still say 184). **Rebuild consequence:** `ingest-legiscan.js` refuses to store a derived-date vote until this column exists (counted `datesDerivedGated`, the run closes `partial`) — a rebuild without 0032 silently lacks those 2024 House votes; re-running the LegiScan ingest after the apply stores them. |
 
 **No manual/live-only SQL exists outside these files.** Every operational fix this project ever
 needed against its own schema (the `pg_cron` extension enable, the `statement_timeout` fixes, the
@@ -208,7 +220,7 @@ either via `npm run refresh:aggregates` or by running `select refresh_vote_aggre
 in the SQL editor, to confirm the `pg_cron`-plus-`PL/pgSQL`-exception-handling combination actually
 works on your project before waiting for the first real cron tick.)
 
-After applying all 32, run a quick sanity check with:
+After applying all of them, run a quick sanity check with:
 
 ```bash
 node --env-file=.env scripts/probe-public-surface.js
@@ -253,6 +265,17 @@ range, same shape as `--rolls` above.
 node --env-file=.env src/cli/ingest-mo-senate.js --year <current-year>
 ```
 
+`--year` is required and one invocation covers ONE calendar year; every prior year you want needs
+its own invocation at the same 30-minute limit, so a multi-year historical backfill is a multi-day
+affair, not a flag. Journal days that fail to parse are quarantined per day on disk
+(`.superpowers/artifacts/mo-senate-journals/<journal-pdf-basename>.failed.json` once the attempt
+cap is reached; `listQuarantinedDays` in the CLI reports the standing set) and replayed by deleting
+the marker —
+the scheduler's `mo-senate-web` ticks then pick a released day up one per tick. (In flight
+2026-08-23: a 2026-session `bill_refs` parse-failure class was root-caused and fixed in commit
+5ced4eb, its 20 quarantined days were released for replay, and a 52-day 2018 backlog was
+discovered and captured in `TODO.md` — Lance's call whether to replay it.)
+
 **6.4 — MO House (house.mo.gov XML/PDF — 30-minute published rate limit, do not shorten):**
 
 ```bash
@@ -264,7 +287,11 @@ current session. **Never pass a historical/prior-era session to this CLI** — `
 table-wide unique constraint against the *current* roster only (the "MO House cross-era
 misattribution trap," a known open gap tracked as TODO 31; migration 0009 fixed the identical bug
 for `mo_senate_id` but it was never applied to the house column), and a historical backfill would
-silently misattribute a successor's votes to their predecessor.
+silently misattribute a successor's votes to their predecessor. Independently of that trap,
+house.mo.gov's XML export serves **only the current General Assembly** (verified 2026-08-23 — it
+does not serve the 2024 session at all), so `--session` could not backfill a prior GA from this
+source even if the `mo_house_id` collision were fixed; prior MO House sessions come from LegiScan
+(6.5), and the 2024 House roll calls specifically depend on migration 0032 (Section 5, row 33).
 
 **6.5 — LegiScan (the primary bulk MO source for bills, sponsors, and votes):**
 
@@ -278,6 +305,25 @@ Assembly session — not the same number as the MO session year. Look this up vi
 this) if you don't already know it; this project's own scheduler resolves it from a
 `sessions.legiscan_session_id` column populated by a prior successful ingest, so on a truly fresh
 database you must supply it explicitly the first time.
+
+**6.5b — MO bill text (required before any MO bill can be summarized):**
+
+```bash
+node --env-file=.env src/cli/ingest-legiscan-texts.js --dry-run
+node --env-file=.env src/cli/ingest-legiscan-texts.js
+node --env-file=.env src/cli/backfill-mo-bill-texts.js --dry-run
+node --env-file=.env src/cli/backfill-mo-bill-texts.js
+```
+
+`ingest-legiscan.js` (6.5) writes bills, sponsors, and votes but **never `bill_texts`** — without
+this step `npm run status`'s `bill texts stored` count stays near zero for MO (federal text arrives
+via 6.6), the READY-to-summarize funnel is empty, and 6.8 has nothing to do.
+`ingest-legiscan-texts.js` pulls text through LegiScan's `getBillText` (counted against the same
+monthly query budget as 6.5; `--limit N` paces it);
+`backfill-mo-bill-texts.js` fetches the state's own PDFs (documents.house.mo.gov / senate.mo.gov)
+with zero LegiScan queries, under the same 30-minute limiters as 6.3/6.4. Both read the gitignored
+LegiScan dataset cache that 6.5 creates (see 6.7b), so run them after 6.5. Federal bill text comes
+from `enrich-federal-bills.js` (6.6), not from here.
 
 **6.6 — Federal bill enrichment (sponsors, status, text, current roster metadata):**
 
@@ -298,25 +344,134 @@ Run this after all the ingestion steps above (6.1–6.6) — it links legislator
 sources present in the database at the time it runs; running it earlier just means running it
 again later picks up whatever's new.
 
-**6.8 — Plain-language summarization pipeline (optional — requires `ANTHROPIC_API_KEY`, costs
-real API spend; confirm current spend-approval policy in the freshly-cloned repo's `CLAUDE.md`
-before running any of these):**
+**6.7b — Backfills (fill the site-facing columns the drivers leave empty):**
+
+Each is invoked as `node --env-file=.env src/cli/<name>.js`. Every one records an `ingestion_runs`
+row, and all but the last are additive (fill NULLs or a known synthetic placeholder, never overwrite
+a real source-printed value); `backfill-mo-glossary-citations.js` is the one that deletes — it merges
+duplicate term rows into one deterministic survivor after repointing their links, which is why it is
+dry-run by default. **Convention: dry-run first, read the plan, then run live.** Most take
+`--dry-run`; `backfill-mo-term-dates.js` and
+`backfill-mo-glossary-citations.js` are dry-run BY DEFAULT and write only with `--apply`.
+
+| CLI | Fills | Reads |
+|---|---|---|
+| `backfill-mo-terms.js` | MO `terms` rows (seat/chamber/district per legislator) from the latest MO session's roster — without it the site's address lookup can never find a MO seat | LegiScan dataset cache |
+| `backfill-term-states.js` | `terms.state` for US House terms (Senate terms copy their own `district`) | congress.gov member roster |
+| `backfill-mo-term-dates.js` (`--apply`, `--apply-overrides <yaml>`) | MO term start/end dates; a human-adjudicated overrides YAML resolves the terms the automatic gate refuses (the one `yaml`-dependency consumer) | LegiScan dataset cache + `.superpowers/artifacts/openstates-people/` |
+| `backfill-nicknames.js` | `legislators.nickname` from LegiScan's printed nickname field (identity-merge input) | LegiScan dataset cache |
+| `backfill-federal-names.js` | real printed names for federal rows whose `full_name` is still the bioguide-id placeholder | congress.gov API (`/member/congress/{n}` — every member who ever served in that Congress) |
+| `backfill-bill-titles.js` | `bills.title` where NULL | LegiScan dataset cache |
+| `backfill-mo-bill-meta.js` | `bill_sponsors` rows and LegiScan's printed `bills.status` for MO bills the primary-source drivers created first | LegiScan dataset cache |
+| `backfill-mo-glossary-citations.js` (`--apply`) | re-keys the glossary's Missouri statute citations into the parseable RSMo shape the MO glossary runner (6.8) needs, merging duplicates deterministically | live DB only |
+
+**The gitignored `.superpowers/artifacts/` cache is load-bearing here.** `legiscan-datasets/`
+holds the dataset ZIPs 6.5 downloads (on the order of 100 MB; the whole artifacts tree is ~1 GB
+of re-fetchable source payloads), and every "LegiScan dataset cache" row above reads it — none of
+them makes a LegiScan API query of its own — so a fresh clone has nothing for them to read until
+6.5 has run live at least once, and a live LegiScan ingest is what regenerates it after a disk
+loss. The same directory holds the MO journal and roll-call artifacts (6.3/6.4), the glossary
+runner's checkpoints (6.8), the scheduler lock files and logs (Section 9), and the tests' skip
+condition (Section 11). Never commit it; never hand-edit it.
+
+**6.7c — Session start dates (recency-first ordering depends on them):**
 
 ```bash
-node --env-file=.env src/cli/summarize.js
-node --env-file=.env src/cli/verify.js
-node --env-file=.env src/cli/extract-terms.js
-node --env-file=.env src/cli/gloss.js
-node --env-file=.env src/cli/auto-publish-glossary.js
+node --env-file=.env src/cli/sync-session-dates.js
+node --env-file=.env src/cli/sync-session-dates.js --apply
 ```
 
-In order: `summarize.js` drafts a plain-language summary for eligible bills (text on hand, no
-existing summary at the current text hash); `verify.js` runs the adversarial refutation pass;
-`extract-terms.js` pulls glossary-term candidates out of summarized bill text;
-`gloss.js` authors + verifies a 1-2 sentence gloss for each extracted term; `auto-publish-glossary.js`
-auto-publishes any glossary term whose verification came back mechanically clean. Each of these
-CLIs prints `{"mode":"blocked","reason":"ANTHROPIC_API_KEY not set"}` and exits cleanly (not an
-error) if the key is missing, rather than partially running.
+The drivers that mint `sessions` rows (6.3, 6.4, 6.5) write no `start_date`, and both
+recency-first consumers — `scripts/export-summary-wave.mjs` and the daily scheduler's
+`sortQueueRecencyFirst` — silently degrade to name-year order without it (found 2026-08-21: 30 of
+31 MO sessions were undated). The dry-run prints every row it would date with its source
+(constitutional convening date for regular sessions; the earlier of OpenStates and the cached
+LegiScan dataset's first recorded action for specials); `--apply` fills NULLs only and records a
+run naming each source. **Re-run it after any ingest that mints a new session row** — every
+January, and after any historical 6.3 backfill year.
+
+**6.8 — Plain-language summaries and glossary (optional — the billed paths require
+`ANTHROPIC_API_KEY` AND funds on the account; confirm the current spend-approval policy in the
+freshly-cloned repo's `CLAUDE.md` before running any of these):**
+
+*(Rewritten 2026-08-23. The five-CLI chain this section used to list — kept as the footnote at the
+end — is the superseded v1/v2 path; production last ran it 2026-07-28/29. The three paths below
+are what produce summaries and glosses today.)*
+
+**Spend rule, stated once:** every billed call needs Lance's explicit per-run approval with a call
+count and dollar estimate up front — EXCEPT `scripts/scheduled-summaries.js`, whose code-enforced
+ledger ($1.00 per tick, $5.00 per ISO week, computed from `ingestion_runs`) IS its standing
+approval. Never assume the account has been reloaded; the scheduler logs `BALANCE DEPLETED —
+reload required` and stops the tick when it has not.
+
+**(a) Billed summaries — the daily scheduler** (`docs/SCHEDULED_SUMMARIES.md`). Registered as a
+Task Scheduler job in Section 9; it owns all routine summary production. One manual tick, identical
+to a scheduled one:
+
+```bash
+node --env-file=.env scripts/scheduled-summaries.js --dry-run
+node --env-file=.env scripts/scheduled-summaries.js
+```
+
+Per bill it runs the billed trust-model-v3 chain (`src/lib/billed-summary-chain.js`: Haiku authors
+from the official text → Sonnet adversarially verifies → blind provisions → a conditional
+provisions-corroboration when the yield is under the length-scaled floor → coverage; every paid
+stage is checkpointed, so a crashed tick's re-run skips the stages already completed), records
+through the same mechanical gates as every other path (`src/cli/summary-queue.js record`), and
+auto-publishes only
+a mechanically CLEAN result — everything else lands as a flagged draft. Queue order is
+recency-first, which is why 6.7c must have run. `SUMMARY_TICK_CAP_USD` / `SUMMARY_WEEKLY_CAP_USD`
+in the environment can only LOWER the caps, never raise them.
+
+**(b) $0 summaries — the subagent wave path** (`docs/RUNBOOK_SUMMARY_WAVES.md`; needs a Claude
+Code session, not the API key). Export a code-generated batch, run the `summary-wave` workflow
+(`.claude/workflows/summary-wave.js`) on it, record through the gates:
+
+```bash
+node --env-file=.env scripts/export-summary-wave.mjs 12
+#   -> .superpowers/artifacts/wave3/manifest.json + per-bill hash-pinned text files
+#   -> run the summary-wave workflow with the manifest contents as args (see the runbook)
+node --env-file=.env src/cli/summary-queue.js record --file <records.json> --dry-run
+node --env-file=.env src/cli/summary-queue.js record --file <records.json>
+node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer   # re-author flagged drafts
+```
+
+Never hand-type a manifest (two waves proved a hand-typed one fabricates ids/hashes); `--pointer`
+banks each draft's prior to disk instead of inlining it (PLAYBOOK lessons 40 and 46).
+
+**(c) Glossary — the Batch-API runner** (`scripts/gloss-batch-mo.mjs`; the MO statute and U.S.
+Code drains that published the live glossary, 2026-08-20/22):
+
+```bash
+node --env-file=.env src/cli/backfill-mo-glossary-citations.js            # dry-run, then --apply (6.7b)
+node --env-file=.env scripts/gloss-batch-mo.mjs --source mo  --budget-usd <N> [--max-terms N] [--resume]
+node --env-file=.env scripts/gloss-batch-mo.mjs --source usc --budget-usd <N> [--max-terms N] [--resume]
+```
+
+`--budget-usd` is mandatory and is the hard cap. The runner fetches each cited section from
+revisor.mo.gov (`src/adapters/mo-statutes.js`: strictly sequential, 5 s spacing; a bot page = a
+10-minute cooldown and one retry) or uscode.house.gov (`src/adapters/uscode.js`, 2 s spacing),
+banks the excerpts under `.superpowers/artifacts/gloss-batch-<source>/` (so `--resume` never mixes
+the two drains), and **projects every batch's cost from that bank on disk before submitting it** —
+refusing the submission if spent + projected would pass the cap (PLAYBOOK lesson 44: the first USC
+run spent $8.31 against an $8 cap because the cap only gated between submissions, and USC
+excerpts average ~2.5x MO's). Haiku authors → mechanical gates (verbatim quote, non-empty) → one
+warned retry → Sonnet escalation → Sonnet adversarial verification; the runner writes the gloss and
+its verdicts but never a `published` status — `auto-publish-glossary.js` (footnote below) is the
+separate $0 pass that publishes the mechanically CLEAN ones, and flagged glosses wait for Lance's
+review. Author and verifier calls go through the Message Batches API (50% of interactive prices). It is a long-running background job — read the lesson-43 note in
+Section 9 before stopping one.
+
+*Footnote — the superseded v1/v2 chain (still present, still gated on `ANTHROPIC_API_KEY`, still
+bills if run; not the production path since 2026-07-29):*
+`src/cli/summarize.js` → `verify.js` → `extract-terms.js` → `gloss.js` → `auto-publish-glossary.js`
+(draft → adversarial refutation → glossary-term extraction → per-term gloss → auto-publish CLEAN).
+Each prints `{"mode":"blocked","reason":"ANTHROPIC_API_KEY not set"}` and exits cleanly (not an
+error) if the key is missing, rather than partially running. Two of them still matter on the side:
+new glossary-term drafts now arrive with each recorded summary's `referenced_terms` (so the
+scheduler mints them as it publishes), and `auto-publish-glossary.js` still runs as the publish
+step after a gloss drain (last ran 2026-08-22 per `npm run status`). Do not delete the chain; just
+do not treat it as the production path.
 
 ---
 
@@ -371,19 +526,33 @@ Run these, in this order, replacing `<which>` each time:
 
 Two more `<which>` values exist beyond the numbered replay list, both for adjudicated
 vote-reconciliation flags (they encode a specific human ruling, so they are NOT part of the routine
-replay and each must be named explicitly — they are excluded from the `all` sweep):
+replay and each must be named explicitly — they are excluded from the `all` sweep, as are five of
+the numbered corrections; see the `all` note below):
 - `sb914-reconcile` — the one-off SB 914 adjudication (Lance ruled "trust senate journals" 2026-08-05).
 - `reconcile-flag` — the GENERAL adjudication tool: `reconcile-flag --flag-id <uuid> --ruling "..."
   --rationale "..." [--canonical-vote <uuid> --superseded-vote <uuid>]`. Supersede a losing vote
   row (writes a `vote_duplicates` exclusion) or resolve-only (close the flag with a recorded ruling,
   no dedup write). These are Lance's human calls, not mechanical replay — on a rebuild, the specific
   rulings would need to be re-made, not blindly re-run.
+- Not a `correct-data.js` value, but the same family (added 2026-08-23):
+  `scripts/resolve-matched-reconciliation-flags.mjs` (dry-run by default; `--apply` on Lance's go)
+  closes `no_tally_corresponding_primary` flags whose LegiScan roll call has SINCE been paired with
+  a journal vote in `vote_duplicates` — the ingest path never resolves an already-minted flag when
+  its missing primary later arrives. Mechanical and additive (the resolution is recorded inside the
+  flag's `discrepancy`; nothing is deleted). Run it after a MO Senate journal replay (6.3) and the
+  next LegiScan tick.
 
 `correct-data.js` takes exactly one `<which>` positional (no default, so you can't accidentally run
 everything at once). The full set of accepted values is the 11 numbered corrections above, plus
-`sb914-reconcile`, `reconcile-flag`, and `all` (which runs only the safe, non-named-ruling
-corrections). Skip any correction whose target condition doesn't exist in your freshly re-ingested
-data — most will report a clean `matched: 0` and do nothing, which is expected and safe.
+`sb914-reconcile`, `reconcile-flag`, and `all`. **`all` runs ONLY items 1, 2, 3, 6, 7, 8**
+(`mo-status`, `mo-1969-dates`, `party-normalize`, `legiscan-source-split`, `vote-duplicates`,
+`mo-house-chamber` — the in-place, no-delete, no-FK-redirect class); **items 4, 5, 9, 10, 11**
+(`mo-2026-session-merge`, `mo-2026-vote-reconcile`, `pierson-split`, `glossary-refuted-claims`,
+`glossary-corrupted-text`) **and the two adjudication tools are deliberately excluded and must each
+be named** — running `all` and believing the numbered list is covered skips five of the eleven (the
+`|| which === 'all'` branches in `src/cli/correct-data.js` are the authority). Skip any correction
+whose target condition doesn't exist in your freshly re-ingested data — most will report a clean
+`matched: 0` and do nothing, which is expected and safe.
 
 ---
 
@@ -394,7 +563,9 @@ npm run refresh:aggregates
 ```
 
 This runs `scripts/refresh-aggregates.js`, which calls the `refresh_vote_aggregates()` Postgres
-function (defined/modified by migrations 0018, 0018a, 0022, 0026, 0027, 0028, 0029; 0030 adjusts its grants) to rebuild the three public
+function (defined by migrations 0018/0022/0026/0027; its function-level timeout set by 0018a; the
+ambient `statement_timeout` it runs under raised by 0028; the matviews it refreshes rebuilt by
+0029 — the function itself is untouched there; its grants by 0030) to rebuild the three public
 vote-aggregate materialized views (`public_position_totals`, `public_party_alignment`,
 `public_party_position_totals`) that the site's profile/party-alignment charts read.
 
@@ -428,8 +599,9 @@ underlying refresh completed fine server-side.
 
 ## 9. Set up scheduled automation
 
-Two independent pieces of automation keep this project's data fresh without a human watching every
-invocation. **`pg_cron` should already exist and be scheduled** once you applied migration
+Three independent pieces of automation keep this project's data fresh without a human watching every
+invocation (two until 2026-08-17, when the daily summary runner — the third block below — was
+registered). **`pg_cron` should already exist and be scheduled** once you applied migration
 `0027_pg_cron_refresh_aggregates.sql` in Section 5 — *provided you enabled the pg_cron extension
 first* (see that migration's fresh-rebuild trap note in Section 5: enable it via Dashboard →
 Database → Extensions, or the `with schema cron` clause errors on a cold database). Its trailing
@@ -479,14 +651,67 @@ recovery logic, leaving a stranded `'running'` row in `ingestion_runs`.
 Full detail on this scheduler's design, cadence table, and how to verify it's alive:
 `docs/SCHEDULED_INGESTION.md`.
 
+**The daily summary runner (`scripts/scheduled-summaries.js`) is the THIRD piece — registered
+2026-08-17, it owns ALL routine plain-language-summary production under a code-enforced ledger
+($1.00 per tick, $5.00 per ISO week, computed from `ingestion_runs`, never from wall-clock run
+count).** A rebuild that stops at the two jobs above gets fresh votes but no new summaries. Same
+machine-owner rule, same Command Prompt caveat, same absolute paths:
+
+```
+schtasks /create /tn "VisibleGov Scheduled Summaries" /tr "\"C:\Program Files\nodejs\node.exe\" --env-file=F:\VisibleGov\.env F:\VisibleGov\scripts\scheduled-summaries.js" /sc daily /st 06:00 /f
+```
+
+Expected output: `SUCCESS: The scheduled task "VisibleGov Scheduled Summaries" has successfully
+been created.` Then, in Task Scheduler → Properties:
+- **General tab:** "Run whether user is logged on or not" (prompts once for the password), as with
+  the ingestion job.
+- **Settings tab: check "Run task as soon as possible after a scheduled start is missed."**
+  `schtasks /create` leaves this OFF; with it off, any day the machine is powered down at 6 AM
+  silently gets no tick. A catch-up tick is just a normal tick — the lock file prevents overlap and
+  the ledger binds regardless of when it fires (it fires immediately when the setting is turned on
+  if that day's 6 AM has already passed).
+- **Settings tab: "Stop the task if it runs longer than" must EXCEED 30 minutes** (the script's own
+  stale-lock window); a fresh registration's default (72 h) is fine — the check matters only if the
+  task is later edited in the GUI.
+
+On the original machine the Properties dialog could not SAVE this task (OK fails with "One or more
+of the specified arguments are not valid" — it chokes on what `schtasks /create` wrote — and
+`Set-ScheduledTask` fails the same way), so both settings above actually went in by exporting the
+task XML, editing it, and re-creating with `schtasks /create /tn "VisibleGov Scheduled Summaries"
+/xml <file> /f` (add `/ru <account> /rp *` for run-whether-logged-on). Expect the same on a rebuild
+that uses the same command; the exact procedure is in `docs/SCHEDULED_SUMMARIES.md`.
+
+Its first real tick needs **`ANTHROPIC_API_KEY` in `.env` AND funds on the account**: without the
+key it logs `ANTHROPIC_API_KEY not set — exiting without a tick` and exits 0; with the key but no
+balance it logs `BALANCE DEPLETED — reload required` and closes the tick `partial`.
+`SUMMARY_WEEKLY_CAP_USD` / `SUMMARY_TICK_CAP_USD` in the environment can only lower the caps.
+Verify it is alive with `npm run status` (the `SUMMARY SCHEDULER` block and the
+`scheduled-summaries` freshness row) and the daily log under
+`.superpowers/artifacts/summary-scheduler-logs/`. Full detail — including the throttled first
+manual tick and the XML re-create procedure for editing the task on this machine (the GUI and
+`Set-ScheduledTask` both fail there): `docs/SCHEDULED_SUMMARIES.md`.
+
+**Stopping any long-running runner (a scheduler tick, `gloss-batch-mo.mjs`, a journal replay) —
+PLAYBOOK lesson 43:** stop it by PID (launch with the PID written to a file; `Stop-Process` on that
+PID tree; confirm the PID is gone), **never by grepping command lines** — Windows returns a NULL
+command line for processes the querying session no longer owns, so a grep-based "0 runners" check
+once missed an orphan that went on to submit a billed batch. After a stop, re-read the job's own
+state files a few minutes later: a file that keeps changing is a process that is still alive. A
+killed runner leaves its lock behind — `.superpowers/artifacts/scheduler.lock.json` (ingestion) and
+`.superpowers/artifacts/summary-scheduler.lock.json` (summaries); both self-heal once a later tick
+finds the lock older than its own declared max duration, and a tick that finds a live lock logs
+`already running ... — skipping this tick` and exits 0, which is the designed behavior, not a
+fault.
+
 ---
 
 ## 10. Serve and verify the site locally
 
 **Deploy status as of 2026-08-05: the ORIGINAL instance is deployed to Cloudflare Pages** at
-`https://visiblegov.pages.dev` (custom domain still pending). A rebuild does NOT inherit that — a
-fresh rebuild produces working *code and data*, and getting it onto Cloudflare is a separate step
-(the runbook for it is `docs/CLOUDFLARE_DEPLOY.md`, and the two deploy-time gotchas it documents are
+`https://visiblegov.pages.dev` (custom domain still pending — decided 2026-08-22: `visiblegov.us`,
+which Lance owns; attaching it is Phases 3-4 of `docs/CLOUDFLARE_DEPLOY.md`, his console work). A
+rebuild does NOT inherit that — a fresh rebuild produces working *code and data*, and getting it
+onto Cloudflare is a separate step (the runbook for it is `docs/CLOUDFLARE_DEPLOY.md`, and the two deploy-time gotchas it documents are
 real and will bite a rebuild too: Pages Functions do not inherit `site/_headers` — `site/functions/
 geocode.js` sets its own headers from `site/js/security-headers.js`; and `site/_redirects` targets
 MUST be extensionless — `/person/* → /person`, never `/person.html` — because Pages
@@ -550,9 +775,10 @@ the recorded tally. Check the browser console for errors — there should be non
    ```
 
    `ℹ fail 0` is the only line that matters for a go/no-go decision. Four backfill-related test
-   files intentionally skip cleanly on a fresh clone (they read a real, gitignored, weekly-mutating
-   LegiScan dataset cache that won't exist until you've run live LegiScan ingestion at least once) —
-   seeing a handful of honest skips there is expected, not a failure.
+   files intentionally skip cleanly on a fresh clone (they read the real, gitignored, weekly-mutating
+   LegiScan dataset cache at `.superpowers/artifacts/legiscan-datasets/` — the same cache the
+   6.5b/6.7b backfill CLIs read — which won't exist until you've run live LegiScan ingestion at
+   least once) — seeing a handful of honest skips there is expected, not a failure.
 
 2. **Live data status:**
 
@@ -596,7 +822,8 @@ them, and you should not expect it to:
   LegiScan vote for the same bill). Decision made: ship as-is, no site caveat needed. See `TODO.md`
   NOW ("MO House per-legislator vote coverage") for the full evidence trail.
 - **Cloudflare Pages deployment: the ORIGINAL instance IS deployed (2026-08-05) at
-  `https://visiblegov.pages.dev`; a rebuild starts from un-deployed and must redo it.** The full,
+  `https://visiblegov.pages.dev` — custom domain `visiblegov.us` decided 2026-08-22, not yet
+  attached; a rebuild starts from un-deployed and must redo it.** The full,
   authoritative runbook is `docs/CLOUDFLARE_DEPLOY.md` in the cloned repo — follow that, not a
   summary. The Pages project settings that matter: production branch `main`, framework preset
   **None**, empty build command, **root directory `site`**, and **build output directory LEFT
@@ -609,12 +836,25 @@ them, and you should not expect it to:
   recently ingested Congress — a legislator's pre-that-Congress federal record (e.g. a senator's
   earlier terms) is not in the database. Not wrong, just thin; the site labels dates honestly
   rather than implying completeness.
-- **Some open, human-adjudication-only items will not be resolved by this rebuild:** a small number
-  of cross-source vote-tally contradictions and legislator-identity ambiguity flags are, by design,
-  left for the project owner's own judgment rather than auto-resolved (`vote_reconciliation_flags`
-  and `identity_flags` tables, worked through the local `npm run review` staff page). A freshly
-  rebuilt instance will surface its own fresh set of these — expect some, they are a normal,
-  expected part of this project's operation, not a defect.
+- **Missouri House 2024 is absent until migration 0032 is applied and the LegiScan ingest re-run**
+  (added 2026-08-23): LegiScan prints all 275 of that session's House roll calls with a
+  `0000-00-00` date, house.mo.gov's XML serves only the current General Assembly, and the ingest
+  refuses a derived date without the 0032 receipt column — see Section 5 row 33 and
+  `docs/DATA_INVENTORY.md` GAP 1. Even after 0032, 90 of the 275 stay refused by design (Tier 1
+  dates 185 per commit 2e420d9).
+- **Some open, human-adjudication-only items will not be resolved by this rebuild:** cross-source
+  vote-tally contradictions and legislator-identity ambiguity flags are, by design, left for the
+  project owner's own judgment rather than auto-resolved (`vote_reconciliation_flags` and
+  `identity_flags` tables, worked through the local `npm run review` staff page). Their count is
+  neither small nor stable — `npm run status` OPERATOR QUEUE is the only honest number (as of
+  2026-08-23: reconciliation flags open in the hundreds, identity flags 0; most of the recent
+  growth was LegiScan 2026 MO Senate roll calls whose journal counterpart sat in the quarantine
+  fixed 2026-08-23, see 6.3). One class IS mechanically closable:
+  `scripts/resolve-matched-reconciliation-flags.mjs` (Section 7) resolves
+  `no_tally_corresponding_primary` flags whose journal twin has since arrived — run it after a
+  journal replay and the next LegiScan tick. A freshly rebuilt instance will surface its own fresh
+  set of these — expect some, they are a normal, expected part of this project's operation, not a
+  defect.
 
 ---
 
@@ -639,7 +879,8 @@ this document**, since this guide is a point-in-time snapshot and `TODO.md` is u
 
 Also useful, not required reading to complete this rebuild: `README.md` (short project overview
 and the canonical short-form runbook this document expands on), `docs/DATA_INVENTORY.md` (what
-each live number means and how the tables relate to each other), `docs/SCHEDULED_INGESTION.md`
-(full detail on the Task Scheduler automation from Section 9), and `CLAUDE.md` (this project's own
-working rules, including the current, possibly-changed status of the API-spend-approval policy
-referenced in Section 2).
+each live number means and how the tables relate to each other), `docs/SCHEDULED_INGESTION.md` and
+`docs/SCHEDULED_SUMMARIES.md` (full detail on the two Task Scheduler automations from Section 9),
+`docs/RUNBOOK_SUMMARY_WAVES.md` (the $0 summary path from Section 6.8), and `CLAUDE.md` (this
+project's own working rules, including the current, possibly-changed status of the
+API-spend-approval policy referenced in Section 2).

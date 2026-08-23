@@ -4,16 +4,19 @@
 
 ---
 
-## ⏱ RESUME HERE — verified live 2026-08-09, read this block first
+## ⏱ RESUME HERE — verified live 2026-08-23, read this block first
 
 **✅ USC GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21 evening) — API balance went to $0 (Lance:
 "out of api credits"), then Lance loaded **$7 more** the same evening (console is the truth; if
 the overspend left a negative balance the net is lower). BILLED PATH: the scheduler resumes on
-its own under its ledger ($3.04 of $5.00 left this ISO week, resets Mon 2026-08-24; ~$0.16 per
+its own under its ledger ($3.04 of $5.00 left this ISO week — 08-21 figure; $2.30 left on
+08-23 after the 08-22/23 ticks — resets Mon 2026-08-24; ~$0.16 per
 published summary this week, so ~2 weeks of ticks); EVERYTHING ELSE still needs per-run
 approval. Gloss backlog is effectively empty (30 structural leftovers, nothing newly minted) —
-no gloss run warranted. Summary coverage (live): 744 of the 3,343 accountability-set bills
-(22%) have a published summary; 2,518 are ready (text, no summary); 1,045 published overall.
+no gloss run warranted. Summary coverage (as of 2026-08-21): 744 of the 3,343 accountability-set bills
+(22%) have a published summary; 2,518 are ready (text, no summary); 1,045 published overall
+(2026-08-23 `npm run status`: 793 / 2,498 ready / 1,094 published — every scheduler tick moves
+these, so `npm run status` is the only live figure; the numbers here are dated snapshots).
 $0 PROJECTION of that backlog from its actual texts (CHATLOG 2026-08-21 late): 2,521 ready,
 2,517 Missouri, 319 monsters; the 2026 session alone is 194 bills ≈ $24 realistic per
 attempt-pass (gate ceiling $145); everything ≈ $291 realistic ($1,855 ceiling); this week's
@@ -37,14 +40,19 @@ each submission (one $5.24 verify batch landed after the last check). Fixed same
 the runner now projects every batch from the bank on disk before submitting, with a calibration
 test pinned to today's actuals (PLAYBOOK lesson 44). **The scheduler's next tick will log
 `BALANCE DEPLETED` and skip — designed; nothing bills until Lance reloads AND says go.**
+*(Superseded the same evening by the $7 reload: the 08-22 and 08-23 ticks billed normally —
+$0.39 / 6 published and $0.35 / 4 published, `balance_depleted:false` on both; the scheduler is
+the one lane that bills without a per-run go, under its $1/tick + $5/ISO-week ledger.)*
 Next-work menu, Lance's call: (b) flag review (419 glosses); (d) periodic gloss runs as the
 scheduler mints MO terms (per-run approval, needs funds); (e) **custom domain DECIDED 2026-08-22:
 `visiblegov.us` (Lance owns it) — Phases 3-4 in docs/CLOUDFLARE_DEPLOY.md rewritten for the apex;
 his console work after his AFK.** ✅ 2026-08-22 morning tick confirmed the $7 reload took and the
 recency fix is live: all 12 lane bills were 2026-session, 6 published for $0.39 (week $2.35/$5).
-⚠️ NEW 2026-08-22 (INBOX): the MO Senate journal parser is quarantining 2026-session days on a
+⚠️ NEW 2026-08-22 (INBOX; FIXED 2026-08-23 — see the ✅ `bill_refs` quarantine FIXED entry below): the MO Senate journal parser is quarantining 2026-session days on a
 `bill_refs` failure class (14 of 20 quarantined days are 26info) — the +249 reconciliation flags
-since 08-18 are mostly LegiScan 2026 Senate roll calls with no journal counterpart. Real gap in
+since the 08-05 count of 107 (87 of them minted 08-18..22; 170 date from 08-06..08-17) are mostly
+LegiScan 2026 Senate roll calls with no journal counterpart (187 of the 364 open are
+`legiscan vs mo-senate-web`). Real gap in
 the completeness-critical pipeline; captured, not chased. ✅ **DRAIN LANE RAN TO EMPTY
 2026-08-22 on Lance's "drain any items that are drainable" (AFK): live 1,090 published /
 28 drafts / 600 retired (1,067 → 1,090 today, all $0 subagent path).** Ledger: the 18
@@ -52,7 +60,10 @@ the completeness-critical pipeline; captured, not chased. ✅ **DRAIN LANE RAN T
 gates, 11 published; DY 4/5; DZ (fresh mode + corroboration) 5/7 — the four bills unparked
 08-18 are all published; EA 1/1; EB 1/2; HB 1607 PUBLISHED on its final attempt (EC). re-authorable pool = 0; the
 remaining 28 drafts are exactly the 28 PARKED bills (every one with a written reason) — NOTHING is
-drainable at $0 until the scheduler mints new refusals. Two process fixes shipped on the way:
+drainable at $0 until the scheduler mints new refusals. **08-23: that condition fired — the 6 AM
+tick minted 4 refusals (HB 1906, HB 3004, HB 1786, HB 1855; live 1,094 published / 32 drafts /
+600 retired) — run `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` to see
+whether they are re-authorable.** Two process fixes shipped on the way:
 `reAuthor_file` pointer mode (`build-drain-wave.mjs --pointer`; a retyped 14KB inline prior
 lost one character and killed a launch — PLAYBOOK 46) and "launch edited workflows by
 scriptPath, never by name" (a session-cached pre-edit script authored on the wrong lane
@@ -62,14 +73,16 @@ silently — PLAYBOOK 47; the fallthrough guard is an INBOX item). Resume the la
 (the parser knew one motion grammar; the journal prints the bill outside the motion for four
 families + non-bill roll calls), 20/20 days parse 137/137 blocks against agent-verified ground
 truth, adversarial review's 23 findings addressed, suite 2,611/0. **Replay IN PROGRESS:** all 20
-failure markers removed; the 14 2026-session days drain through the scheduler one per tick
-(~7 h from 06:00Z); 2018: 1 of 6 replayed manually, then the 52-day 2018 backlog discovery
+failure markers removed; the 14 2026-session days drain through the scheduler one per
+day-writing slot (~every 1.5–1.75 h, not per tick: on 08-23 days landed at 07:30 / 09:15 / 10:45
+/ 12:30Z, `total_pending_days` 14 → 11, 0 failures — so ~20 h from 06:00Z rather than 7; read
+`counts.total_pending_days` on the latest `mo-senate-web` run for the remainder); 2018: 1 of 6 replayed manually, then the 52-day 2018 backlog discovery
 (INBOX) — Lance's call. After replay + the next LegiScan tick: `node --env-file=.env
 scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply` on his go) closes the
 `no_tally_corresponding_primary` flags whose journal twin now exists (176 open).
 ⏳ **2024 MO House votes (2026-08-23): built, tested, awaiting migration 0032** — LegiScan prints
 all 275 as `0000-00-00` (source defect, confirmed via getRollCall); the House XML export does not
-serve 2024 (current GA only, verified in Lance's browser); 184 are dated by an exact printed
+serve 2024 (current GA only, verified in Lance's browser); 185 are dated by an exact printed
 AYES/NOES match against the bill history (Tier 1, Lance's pick), receipt in
 `votes.vote_date_provenance`. **Lance: apply `supabase/migrations/0032_vote_date_provenance.sql`**,
 then `node --env-file=.env src/cli/ingest-legiscan.js --dataset-file <scratchpad>/dataset-2122-envelope.json`
@@ -93,20 +106,29 @@ credits" — then "I loaded $7 more"; the scheduler draws ~$0.35–0.70/tick fro
 assume a further reload.
 
 **✅ STANDING STATE (updated 2026-08-10 evening; drain COMPLETE 2026-08-18 — live 1,037, see
-CHATLOG): THE 2025-SESSION MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
+CHATLOG) — HISTORICAL, superseded 2026-08-23 by the block above: the billed scheduler IS the
+running lane (registered Windows task, daily 6 AM, ticking since 08-17 under its ledger), the
+drain lane ran to empty 08-22, and the counts below are the 08-10 close. THE 2025-SESSION
+MANIFEST CAMPAIGN IS COMPLETE.** All 400 manifest bills consumed: 394 attempted (0 fresh remain) + 6 class-parked
 with documented structural reasons (HR 3095 ZIP-code list + 5 SRES en-bloc nomination lists —
 single-provision structures the completeness floor rightly refuses; park set lives in the
 session build script, reasons in CHATLOG 2026-08-10). **Live: 710 published / 359 drafts / 119
 retired** (counted directly at close). Day arc 442 -> 710; grand arc 115 (08-06) -> 710.
 **No lane is currently running.** BILLED PATH REMAINS CLOSED (balance spent 2026-08-09; no
-billed call without new funds AND Lance's explicit go — never assume a reload). Next-work menu,
+billed call without new funds AND Lance's explicit go — never assume a reload). *(Both sentences
+describe 2026-08-10; superseded — the scheduler has billed daily since 08-17, $2.70 of $5.00
+this ISO week as of 08-23, and every OTHER billed call still needs a per-run go.)* Next-work menu,
 Lance's call: (a) **draft drain** — 359 verified-flagged drafts, historically ~80% convert via
 re-author-with-objections ("keep draining drafts" resumes it; the 103-no-envelope-drafts
-DB-objections upgrade is still owed); (b) **next manifest export** — ~2,100 eligible bills with
-text beyond this manifest, exporter is recency-first (`scripts/export-summary-wave.mjs`);
+DB-objections upgrade is still owed) *(superseded: drain ran to empty 2026-08-22 — see above)*;
+(b) **next manifest export** — ~2,100 eligible bills with
+text beyond this manifest, exporter is recency-first (`scripts/export-summary-wave.mjs`)
+*(08-10 estimate; the dated figure is 2,498 READY as of 2026-08-23 per `npm run status`)*;
 (c) **scheduled-summaries BUILT (2026-08-15), awaiting Lance: load credits + register the task
 per docs/SCHEDULED_SUMMARIES.md** — the autonomous daily runner, code-enforced $5/ISO-week
-cap, unregistered but ready to go; (d) 34 old-manifest monster bills + ~23 passage bills missing
+cap, unregistered but ready to go *(superseded: REGISTERED and running — `schtasks` shows the
+`VisibleGov Scheduled Summaries` task Daily 6:00 AM, last run 2026-08-23 06:00:01, next 08-24;
+`ingestion_runs` carries a billed tick every day 08-18..08-23)*; (d) 34 old-manifest monster bills + ~23 passage bills missing
 text (ingestion) remain from earlier inventories. Waves are built from LIVE unattempted state
 (zero summaries rows = fresh), never manifest slices.
 
@@ -118,16 +140,23 @@ text (ingestion) remain from earlier inventories. Waves are built from LIVE unat
   (2026-08-10 morning) → 710 (evening, +268 in the final day). Of the 3,343-bill accountability
   set (passage vote + text), 473 now carry a published summary; the other published summaries
   are 'other'-priority resolutions from the 2025-session manifest. 2,549 eligible bills with
-  text remain unsummarized overall. ⚠️ `npm run status`'s "draft/flagged" line reads 478 — it
-  counts `neq.published`, which includes the 119 retirees (INBOX note, still unfixed).
+  text remain unsummarized overall (08-10; 2,498 READY on 2026-08-23). ⚠️ `npm run status`'s "draft/flagged" line reads 478 — it
+  counts `neq.published`, which includes the 119 retirees (INBOX note — FIXED 2026-08-16,
+  commit c9b3560: the gauge now counts `eq.draft` and prints retirees on their own line).
 - Glossary: 116 published of 6,743 terms (extraction backlog grew with ingest: 5,995
-  needs_mapping, 632 draft-mappable; the campaign has been summaries-only).
+  needs_mapping, 632 draft-mappable; the campaign has been summaries-only). *(08-10; after the
+  MO + USC gloss drains, 2026-08-23 reads 1,858 published of 7,344, 522 draft-mappable, 4,964
+  needs_mapping — `npm run status`.)*
 - Git clean on `main`, everything pushed (run `git log -1` for the exact HEAD — a doc cannot
   contain its own latest commit hash). Suite 2,300+ green (`node --test` in a clean shell for
   the exact count — see the `.env` trap below; last full run 2,389/0 after the parens-gate fix,
   commit 92816ff).
 - Migrations: **32 files on disk (0001-0031 + 0018a), ALL applied live.** Nothing is awaiting an
-  apply (0030/0031 verified live 2026-08-05).
+  apply (0030/0031 verified live 2026-08-05). **(Superseded 2026-08-23: 33 files on disk —
+  0001-0031 + 0018a applied; `0032_vote_date_provenance.sql` is DRAFTED and NOT applied —
+  live check: `votes.vote_date_provenance` does not exist yet. Draft-then-apply: Lance applies
+  it, then the 2024 MO House re-ingest in the block above / ledger item 23 stores the 185
+  tally-dated roll calls. CLAUDE.md trap #2 carries the same correction.)**
 - Data (2026-08-10 `npm run status`): votes 10,266 · vote_casts 1,470,602 · bills 38,256 ·
   legislators 1,607.
 - Scheduler healthy: sources ticking through 2026-08-08+ (us-congress and mo-legislature both
@@ -136,7 +165,7 @@ text (ingestion) remain from earlier inventories. Waves are built from LIVE unat
   tests in `review-logic.test.js` fail (expected-500-got-200) because they assert behavior when NO
   DB client is configured. Verified deterministically 2026-08-05 — and it caught me AGAIN mid-sync
   when a live `curl` check and `node --test` shared one shell. Use `node --test` in a clean shell.
-  Every CLI takes `--env-file=.env` for exactly this reason. (PLAYBOOK_DELTA lesson 27.)
+  Every CLI takes `--env-file=.env` for exactly this reason. (PLAYBOOK_DELTA lesson 30.)
 
 ✅ **Migration 0031 APPLIED and VERIFIED LIVE 2026-08-05 (deploy night).** The anon 500 on
 profile vote lists is fixed: the exact failing query returns 200 in 0.27s as anon (was 500 timeout
@@ -146,12 +175,18 @@ zero console errors: profile renders 162 vote rows with bill links + populated a
 click-through to a bill page (HB 3080) shows sponsors, plain-language summary, and roll-call
 tallies. **The full product loop works on the live site.**
 
-**THE NEXT THING: finish the Cloudflare deploy — Phases 3 & 4 (custom domain), all Lance's console
+**~~THE NEXT THING~~ (2026-08-05 framing — since 2026-08-22 this is ONE ITEM of the next-work
+menu in RESUME HERE, item (e)): finish the Cloudflare deploy — Phases 3 & 4 (custom domain), all Lance's console
 work.** Phase 1 (create Pages project) and Phase 2 (verify on `.pages.dev`) are DONE and the site
 is live and verified. Remaining, per `docs/CLOUDFLARE_DEPLOY.md`: Phase 3 (move nameservers to
 Cloudflare — a clean sweep, no email to preserve) and Phase 4 (attach
 `visiblegov.helpingpeoplehelpingpeople.com`, then re-run the curl checks against the custom domain,
-since headers/redirects/Functions are host-sensitive). The pre-deploy list below is fully done and
+since headers/redirects/Functions are host-sensitive). **(Superseded 2026-08-22: the custom domain
+is the apex `visiblegov.us` — Lance owns it. Phase 3 is now a FRESH zone for `visiblegov.us`
+(add site → delete registrar cruft → nameservers at the registrar), NOT a sweep of the HPHP zone,
+which is no longer involved and stays where it is; Phase 4 attaches `visiblegov.us` with `www`
+as an alias. `docs/CLOUDFLARE_DEPLOY.md` Phases 3-4 were rewritten for the apex, commit 1f44a2d.)**
+The pre-deploy list below is fully done and
 kept as the record of what had to be true:
 1. ✅ **`geocode.js` security headers — BUILT 2026-08-05.** All five response paths (incl. the
    400/502 error paths) now set them from `site/js/security-headers.js`, a shared constant the
@@ -173,7 +208,8 @@ kept as the record of what had to be true:
    and owns `helpingpeoplehelpingpeople.com` — which currently serves only a disposable caard.io
    one-pager he is fine losing, and he explicitly confirmed the zone has **no email functions at
    all** — so the nameserver move is a clean sweep: every imported record gets deleted, no judgment
-   call, nothing to preserve.
+   call, nothing to preserve. *(Superseded 2026-08-22: the HPHP zone is not part of the plan any
+   more — `visiblegov.us` gets its own zone; see the note above.)*
    (3d) Preview builds: recommended **leave the default on** — this is a public-transparency site,
    the anon key is public by design, RLS is the wall, and there is no auth session to confuse
    across origins. Not yet formally ruled by Lance; nothing blocks on it.
@@ -203,13 +239,36 @@ kept as the record of what had to be true:
   (not a regression): federal `Last, First "Nick"` name shapes make the surname-fallback sort put
   quoted nicknames first within each view.
 
-**Genuinely open, NOT blocking the deploy** (details further down / in the audit sections):
-- 107 open `vote_reconciliation_flags` (61 hard_mismatch). Now drainable with
+**Genuinely open, NOT blocking the deploy** (details further down / in the audit sections; the
+counts on this list are dated — `npm run status` OPERATOR QUEUE is the live figure):
+- 107 open `vote_reconciliation_flags` (61 hard_mismatch) *(2026-08-05 count; 2026-08-23: 364
+  open — 101 hard_mismatch, 176 `no_tally_corresponding_primary` (expected to close via
+  `scripts/resolve-matched-reconciliation-flags.mjs` once the journal replay lands their twins),
+  69 `primary_cast_data_not_comparable`, 14 soft, 4 ambiguous; 187 legiscan-vs-mo-senate-web,
+  177 legiscan-vs-mo-house-xml)*. Now drainable with
   `correct-data.js reconcile-flag` instead of one code change per flag — but each is a real human
   ruling about a real legislator's record, so it is Lance's work, not an agent's.
 - 359 draft summaries (see the RESUME HERE block for what they are — verified-flagged,
   drain-lane fodder) + 632 draft-mappable glossary terms (plus 5,995 needs_mapping) in the
-  review queue.
+  review queue *(2026-08-10 figures; 2026-08-23: 32 drafts = 28 parked with written reasons + 4
+  fresh scheduler refusals; glossary 522 draft-mappable / 4,964 needs_mapping / 1,858 published of
+  7,344, plus 419 flagged glosses awaiting Lance's flag review)*.
+- **Migration `0032_vote_date_provenance.sql` — DRAFTED 2026-08-23, NOT applied** (live:
+  `votes.vote_date_provenance` absent). Draft-then-apply: Lance's apply, then the $0 re-ingest of
+  session 2122 from the cached dataset stores the 185 tally-dated 2024 MO House roll calls
+  (RESUME HERE ⏳ entry; ledger item 23). Until then `npm run status` shows 2024 MO casts at
+  ~2,500 against 55k–205k for every other year.
+- **MO House XML export serves only the CURRENT General Assembly** (verified 2026-08-23 in
+  Lance's browser: 241 of 242 prior-GA loads are the HTTP-200 error page) — there is no
+  prior-GA backfill path through `mo-house-xml`; LegiScan is the only source for earlier years.
+  Recorded in ledger item 23; listed here so a fresh session does not go looking for one.
+- **Sen. Travis Fitzwater (MO Senate D10, term since 2023-01-04) has 0 casts on ANY
+  `mo-senate-web` journal vote** (234 journal votes live, 168 of them 2026 — counted 2026-08-23
+  ~15:00Z; the replay adds more each day-writing slot) while carrying
+  5,073 LegiScan casts — the journal pipeline, the completeness-critical one, resolves 33 of
+  the 34 roster seats and drops his. Captured 2026-08-23 (INBOX entry with the mechanism);
+  pre-existing (the 08-02 session-merge note below already saw the symptom), not caused by the
+  replay.
 - ~19 known unbounded-`.select()` sites across 8 files, grandfathered in
   `tests/select-pagination-enforcement.test.js`'s dated allowlist. `ingest.js` is closest to
   actually tripping (legislators at ~940 of the 1,000 cap on a live-scheduled path).
@@ -1008,8 +1067,8 @@ session's own direct work, not assumed.**
     votes. Not wrong, just thin; the site labels dates honestly. Widening means more Congress.gov
     roll-call ingestion (free, polite, slow).
 
-23. **The 275 undated 2024 MO House roll calls — 184 RECOVERED 2026-08-23 by a printed tally
-    match, 91 stay refused.** Refused at ingest because they carry LegiScan's `0000-00-00`
+23. **The 275 undated 2024 MO House roll calls — 185 RECOVERED 2026-08-23 by a printed tally
+    match, 90 stay refused.** Refused at ingest because they carry LegiScan's `0000-00-00`
     sentinel (the per-roll-call API prints it too — spot-checked live). CORRECTION of the 07-30
     premise: the House XML export serves only the current General Assembly (251 loads, 241/242
     are the HTTP-200 error page — verified in Lance's browser), so they were NEVER going to
@@ -1017,8 +1076,11 @@ session's own direct work, not assumed.**
     prints no tally; floor passage actions in the bill history DO ("Third Read and Passed (H) -
     AYES: 108 NOES: 46", dated). Tier 1 rule (Lance, 2026-08-23): exactly one dated same-chamber
     action with the roll call's own AYES/NOES → that date, receipt stored in
-    `votes.vote_date_provenance` (migration 0032). 184 match; 84 would need a stage-day
-    inference (declined — "never a guess"); 10 ambiguous; 5 tally-less concurrence votes.
+    `votes.vote_date_provenance` (migration 0032). 185 match (measured by running the shipped
+    rule over the cached dataset, 2026-08-23); the other 90 are refused — 79 with no action
+    printing that tally anywhere in the bill's history, 10 whose tally is shared by a sibling roll
+    call on the same bill and chamber, 1 whose only tallied action belongs to the other chamber.
+    A stage-day inference would have reached ~84 of the 79-class; declined — "never a guess".
     **Migration 0032 awaits Lance's apply; then re-ingest session 2122 from the cached dataset.**
 
 24. **Giant bills (11 over the 400k-char gate).** HRB 2467 (561k), HRB 1 (550k), SRB 975 (751k) and
@@ -1233,8 +1295,12 @@ session's own direct work, not assumed.**
   item has any key outside the known set, throw with the key name. Small, TDD-able against the
   manifest shape; do it the next time the workflow is touched.
 
-- **(2026-08-22) MO Senate journal parser quarantines 2026-session days on `bill_refs` — the
-  completeness-critical pipeline has a live gap.** 20 days quarantined (was 12 on 08-03): 14 are
+- ~~**(2026-08-22) MO Senate journal parser quarantines 2026-session days on `bill_refs` — the
+  completeness-critical pipeline has a live gap.**~~ **RESOLVED 2026-08-23 (commit 5ced4eb):
+  parser fixed TDD against all 20 quarantined days (137/137 blocks), every `*.failed.json` marker
+  removed (0 on disk), replay in progress through the scheduler — see RESUME HERE; the flag
+  re-match (`resolve-matched-reconciliation-flags.mjs`) runs after the replay.** Original
+  capture: 20 days quarantined (was 12 on 08-03): 14 are
   2026 session (`26info`), 6 are 2018. Every failure record reads `category: bill_refs — "block N:
   no bill reference found in motion - needs human review"` after 3 attempts (e.g.
   `RDay6805151864-1889.failed.json`, 2026-05-15). Consequence, measured: open
@@ -1247,6 +1313,22 @@ session's own direct work, not assumed.**
   clauses / "the bill" without a number), fix the parser TDD with those days as fixtures, and
   replay the quarantined days (`*.failed.json` markers hold them out; replay = delete the marker
   or use the adapter's replay path). The flags will then re-match or become genuine rulings.
+
+- **(2026-08-23) Journal pipeline drops one senator entirely: Sen. Travis Fitzwater (MO Senate
+  D10, term 2023-01-04 → open) has 0 casts on any `mo-senate-web` vote** — 234 journal votes are
+  live (168 from 2026; counted 2026-08-23 ~15:00Z, the replay adds more each slot) and he
+  carries 5,073 LegiScan casts, so every journal-sourced roll call
+  is missing one real senator's position. Observed live during the 08-23 replay, pre-existing
+  (the 08-02 session-merge note in NOW already saw "Fitzwater's yea vote present in every
+  LegiScan roll call, absent from every Senate-journal-sourced one"): each replayed 2026 day's
+  run record lists his casts in `unresolvedSample` as `{surname:'Fitzwater', district:null}`,
+  the run's `resolutionRoster` carries 33 seats with no District 10 entry, his `legislators` row
+  has `mo_senate_id: null` (the district-number identity key the adapter resolves on, migration
+  0008), and a second `legislators` row `Paul Fitzwater` (no terms, 1,639 casts) shares the
+  surname, so a surname-only fallback cannot pick him. Not caused by the parser fix. Next step
+  (its own small build, on Lance's go): find why the roster parse yields no D10 entry, set the
+  identity key, and replay — the dropped casts then resolve and the matching LegiScan
+  `hard_mismatch` flags should re-match. Capture only.
 
 - **(2026-08-22) Post-tick aggregate refresh collides with pg_cron — real, benign, UNRECORDED
   until now.** The ingest scheduler's `scripts/refresh-aggregates.js` call after a write-tick
@@ -1265,8 +1347,9 @@ session's own direct work, not assumed.**
   `backfill-*.js` family, `sync-session-dates.js`, the gloss runner, and correct "`correct-data.js
   all` runs six"; SCHEDULED_SUMMARIES lines 132/170 still say never-billed/not-registered, and it
   lacks the 08-18 corroboration stage and the 08-22 recency-first fallback + WARNING line;
-  CLOUDFLARE_DEPLOY Phase 4 says the subdomain is decided (it is UNDECIDED: .us / .net /
-  subdomain); ARTIFACTS' cache table omits seven dirs incl. `scheduled-summaries/parked.json`
+  ~~CLOUDFLARE_DEPLOY Phase 4 says the subdomain is decided (it is UNDECIDED: .us / .net /
+  subdomain)~~ *(struck 2026-08-23: decided `visiblegov.us` the same day this was written and
+  the doc was rewritten for the apex — commit 1f44a2d)*; ARTIFACTS' cache table omits seven dirs incl. `scheduled-summaries/parked.json`
   (cost-bearing), `summary-scheduler-logs/`, `wave3/`, `gloss-batch-{mo,usc}/`,
   `openstates-people/`; RUNBOOK_SUMMARY_WAVES needs a "lane CLOSED 2026-08-18, scheduler owns
   summaries" banner; VOTERTABLES_JOIN_GAMEPLAN Phase 1 (address lookup) already shipped
@@ -1333,6 +1416,9 @@ brainstorm → spec cycle when this project gets picked up.
 **2026-08-17 (Lance: "Look into joining VisibleGov and VoterTables and make a gameplan"):**
 
 Gameplan written to `docs/VOTERTABLES_JOIN_GAMEPLAN.md` — PROPOSAL, awaiting Lance's review.
+*(2026-08-23 note: Phase 1 is already LIVE — built 2026-07-30 (commit 9252d6c) and live since the
+2026-08-05 deploy, as `site/index.html` `#address-lookup` + `site/functions/geocode.js`; the gameplan doc still proposes it, so strike
+it there before Lance reviews, per the 08-22 docs-debt entry.)*
 Short form: join on (chamber, district). Phase 1 = "Find my legislators" page via the free
 Census geocoder (address → MO House/Senate district → existing profiles; needs NO VoterTables
 data). Phase 2 = pivot VoterTables' data channel from stalled clerk outreach (43/116 counties)
@@ -1373,4 +1459,4 @@ draft — see NOW.
   re-recorded with --replace-drafts: 8 published (both Laken Rileys, Rescissions, DETERRENT
   among them), 5 re-flagged on real second issues the parens failure had masked. Zero
   gate-mechanics flags in the 9 waves after the fix.
-- **`npm run status` "summaries draft/flagged" gauge misleading since drain campaign (2026-08-09, STILL OPEN):** it counts `summaries?status=neq.published`, which includes the drafts retired to 'rejected' by --replace-drafts — reads 478 when actual open drafts are 359 (as of 2026-08-10). Fix: count `status=eq.draft` (and maybe show rejected separately). One-line change in scripts/data-status.js; PLAYBOOK lesson 36 documents the class.
+- **`npm run status` "summaries draft/flagged" gauge misleading since drain campaign (2026-08-09, ~~STILL OPEN~~ RESOLVED 2026-08-16, commit c9b3560 — `scripts/data-status.js` now counts `status=eq.draft` and prints "summaries retired (superseded)" on its own line):** it counts `summaries?status=neq.published`, which includes the drafts retired to 'rejected' by --replace-drafts — reads 478 when actual open drafts are 359 (as of 2026-08-10). Fix: count `status=eq.draft` (and maybe show rejected separately). One-line change in scripts/data-status.js; PLAYBOOK lesson 36 documents the class.

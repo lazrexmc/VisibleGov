@@ -12,34 +12,20 @@ and why, and surface how legislators voted on it - so people can hold their own 
 accountable with real information instead of spin.
 
 > ## ⏱ FRESH SESSION: READ `TODO.md`'s "RESUME HERE" BLOCK FIRST
-> It is at the very top of `TODO.md`, was verified against the live database on 2026-08-09, and is
-> the ONLY place that states what is actually open. Everything else — including the status
-> paragraph directly below — is a historical snapshot that goes stale. **The site is DEPLOYED and
-> verified live at https://visiblegov.pages.dev** (2026-08-05); the full product loop — directory →
-> profile → real votes → bill → tally — was confirmed working in a real browser with zero console
-> errors. **710 plain-language summaries are published (2026-08-10, up from 115 on 2026-08-06)**
-> — the 400-bill 2025-session recency manifest campaign is **COMPLETE** (394 attempted, 6
-> class-parked with documented structural reasons). What remains: the custom-domain phases
-> (nameservers + attach `visiblegov.helpingpeoplehelpingpeople.com`, Lance's console work — see
-> `docs/CLOUDFLARE_DEPLOY.md`), the 359-draft drain lane, the next recency-first export (~2,500
-> eligible bills with text), and the parked autonomy build. **Lane state (2026-08-10 evening):
-> NO summary lane is running — the campaign finished; the BILLED path stays CLOSED — the API
-> balance is spent ($1.98, 2026-08-09) and Lance's standing instruction is "Once depleted, pause
-> waves as I do not auto reload credits" — no billed call without new funds AND his explicit
-> go.**
-> **Update 2026-08-19:** the drain is COMPLETE (live 1,037; the registered daily 6 AM scheduler
-> owns all future summaries under its $1/tick + $5/wk ledger carve-out), and the **Missouri
-> statute glossary is LIVE** (2026-08-21: 1,217 RSMo glosses published for $12.45 via the
-> Batch-API runner; glossary 116 → 1,333; PLAYBOOK lessons 41-43 record what the audit and the
-> run taught — incl. lesson 43: stop background runners by PID, never by command-line grep).
-> **Update 2026-08-21 (evening):** the **federal (U.S.C.) glossary drain is LIVE too** — 525
-> glosses published (glossary published 1,858; 649 of 1,045 summaries show a gloss) — but the run
-> spent **$8.31 against an $8 cap and a $5.62 balance** (USC excerpts are 2.5x MO's; the cap only
-> gated before each submission). **The balance hit $0 ("out of api credits"); Lance then loaded
-> $7 more the same evening — the scheduler resumes under its ledger carve-out; every other billed
-> call still needs explicit per-run approval with a cost stated.** The runner now
-> projects each batch from the banked text before submitting (lesson 44). 419 flagged glosses
-> await Lance's review.
+> It is at the very top of `TODO.md`, is re-verified against the live database continuously (its
+> heading carries the date of the last full re-verification — 2026-08-23 at this writing — but
+> trust the dates INSIDE the block over the heading), and is the ONLY place that states what is
+> actually open: which lanes are running, what awaits Lance, what is in flight. Everything else in this file — including the dated
+> snapshots kept further down — is history that goes stale; do not resume from it. Live numbers:
+> `npm run status` (what each number means: `docs/DATA_INVENTORY.md`).
+>
+> **Two Windows Scheduled Tasks mutate the database while you work (both Ready, 2026-08-23):**
+> `VisibleGov Scheduled Ingestion` (every 15 minutes since 2026-07-31; `scripts/scheduled-ingest.js`;
+> `docs/SCHEDULED_INGESTION.md`) and `VisibleGov Scheduled Summaries` (daily 06:00;
+> `scripts/scheduled-summaries.js`, billed under its $1/tick + $5/ISO-week ledger;
+> `docs/SCHEDULED_SUMMARIES.md`). Both docs carry the same rule: **an agent never runs `schtasks`**
+> — registering, pausing, and removing the tasks is Lance's step. Expect ingestion run records and
+> freshness timestamps to move under you.
 >
 > **Two traps that will cost you a session if you hit them cold:**
 > 1. **Never `source .env` in a shell where you then run `node --test`** — it makes 2 correct
@@ -49,9 +35,65 @@ accountable with real information instead of spin.
 >    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
 > 2. **Migrations 0001-0031 (+ 0018a) are APPLIED. `0032_vote_date_provenance.sql` is DRAFTED and
 >    AWAITS LANCE'S APPLY (2026-08-23)** — it adds `votes.vote_date_provenance jsonb`, the receipt
->    for the 184 LegiScan 2024 House roll calls dated by a printed tally match; the ingest refuses
->    those votes (counted `datesDerivedGated`) until it lands. Older text saying any OTHER migration
->    is "drafted, awaiting Lance" is stale.
+>    for the 185 LegiScan 2024 House roll calls dated by a printed tally match (184 before the
+>    pre-commit adversarial review's chamber-suffix fix — commit 2e420d9, CHATLOG 2026-08-23);
+>    the ingest refuses those votes (counted `datesDerivedGated`) until it lands. Older text saying any OTHER migration
+>    is "drafted, awaiting Lance" is stale. **Standing caveat: whoever drafts a migration edits this
+>    trap (and the migration count in the Status paragraph below) in the same commit** — this trap
+>    still read "nothing awaits an apply" while 0032 sat drafted-but-uncommitted on 2026-08-23 (and
+>    the Status paragraph's count lagged a commit longer), which is exactly the misdirection it
+>    exists to prevent.
+>
+> **Newer traps, pointers only — `PLAYBOOK_DELTA.md` lessons 43-50 (2026-08-21..23):** verify a
+> background runner's liveness by PID, never by command-line grep (43); a spend cap that only gates
+> BEFORE each submission cannot stop a single batch — project from the data on disk (44); a sort
+> key that is NULL for most rows degrades silently — re-run `node --env-file=.env
+> src/cli/sync-session-dates.js` (dry-run, then `--apply`) whenever a session is minted (45);
+> anything retyped into a launch call is a transcription — bank it and send a pointer (46);
+> `Workflow({name})` can serve a session-cached pre-edit script — launch edited workflows by
+> `scriptPath` (47; `.claude/workflows/*.js` must stay LF — `.gitattributes` pins it); a grammar
+> verified on two fixtures is a hypothesis about the corpus (48); a roll call with no bill is a
+> different kind of record, not a failed parse (49); a documented fallback that was never exercised
+> is a hope (50).
+
+> **Historical status snapshots — SUPERSEDED 2026-08-23, kept for the record only; resume from
+> `TODO.md`'s RESUME HERE, never from here.** **The site is DEPLOYED and
+> verified live at https://visiblegov.pages.dev** (2026-08-05); the full product loop — directory →
+> profile → real votes → bill → tally — was confirmed working in a real browser with zero console
+> errors. **710 plain-language summaries are published (2026-08-10, up from 115 on 2026-08-06)**
+> — the 400-bill 2025-session recency manifest campaign is **COMPLETE** (394 attempted, 6
+> class-parked with documented structural reasons). What remains: the custom-domain phases
+> (nameservers + attach ~~`visiblegov.helpingpeoplehelpingpeople.com`~~ — superseded 2026-08-22:
+> the apex `visiblegov.us`, which Lance owns, with `www` as a redirect/alias (wiring still his call); his console
+> work — see `docs/CLOUDFLARE_DEPLOY.md`), ~~the 359-draft drain lane~~ (drained: COMPLETE
+> 2026-08-18/19, and the $0 lane ran to empty again 2026-08-22), the next recency-first export (~2,500
+> eligible bills with text — still ~2,500 ready on 2026-08-23; the daily scheduler now works that
+> queue recency-first), and ~~the parked autonomy build~~ (built 2026-08-15
+> as `scripts/scheduled-summaries.js`, registered as the daily task). **Lane state (2026-08-10 evening):
+> NO summary lane is running — the campaign finished; the BILLED path stays CLOSED — the API
+> balance is spent ($1.98, 2026-08-09) and Lance's standing instruction is "Once depleted, pause
+> waves as I do not auto reload credits" — no billed call without new funds AND his explicit
+> go.** *(superseded 2026-08-21: Lance loaded $7; the scheduler bills under its ledger, everything
+> else still needs per-run approval — see the policy bullets under Working conventions.)*
+> **Update 2026-08-19:** the drain is COMPLETE (live 1,037; the registered daily 6 AM scheduler
+> owns all future summaries under its $1/tick + $5/wk ledger carve-out), and the **Missouri
+> statute glossary is LIVE** (2026-08-21: 1,217 RSMo glosses published for $12.45 via the
+> Batch-API runner — `scripts/gloss-batch-mo.mjs --source mo|usc`, checkpoints under
+> `.superpowers/artifacts/gloss-batch-<source>/`, resumed with `--resume`, stopped by the PID the
+> launcher wrote to `runner.pid` there (the script itself has no PID handling — lesson 43);
+> glossary 116 → 1,333;
+> PLAYBOOK lessons 41-43 record what the audit and the
+> run taught — incl. lesson 43: stop background runners by PID, never by command-line grep).
+> **Update 2026-08-21 (evening):** the **federal (U.S.C.) glossary drain is LIVE too** — 525
+> glosses published (glossary published 1,858; 649 of 1,045 summaries show a gloss) — but the run
+> spent **$8.31 against an $8 cap and a $5.62 balance** (USC excerpts are 2.5x MO's; the cap only
+> gated before each submission). **The balance hit $0 ("out of api credits"); Lance then loaded
+> $7 more the same evening — the scheduler resumes under its ledger carve-out; every other billed
+> call still needs explicit per-run approval with a cost stated.** The runner now
+> projects each batch from the banked text before submitting (lesson 44). 419 flagged glosses
+> await Lance's review. *(Everything after this date lives in `TODO.md`'s RESUME HERE — the $0
+> drain lane running to empty 2026-08-22, the session-date fix, the MO Senate journal fix and
+> replay, the 2024 MO House dating behind migration 0032 — and is deliberately NOT mirrored here.)*
 
 **Status (2026-08-04): backend live and accurate — two independent audits ran end-to-end 2026-08-03
 (an 8-domain accuracy audit, then a senior-engineering-lens audit), 4 + 19 findings fixed and
@@ -62,8 +104,9 @@ misestimation) was root-caused and fixed live 2026-08-04 — manual refresh now 
 real scheduled `pg_cron` ticks are succeeding; the site is now DEPLOYED and verified live at
 https://visiblegov.pages.dev (2026-08-05), custom domain still pending — see `TODO.md` RESUME
 HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
-the public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0031 all applied — 32
-files total including 0018a; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
+the public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0031 all applied — 33
+files on disk as of 2026-08-23, including 0018a and the DRAFTED, not-yet-applied
+`0032_vote_date_provenance.sql` (trap 2 above); 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
 anon vote-list timeout found on deploy night, both verified live 2026-08-05; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
 missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-backed tests (`tests/`,
 2,200+ green — run `node --test` for the exact current count; a senior engineering audit,
@@ -73,28 +116,44 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-38 lessons as of 2026-08-10, several earned the hard way in THIS repo; lessons 37-38 are the
-newest: diagnose a silently-dead background task from its on-disk artifacts and resume from
-journaled state, and park a failing structural CLASS with written reasons rather than paying
-per-instance retries), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+50 lessons as of 2026-08-23 — lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
+H2s, so `grep -c '^## Lesson'` undercounts at 37; the "Index of lessons" table at the top of the
+file is the live count — several
+earned the hard way in THIS repo; lessons 37-38 were the newest as of 2026-08-10 — diagnose a
+silently-dead background task from its on-disk artifacts and resume from journaled state, and park
+a failing structural CLASS with written reasons rather than paying per-instance retries — and
+lessons 45-50 (2026-08-22/23) are the newest now, summarized in the banner above), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
-own staleness banner, refreshed 2026-08-10, defer to `TODO.md`/live checks for migration-applied state),
-then the most recent `CHATLOG.md` entries (why things are the way they are).
+own staleness banner — trust the date printed in that banner, not one quoted here — and defer to
+`TODO.md`/live checks for migration-applied state),
+then the most recent `CHATLOG.md` entries (why things are the way they are). The operating docs
+that now carry standing truth, read when the work touches them: `docs/DATA_INVENTORY.md` (what
+every `npm run status` number means, and the known coverage gaps), `docs/SCHEDULED_INGESTION.md`
+and `docs/SCHEDULED_SUMMARIES.md` (the two registered Windows tasks — pausing, resuming, the
+ledger), `docs/RUNBOOK_SUMMARY_WAVES.md` (the $0 subagent summary lane; drain waves come from
+`node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` and are launched by
+`scriptPath`), and `docs/DISASTER_RECOVERY.md` (full rebuild from a bare clone when the Supabase
+project or the machine is gone).
 
 **Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not
 an open defect in the fix itself:** the cross-adapter vote-duplicate dedup (migration 0022) is
 applied and live; its backfill was itself found and fixed 2026-08-03 (a bare `.select()` had
 silently truncated the scan to 12% of its target — see
-`docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries 62 real
-matched pairs (59 from the backfill, all 2018 MO Senate; 3 more marked since by live ingest). The `mo-house-xml` roll-call-PDF adapter resolves casts against
+`docs/audits/2026-08-03-senior-engineering-audit.md` finding 1) and now correctly carries real
+matched pairs — 59 from the backfill, all 2018 MO Senate, plus a handful marked since by live ingest
+(62 when this was written 2026-08-05; 66 as of 2026-08-23 — the table is the truth). The `mo-house-xml` roll-call-PDF adapter resolves casts against
 a roster containing exactly one real legislator, a leftover test fixture — investigated end-to-end
 2026-08-05: the dominant `legiscan` pipeline already covers 96.9% of all MO House votes with 0%
-zero-cast, and every bill `mo-house-xml` currently resolves any real cast for already has a
+zero-cast (the 2026-08-05 measurement; ~92% as of 2026-08-23 because `mo-house-xml` rows have grown
+since — the one-legislator roster finding is unchanged), and every bill `mo-house-xml` currently resolves any real cast for already has a
 LegiScan vote for the same bill (100% overlap, live-verified) — so a roster-ingest-loop fix was
 deliberately deprioritized as low-value (plus a separate, still-open `mo_house_id`
-cross-era-collision risk, TODO 31, any such fix would need to navigate). **Prior "most MO House
+cross-era-collision risk, TODO 31, any such fix would need to navigate). Also (verified in Lance's
+browser 2026-08-23): the House XML export serves only the current General Assembly, so earlier
+sessions cannot be backfilled from it — the undated 2024 House roll calls are instead dated from
+LegiScan's own printed history behind drafted migration 0032 (trap 2 above). **Prior "most MO House
 per-legislator vote data structurally incomplete" framing was itself wrong and is corrected here:**
 live-verified directly that all 159 CURRENT MO House legislators have at least one real MO House
 vote on their profile page via LegiScan's own coverage — the gap was specifically "zero votes *from
@@ -108,7 +167,9 @@ per-legislator vote coverage," for the full evidence trail.
   https://visiblegov.pages.dev and verified live end-to-end.** Lance's original ruling (2026-07-31,
   *"I'm only interested in starting the cloudflare portion once the entire backend is locked in and
   accurate"*) was satisfied — he raised the deploy himself after four audit passes produced zero
-  criticals. Only the custom-domain phases remain (his console work; `docs/CLOUDFLARE_DEPLOY.md`).
+  criticals. Only the custom-domain phases remain (his console work; `docs/CLOUDFLARE_DEPLOY.md`;
+  target decided 2026-08-22: the apex `visiblegov.us`, superseding the earlier
+  `helpingpeoplehelpingpeople.com` subdomain plan).
   Two real bugs were found and fixed DURING the deploy's own verification (the browser walk earned
   its cost): `_redirects` targets had to become extensionless (Pages 308-canonicalizes `.html`),
   and migration 0031 fixed a live anon `statement_timeout` on profile vote lists — see
@@ -158,17 +219,30 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   restrictions from the rules and settings until I reinstate them."** Per-run approval + cost
   statement is NOT required for live API calls while this is in effect. This is a suspension, not
   a repeal — the rule text above stays in place so reinstating it is a one-line revert of this
-  note, not a rewrite. Treat this as still in effect until Lance says otherwise; do not assume it
-  has lapsed just because time has passed or the session has changed.
+  note, not a rewrite. ~~Treat this as still in effect until Lance says otherwise; do not assume it
+  has lapsed just because time has passed or the session has changed.~~ **ENDED in practice
+  (marked 2026-08-23): depletion on 2026-08-09 overtook the suspension, and Lance's 2026-08-21
+  reload ("I loaded $7 more") was a balance update, not a go — so the original rule above
+  (per-run approval with a cost stated) governs every billed call except the scheduler's ledger
+  carve-out in the next bullet. No new ruling from Lance re-suspended it; if he does, that is a
+  new dated note here.**
   **SUPERSEDED IN PRACTICE by depletion (2026-08-09): the API balance is SPENT.** Lance's final
   authorization ("I have a $1 or $2 left... use the dollars... Once depleted, pause waves as I do
   not auto reload credits") was executed the same day — $1.98 across three budget-capped
   `scripts/summary-probe-api.mjs` runs, zero credit errors, then full stop. **All summary lanes
   (billed AND subagent) are paused; any new billed call now requires Lance to add funds AND give
   an explicit go.** See the memory file `no-api-spend-hold.md` and CHATLOG 2026-08-09.
+  *(Superseded 2026-08-21/22: Lance loaded $7 on 2026-08-21 evening; the billed scheduler ticks
+  daily under its $1/tick + $5/ISO-week ledger — the next bullet; the $0 subagent drain lane ran
+  to empty on 2026-08-22 and resumes only when `node --env-file=.env
+  scripts/build-drain-wave.mjs <WAVE> 6 --pointer` reports candidates; every OTHER billed call
+  still needs funds on the balance AND Lance's explicit go with a cost stated — never assume a
+  further reload.)*
 - **Scheduled summaries — `scripts/scheduled-summaries.js` exception:** `scripts/scheduled-summaries.js`
-  runs billed calls unattended under a code-enforced $5.00/ISO-week cap (Lance, 2026-08-10; built
-  2026-08-15); this ledger+cap IS the per-run approval for this runner only. Every other billed
+  runs billed calls unattended under a code-enforced $5.00/ISO-week cap plus a $1.00/tick cap (Lance,
+  2026-08-10; built 2026-08-15; registered as the Windows task `VisibleGov Scheduled Summaries`,
+  daily 06:00, trigger dated 2026-08-17 — `docs/SCHEDULED_SUMMARIES.md`); this ledger+cap IS the
+  per-run approval for this runner only. Every other billed
   call still requires explicit per-run approval.
 - **Trust model v3 (adopted 2026-07-28 for glossary, 2026-07-31 for summaries — fully live, not
   pending; spec: docs/superpowers/specs/2026-07-28-trust-model-v3-design.md):** opus-5 authors from
