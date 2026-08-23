@@ -1,0 +1,5 @@
+# Files whose byte-exact line endings matter: journal text fixtures are parsed as-is by the
+# MO Senate adapter tests, and .claude/workflows/*.js must stay LF (CRLF blocks the Workflow
+# permission layer — CHATLOG 2026-08-18, commit d48cac1).
+tests/fixtures/research/mo-senate/*.txt text eol=lf
+.claude/workflows/*.js text eol=lf

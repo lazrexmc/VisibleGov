@@ -1170,6 +1170,12 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-23) `ingest-mo-senate.js --year 2026 --dry-run` reports "no sessions row yet for
+  identifier=2026"** while the live path dedups onto the `261` session row (TODO 25 fix) — the
+  dry-run report looks the session up by bare year and so reports zero votes/pending for the
+  current session. Cosmetic but misleading for an operator; align dryRunReport with
+  ensureSession's lookup.
+
 - **(2026-08-23) Store non-bill roll calls.** The journal parser now classifies quorum calls,
   simple-resolution adoptions/amendments, journal amendments, and appointment confirmations as
   `nonBillVotes` (reported in run detail, never stored). `votes.bill_id` is nullable (0001: "some
