@@ -1743,3 +1743,38 @@ test('runMoSenate: a mid-loop failure carries forward PARTIAL progress into the 
     assert.deepEqual(closeCalls[0].detail.counts.quarantined_days, ['RDayF']);
   });
 });
+
+// ---- 2026-08-23: non-bill roll calls (journal attribution fix) ----
+//
+// RDay160131222-234 (2018-01-31) is the canonical day with ZERO bill votes — two roll calls on
+// amendments to SR 1137 (Senate rules) and one advice-and-consent vote on an appointment. Before
+// the fix every such block failed 'no bill reference found in motion' and the day was quarantined
+// forever; now the day completes (done marker written, failures 0) with the three roll calls
+// reported as non-bill and nothing written to votes.
+test('processJournalDay: a day made only of non-bill roll calls completes — done marker, zero votes written, non_bill_votes 3, failures 0', async () => {
+  const { mkdtempSync, existsSync, readFileSync: readFs } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'mo-senate-nonbill-'));
+  const { client, tables } = makeFakeDb();
+  const sessionRow = { id: 'sess-2018' };
+  const dayRow = {
+    journal_url: 'https://www.senate.mo.gov/18info/Journals/RDay160131222-234.pdf',
+    journal_date: '2018-01-31',
+    pdf_basename: 'RDay160131222-234',
+  };
+  const args = { journalPdfFile: `${FIXTURES}/RDay160131222-234.pdf` };
+  const result = await processJournalDay(client, 'run-1', 2018, sessionRow, dayRow, args, { gated: false, roster: [] }, dir);
+
+  assert.equal(result.failures, 0);
+  assert.equal(result.votes_parsed, 0);
+  assert.equal(result.votes_written, 0);
+  assert.equal(result.non_bill_votes, 3);
+  assert.deepEqual(result.nonBillVotes.map((n) => [n.ordinal, n.kind]), [[1, 'simple_resolution'], [2, 'simple_resolution'], [3, 'appointment']]);
+  assert.equal(tables.votes.length, 0);
+  assert.ok(existsSync(`${dir}/RDay160131222-234.done.json`), 'the day must complete');
+  assert.ok(!existsSync(`${dir}/RDay160131222-234.failed.json`), 'no failure artifact');
+  const marker = JSON.parse(readFs(`${dir}/RDay160131222-234.done.json`, 'utf8'));
+  assert.equal(marker.votes, 0);
+  assert.equal(marker.non_bill_votes, 3);
+});

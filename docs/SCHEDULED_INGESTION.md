@@ -528,3 +528,17 @@ feeding a duplicate-session defect while it does. Re-verify this claim against `
 TODO.md if this document is read long after 2026-08-02 and the fix's continued correctness matters
 (12 real scheduler ticks had run clean with zero duplicates recreated as of the 2026-08-02 check
 that closed this item).
+
+## MO Senate journal attribution kinds and non-bill roll calls (2026-08-23)
+
+`ingest-mo-senate.js` run detail now carries every attribution kind the parser can produce —
+`motion`, `preceding_taken_up`, `conference_committee_report`, `title_block`,
+`preceding_title_block`, `amendment_instruction`, `narrative_window` — and `non_bill_votes`
+(quorum calls, simple-resolution adoptions/amendments, journal amendments, appointment
+confirmations: recorded roll calls that are mechanically not votes on a bill; reported, never
+stored, never a failure). A day completes when `failures` is 0, so a day made only of non-bill
+roll calls completes. The 20 days quarantined on `bill_refs` through 2026-08-22 were this class;
+see CHATLOG 2026-08-23 and tests/mo-senate-journal-attribution.test.js. To replay a quarantined
+day after a parser fix: delete its `.failed.json` in `.superpowers/artifacts/mo-senate-journals/`
+and the day re-enters the worklist (the scheduler drains current-year days one per tick; prior
+years need a manual `--year <Y> --limit 1` run).

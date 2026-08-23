@@ -747,7 +747,7 @@ export async function processJournalDay(
     return buildDayFailureResult(dayRow, 'extraction', `extract ${dayRow.pdf_basename}`, err, dir);
   }
 
-  const { votes, failures } = journalPdf.parseJournalVotes(text);
+  const { votes, failures, nonBillVotes } = journalPdf.parseJournalVotes(text);
 
   const attribution = { motion: 0, preceding_taken_up: 0 };
   let votesWritten = 0;
@@ -833,7 +833,7 @@ export async function processJournalDay(
   // day leave the worklist forever (done marker); a day with >=1 failure stays pending — visibly
   // retried (and quarantined at the attempt cap) rather than silently marked done with a gap.
   if (failures.length === 0) {
-    writeDoneMarker(dayRow.pdf_basename, { run_id: runId, votes: votesWritten, gated: dayGated }, dir);
+    writeDoneMarker(dayRow.pdf_basename, { run_id: runId, votes: votesWritten, non_bill_votes: nonBillVotes.length, gated: dayGated }, dir);
   } else {
     writeDayFailureArtifact(dayRow.pdf_basename, dayRow.journal_url, failures, dir);
   }
@@ -845,6 +845,11 @@ export async function processJournalDay(
     votes_written: votesWritten,
     failures: failures.length,
     failureDetails: failures.map((f) => ({ ordinal: f.ordinal, category: f.category, message: f.message })),
+    // Recorded roll calls that are mechanically not votes on a bill (quorum calls, simple-resolution
+    // adoptions/amendments, journal amendments, appointment confirmations) — reported for the
+    // record, never stored as votes, never a failure (parseJournalVotes, 2026-08-23).
+    non_bill_votes: nonBillVotes.length,
+    nonBillVotes: nonBillVotes.map((n) => ({ ordinal: n.ordinal, kind: n.kind, motion: n.motion })),
     attribution,
     casts: {
       resolved: castsResolved, unresolved: castsUnresolved, unresolvedSample, gated: dayGated,
@@ -1147,6 +1152,7 @@ export async function runMoSenate(client, args, {
     let anyGated = rosterResult.identities.gated;
     const unresolvedSample = [];
     const attribution = { motion: 0, preceding_taken_up: 0 };
+    let totalNonBillVotes = 0;
 
     for (const dayRow of worklist.days) {
       const result = await processJournalDay(client, runId, args.year, sessionRow, dayRow, args, {
@@ -1166,8 +1172,8 @@ export async function runMoSenate(client, args, {
       // TypeError on the old fetch-failure return shape (which had no `attribution` key at all),
       // masking the real error and dropping the rest of this run's detail.
       const resultAttribution = result.attribution ?? { motion: 0, preceding_taken_up: 0 };
-      attribution.motion += resultAttribution.motion ?? 0;
-      attribution.preceding_taken_up += resultAttribution.preceding_taken_up ?? 0;
+      for (const [key, n] of Object.entries(resultAttribution)) attribution[key] = (attribution[key] ?? 0) + (n ?? 0);
+      totalNonBillVotes += result.non_bill_votes ?? 0;
       if (result.casts) {
         totalCastsResolved += result.casts.resolved;
         totalCastsUnresolved += result.casts.unresolved;
@@ -1197,8 +1203,14 @@ export async function runMoSenate(client, args, {
       unresolved: totalCastsUnresolved,
       failures: totalFailures,
       gated: anyGated,
-      attributed_from_context: attribution.preceding_taken_up,
+      // Every attribution kind OTHER than 'motion' is context-derived (the bill was read from a
+      // printed statement outside the motion sentence): preceding_taken_up,
+      // conference_committee_report, title_block, preceding_title_block, amendment_instruction,
+      // pending_amendment_recall, narrative_window (2026-08-23; this used to count only the
+      // first of those).
+      attributed_from_context: Object.entries(attribution).reduce((n, [key, v]) => (key === 'motion' ? n : n + (v ?? 0)), 0),
       attribution,
+      non_bill_votes: totalNonBillVotes,
       // FIX (freshness-honesty, 2026-07-30): worklist.skippedQuarantinedKeys is scoped to THIS
       // run's --year candidates only — listQuarantinedDays() reports the STANDING quarantined set
       // across the whole artifacts directory, so the public_freshness view (which reads only the
@@ -1258,6 +1270,8 @@ async function main() {
           pdf_basename: journalPdfBasename(args.journalPdfFile),
           votes_planned: parsed.votes.length,
           failures: parsed.failures.length,
+          non_bill_votes: parsed.nonBillVotes.length,
+          nonBillVotes: parsed.nonBillVotes.map((n) => ({ ordinal: n.ordinal, kind: n.kind })),
           attribution,
           writes: 0,
         },

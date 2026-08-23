@@ -1170,6 +1170,27 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-23) Store non-bill roll calls.** The journal parser now classifies quorum calls,
+  simple-resolution adoptions/amendments, journal amendments, and appointment confirmations as
+  `nonBillVotes` (reported in run detail, never stored). `votes.bill_id` is nullable (0001: "some
+  votes are procedural") but every consumer joins on bills. Decision needed: store them with
+  bill_id NULL + a `kind` so legislator profiles can show confirmation/resolution votes (real
+  accountability signal: SR 640 was a 23-11 contested roll call), or keep them out. Needs the
+  profile/aggregate consumers audited first.
+- **(2026-08-23) Scheduler: prior-year journal backlog has no automatic drain path.** The ingest
+  registry runs `ingest-mo-senate.js --year <current>` only; the six un-quarantined 2018 days
+  need manual `--year 2018 --limit 1` runs (each honours the durable 30-min cooldown against the
+  scheduler's own ticks). Options: a `--years` list, or a second registry entry for the prior
+  year that only runs when it has pending days.
+- **(2026-08-23) Run `scripts/resolve-matched-reconciliation-flags.mjs --apply` after the journal
+  replay completes AND the next LegiScan tick has re-cross-checked** (it re-processes all 604
+  roll calls daily from the cached dataset and writes new vote_duplicates pairs). Dry-run first;
+  176 `no_tally_corresponding_primary` flags open at build time, 0 resolvable until then.
+- **(2026-08-23) Journal parser follow-ups the fan-out surfaced but did not fix:** a two-word
+  surname gap (known, carried); the 'Was taken up on a standing division vote.' taken-up
+  variant (handled by the window rule, not by the EC scan); `nonBillVotes` kinds should be
+  surfaced in `npm run status` / data-status.
+
 - **(2026-08-22) Drain workflow: unknown manifest fields should THROW, not fall through to fresh
   authoring.** `summary-wave.js` picks the author branch by `preAuthored` → `reAuthor ||
   reAuthor_file` → `checkpoint_file` → fresh; an item that carries a field the running script

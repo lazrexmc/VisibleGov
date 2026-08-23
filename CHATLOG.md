@@ -5626,3 +5626,56 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   the spend-hold memory. Nothing is drainable until the scheduler's own refusals mint new
   candidates; Lance's own items (visiblegov.us Phases 3-4, 419 gloss flags, 28 parks, 356
   reconciliation flags) are untouched and his.
+- **MO Senate journal `bill_refs` quarantine ROOT-CAUSED AND FIXED — 20 of 20 quarantined days
+  now parse 137/137 blocks against an agent-verified ground truth; suite 2,593/0** (2026-08-23,
+  Lance: "proceed with 1"). Systematic-debugging pass, Phase 1 first: fetched all 20 quarantined
+  journals once (sequential, 2 s apart, cached locally), reproduced every failure with the
+  adapter's own `extractJournalText` + `parseJournalVotes`, then ran a 40-agent workflow — one
+  classifier per day over a per-block diagnostic, one adversarial verifier per day re-deriving
+  every claimed bill from the raw text — 72 findings, 0 disagreements, 0 misattributions among
+  the blocks that already parsed. The root cause is a single false assumption, not a 2026 wording
+  change: `resolveBillAttribution` knew ONE grammar ("the sentence before 'by the following vote:'
+  names the bill", abbreviated tokens only, plus the emergency-clause fallback), which held for the
+  two 2018/2026 fixtures and is false for the session's floor work. The journal prints the bill
+  OUTSIDE the motion for four recurring families — conference-committee-report adoption (19
+  blocks; 12 CCR pairs on the FY2027 appropriations day alone — the bill is only in the report
+  heading and the 'moved that the following conference committee report be taken up' sentence),
+  third reading after a printed title block (19; the title's own period makes the motion the bare
+  'Was read the 3rd time and passed'), floor-amendment roll calls (10; 'SA 2, as amended, was
+  adopted' — the bill is only in the amendment's 'Amend Senate Substitute for Senate Bill No.
+  1233, Page 1' instruction), procedural reconsideration (1) — in SPELLED-OUT forms the regex
+  could not read ('HOUSE BILLS NOS. 835 and 1111', 'Senate Joint Resolution No. 87'); and it
+  prints NON-BILL roll calls under the same anchor (quorum calls with Present/Absent categories,
+  'SR 640 was adopted', amendments to a Senate-rules resolution, an amendment to the Senate
+  JOURNAL itself with SB 888 quoted eight times inside it, an appointment confirmation) — four
+  whole days had only those and were quarantined for nothing. Two sentence-boundary defects rode
+  along: abbreviation periods ('SS No. 2 for SCS for SB 1012' → '2 for SCS for SB 1012 …';
+  'John B. Hurst' → 'Hurst was adopted') and no lower bound (a block with no period in its
+  preceding narrative swallowed the previous block's vote lists into `motion` and emitted
+  duplicate bill_refs — 6 OK blocks had this silently). One more defect was a category shape:
+  'NAYS—Senators—2' with the names on the next line (once in 22 days). **Fix (TDD, 20 new tests on
+  seven real-day text fixtures + the two original PDF fixtures unchanged):** spelled-out bill
+  grammar anchored on Bill/Joint Resolution/Concurrent Resolution and CASE-SENSITIVE — the journal
+  capitalizes a bill when naming the vehicle and lowercases it in an "An Act" title's enactment
+  history ('as enacted by … senate bill no. 982'), which a case-insensitive grammar turned into a
+  three-bill ambiguity on 2026-04-29; a bounded sentence boundary (floor = end of the previous
+  block's printed categories; 'No.'/'Nos.'/single-initial periods are not terminal); ONE
+  attribution mechanism for the bill-action families — every bill token in the family's own
+  bounded window must name the same identity or the block fails loud naming every candidate (CCR
+  windows start at the report's taken-up sentence; title-block windows at the 'entitled:'
+  sentence) — plus the amendment-instruction rule and a title-block corroboration for the
+  emergency clause in the CCR→CCS→EC sequence (which prints no 'taken up' line at all); non-bill
+  roll calls are recognised only by their own explicit shapes and REPORTED as `nonBillVotes`
+  (never attributed, never stored — votes.bill_id is nullable but no consumer renders a bill-less
+  vote; storing them is a TODO — never a failure, so those days complete). Fail-loud posture for
+  anything else is unchanged and pinned (a bill-less unknown motion; a title window naming two
+  bills; a CCR with no heading; a CCR whose taken-up sentence and heading disagree). Driver:
+  `non_bill_votes` in day/run detail and the done marker, all attribution kinds summed, dry-run
+  plan reports non-bill. Attribution mix over the 137 blocks: motion 79, CCR 18, title block 19,
+  amendment instruction 10, preceding title block 2, preceding taken-up 1, narrative window 1;
+  7 non-bill. Also built `scripts/resolve-matched-reconciliation-flags.mjs` (dry-run default):
+  nothing in the ingest path resolves an already-minted `no_tally_corresponding_primary` flag when
+  its primary later arrives (flags are additive; 0011 keeps resolved ones from re-minting), so
+  after replay + the next LegiScan tick (which re-cross-checks all 604 roll calls against the
+  cached dataset daily and marks new vote_duplicates pairs) this resolves exactly the flags whose
+  LegiScan roll call now has a canonical twin — 176 open today, 0 resolvable until then. **Adversarial review before commit (3 lenses — wrong-pick, design posture, code quality — 27 agents, 23 findings confirmed by execution, 1 refuted): all 23 addressed.** The two HIGHs were one defect — the amendment rule took the nearest 'Amend …' line instead of the amendment the motion names, so a pending amendment recalled from the Informal Calendar (which reprints no instruction) would have been silently attributed to whichever bill was amended most recently, or misfiled as non-bill; fixed by tying the designator in the motion ('SA 3', 'SSA 1 for SA 2') to ITS OWN heading + instruction, with the '(pending)' recall sentence as the corroboration window (or as the statement itself when the heading lies outside the block), instruction-vs-narrative disagreement failing loud. Mediums: reconsideration borrows only from floor-action sentences (never a committee report/referral/House message); non-bill classifiers narrowed to their exact printed shapes (a bill named after the appointments report, or 'quorum' elsewhere in a motion, never classifies non-bill); a bill reachable only across a single-initial period is never attributed as 'motion'; a motion naming two bills fails loud; a third reading with no 'entitled:' fails loud instead of falling back to proximity; plural locators ('Sections', 'Lines') end an instruction; NUMBER_LIST needs an explicit separator; 'CONFERENCE COMMITTEE REPORT NO. 2 ON' headings; the Excused-from-voting tail survives a hyphenated surname; a non-bill block with no Vacancies line fails loud; uppercase 'NO.' is not a boundary; the unreachable EC mismatch throw removed; attributed_from_context now sums every context-derived kind; stale comments corrected (incl. my false premise that no consumer renders a bill-less vote — person-page.js does). 20 more tests pin each, plus a driver-level test that a day of only non-bill roll calls completes with a done marker and zero votes (new PDF fixture RDay160131222-234). Re-verified after every fix: 137/137 blocks, 20/20 days, originals unchanged.

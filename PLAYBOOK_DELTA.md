@@ -971,3 +971,31 @@ the persisted script in the run's "Script file" path for the edit, and grep the 
 transcript for a prompt phrase unique to the new branch; (3) a silent fallthrough is a design
 smell — an item that carries a field the script does not recognise should throw, not author
 fresh (captured in TODO, not yet built).
+
+## Lesson 48 — A grammar verified against two fixtures is a hypothesis about the corpus, not a fact about it; before designing the fix, ground-truth EVERY quarantined instance and let the classes fall out (2026-08-23)
+
+The MO Senate journal parser's "the sentence before the anchor names the bill" rule was verified
+against 24 real motion sentences in two fixture days, shipped with three review rounds of
+hardening, and then quarantined 20 of the session's days — because the rule was true of those 24
+sentences and false of the session. The productive move was not to read two failing journals and
+patch the first phrasing seen (the first one read showed three classes; the corpus had nine,
+including non-bill roll calls that no bill grammar can ever satisfy). It was: fetch every
+quarantined document once, reproduce each failure with the adapter's own functions, fan out one
+classifier + one adversarial verifier per document, and only then design — against a table of
+137 ground-truthed blocks that doubled as the test oracle (137/137 on the first full run after
+the last three fixes). The second trap inside this one: capitalization was signal. The journal
+names a vehicle in Title Case/CAPS and cites enactment history in lowercase ('as enacted by ...
+senate bill no. 982'); a case-insensitive grammar read a title block as a three-bill ambiguity.
+When a document's own typography is consistent, encode it rather than normalizing it away.
+
+## Lesson 49 — "Needs human review" is only honest when a human could resolve it; a roll call with no bill is not a failed parse, it is a different kind of record (2026-08-23)
+
+Four quarantined days contained nothing but quorum calls, votes on simple resolutions, an
+amendment to the journal, and an appointment confirmation. The fail-loud gate filed each as
+"no bill reference found in motion - needs human review" and quarantined the day — but no human
+review could ever attach a bill, so the day sat quarantined forever and every bill vote on such a
+day would have sat with it. Fail-loud is the right default for the unknown; for a shape the code
+can recognise mechanically as legitimately bill-less, the honest output is a typed classification
+that is reported and counted, not a failure. Corollary for the data model: votes.bill_id was
+nullable from day one ("some votes are procedural") and nothing ever used it — the schema knew
+something the parser did not.

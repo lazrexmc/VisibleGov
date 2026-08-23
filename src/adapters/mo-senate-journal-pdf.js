@@ -158,10 +158,63 @@ const ANCHOR_RE = /by\s+the\s+following\s+vote\s*:/gi;
 // the load-bearing fix. (Tested: a synthetic internal period BEFORE a bill reference still yields
 // the correct bill_refs, because truncation only drops the SENTENCE PREFIX - see
 // tests/mo-senate-journal-pdf.test.js.)
-function extractMotionSentence(text, anchorStart, anchorEnd) {
-  const periodIdx = text.lastIndexOf('.', anchorStart - 1);
-  const start = periodIdx === -1 ? 0 : periodIdx + 1;
+//
+// ATTRIBUTION FIX (2026-08-23, the quarantine class — see tests/mo-senate-journal-attribution.test.js):
+// the bare single-period lookback had two defects the real 2026 journals exposed. (1) A period
+// inside an abbreviation is not a sentence boundary: 'SS No. 2 for SCS for SB 1012' truncated
+// every numbered-substitute motion to '2 for SCS for SB 1012 ...', and 'John B. Hurst' truncated an
+// appointment roll call to 'Hurst was adopted ...'. Only the two forms actually observed are
+// exempted ('No.'/'Nos.' and a single capital initial) — nothing speculative. (2) The lookback had
+// no LOWER bound: a block whose preceding narrative contains no period at all (the previous block's
+// vote lists end 'Vacancies—None' with no period, then 'On motion of Senator X, HCS for SB 1572 was
+// read...') swallowed the entire previous block — lists and all — into `motion`, storing it as the
+// vote's question text and emitting duplicate bill_refs. The motion now starts no earlier than the
+// end of the previous block's printed categories (`lowerBound`, computed by narrativeStartBefore).
+// 'No.'/'Nos.' in both the Title Case and ALL-CAPS forms the spelled-out bill grammar accepts (a
+// motion quoting an uppercase heading would otherwise still be cut at 'NO.'). The single-initial
+// exemption is kept SEPARATE because it is the one that can overshoot: 'Exhibit A.' / 'Article X.'
+// have the same shape as 'John B.' — so the attribution path (resolveBillAttribution) also
+// computes the motion WITHOUT it and refuses to attribute a bill that is reachable only across an
+// exempted initial (review finding, 2026-08-23).
+const ABBREVIATION_NO_RE = /\b(?:No|NO|Nos|NOS)$/;
+const SINGLE_INITIAL_RE = /(?:^|[\s(])[A-Z]$/;
+
+function findSentenceStart(text, beforeIndex, lowerBound, { exemptInitial = true } = {}) {
+  let searchEnd = beforeIndex - 1;
+  while (searchEnd >= lowerBound) {
+    const periodIdx = text.lastIndexOf('.', searchEnd);
+    if (periodIdx < lowerBound) break;
+    const prefix = text.slice(Math.max(lowerBound, periodIdx - 4), periodIdx);
+    if (ABBREVIATION_NO_RE.test(prefix) || (exemptInitial && SINGLE_INITIAL_RE.test(prefix))) { searchEnd = periodIdx - 1; continue; }
+    return periodIdx + 1;
+  }
+  return lowerBound;
+}
+
+function extractMotionSentence(text, anchorStart, anchorEnd, lowerBound = 0, opts = {}) {
+  const start = findSentenceStart(text, anchorStart, lowerBound, opts);
   return text.slice(start, anchorEnd).replace(/\s+/g, ' ').trim();
+}
+
+// The end of the last printed vote-list tail before `anchorStart` (searching from `searchFrom`):
+// 'Vacancies—None' / 'Vacancies—N', optionally followed by the rarer 'Excused from voting—Senator
+// X—1' line (real in the 2026-05-06 journal). Everything before that belongs to the previous block
+// (or the day-opening attendance roll, which prints the same tail); everything after it is THIS
+// block's own narrative. Used as the motion lookback's floor and as the attribution window's start.
+// (The Excused name run excludes only the em-dash, not '-': a hyphenated surname — Chappelle-Nadal
+// is real — must not end the run early and drop the whole optional group.)
+const BLOCK_TAIL_RE = /Vacancies\s*[—-]\s*(?:None|\d+)(?:\s*Excused\s+from\s+voting\s*[—-]\s*Senators?\b[^—]*?[—-]\s*\d+)?/g;
+
+function narrativeStartBefore(text, anchorStart, searchFrom) {
+  const re = new RegExp(BLOCK_TAIL_RE);
+  re.lastIndex = searchFrom;
+  let end = searchFrom;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index >= anchorStart) break;
+    end = m.index + m[0].length;
+  }
+  return end;
 }
 
 // ---- parsing: bill references ----
@@ -174,22 +227,66 @@ function extractMotionSentence(text, anchorStart, anchorEnd) {
 // 1272' (Day 39) - so the separator between numbers accepts an optional comma AND/OR an optional
 // 'and'/'&' token (both parts independently optional, since real separators mix them:
 // ', ' / ' & ' / ', and ' / ' and ').
+//
+// ATTRIBUTION FIX (2026-08-23): the journal prints the SAME bill identity in two grammars, and the
+// places that carry it for the quarantined motion families are all in the second one — conference
+// committee report headings ('CONFERENCE COMMITTEE REPORT ON ... HOUSE BILL NO. 2002', 'SENATE BILLS
+// NOS. 835 and 1111'), title blocks ('... SENATE JOINT RESOLUTION NO. 87'), amendment instructions
+// ('Amend Senate Substitute for Senate Bill No. 1233, Page 1'), and reconsideration motions
+// ('Senate Committee Substitute for House Committee Substitute for House Bill No. 2474'). The
+// spelled-out grammar is anchored on Bill / Joint Resolution / Concurrent Resolution so that
+// 'SENATE AMENDMENT NO. 2' (an amendment designator heading) and 'Senate Resolution No. 1137' (a
+// one-chamber simple resolution, not a bill) can never yield a bogus 'SB 2' / 'SB 1137' — both are
+// real trap strings in the quarantined days. Numbered substitutes ('SS No. 2 for SCS for SB 1012')
+// are consumed as a prefix like the unnumbered ones.
 const BILL_TYPES = 'SB|HB|SJR|HJR|SCR|HCR';
+// A list needs an EXPLICIT separator between numbers (', ' / ' & ' / ', and ' / ' and ' — the four
+// real forms); bare whitespace never joins two numbers, so prose or an ordinal after a bill number
+// in a heading or title block cannot be swallowed into the identity.
+const NUMBER_LIST = '\\d+(?:\\s*(?:,\\s*(?:and|&)?|and|&)\\s*\\d+)*';
 const BILL_TOKEN_RE = new RegExp(
-  `(?:(?:SS|SCS|HS|HCS|CCS)\\s+for\\s+)*(${BILL_TYPES})s?\\s+(\\d+(?:(?:\\s*,)?(?:\\s*(?:and|&))?\\s*\\d+)*)`,
+  `(?:(?:SS|SCS|HS|HCS|CCS)(?:\\s+No\\.\\s*\\d+)?\\s+for\\s+)*\\b(${BILL_TYPES})s?\\s+(${NUMBER_LIST})`,
+  'g',
+);
+// Case-SENSITIVE on purpose (Title Case or ALL CAPS only): the journal capitalizes a bill when it
+// names the vehicle ('House Bill No. 2474', 'HOUSE BILLS NOS. 2637 and 3155') and lowercases it
+// when an "An Act ..." title cites enactment history ('as enacted by senate substitute no. 3 for
+// senate bill number 888 ... house committee substitute for senate bill no. 982' — real, in the
+// 2026-04-29 HBs 2637 & 3155 title block). Those history citations are not the vehicle, and a
+// case-insensitive grammar turned that title block into a three-bill ambiguity.
+const SPELLED_TOKEN_RE = new RegExp(
+  `\\b(Senate|SENATE|House|HOUSE)\\s+(Bills?|BILLS?|Joint\\s+Resolutions?|JOINT\\s+RESOLUTIONS?|Concurrent\\s+Resolutions?|CONCURRENT\\s+RESOLUTIONS?)\\s+(?:No|NO|Nos|NOS)\\.\\s*(${NUMBER_LIST})`,
   'g',
 );
 
-export function extractBillRefs(motion) {
-  const refs = [];
-  const re = new RegExp(BILL_TOKEN_RE);
+function spelledType(chamber, kind) {
+  const c = /^s/i.test(chamber) ? 'S' : 'H';
+  if (/joint/i.test(kind)) return `${c}JR`;
+  if (/concurrent/i.test(kind)) return `${c}CR`;
+  return `${c}B`;
+}
+
+// Every bill token in text[start, end), in document order: [{ index, refs }]. A single token can
+// itself be a combined vehicle ('SBs 894 and 921' -> refs ['SB 894', 'SB 921']).
+function findBillTokens(text, start = 0, end = text.length) {
+  const slice = text.slice(start, end);
+  const tokens = [];
   let m;
-  while ((m = re.exec(motion))) {
-    const type = m[1];
-    const numbers = m[2].match(/\d+/g) || [];
-    for (const n of numbers) refs.push(`${type} ${n}`);
+  const abbrev = new RegExp(BILL_TOKEN_RE);
+  while ((m = abbrev.exec(slice))) {
+    tokens.push({ index: start + m.index, refs: (m[2].match(/\d+/g) || []).map((n) => `${m[1]} ${n}`) });
   }
-  return refs;
+  const spelled = new RegExp(SPELLED_TOKEN_RE);
+  while ((m = spelled.exec(slice))) {
+    const type = spelledType(m[1], m[2]);
+    tokens.push({ index: start + m.index, refs: (m[3].match(/\d+/g) || []).map((n) => `${type} ${n}`) });
+  }
+  tokens.sort((a, b) => a.index - b.index);
+  return tokens;
+}
+
+export function extractBillRefs(motion) {
+  return findBillTokens(motion).flatMap((t) => t.refs);
 }
 
 // ---- parsing: category name-lists ----
@@ -235,14 +332,21 @@ function extractNameTokens(raw) {
 // glyph, same defensive posture as mo-senate-web.js's PDF_ENTRY_RE for the same reason.
 function extractCategory(blockText, cursor, label) {
   const escapedLabel = label.replace(/\s+/g, '\\s+');
+  // Three printed shapes: '<Label>—Senators—None'; '<Label>—Senators <names>—<N>' (also the
+  // singular '<Label>—Senator <name>—1'); and — real exactly once across 22 journal days, the
+  // 2026-02-12 block that quarantined that day — the count on the header line with the names on
+  // the following line(s): '<Label>—Senators—2\nNicola Moon'. The third alternative's name run is
+  // bounded by the next category label so it can never swallow a later category; the reconcile
+  // gate in requireCategory still applies to it.
   const re = new RegExp(
-    `${escapedLabel}\\s*[\\u2014-]\\s*Senators?(?:\\s*[\\u2014-]\\s*(None)|\\s+([\\s\\S]*?)[\\u2014-]\\s*(\\d+))`,
+    `${escapedLabel}\\s*[\\u2014-]\\s*Senators?(?:\\s*[\\u2014-]\\s*(None)|\\s+([\\s\\S]*?)[\\u2014-]\\s*(\\d+)|\\s*[\\u2014-]\\s*(\\d+)\\s*\\n\\s*([\\s\\S]*?)(?=\\s*(?:YEAS|NAYS|Absent|Vacancies|Excused)\\b))`,
   );
   const slice = blockText.slice(cursor);
   const m = slice.match(re);
   if (!m) return null;
   const matchEnd = cursor + m.index + m[0].length;
   if (m[1]) return { names: [], count: 0, matchEnd };
+  if (m[4] !== undefined) return { names: extractNameTokens(m[5]), count: Number(m[4]), matchEnd };
   return { names: extractNameTokens(m[2]), count: Number(m[3]), matchEnd };
 }
 
@@ -294,8 +398,9 @@ function extractVacancies(blockText, cursor, ordinal) {
   return m[1] === 'None' ? 0 : Number(m[1]);
 }
 
-// ---- parsing: bill attribution (motion, or - emergency-clause continuations only - the
-// preceding "taken up" line) ----
+// ---- parsing: bill attribution. Originally two outcomes (the motion names the bill, or — an
+// emergency-clause continuation — the preceding "taken up" line); since 2026-08-23 the families
+// the journal actually prints, see the ATTRIBUTION FIX section below resolveEmergencyClause ----
 //
 // CODE REVIEW FIX ROUND 1 (finding 2, load-bearing): bill_refs is what ties a parsed vote to the
 // actual bill - it must never be silently wrong or silently absent, because nothing downstream can
@@ -324,9 +429,10 @@ function extractVacancies(blockText, cursor, ordinal) {
 // region (two anchors back) so a stale, unrelated bill from much earlier in the day can never be
 // picked up by accident.
 //
-// This fallback is NOT a general escape hatch for any zero-ref motion - only for a motion matching
-// /emergency\s+clause/i (finding 2's round-1 behavior otherwise stands unchanged: an unknown
-// zero-ref motion still fails loud for human review).
+// This fallback applies only to a motion matching /emergency\s+clause/i. (Until 2026-08-23 every
+// OTHER zero-ref motion failed loud; the other families now have their own explicit-statement
+// rules — see resolveBillAttribution — and an unknown zero-ref motion still fails loud for human
+// review.)
 //
 // CODE REVIEW FIX ROUND 3 (controller ruling): the cross-check against the immediately preceding
 // vote block is not optional corroboration - it is REQUIRED, not "used when available." Round 2
@@ -367,18 +473,326 @@ function nearestBillRefBefore(text, beforeIndex, lowerBound) {
   return numbers.map((n) => `${best[1]} ${n}`);
 }
 
-function resolveBillAttribution(text, anchorStart, ordinal, motion, precedingVote, precedingWindowStart) {
-  const motionRefs = extractBillRefs(motion);
-  if (motionRefs.length > 0) return { bill_refs: motionRefs, attribution: 'motion' };
+// ---- ATTRIBUTION FIX (2026-08-23): the motion families the journal prints WITHOUT the bill in
+// the motion sentence, and the non-bill roll calls that share the anchor ----
+//
+// Evidence: 18 of the 20 quarantined journal days (14 in the 2026 session, 6 in 2018) failed on
+// exactly these shapes — ground-truthed block by block by a classifier + adversarial-verifier agent
+// pair per day (72 findings, 0 disagreements, 0 misattributions among the blocks that did parse).
+// The old gate's assumption ("the sentence before the anchor always names the bill") held for the
+// two original fixtures and is simply false for the 2026 session's floor work:
+//   * conference-committee-report adoption: 'Senator X moved that the above conference committee
+//     report be adopted' — the bill is named only in the 'on behalf of the conference committee ...
+//     on SS for SCS for HCS for HB 2002, moved that the following conference committee report be
+//     taken up' sentence and in the 'CONFERENCE COMMITTEE REPORT ON ... HOUSE BILL NO. 2002' heading
+//     (19 blocks; 12 CCR pairs on the FY2027 appropriations day alone);
+//   * third reading after a printed title block: 'On motion of Senator X, CCS for ... HB 2002,
+//     entitled: <TITLE> An Act ... . Was read the 3rd time and passed' — the title's own period
+//     makes the motion sentence the bare 'Was read the 3rd time and passed' (19 blocks);
+//   * floor-amendment roll calls: 'SA 2, as amended, was adopted' / 'SA 3 failed of adoption' —
+//     the bill is named only in the amendment's own instruction line 'Amend Senate Substitute for
+//     Senate Bill No. 1233, Page 1, ...' (10 blocks);
+//   * procedural reconsideration: 'moved that the vote by which the motion to postpone debate was
+//     defeated be reconsidered' — the bill sits in the immediately preceding sentences (1 block);
+//   * and NON-BILL roll calls that legitimately have no bill: mid-debate quorum calls ('A quorum
+//     was established by the following vote:' with Present/Absent categories), adoption of a simple
+//     Senate resolution ('SR 640 was adopted'), amendments to a simple resolution (Senate rules),
+//     an amendment to the Senate JOURNAL itself, and advice-and-consent votes on gubernatorial
+//     appointments. Four whole days had ONLY such roll calls and were quarantined for nothing.
+//
+// Design, unchanged in spirit from rounds 1-3 ("never a guess", fail loud for human review):
+//   * every attribution comes from an explicit printed statement of the bill — a heading, an
+//     instruction line, the 'entitled:' sentence, a '(pending)' recall sentence — with ONE
+//     exception, the procedural-reconsideration family, which borrows its bill from the block's
+//     own floor-action sentences (never from a committee report, referral or House message)
+//     and only when they all name the same bill — labelled 'narrative_window' so the provenance
+//     is distinguishable from a printed statement;
+//   * the bill-action families resolve through ONE mechanism, resolveFromWindow: every bill token
+//     (abbreviated or spelled out) inside the family's own bounded narrative window must name the
+//     same identity, otherwise the block fails loud naming every candidate. The window never reaches
+//     into the previous block (lowerBound = end of its printed categories), and for CCRs it starts at
+//     the report's own taken-up sentence, so House messages listing other bills earlier in the
+//     block can never collide. This is strictly stronger than a single cross-check: a CCR whose
+//     taken-up sentence and heading disagree fails, as does a title block naming a second bill;
+//   * amendment roll calls resolve from the nearest preceding 'Amend <vehicle>, Page ...' line
+//     (the instruction printed when the amendment was offered — the amendment under vote or its
+//     sub-amendment, which targets the same vehicle); an instruction that targets the Senate
+//     Journal or a simple resolution classifies the block as non-bill instead;
+//   * non-bill roll calls are recognised only by their own explicit shapes (the word 'quorum', an
+//     SR/HR token, an instruction targeting the Journal or a Resolution, a committee-report motion
+//     in a window that names the Committee on Gubernatorial Appointments) and are REPORTED as
+//     `nonBillVotes` — never attributed and, for now, never stored as votes (votes.bill_id is
+//     nullable and site/js/person-page.js already renders a bill-less vote as "procedural vote,
+//     no associated bill", so storing them is feasible — it is a captured product decision, not
+//     a technical block), and never a failure, so a day made only of them can complete;
+//   * anything else bill-less still fails loud exactly as before (the round-1 gate), including a
+//     third reading whose window names two bills — the agents' wrong-pick traps (SB 888 quoted
+//     inside a journal amendment, SB 579 in a referrals line, SB 546 around a quorum call) are all
+//     pinned by tests.
+// An amendment designator as a motion prints it ('SA 3', 'SA 2, as amended', 'SSA 1 for SA 2') and
+// as its heading prints it ('SENATE AMENDMENT NO. 3', 'SENATE SUBSTITUTE AMENDMENT NO. 1 FOR SENATE
+// AMENDMENT NO. 2', 'SENATE AMENDMENT NO. 1 TO SENATE AMENDMENT NO. 2'), both normalised to the
+// same canonical string so the motion can be tied to ITS OWN heading + instruction — never to
+// whichever 'Amend ...' line happens to be nearest (review finding, 2026-08-23: a pending amendment
+// recalled from the Informal Calendar reprints no instruction, so "nearest" was another bill's).
+const AMENDMENT_DESIGNATOR_RE = /\b(SSA|SA|HSA|HA)\s+(\d+)(?:\s+(?:to|for)\s+(SSA|SA|HSA|HA)\s+(\d+))?\b/;
+const AMENDMENT_HEADING_RE = /\b(SENATE|HOUSE)\s+(SUBSTITUTE\s+)?AMENDMENT\s+NO\.\s*(\d+)(?:\s+(?:TO|FOR)\s+(SENATE|HOUSE)\s+(SUBSTITUTE\s+)?AMENDMENT\s+NO\.\s*(\d+))?/g;
+const SIMPLE_RESOLUTION_TOKEN_RE = /\b(?:SR|HR)\s+\d+\b/;
+const SIMPLE_RESOLUTION_SPELLED_RE = /\b(?:Senate|House)\s+Resolutions?\s+Nos?\./i;
+const CCR_HEADING_RE = /CONFERENCE COMMITTEE REPORT(?:\s+NO\.\s*\d+)?\s+ON\b/g; // the uppercase heading only
+const CCR_TAKEN_UP_RE = /moved\s+that\s+the\s+following\s+conference\s+committee\s+report\s+be\s+taken\s+up/gi;
+// The instruction line printed under an amendment heading: 'Amend <vehicle>, Page 1, Section …' /
+// ', In the Title, Line 5' / ', Sections 326.256 and 326.277' — the vehicle ends at the first such
+// locator (singular and plural forms).
+const AMEND_INSTRUCTION_RE = /\bAmend\s+((?:Senate|House)[\s\S]{0,300}?)(?=,\s*(?:Pages?|In\s+the\s+Title|Sections?|Lines?)\b)/g;
+const THIRD_READING_RE = /read\s+the\s+(?:3rd|third)\s+time|\bfinally\s+passed\b/i;
+const RECONSIDER_RE = /\breconsider/i;
+// A sentence that is a FLOOR ACTION on a question (the only kind a bill-less reconsideration may
+// borrow its bill from) vs. one that merely mentions a bill in passing (a committee report, a
+// referral, a House message).
+const FLOOR_ACTION_RE = /\b(?:taken\s+up|moved\s+that|read\s+the\s+(?:3rd|third)\s+time|3rd\s+read|be\s+adopted|was\s+adopted|be\s+passed|was\s+passed|be\s+postponed)\b/i;
+const NOT_FLOOR_ACTION_RE = /\b(?:referred|Committee\s+on|REPORTS\s+OF\s+STANDING\s+COMMITTEES|MESSAGES\s+FROM\s+THE\s+HOUSE|begs\s+leave\s+to\s+report|Madam\s+President|Mr\.\s+President)\b/;
 
-  if (!/emergency\s+clause/i.test(motion)) {
+function canonicalDesignator(kindA, numA, kindB, numB) {
+  return `${kindA} ${numA}${kindB ? ` to ${kindB} ${numB}` : ''}`;
+}
+function designatorFromMotion(motion) {
+  const m = AMENDMENT_DESIGNATOR_RE.exec(motion);
+  return m ? canonicalDesignator(m[1], m[2], m[3], m[4]) : null;
+}
+function designatorFromHeading(m) {
+  const kind = (chamber, substitute) => `${chamber[0] === 'S' ? 'S' : 'H'}${substitute ? 'SA' : 'A'}`;
+  return canonicalDesignator(kind(m[1], m[2]), m[3], m[4] ? kind(m[4], m[5]) : null, m[6]);
+}
+
+// The last match of `re` whose index lies in [lowerBound, beforeIndex), or null.
+function lastMatchBefore(re, text, lowerBound, beforeIndex) {
+  const scanner = new RegExp(re);
+  scanner.lastIndex = lowerBound;
+  let best = null;
+  let m;
+  while ((m = scanner.exec(text))) {
+    if (m.index >= beforeIndex) break;
+    best = m;
+  }
+  return best;
+}
+
+function noBillReferenceError(ordinal, motion) {
+  return new JournalParseError(
+    `block ${ordinal}: no bill reference found in motion - needs human review`,
+    {
+      ordinal, category: 'bill_refs', reason: 'no bill reference found in motion - needs human review', motion,
+    },
+  );
+}
+
+function resolveFromWindow(text, windowStart, anchorStart, ordinal, motion, attribution) {
+  const tokens = findBillTokens(text, windowStart, anchorStart);
+  if (tokens.length === 0) throw noBillReferenceError(ordinal, motion);
+  const identities = [...new Set(tokens.map((t) => t.refs.join(' & ')))];
+  if (identities.length !== 1) {
     throw new JournalParseError(
-      `block ${ordinal}: no bill reference found in motion - needs human review`,
+      `block ${ordinal}: the motion names no bill and its own narrative names more than one (${identities.join('; ')}) - needs human review`,
       {
-        ordinal, category: 'bill_refs', reason: 'no bill reference found in motion - needs human review', motion,
+        ordinal, category: 'bill_refs', reason: 'ambiguous narrative window - more than one bill named', candidates: identities, motion,
       },
     );
   }
+  return { bill_refs: tokens[0].refs, attribution };
+}
+
+function resolveConferenceReport(text, lowerBound, anchorStart, ordinal, motion) {
+  const heading = lastMatchBefore(CCR_HEADING_RE, text, lowerBound, anchorStart);
+  if (!heading) {
+    throw new JournalParseError(
+      `block ${ordinal}: conference-committee-report adoption motion with no CONFERENCE COMMITTEE REPORT heading in its narrative - needs human review`,
+      {
+        ordinal, category: 'bill_refs', reason: 'no conference committee report heading found in the block narrative', motion,
+      },
+    );
+  }
+  const takenUp = lastMatchBefore(CCR_TAKEN_UP_RE, text, lowerBound, heading.index);
+  const windowStart = takenUp ? findSentenceStart(text, takenUp.index, lowerBound) : heading.index;
+  return resolveFromWindow(text, windowStart, anchorStart, ordinal, motion, 'conference_committee_report');
+}
+
+// A bill-less reconsideration borrows its bill only from a FLOOR-ACTION sentence in its narrative
+// (never from a committee report / referral / House message that merely mentions a bill), and
+// only if every such sentence names the same bill.
+function resolveFromFloorActions(text, windowStart, anchorStart, ordinal, motion, attribution) {
+  const tokens = findBillTokens(text, windowStart, anchorStart).filter((t) => {
+    const start = findSentenceStart(text, t.index, windowStart, { exemptInitial: false });
+    const periodIdx = text.indexOf('.', t.index);
+    const end = periodIdx === -1 || periodIdx > anchorStart ? anchorStart : periodIdx + 1;
+    const sentence = text.slice(start, end);
+    return FLOOR_ACTION_RE.test(sentence) && !NOT_FLOOR_ACTION_RE.test(sentence);
+  });
+  if (tokens.length === 0) throw noBillReferenceError(ordinal, motion);
+  const identities = [...new Set(tokens.map((t) => t.refs.join(' & ')))];
+  if (identities.length !== 1) {
+    throw new JournalParseError(
+      `block ${ordinal}: the motion names no bill and its narrative's floor actions name more than one (${identities.join('; ')}) - needs human review`,
+      {
+        ordinal, category: 'bill_refs', reason: 'ambiguous narrative window - more than one bill named', candidates: identities, motion,
+      },
+    );
+  }
+  return { bill_refs: tokens[0].refs, attribution };
+}
+
+function resolveAmendmentVote(text, lowerBound, anchorStart, ordinal, motion) {
+  const designator = designatorFromMotion(motion);
+  // 1. The amendment's OWN heading in this block's narrative, and the instruction printed directly
+  //    under it — the explicit statement of what the amendment amends.
+  let heading = null;
+  const scanner = new RegExp(AMENDMENT_HEADING_RE);
+  scanner.lastIndex = lowerBound;
+  let m;
+  while ((m = scanner.exec(text))) {
+    if (m.index >= anchorStart) break;
+    if (designatorFromHeading(m) === designator) heading = m;
+  }
+  if (heading) {
+    const headingEnd = heading.index + heading[0].length;
+    const instructionScanner = new RegExp(AMEND_INSTRUCTION_RE);
+    instructionScanner.lastIndex = headingEnd;
+    const instruction = instructionScanner.exec(text);
+    const nextHeading = lastMatchBefore(AMENDMENT_HEADING_RE, text, headingEnd, anchorStart);
+    const instructionLimit = Math.min(anchorStart, headingEnd + 400, nextHeading ? nextHeading.index : anchorStart);
+    if (!instruction || instruction.index >= instructionLimit) {
+      throw new JournalParseError(
+        `block ${ordinal}: amendment ${designator} has a heading but no "Amend ..." instruction under it - needs human review`,
+        {
+          ordinal, category: 'bill_refs', reason: 'amendment heading without an instruction line', motion, designator,
+        },
+      );
+    }
+    const vehicle = instruction[1];
+    if (/\b(?:Senate|House)\s+Journal\b/i.test(vehicle)) return { nonBill: 'journal_amendment' };
+    if (SIMPLE_RESOLUTION_SPELLED_RE.test(vehicle)) return { nonBill: 'simple_resolution' };
+    const identities = [...new Set(findBillTokens(vehicle).map((t) => t.refs.join(' & ')))];
+    if (identities.length === 0) {
+      throw new JournalParseError(
+        `block ${ordinal}: the amendment instruction names no bill ("Amend ${vehicle.replace(/\s+/g, ' ').slice(0, 80)}") - needs human review`,
+        {
+          ordinal, category: 'bill_refs', reason: 'amendment instruction names no bill', motion, vehicle,
+        },
+      );
+    }
+    if (identities.length > 1) {
+      throw new JournalParseError(
+        `block ${ordinal}: the amendment instruction names more than one bill (${identities.join('; ')}) - needs human review`,
+        {
+          ordinal, category: 'bill_refs', reason: 'ambiguous amendment instruction - more than one bill named', candidates: identities, motion,
+        },
+      );
+    }
+    // Corroboration: every bill token from the corroboration window through the anchor must agree
+    // with the instruction. The window starts at the amendment's '(pending)' RECALL sentence when
+    // one follows the heading (a recalled amendment's heading can be separated from its roll call
+    // by other bills' business, which legitimately names other bills), otherwise at the heading
+    // (the instruction, any sub-amendment's instruction, the amendment body's own Title Case
+    // references).
+    const recallAfterHeading = lastMatchBefore(new RegExp(`\\b${designator.replace(/\s+/g, '\\s+')}\\s*\\(pending\\)`, 'g'), text, headingEnd, anchorStart);
+    const windowStart = recallAfterHeading ? findSentenceStart(text, recallAfterHeading.index, lowerBound, { exemptInitial: false }) : heading.index;
+    const corroborated = resolveFromWindow(text, windowStart, anchorStart, ordinal, motion, 'amendment_instruction');
+    if (corroborated.bill_refs.join(' & ') !== identities[0]) {
+      throw new JournalParseError(
+        `block ${ordinal}: amendment ${designator}'s instruction names ${identities[0]} but its narrative names ${corroborated.bill_refs.join(' & ')} - needs human review`,
+        {
+          ordinal, category: 'bill_refs', reason: 'amendment instruction and narrative disagree', candidates: [identities[0], corroborated.bill_refs.join(' & ')], motion,
+        },
+      );
+    }
+    return corroborated;
+  }
+  // 2. No heading in this block: the pending-amendment RECALL shape — '<bill>, with SS and SA 3
+  //    (pending), be called from the Informal Calendar and again taken up' — names both the bill
+  //    and the designator in one sentence; the window from that sentence must name one bill.
+  const recall = lastMatchBefore(new RegExp(`\\b${designator.replace(/\s+/g, '\\s+')}\\s*\\(pending\\)`, 'g'), text, lowerBound, anchorStart);
+  if (recall) {
+    const sentenceStart = findSentenceStart(text, recall.index, lowerBound, { exemptInitial: false });
+    return resolveFromWindow(text, sentenceStart, anchorStart, ordinal, motion, 'pending_amendment_recall');
+  }
+  throw new JournalParseError(
+    `block ${ordinal}: amendment ${designator} roll call with neither its own heading and "Amend ..." instruction nor a "(pending)" recall sentence in its narrative - needs human review`,
+    {
+      ordinal, category: 'bill_refs', reason: 'no amendment instruction or recall sentence found in the block narrative', motion, designator,
+    },
+  );
+}
+
+// `motion` is the sentence with the single-initial period exemption; `strictMotion` the same
+// sentence without it (they differ only when an initial was crossed). The bill must be reachable
+// in the STRICT sentence — a reference that only appears across an exempted initial ('... per
+// Exhibit A. The motion was adopted') is the previous sentence's, not this motion's.
+function resolveBillAttribution(text, anchorStart, ordinal, motion, precedingVote, precedingWindowStart, lowerBound = 0, precedingWindow = null, strictMotion = motion) {
+  const motionTokens = findBillTokens(strictMotion);
+  if (motionTokens.length > 0) {
+    const identities = [...new Set(motionTokens.map((t) => t.refs.join(' & ')))];
+    if (identities.length !== 1) {
+      throw new JournalParseError(
+        `block ${ordinal}: the motion names more than one bill (${identities.join('; ')}) - needs human review`,
+        {
+          ordinal, category: 'bill_refs', reason: 'ambiguous motion - more than one bill named', candidates: identities, motion,
+        },
+      );
+    }
+    return { bill_refs: motionTokens[0].refs, attribution: 'motion' };
+  }
+  if (strictMotion !== motion && findBillTokens(motion).length > 0) {
+    throw new JournalParseError(
+      `block ${ordinal}: the only bill reference near the motion lies across a single-initial period ("${motion.slice(0, 80)}") - needs human review`,
+      {
+        ordinal, category: 'bill_refs', reason: 'bill reference reachable only across an exempted initial period', motion,
+      },
+    );
+  }
+
+  // Non-bill roll calls — each recognised ONLY by its observed printed shape.
+  if (/\bA\s+quorum\s+was\s+established\b/i.test(motion)) return { nonBill: 'quorum_call' };
+  if (SIMPLE_RESOLUTION_TOKEN_RE.test(motion)) return { nonBill: 'simple_resolution' };
+  if (/^The\s+committee\s+report\s+on\b.*\bwas\s+adopted\b/i.test(motion)) {
+    // An advice-and-consent vote: the Committee on Gubernatorial Appointments' report sits in this
+    // block's narrative and NO bill is named after it (a bill token there would mean the motion
+    // is about something else and must fail loud).
+    const committee = lastMatchBefore(/\bGubernatorial\s+Appointments\b/g, text, lowerBound, anchorStart);
+    if (committee && findBillTokens(text, committee.index, anchorStart).length === 0) return { nonBill: 'appointment' };
+  }
+
+  if (/emergency\s+clause/i.test(motion)) {
+    return resolveEmergencyClause(text, anchorStart, ordinal, motion, precedingVote, precedingWindowStart, precedingWindow);
+  }
+  if (AMENDMENT_DESIGNATOR_RE.test(motion)) return resolveAmendmentVote(text, lowerBound, anchorStart, ordinal, motion);
+  if (/conference\s+committee\s+report/i.test(motion) && /\badopt/i.test(motion)) {
+    return resolveConferenceReport(text, lowerBound, anchorStart, ordinal, motion);
+  }
+  // Reconsideration is the more specific shape and is tested first: its motion may quote 'read
+  // the 3rd time' ('the vote by which the bill was read the 3rd time and passed be reconsidered').
+  if (RECONSIDER_RE.test(motion)) return resolveFromFloorActions(text, lowerBound, anchorStart, ordinal, motion, 'narrative_window');
+  if (THIRD_READING_RE.test(motion)) {
+    // A third reading whose motion names no bill is the post-title-block shape: the bill sits in the
+    // 'On motion of Senator X, <vehicle>, entitled:' sentence that opens the title block. No
+    // 'entitled:' in this block's narrative means this is not that shape — fail loud, never fall
+    // back to proximity.
+    const entitled = lastMatchBefore(/,\s*entitled\s*:/g, text, lowerBound, anchorStart);
+    if (!entitled) {
+      throw new JournalParseError(
+        `block ${ordinal}: third-reading motion names no bill and no "entitled:" title block precedes it in this block's narrative - needs human review`,
+        {
+          ordinal, category: 'bill_refs', reason: 'third reading without a bill or a title block', motion,
+        },
+      );
+    }
+    const windowStart = findSentenceStart(text, entitled.index, lowerBound, { exemptInitial: false });
+    return { ...resolveFromWindow(text, windowStart, anchorStart, ordinal, motion, 'title_block'), window: { start: windowStart, end: anchorStart } };
+  }
+
+  throw noBillReferenceError(ordinal, motion);
+}
+
+function resolveEmergencyClause(text, anchorStart, ordinal, motion, precedingVote, precedingWindowStart, precedingWindow = null) {
 
   // FIX ROUND 3: required, not optional - see the module comment above. Checked BEFORE the scan
   // even runs, since without a successful preceding vote there is nothing to verify against and
@@ -396,7 +810,23 @@ function resolveBillAttribution(text, anchorStart, ordinal, motion, precedingVot
     );
   }
 
+  // ATTRIBUTION FIX (2026-08-23): the conference sequence — CCR adoption, then the CCS 'read the
+  // 3rd time and passed' after a printed title block, then 'The emergency clause was adopted' —
+  // prints NO 'taken up' line between the title block and the EC (the only 'taken up' is the
+  // report's own 'be taken up' sentence, before the CCR block, outside this scan's window), so the
+  // round-2/3 taken-up corroboration has nothing to read. The second source in that shape is the
+  // title block itself: when the immediately preceding vote was attributed from its title block,
+  // the EC attributes to that bill iff every bill token from the title block's window through
+  // this anchor names that same bill (the window rule of resolveFromWindow) — 'The President
+  // declared the bill passed.' names none, so any stray second bill fails loud as before.
   const takenUpIdx = lastTakenUpIndexBefore(text, anchorStart);
+  if (precedingVote.attribution === 'title_block' && precedingWindow
+    && (takenUpIdx === -1 || nearestBillRefBefore(text, takenUpIdx, precedingWindowStart).length === 0)) {
+    // The EC window is a strict superset of the preceding vote's title-block window (same start,
+    // later end), so if resolveFromWindow returns at all its single identity IS the preceding
+    // vote's bill; a second bill anywhere between the title block and this anchor fails loud there.
+    return resolveFromWindow(text, precedingWindow.start, anchorStart, ordinal, motion, 'preceding_title_block');
+  }
   if (takenUpIdx === -1) {
     throw new JournalParseError(
       `block ${ordinal}: emergency-clause block has no bill reference in its own motion and no preceding "taken up" line was found - needs human review`,
@@ -451,15 +881,23 @@ function parseVoteBlock(blockText, ordinal, motion, bill_refs, attribution) {
   };
 }
 
-// parseJournalVotes(text) -> { votes, failures }. CONTROLLER RULING 5 / task-4-brief.md: unlike
+// parseJournalVotes(text) -> { votes, failures, nonBillVotes }. CONTROLLER RULING 5 / task-4-brief.md: unlike
 // mo-rollcall-pdf.js's parseMoRollCall (one roll call per PDF, throws on failure), one journal PDF
 // covers a WHOLE DAY of independent votes - a single corrupted block must not discard the other
 // 12. Each anchor match opens a block bounded by the NEXT anchor's start (or end of document for
 // the last block), so category lookups can never wander into a different block's headers. Ordinal
 // is 1-based, assigned by anchor-match order in the (immutable) PDF - stable across re-parses.
+//
+// Returns { votes, failures, nonBillVotes }. nonBillVotes (2026-08-23) lists the recorded roll calls
+// that are mechanically NOT votes on a bill — quorum calls, simple-resolution adoptions and
+// amendments, journal amendments, appointment confirmations — as { ordinal, kind, motion }. They are
+// reported, never attributed, and never counted as failures (the day-completeness rule keys on
+// `failures` alone), so a day whose only roll calls are procedural can complete.
 export function parseJournalVotes(text) {
   const votes = [];
   const failures = [];
+  const nonBillVotes = [];
+  const windowByOrdinal = new Map();
   const anchors = [...text.matchAll(ANCHOR_RE)];
   for (let i = 0; i < anchors.length; i += 1) {
     const ordinal = i + 1;
@@ -467,7 +905,13 @@ export function parseJournalVotes(text) {
     const anchorEnd = anchor.index + anchor[0].length;
     const blockEnd = i + 1 < anchors.length ? anchors[i + 1].index : text.length;
     const blockText = text.slice(anchorEnd, blockEnd);
-    const motion = extractMotionSentence(text, anchor.index, anchorEnd);
+    // This block's own narrative starts where the previous block's printed categories end (or,
+    // for the first block, after the day-opening attendance roll's identical tail) — the floor for
+    // both the motion-sentence lookback and the attribution windows.
+    const prevAnchorEnd = i > 0 ? anchors[i - 1].index + anchors[i - 1][0].length : 0;
+    const lowerBound = narrativeStartBefore(text, anchor.index, prevAnchorEnd);
+    const motion = extractMotionSentence(text, anchor.index, anchorEnd, lowerBound);
+    const strictMotion = extractMotionSentence(text, anchor.index, anchorEnd, lowerBound, { exemptInitial: false });
     const last = votes[votes.length - 1];
     const precedingVote = last && last.ordinal === ordinal - 1 ? last : null;
     // Lower bound for the emergency-clause taken-up-line bill scan (resolveBillAttribution): the
@@ -484,17 +928,33 @@ export function parseJournalVotes(text) {
     // window finds, so a wrong pick fails loud rather than silently attributing to preamble text
     // (e.g. THIRD READING OF SENATE BILLS boilerplate) above the day's first bill.
     const precedingWindowStart = i >= 2 ? anchors[i - 2].index + anchors[i - 2][0].length : 0;
+    // The attribution window of the immediately preceding vote (only title-block attributions
+    // carry one) — the emergency-clause corroboration source in the conference sequence.
+    const precedingWindow = precedingVote ? (windowByOrdinal.get(precedingVote.ordinal) ?? null) : null;
     try {
-      const {
-        bill_refs, attribution,
-      } = resolveBillAttribution(text, anchor.index, ordinal, motion, precedingVote, precedingWindowStart);
-      votes.push(parseVoteBlock(blockText, ordinal, motion, bill_refs, attribution));
+      const resolved = resolveBillAttribution(text, anchor.index, ordinal, motion, precedingVote, precedingWindowStart, lowerBound, precedingWindow, strictMotion);
+      if (resolved.nonBill) {
+        // A non-bill block is not category-parsed (a quorum call prints Present/Absent, not
+        // YEAS/NAYS), but it must still END like every block — its printed tail is the next
+        // block's narrative floor. A block with no Vacancies line is malformed: fail it loud
+        // rather than let the next vote's motion swallow its lists.
+        if (!new RegExp(BLOCK_TAIL_RE).test(blockText)) {
+          throw new JournalParseError(
+            `block ${ordinal}: could not find the "Vacancies" line - cannot safely close out this non-bill block`,
+            { ordinal, category: 'vacancies', blockPreview: blockText.slice(0, 200) },
+          );
+        }
+        nonBillVotes.push({ ordinal, kind: resolved.nonBill, motion });
+      } else {
+        if (resolved.window) windowByOrdinal.set(ordinal, resolved.window);
+        votes.push(parseVoteBlock(blockText, ordinal, motion, resolved.bill_refs, resolved.attribution));
+      }
     } catch (err) {
       if (err instanceof JournalParseError) failures.push(err);
       else throw err;
     }
   }
-  return { votes, failures };
+  return { votes, failures, nonBillVotes };
 }
 
 // ---- resolution ----
