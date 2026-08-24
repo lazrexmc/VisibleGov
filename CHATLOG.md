@@ -5841,3 +5841,26 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   6 of the 15 days had replayed and found just 3 clean pairings (153 `no_tally_corresponding_
   primary`). Today's tick runs against the complete journal record; the resolver's dry-run after
   it is the real measure, and `--apply` needs Lance's go.
+- **A plain question surfaced a real display defect: 195 duplicate vote rows** (2026-08-24, Lance:
+  "what is Missouri SB 68?"). Answering it properly meant noting that Missouri reuses bill numbers
+  — there are EIGHT MO SB 68s, one per session — and that the 2025 one (passed, elementary and
+  secondary education, 247k chars of text, 391 recorded casts) has **no published summary**: he
+  picked a bill at random and hit the coverage gap the 2026-08-24 evaluation flagged. While
+  pulling its record, its page showed two Senate roll calls on 2025-02-27, both 29-5, both from
+  LegiScan (rollcall 1501776 and 1501777). Rather than assume, compared their cast lists:
+  **34 casts each, all 34 positions byte-identical**, and the source URLs are the same journal
+  page and anchor (`RDay0227489-511.pdf#496.3` / `RDay290227489-511.pdf#496.3` — one carries a
+  malformed day prefix). One vote, two roll-call ids. Migration 0022's dedup is structurally blind
+  to it: it pairs LegiScan against a PRIMARY source, and both rows are the same source. Measured
+  the class DB-wide before writing it up, and the first measurement was wrong in an instructive
+  way: grouping by (bill, chamber, date, result, source) returned 368 groups, but federal `result`
+  is a WORD ("Passed"), so 14 distinct US Senate roll calls from 2026-06-04 all collided. Re-ran
+  with the cast-list comparison as the test: **171 groups are one vote stored more than once (195
+  redundant rows — legiscan 171, mo-* 19, us-* 5)**, 185 groups are genuinely distinct votes that
+  merely share a tally, 12 unverifiable (a row has no casts). Worst years are the current ones:
+  2025 (58) and 2026 (34). Captured in TODO INBOX with the fix shape (extend dedup to same-source
+  pairs with identical cast lists → mark superseded in `vote_duplicates`; the public views already
+  exclude superseded rows so the display self-corrects and nothing is deleted) and the two open
+  design questions (which row is canonical; whether a same-source pair should mint a review flag
+  instead of auto-pairing, since no second source corroborates that they are the same event).
+  Not built — awaiting Lance's go.

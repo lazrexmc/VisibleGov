@@ -1258,6 +1258,32 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-24) SAME-SOURCE duplicate vote rows — 195 redundant rows, measured. A visitor sees
+  one vote listed twice.** Found by answering a plain question ("what is Missouri SB 68?"): the
+  2025 SB 68 page shows two Senate roll calls, both 2025-02-27, both 29-5, both
+  `legiscan-2169-rollcall-*` (1501776, 1501777). Their **cast lists are byte-identical — 34 casts,
+  all 34 positions the same** — and their source URLs are the same journal page and anchor
+  (`RDay0227489-511.pdf#496.3` vs `RDay290227489-511.pdf#496.3`, one with a malformed day prefix).
+  It is one vote the source issued two roll-call ids for. **Migration 0022's dedup cannot catch
+  this class:** it pairs LegiScan against a PRIMARY source and marks the pair in `vote_duplicates`;
+  both rows here are the same source, so there is no flag, no pairing, and both render.
+  **Measured blast radius (whole DB, 2026-08-24):** grouping every vote by
+  (bill, chamber, date, result, source) gives 368 candidate groups; comparing CAST LISTS —
+  the only honest test — **171 groups are the same vote stored more than once (195 redundant
+  rows: legiscan 171, mo-* 19, us-* 5)**, 185 groups are genuinely distinct votes that merely
+  share a tally (correctly stored — e.g. 14 US Senate roll calls on 2026-06-04 all "Motion
+  Rejected"), and 12 were skipped because a row has no casts to compare. By year: 2025 (58) and
+  2026 (34) are the worst, so the CURRENT session is the most affected. Note the grouping key
+  alone is NOT sufficient evidence — federal `result` is a word, not a tally — which is exactly
+  why the cast-list comparison has to be the test.
+  **Fix shape (not built, needs Lance's go):** extend the dedup to same-source pairs that share
+  bill + chamber + date + tally AND have identical cast lists, marking the later row superseded
+  in `vote_duplicates` (the public views already exclude superseded rows, so the display fixes
+  itself and nothing is deleted — the audit trail stays). Open questions for the design: which
+  row is canonical (lowest roll_call_id? earliest ingested?), and whether a same-source pair
+  should mint a reconciliation flag for review instead of auto-pairing, since unlike the
+  cross-source case there is no second source corroborating that they are the same event.
+
 - **(2026-08-23) `ingest-mo-senate.js --year 2026 --dry-run` reports "no sessions row yet for
   identifier=2026"** while the live path dedups onto the `261` session row (TODO 25 fix) — the
   dry-run report looks the session up by bare year and so reports zero votes/pending for the
