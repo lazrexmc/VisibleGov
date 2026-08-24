@@ -72,14 +72,16 @@ silently — PLAYBOOK 47; the fallthrough guard is an INBOX item). Resume the la
 ✅ **MO Senate journal `bill_refs` quarantine FIXED 2026-08-23 (commit 5ced4eb):** root-caused
 (the parser knew one motion grammar; the journal prints the bill outside the motion for four
 families + non-bill roll calls), 20/20 days parse 137/137 blocks against agent-verified ground
-truth, adversarial review's 23 findings addressed, suite 2,611/0. **Replay IN PROGRESS:** all 20
-failure markers removed; the 14 2026-session days drain through the scheduler one per
-day-writing slot (~every 1.5–1.75 h, not per tick: on 08-23 days landed at 07:30 / 09:15 / 10:45
-/ 12:30Z, `total_pending_days` 14 → 11, 0 failures — so ~20 h from 06:00Z rather than 7; read
-`counts.total_pending_days` on the latest `mo-senate-web` run for the remainder); 2018: 1 of 6 replayed manually, then the 52-day 2018 backlog discovery
-(INBOX) — Lance's call. After replay + the next LegiScan tick: `node --env-file=.env
-scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply` on his go) closes the
-`no_tally_corresponding_primary` flags whose journal twin now exists (176 open).
+truth, adversarial review's 23 findings addressed, suite 2,611/0. **Replay COMPLETE 2026-08-24 11:30Z:** all 15 days re-read through the scheduler (14 2026-session
++ 1 manual 2018 run) — **103 votes, 3,391 casts, 5 non-bill roll calls, ZERO failures, zero
+quarantined days**, `total_pending_days` 0. Biggest single recovery: the 2026-05-06 FY2027
+appropriations day, 31 votes (23 of them the CCR/third-reading pairs the old grammar could not
+attribute at all). The 2018 backlog (52 days) is untouched and remains Lance's call (INBOX).
+**Next:** the LegiScan tick at ~16:45Z daily re-cross-checks all 604 roll calls against the primary
+sources; yesterday's ran when only 6 of 15 days had replayed and paired just 3. After today's,
+run `node --env-file=.env scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply`
+on Lance's go) to close the `no_tally_corresponding_primary` flags whose journal twin now exists
+(177 open at 11:30Z; 368 flags open overall).
 ✅ **2024 MO House votes RECOVERED (2026-08-23): migration 0032 applied by Lance, re-ingest done
 — 185 votes + 30,105 casts live.** LegiScan prints all 275 as `0000-00-00` (source defect,
 confirmed via getRollCall); the House XML export does not serve 2024 (current GA only, verified in

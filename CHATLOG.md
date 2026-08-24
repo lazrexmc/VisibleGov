@@ -5822,3 +5822,22 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   per published summary** against the billed scheduler's measured **$0.123 per published
   summary** (9 real ticks), i.e. the remaining 2,486 ready bills are ~526M subscription tokens and
   ~35 h of orchestrated session time on this lane, versus ~$306 billed (~$155 via the Batch API).
+- **MO Senate journal replay COMPLETE — 15 days, 103 votes, 3,391 casts, ZERO failures**
+  (2026-08-24 11:30Z, ~30 h unattended through the registered ingest scheduler). Every day the
+  `bill_refs` class had quarantined is now read and stored: 14 2026-session days through the
+  scheduler's own day slots plus the one 2018 day run manually on 08-23. Per-day: 0/3-non-bill
+  (2018-01-31), 0/1-non-bill, 1, 4, 2, 1, 0/1-non-bill, 2, 14, 4, **31**, 2, 10, 12, 20. The 31 is
+  the 2026-05-06 FY2027 appropriations day — 23 of those votes are the conference-committee-report
+  and post-title-block third readings the old grammar could not attribute at all; the 20 is
+  2026-05-15, the day whose five failures started the investigation. `total_pending_days` 0,
+  quarantined set 0, 108 done markers, 0 failure markers, and not one parse failure across the
+  whole replay — the offline harness (137/137 blocks) predicted the live result exactly.
+  Observed cadence settled at one day per ~150 min: the scheduler rotates four sources every 15
+  min and the CURRENT-year journal index has a 60-minute cache, so index slots keep taking turns
+  the day slots would otherwise use (a closed year's index never expires — `effectiveMaxAge` —
+  so this only bites the live session; captured, not chased, since the replay is now done).
+  **Follow-on is NOT yet done:** `vote_duplicates` is still 66 and the resolver reports 0
+  resolvable, because yesterday's 16:45Z LegiScan tick cross-checked all 604 roll calls when only
+  6 of the 15 days had replayed and found just 3 clean pairings (153 `no_tally_corresponding_
+  primary`). Today's tick runs against the complete journal record; the resolver's dry-run after
+  it is the real measure, and `--apply` needs Lance's go.
