@@ -5806,3 +5806,19 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   row) and the VoterTables gameplan — 17 edits; the only surviving "drafted" mentions are
   deliberate history (strike-throughs and the standing caveat about the trap itself having lagged).
   Suite 2,630 pass / 0 fail; line endings byte-match HEAD on every touched file.
+- **Fresh-authoring lane REOPENED by Lance and wave WA ran 12/12** (2026-08-24, "run $0 subagent
+  summary waves over the ready bills, recency-first"). Exported recency-first
+  (`export-summary-wave.mjs 12`): all 12 from the live 2026-01-07 session, 0 undated, 0 not found
+  — the session-date fix holding. Wave WA (run wf_afc256e5-d5b, launched by `scriptPath` per
+  lesson 47): 49 agents, 0 errors, **2,540,811 subagent tokens, 10.2 minutes**, every bill clean
+  on the first pass — 0 refuted verdicts across 155 bullets, 0 uncovered provisions, one
+  corroboration run (HB 1885, sub-floor yield). Record run ae8158b6: **12 published, 0 flagged, 0
+  gated, 0 failures**. Live 1,094 → **1,106**. NOTE for the record: the harness's safety
+  classifier was rate-limited during 7 of the 12 author agents, so their output was not
+  safety-reviewed by it; the mechanical gates (adversarial verdicts re-derived in code, citation
+  binding, completeness floor with corroboration) are the actual trust boundary and all 12 passed
+  them — but the gap is disclosed rather than glossed. Lance then asked to pause after this wave
+  and evaluate the direction; the honest economics from this wave are **211,734 subagent tokens
+  per published summary** against the billed scheduler's measured **$0.123 per published
+  summary** (9 real ticks), i.e. the remaining 2,486 ready bills are ~526M subscription tokens and
+  ~35 h of orchestrated session time on this lane, versus ~$306 billed (~$155 via the Batch API).

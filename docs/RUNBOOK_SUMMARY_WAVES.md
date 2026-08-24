@@ -1,20 +1,28 @@
 # Runbook — summary waves ($0 subagent path)
 
-> **LANE STATE (2026-08-23) — read this before running anything below.** Fresh summaries are
-> owned by the registered daily scheduler — `scripts/scheduled-summaries.js`, built 2026-08-15,
-> registered by Lance 2026-08-17, daily 6 AM, code-enforced $1.00/tick + $5.00/ISO-week ledger
-> (`docs/SCHEDULED_SUMMARIES.md`); the fresh-authoring subagent campaign this runbook was
-> written for completed 2026-08-10 and the lane was declared CLOSED 2026-08-18 (TODO's
-> docs-pass wording for this banner: "lane CLOSED 2026-08-18, scheduler owns summaries"). What
-> survives here is the **$0 drain / re-author lane** over flagged drafts (sections below), and
-> it ran to EMPTY on 2026-08-22: re-authorable pool 0, and the 28 drafts then open were exactly
-> the 28 PARKED bills, every one with a written reason. The 2026-08-23 6 AM tick has since minted
-> 4 new refusals — HB 1786, HB 1855, HB 1906, HB 3004 (live-verified 2026-08-23: 32 draft-only
-> bills, 28 parked, 4 in neither park list) — not yet triaged. Resume only when
-> `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` reports candidates —
-> the scheduler's own gate refusals are the only thing that mints new ones. Live counts
-> (published / awaiting review / retired, and the scheduler's week-to-date spend) come from
-> `npm run status`, never from a number typed into this file.
+> **LANE STATE (2026-08-24) — read this before running anything below. THE FRESH-AUTHORING LANE
+> IS OPEN AGAIN.** Lance reopened it 2026-08-24 ("run $0 subagent summary waves over the ready
+> bills, recency-first") and asked for it to run continuously — each wave recorded, the next
+> exported and launched, until he signals a pause. Rationale: coverage is the product's
+> bottleneck — 793 of 3,438 accountability bills (23%) have a published summary while 2,498 are
+> READY (text on hand, no summary), and the daily scheduler's 4-6/tick would take ~450 days to
+> work that down. This lane costs $0 and built most of the existing corpus.
+>
+> The billed scheduler keeps running alongside it — `scripts/scheduled-summaries.js`, built
+> 2026-08-15, registered by Lance 2026-08-17, daily 6 AM, code-enforced $1.00/tick +
+> $5.00/ISO-week ledger (`docs/SCHEDULED_SUMMARIES.md`). The two lanes do not collide: the
+> exporter's queue is "text on hand, no summary", so a bill the scheduler has already published
+> is not in it, and `record` refuses a bill that gained a summary since export
+> (`alreadySummarized`).
+>
+> *(History: the first fresh campaign completed 2026-08-10 and the lane was declared CLOSED
+> 2026-08-18 — superseded by the reopening above.)* The **$0 drain / re-author lane** over
+> flagged drafts (sections below) also survives and is the other half of the work: it ran to
+> EMPTY on 2026-08-22, and the scheduler mints new refusals most ticks (4 on 2026-08-23: HB 1786,
+> HB 1855, HB 1906, HB 3004), so treat it as a recurring queue — run
+> `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` whenever a tick has
+> fired. Live counts (published / awaiting review / retired, and the scheduler's week-to-date
+> spend) come from `npm run status`, never from a number typed into this file.
 
 **Lance's ruling (2026-08-07):** more plain-language summaries with zero work from him, dollars
 untouched — the engine is Claude-session subagent waves ("$0 sessions only"), scope = the queue's
