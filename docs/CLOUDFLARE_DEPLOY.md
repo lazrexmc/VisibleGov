@@ -221,6 +221,14 @@ the Pages custom-domain attachment.
 
 ## Phase 4 — Attach the custom domain
 
+> **Verification is scripted — run it the moment the domain is attached:**
+> `bash scripts/verify-custom-domain.sh https://visiblegov.us`
+> It re-runs every Phase-2 check against the new host (apex 200, all three security headers,
+> `/trust`, the `/person/<id>` rewrite, the 404 body, the geocode Function's rejection path and
+> its headers, and that the index actually renders) and exits non-zero if any fail. Baselined
+> against `https://visiblegov.pages.dev` on 2026-08-24: 11 passed, 0 failed. Pass a host argument
+> to check either deployment; with no argument it checks `https://visiblegov.us`.
+
 ~~Decided 2026-07-28: the target is `visiblegov.helpingpeoplehelpingpeople.com` (a subdomain).~~
 **Superseded 2026-08-22: the target is the apex `visiblegov.us`** (Lance bought it — CHATLOG
 2026-08-22 morning entry, "I now own the domain visiblegov.us as well"; registered
