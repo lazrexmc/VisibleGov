@@ -301,12 +301,29 @@ auth session to get confused across origins. The only mild downsides are duplica
 search engines and the chance someone shares a stale preview URL. Restrict it later if either
 becomes a real annoyance.
 
-**`www` wiring** (added 2026-08-23; Lance's call, not decided as of this date). Two equally fine
-ways to give `www.visiblegov.us` a home: (a) a Cloudflare redirect rule sending it to
-`https://visiblegov.us` — one host serves content, and the Phase 4 re-run checks the apex in full
-and only checks that `www` redirects; or (b) `www` attached as a second Pages custom domain — two
-hosts serve content, and every Phase 2 check runs against both. Record the choice here when made
-so the Phase 4 re-run has a fixed host list.
+**`www` wiring — DECIDED 2026-08-25 (Lance): option (a), redirect `www` to the apex.** One
+canonical URL (`https://visiblegov.us`), which is better for search engines and for links people
+share; `www.visiblegov.us` still works for anyone who types it, it just does not stay there.
+*(The alternative considered and not taken: attaching `www` as a second Pages custom domain, which
+serves the same content on two hosts.)*
+
+Wiring order matters — a redirect rule only fires if DNS actually routes `www` to Cloudflare's
+edge, so the DNS record comes first:
+
+1. Attach the apex `visiblegov.us` in Pages (step 1 above). Cloudflare creates the apex DNS
+   record itself as part of the attachment — do not hand-add one.
+2. DNS → **Add record**: type `CNAME`, name `www`, target `visiblegov.us`, **Proxied (orange
+   cloud)**. Proxied is the load-bearing part: a grey-cloud (DNS-only) record bypasses the edge
+   and the redirect rule never runs.
+3. Rules → **Redirect Rules** → Create. Match: `Hostname` **equals** `www.visiblegov.us`.
+   Then: **Dynamic** redirect, status **301**, target expression
+   `concat("https://visiblegov.us", http.request.uri.path)`, **preserve query string ON**.
+   Dynamic + `concat` rather than a static URL so a deep link keeps its path —
+   `www.visiblegov.us/trust` must land on `visiblegov.us/trust`, not the home page.
+
+Phase-4 host list this fixes: run the full check set against `https://visiblegov.us`
+(`scripts/verify-custom-domain.sh`), and against `https://www.visiblegov.us` check only that it
+301s to the apex **preserving the path**.
 
 ---
 
