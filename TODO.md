@@ -1258,6 +1258,33 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-26) FULL SYSTEM AUDIT — `docs/audits/2026-08-26-system-audit.md`.** Run against the
+  live DB, live site and repo on Lance's request. **Verdict: data and trust layers are sound; the
+  defects are signal quality, a duplicate class, and coverage — not correctness of what is
+  published.** Verified healthy: 0 of 1,112 published summaries lack a support verification (10
+  lack completeness, all pre-migration-0020 and already disclosed), 0 published glossary entries
+  lack quote+source, 0 orphan casts / NULL vote_dates / NULL session_ids, drafts invisible to
+  anon, column scoping holds, no secrets tracked, 2,630 tests green, MO ingestion 162-163 clean
+  runs in 7 days with 0 failures, and the federal "121 partial runs" streak is NOT a break
+  (roll283 → 200 stored, roll284 → 404 absent: the House simply has not voted since 07-23).
+  **Method warning worth keeping:** the audit's first trust-model pass reported 708 unverified
+  summaries — false, caused by a `.limit(20000)` read PostgREST capped at 1,000. Paginated, the
+  answer is 0. A count from a single unpaginated read is not evidence (PLAYBOOK lesson 20).
+  **Gameplan, in order (none started):** (1) fix signal death on always-partial sources — classify
+  an expected miss (404 on the NEXT roll call = "no more votes yet", close `succeeded`) apart from
+  a real failure (5xx, timeout, changed URL shape, 404 on a roll call already held), and stop
+  collapsing every message to `HTTP N`; until then a real outage is indistinguishable from a quiet
+  week. (2) the same-source dedup (see the 08-24 entry) — one job, two payoffs. (3) Bob Onder's
+  phantom MO Senate term row (no start_date, no end_date, 0 votes) renders him as a currently
+  serving MO senator though he now serves in the US House — fix via a `correct-data` correction
+  with a written reason, then guard: no start_date AND no votes must never read as "serving now"
+  (blast radius measured: exactly 1 row of 731 open-ended terms). (4) decide the Cloudflare
+  Web Analytics question, and if allowed add a line to the trust page saying what is collected.
+  (5) expose `vote_date_provenance` on `public_votes` + render it (the 185 derived dates currently
+  ship without their receipt). (6) coverage is a DECISION not a build — \$0 waves cannot close
+  2,481 bills (~526M tokens, ~35 h) vs ~\$306 billed. (7) accept the 382 flags as a human queue;
+  close the one orphaned `correct-data` run row stuck at `running` since 08-03.
+
 - **(2026-08-26) CORRECTION: the reconciliation flags will NOT drain on their own — the earlier
   expectation was wrong.** After the MO Senate journal replay completed (2026-08-24), the standing
   expectation recorded in TODO/CHATLOG was that the next LegiScan tick would re-cross-check against

@@ -5884,3 +5884,26 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   regardless of output (last five ticks $0.36/$0.36/$0.36/$0.35/$0.39 for 1/4/1/4/6 published), so
   "$0.12 per summary" is a cross-tick average, not a per-bill price; the ~$306 backlog estimate is
   unaffected.
+- **Full system audit on request — `docs/audits/2026-08-26-system-audit.md`** (2026-08-26, Lance:
+  "audit the system in full detail, provide feedback and generate a gameplan"). Run directly
+  against the live DB, the live site and the repo, not from the docs. **Verdict: the data and
+  trust layers are sound; the defects are signal quality, a duplicate class, and coverage — not
+  the correctness of anything published.** The audit's own most important moment was catching
+  itself: the first trust-model pass reported 708 of 1,112 published summaries as unverified,
+  which would have been a catastrophe — it was a `.limit(20000)` read PostgREST silently capped at
+  1,000 rows. Re-read through `selectAll`, the real answer is **0** summaries without a support
+  verification (10 without completeness, all published 07-28→30 before that axis existed and
+  already disclosed on the trust page). Same trap the project has hit twice before; recorded in
+  the audit as "a count from a single unpaginated read is not evidence". Also resolved a standing
+  ambiguity: the federal sources' 121-consecutive-`partial` streak is NOT a break —
+  `clerk.house.gov/evs/2026/roll283.xml` returns 200 (we hold it) and `roll284.xml` returns 404
+  (it does not exist); the House has not voted since 07-23, the Senate since 08-08. Ingestion is
+  complete and current. New findings: **D2 signal death** — us-congress 121/121 partial,
+  us-senate 121/121, every failure across all 121 runs collapsing to one message shape
+  (`HTTP N from us-congress: .../rollN.xml`, rendering 404 and 500 identically), so a genuine
+  outage would be indistinguishable from a quiet week; and **D4 a phantom "currently serving"
+  row** — Bob Onder has 4 legislator rows correctly unified under one person_id, one of them empty
+  (no votes, no start_date, no end_date, MO Senate d2), so the directory shows him as a sitting MO
+  senator while he serves in the US House. Blast radius measured rather than assumed: of 731
+  open-ended terms only 2 also lack a start date and exactly 1 has zero votes — one wrong row, not
+  a broken directory. Gameplan written into TODO in value order, nothing started.
