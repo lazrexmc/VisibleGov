@@ -11,7 +11,9 @@ import {
   el, clearChildren, sectionState, mountFooter, UnsafeAttributeError, InvalidSectionStateError,
   isSafeSrc,
 } from '../site/js/render.js';
-import { voteReceiptUrl, photoUrl, officialBillUrl } from '../site/js/receipts.js';
+import {
+  voteReceiptUrl, photoUrl, officialBillUrl, rollCallLabel,
+} from '../site/js/receipts.js';
 import {
   resolveSitePath, applyRewrites, canonicalizeHtmlPath, createSiteServer, contentTypeFor, SITE_ROOT, PathTraversalError,
   _setGeocodeFetch, parseHeadersFile, loadSiteHeaders,
@@ -617,6 +619,59 @@ test('mountFooter: clears any prior content before rendering (idempotent — saf
 // ============================================================================
 // receipts.js
 // ============================================================================
+
+// rollCallLabel — 2026-08-26. MEASURED first: after the profile renderer began showing question +
+// date + tally, 50,070 rendered rows were STILL indistinguishable, and every one of them is a
+// genuinely distinct vote (zero are the same vote twice). They collapse because the source's own
+// question is generic — the US Senate labels 20 vote-a-rama motions "On the Motion". 99.3% carry
+// the source's own roll-call identifier in the url. Rendering it is mechanical and IS the receipt.
+
+test('rollCallLabel: US House roll number, unpadded (25,126 residual rows)', () => {
+  assert.equal(rollCallLabel('https://clerk.house.gov/evs/2026/roll283.xml'), 'Roll call 283');
+  assert.equal(rollCallLabel('https://clerk.house.gov/evs/2019/roll007.xml'), 'Roll call 7',
+    'leading zeros are url padding, not the number the Clerk uses');
+});
+
+test('rollCallLabel: US Senate takes the VOTE number, not congress or session (13,515 rows)', () => {
+  // vote_119_1_00332.xml is congress 119, session 1, vote 332. Only the last is the roll call.
+  assert.equal(
+    rollCallLabel('https://www.senate.gov/legislative/LIS/roll_call_votes/vote1191/vote_119_1_00332.xml'),
+    'Roll call 332',
+  );
+});
+
+test('rollCallLabel: MO House prints day.rollcall verbatim (8,160 rows)', () => {
+  // Deliberately NOT reformatted to "Day 46, RC 22" — 046.022 is the token the Clerk uses, and a
+  // visitor comparing the page to the PDF should see the same string on both.
+  assert.equal(
+    rollCallLabel('https://www.house.mo.gov/billtracking/bills231/rollcalls/046.022.pdf'),
+    'Roll call 046.022',
+  );
+});
+
+test('rollCallLabel: MO Senate journal anchor is the page location (2,936 rows)', () => {
+  assert.equal(
+    rollCallLabel('https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf#1876.2'),
+    'Journal p. 1876.2',
+  );
+});
+
+test('rollCallLabel: returns null rather than guessing — 333 rows have nothing derivable', () => {
+  assert.equal(rollCallLabel('https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf'), null,
+    'a journal url with NO anchor covers a whole sitting and locates nothing');
+  assert.equal(rollCallLabel('https://legiscan.com/mo/bills/2022/HB1720/'), null, 'a bill page is not a roll call');
+  assert.equal(rollCallLabel('https://example.gov/whatever.html'), null);
+  assert.equal(rollCallLabel(''), null);
+  assert.equal(rollCallLabel(null), null);
+  assert.equal(rollCallLabel(undefined), null);
+});
+
+test('rollCallLabel: the whole point — two votes on one day get DIFFERENT labels', () => {
+  const base = 'https://www.senate.gov/legislative/LIS/roll_call_votes/vote1191/vote_119_1_';
+  assert.notEqual(rollCallLabel(`${base}00332.xml`), rollCallLabel(`${base}00335.xml`));
+  const mo = 'https://www.senate.mo.gov/26info/Journals/RDay6805151864-1889.pdf';
+  assert.notEqual(rollCallLabel(`${mo}#1876.2`), rollCallLabel(`${mo}#1876.3`));
+});
 
 test('voteReceiptUrl: returns source_url, or null when absent', () => {
   assert.equal(voteReceiptUrl({ source_url: 'https://example.com/roll-call/1' }), 'https://example.com/roll-call/1');

@@ -7,6 +7,58 @@ export function voteReceiptUrl(feedRow) {
   return feedRow?.source_url ?? null;
 }
 
+// rollCallLabel — the SOURCE'S OWN identifier for a roll call, derived from the url we already
+// store and already render as the "source" link.
+//
+// WHY (measured 2026-08-26). After the profile renderer started showing question + date + tally,
+// 50,070 rendered rows were still indistinguishable. Measuring them showed these are NOT duplicates
+// — every single one is a genuinely DISTINCT vote (zero were the same vote appearing twice). They
+// collapse because the source's own question text is generic: the US Senate labels twenty separate
+// vote-a-rama motions "On the Motion", and LegiScan labels both an adoption motion and a third
+// reading "Senate: Third Reading". 99.3% of them (49,737) carry a distinct source_url holding the
+// identifier that DOES separate them:
+//
+//   clerk.house.gov/evs/2026/roll283.xml                    25,126 rows
+//   senate.gov/.../vote_119_1_00332.xml                     13,515 rows
+//   house.mo.gov/.../rollcalls/046.022.pdf                   8,160 rows
+//   senate.mo.gov/.../RDay....pdf#1876.2                     2,936 rows
+//   (nothing derivable)                                        333 rows
+//
+// This is the honest way to tell two real votes apart: it is the source's own number, mechanically
+// parsed, never a distinction we invented. It is also literally the receipt — the same url the
+// "source" link opens.
+//
+// Returns null rather than guessing. A bare journal PDF with no anchor locates nothing, and an
+// unrecognised host means a new adapter nobody has taught this function about yet; in both cases
+// rendering nothing is correct and rendering a guess would be worse than the ambiguity it replaces.
+export function rollCallLabel(sourceUrl) {
+  const u = String(sourceUrl ?? '').trim();
+  if (!u) return null;
+
+  // US House: /evs/<year>/roll283.xml — leading zeros are the url's padding, not the Clerk's
+  // number, so roll007 prints as 7.
+  const usHouse = /clerk\.house\.gov\/evs\/\d+\/roll(\d+)\.xml/i.exec(u);
+  if (usHouse) return `Roll call ${Number(usHouse[1])}`;
+
+  // US Senate: vote_<congress>_<session>_<vote>.xml — only the LAST number is the roll call.
+  const usSenate = /roll_call_votes\/[^/]*\/vote_\d+_\d+_(\d+)\.xml/i.exec(u);
+  if (usSenate) return `Roll call ${Number(usSenate[1])}`;
+
+  // MO House: /rollcalls/046.022.pdf — day.rollcall. Printed VERBATIM rather than reformatted into
+  // "Day 46, RC 22": 046.022 is the token the Clerk uses, and a visitor comparing the page against
+  // the PDF should see the same string on both.
+  const moHouse = /billtracking\/bills\d+\/rollcalls\/([\d.]+)\.pdf/i.exec(u);
+  if (moHouse) return `Roll call ${moHouse[1]}`;
+
+  // MO Senate journal: the #fragment is the page (and position on it). A journal url WITHOUT a
+  // fragment covers a whole sitting and identifies nothing — that is the same distinction
+  // src/lib/source-url-granularity.js draws, for the same reason.
+  const moSenate = /senate\.mo\.gov\/.*\/Journals\/RDay[^#]*#([\d.]+)/i.exec(u);
+  if (moSenate) return `Journal p. ${moSenate[1]}`;
+
+  return null;
+}
+
 // Bioguide photo derivation (design spec §3, "the ruled no-NEW-column decision"): legislators.
 // image_url (OpenStates-era) wins when a source already provided one; otherwise the well-known
 // unitedstates/images bioguide path is derived at render time from bioguide_id, never stored.

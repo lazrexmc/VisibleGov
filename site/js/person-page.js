@@ -19,7 +19,7 @@ import {
 import {
   el, clearChildren, sectionState, mountFooter, isSafeSrc,
 } from './render.js';
-import { voteReceiptUrl, photoUrl } from './receipts.js';
+import { voteReceiptUrl, photoUrl, rollCallLabel } from './receipts.js';
 import { extractOneLiner } from './summary-parse.js';
 import {
   buildIdentity, voteFilterQuery, groupSponsorships, chamberLabel,
@@ -282,8 +282,15 @@ function renderVoteRow(voteRow, oneLinerMap) {
   // written in the first place. Either may legitimately be absent (a vote whose date the source
   // never printed, a chamber that publishes no tally), so each is emitted only when present rather
   // than rendering an empty separator or a "null".
+  // The roll-call identifier is the third piece, and the one that separates votes the SOURCE
+  // labels identically. Measured after the date+tally fix landed: 50,070 rendered rows were still
+  // indistinguishable, and every one is a genuinely DISTINCT vote — the US Senate calls twenty
+  // separate vote-a-rama motions "On the Motion", LegiScan calls both an adoption motion and a
+  // third reading "Senate: Third Reading". 99.3% carry the source's own number in the url we
+  // already link as "source". It is null for the 333 rows with nothing derivable, and filter(Boolean)
+  // drops it rather than printing an empty separator.
   const voteDay = String(voteRow.vote_date ?? '').slice(0, 10);
-  const meta = [voteDay || null, voteRow.result || null].filter(Boolean);
+  const meta = [voteDay || null, voteRow.result || null, rollCallLabel(voteRow.source_url)].filter(Boolean);
   if (meta.length) {
     main.appendChild(el('p', { class: 'vote-meta' }, meta.join(' · ')));
   }
