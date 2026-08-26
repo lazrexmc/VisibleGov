@@ -82,8 +82,22 @@ PLAYBOOK lessons **51-55** carry all of it.
    — the data was always in `public_vote_feed`, only the render dropped it. Worst real case: Rusty
    Black's profile showed **25 identical rows** for SB 724 (2022-05-10), which are 25 separate
    amendment votes with tallies from 0-124 to 128-6. Now renders the question for bill-linked votes
-   plus a `date · tally` line, both printed exactly as stored. 4 new tests. **Not yet seen in a real
-   browser** — worth a `playwright` pass on a live profile before calling it visually done.
+   plus a `date · tally` line, both printed exactly as stored. 4 new tests.
+   **VERIFIED LIVE in a browser 2026-08-26** (playwright, visiblegov.us, two profiles): every row
+   now carries `.vote-question` and `.vote-meta`, and each profile's first page renders 48 of 50
+   rows distinctly. Row shape confirmed: `MO Senate / HB 3080 — <title> / Senate: Emergency Clause /
+   2026-05-15 · 24-4 / Position: absent | source`. Measured effect: rows rendering as repeats
+   **369,063 -> 50,070 (86% resolved)**.
+   **RESIDUAL, newly characterized — a DEDUP problem, not a render one.** Of the 50,070 left,
+   **49,908 have a DISTINCT `source_url`** and only **162** are genuinely indistinguishable from
+   what we hold. The pattern, from SB 1019 / SB 953 on 2026-05-15: LegiScan labels BOTH the adoption
+   motion and the third reading `"Senate: Third Reading"`, separating them only by journal anchor
+   (`#1876.2` vs `#1876.3`) — and the SAME two votes also exist as `mo-senate-web` rows carrying the
+   narrative text that actually distinguishes them ("Senator Crawford moved that HCS for SB 1019 be
+   adopted..." vs "...read the 3rd time and passed"). So the page shows FOUR rows for TWO physical
+   votes: two unpaired cross-source duplicates that migration 0022 never matched. Rendering the raw
+   anchor would be meaningless to a visitor; pairing the cross-source rows would remove them
+   outright. That is the next move here, and it is non-destructive (`vote_duplicates` marking).
 3. ~~**`006.004.pdf`**~~ **RESOLVED 2026-08-26 by Lance reading the source PDF.** The document
    names **HB 1979** explicitly (Session Day 6, Roll Call 4, 1/14/2016, "HBs FOR THIRD READING",
    sponsor ROWDEN (044), draft 5624H.02P) and **SB 903 appears nowhere on it**; its printed tally
