@@ -29,6 +29,10 @@ import {
 } from '../src/lib/source-url-granularity.js';
 
 const apply = process.argv.includes('--apply');
+// --plan-json prints the exact rows this run WOULD retract, so the decision (which stays here, in
+// tested JS) can be executed by something else — e.g. one atomic SQL transaction over MCP, which is
+// stronger than this script's row-at-a-time loop: it either fully succeeds or fully rolls back.
+const planJson = process.argv.includes('--plan-json');
 const limIdx = process.argv.indexOf('--limit');
 const limit = limIdx !== -1 ? Number(process.argv[limIdx + 1]) : Infinity;
 const client = getClient();
@@ -93,7 +97,22 @@ for (const [url, rows] of byUrl) {
     skipped.push({ url, reason: 'ambiguous — question text cannot arbitrate; needs human review', rows: rows.length });
     continue;
   }
-  const keep = rows.find((r) => identifierOf(r.bill_id) === named[0]);
+  // If MORE THAN ONE row carries the named identifier, the question text cannot arbitrate between
+  // them and `find` would pick whichever happened to come first. That is not a tiebreak, it is a
+  // coin flip on which vote survives — and it produced a plan that kept a special-session copy and
+  // deleted the regular-session original, because Missouri numbers a bill "SB 4" in both. Skip:
+  // the session-date detector below decides these correctly, on the date, or nothing does.
+  const claimants = rows.filter((r) => identifierOf(r.bill_id) === named[0]);
+  if (claimants.length !== 1) {
+    skipped.push({
+      url,
+      reason: `${claimants.length} rows share the identifier the question names (${named[0]}) — `
+        + 'question text cannot arbitrate; left to the session-date rule',
+      rows: rows.length,
+    });
+    continue;
+  }
+  const keep = claimants[0];
   for (const r of rows) {
     if (r.id === keep.id) continue;
     planned.push({
@@ -155,6 +174,24 @@ const deduped = [...plannedById.values()];
 const { data: existingTombs } = await selectAll(client, 'retracted_votes', 'vote_id');
 const tombstoned = new Set((existingTombs ?? []).map((r) => r.vote_id));
 const todo = deduped.filter((p) => !tombstoned.has(p.row.id)).slice(0, limit);
+
+if (planJson) {
+  console.log(JSON.stringify(todo.map((p) => ({
+    vote_id: p.row.id,
+    bill_id: p.row.bill_id,
+    bill_identifier: identifierOf(p.row.bill_id),
+    source_key: p.row.source_key,
+    source_url: p.row.source_url,
+    klass: p.klass,
+    also_detected_by: p.alsoDetectedBy,
+    reason: p.reasonText,
+    kept_vote_id: p.keptVoteId,
+    kept_source_key: p.keptSourceKey,
+    kept_bill: p.keptBill,
+    url_shape: p.shape,
+  })), null, 1));
+  return;
+}
 
 console.log(JSON.stringify({
   mode: apply ? 'apply' : 'dry-run',
