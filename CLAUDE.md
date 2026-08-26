@@ -125,13 +125,13 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-54 lessons as of 2026-08-26 — lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
+55 lessons as of 2026-08-26 — lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
 H2s, so `grep -c '^## Lesson'` undercounts at 37; the "Index of lessons" table at the top of the
 file is the live count — several
 earned the hard way in THIS repo; lessons 37-38 were the newest as of 2026-08-10 — diagnose a
 silently-dead background task from its on-disk artifacts and resume from journaled state, and park
 a failing structural CLASS with written reasons rather than paying per-instance retries — and
-lessons 51-54 (2026-08-26) are the newest now, summarized in the banner above), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+lessons 51-55 (2026-08-26) are the newest now, summarized in the banner above), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
@@ -172,7 +172,23 @@ misstatement. **Site-content decision: ship as-is, no caveat needed** — resolv
 verified there's no meaningful gap for a caveat to warn about. See `TODO.md` NOW, "MO House
 per-legislator vote coverage," for the full evidence trail.
 
-**Three standing rules that are easy to violate without noticing:**
+**Four standing rules that are easy to violate without noticing:**
+- **A REQUIRED MCP CONNECTION THAT IS NOT AUTHORIZED IS A BLOCKER TO RAISE, NEVER A FORK IN THE
+  ROAD TO QUIETLY TAKE.** At session start `scripts/preflight-mcp.mjs` runs (SessionStart hook in
+  `.claude/settings.json`) and prints which MCP servers this project depends on. It cannot check
+  OAuth state — that is per-session runtime — so **you** must: if a system notice says a server
+  needs authentication, or an MCP call fails as unauthorized, **stop and tell Lance, and help him
+  authorize it before doing the work another way.** Do not silently build or use an alternative
+  route to the same capability.
+  *Why this rule exists (2026-08-26):* a session opened with a notice that
+  `plugin:supabase:supabase` needed authentication. It was not surfaced. The session instead added
+  a `pg` dependency, wrote a ~400-line direct Postgres client plus tests and a verify script, and
+  asked Lance to rotate his database password — to reach a capability that was one `/mcp` click
+  away. Once authorized, the MCP immediately found two real defects nothing else could reach (an
+  unindexed `votes.bill_id` behind every bill-page query, and the security advisor set) and turned
+  a 20-row retraction into one atomic guarded transaction instead of 20 separate writes. The
+  detour cost hours and nearly cost a credential rotation. `docs/MCP_REQUIREMENTS.md` lists what is
+  required and why; PLAYBOOK lesson 55 has the general form.
 - ~~**Cloudflare deploy is a MILESTONE, not a task**~~ **— DONE 2026-08-05: the site is deployed to
   https://visiblegov.pages.dev and verified live end-to-end.** Lance's original ruling (2026-07-31,
   *"I'm only interested in starting the cloudflare portion once the entire backend is locked in and

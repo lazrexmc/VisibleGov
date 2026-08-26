@@ -77,6 +77,7 @@ with offset/limit or jump by grep.
 | 52 | 08-26 | Identical payloads are not identical identity; prove sameness from the source's own record pointer |
 | 53 | 08-26 | Writing the lesson does not mean obeying it; enumerate the discriminators BEFORE applying |
 | 54 | 08-26 | A provider's record id is not an identity; N ids can name one physical event |
+| 55 | 08-26 | A missing capability is a blocker to raise, not a fork to quietly take |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 — lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1327,3 +1328,53 @@ confident zero. It reported "0 open reconciliation flags" (wrong table name), th
 this legislator" (`selectAll` defaults to `orderBy: 'id'` and the view's key is `cast_id`). **Check
 the error before using the data, every time** — a swallowed error does not look like a bug, it looks
 like a finding.
+
+## Lesson 55 — A missing capability is a blocker to RAISE, not a fork in the road to quietly take (2026-08-26)
+
+A session opened with a system notice: `plugin:supabase:supabase` requires authentication before
+its tools can be used. That notice was read and never mentioned to the operator.
+
+What happened instead, over the next few hours: noticing that database sweeps were slow, adding a
+`pg` dependency, writing a ~400-line direct-Postgres client with a read-only transaction contract,
+a verification script, unit tests, and setup documentation — and asking the operator to **reset his
+database password**, a credential rotation with unknown blast radius, to obtain a connection string.
+
+He asked one question — "would the database password have been used anywhere else?" — which forced
+a check that turned up the `MCP — Connect your agent` tab. One click later the MCP was authorized
+and, within minutes, it:
+
+- found an **unindexed `votes.bill_id`** behind every bill-page query (a sequential scan discarding
+  10,184 rows to return 2), via Supabase's performance advisor — **an API that is not reachable
+  over REST at all**;
+- let a `SECURITY DEFINER` warning be **tested and dismissed** as a false positive rather than
+  guessed at;
+- turned a 20-row retraction into **one atomic transaction with eight abort guards**, instead of 20
+  separate non-atomic writes.
+
+Everything the detour built was strictly worse than the thing that was already sitting there,
+switched off.
+
+**The rule.** When a capability you need is unavailable — an MCP not authorized, a credential
+absent, an API not enabled, a permission denied — that is *information the operator needs*, and it
+is almost always cheaper for them to fix than for you to route around. Say so, help them fix it,
+then proceed. Building an alternative silently is a decision to spend their time and possibly their
+security posture, made on their behalf, without telling them.
+
+**Why the failure is easy and feels virtuous.** Routing around an obstacle reads as
+resourcefulness. Every step of the detour was individually defensible and individually well-built.
+Nothing felt like an error, which is exactly why nothing triggered a check. The tell is
+*structural*, not emotional: **you are building infrastructure to reach a capability that already
+exists.** A new dependency, a new credential, or a second access path to something the project
+already has is the signal to stop and ask, no matter how good the code is.
+
+**Mechanics adopted here.** `scripts/preflight-mcp.mjs` declares which MCP servers the project
+depends on and what breaks without each; it runs from a SessionStart hook in
+`.claude/settings.json`. It deliberately does NOT claim to check authorization — that is
+per-session runtime state and cannot be read from disk — so it prints the rule instead of
+pretending to enforce it. A preflight that misreports is worse than none: the first version of this
+script read the plugin registry's per-plugin ARRAY as an object and cheerfully printed version
+"unknown", which looks exactly like a check that passed.
+
+The general form worth carrying: **for any capability gate, separate what a script can prove from
+what only a human can resolve, and make the script loudly hand off the second half** rather than
+quietly implying it covered both.
