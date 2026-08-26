@@ -65,10 +65,34 @@ looks identical to working right up until you rely on it. That is why `scripts/p
 checks binaries as well as plugins.
 
 ```
-npm install -g typescript-language-server typescript
+npm install -g typescript-language-server     # the server binary, global
+npm install --save-dev typescript@5           # the compiler, IN THE WORKSPACE
 ```
 
-Live: typescript-language-server 6.0.0, typescript 7.0.2.
+**Both halves are load-bearing and the obvious command gets one of them wrong.**
+
+`npm install -g typescript` today installs **TypeScript 7**, the Go rewrite, whose `lib/` ships
+`tsc.js` and **no `tsserver.js`**. `typescript-language-server` needs `tsserver.js`, so the LSP
+starts and then dies with *"Could not find a valid TypeScript installation."* Pin `typescript@5`
+(5.9.3 at time of writing) — the last line that ships it.
+
+It also has to be resolvable **from the workspace**, not globally: the server looks for `typescript`
+in the project's `node_modules` first. Hence `--save-dev` rather than `-g`. As a devDependency it
+also survives a fresh clone, which matters for `docs/DISASTER_RECOVERY.md`.
+
+Live: `typescript-language-server` 6.0.0 (global), `typescript` 5.9.3 (workspace devDependency).
+
+### Caveat: `findReferences` under-reports on a cold index
+
+tsserver only searches files it has loaded. The first `findReferences` on `assessSharedUrl`
+returned **1** result — the declaration alone. After a `goToDefinition` from one caller warmed the
+project, the same query returned **13 across 4 files**.
+
+This is the same failure shape as everything else that has bitten this project: **a silent partial
+answer that looks exactly like a complete one.** An under-reported reference list reads as "nothing
+else calls this", which is precisely the false confidence that makes a rename break something.
+Before trusting a reference count for a refactor, warm the index (open a known caller, or
+`goToDefinition` from one) — or cross-check with `grep`, which does not care what is loaded.
 
 Covers `.ts .tsx .js .jsx .mts .cts .mjs .cjs` — this project is 177 `.js` + 12 `.mjs` and **zero
 TypeScript**, so the `.js` coverage is the whole point. `jsconfig.json` at the repo root tells it

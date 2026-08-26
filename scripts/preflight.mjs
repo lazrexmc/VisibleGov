@@ -52,7 +52,9 @@ const REQUIRED_TOOLING = [
     forPlugin: 'typescript-lsp',
     why: 'Code intelligence over the 177 .js files here — find-references, go-to-definition. '
       + 'The plugin declares the language server; npm provides it.',
-    fix: 'npm install -g typescript-language-server typescript',
+    fix: 'npm install -g typescript-language-server  (and: npm install --save-dev typescript@5 '
+      + '— NOT typescript@7, whose Go rewrite ships no tsserver.js, and it must live in the '
+      + 'workspace, not globally)',
   },
 ];
 
