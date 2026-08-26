@@ -4,7 +4,83 @@
 
 ---
 
-## ⏱ RESUME HERE — verified live 2026-08-23, read this block first
+## ⏱ RESUME HERE — verified live 2026-08-26, read this block first
+
+### 2026-08-26 — the day the adversarial audit ran. Read this before anything below it.
+
+**Live numbers right now:** votes **10,166** · casts **1,390,051** · published summaries **1,112** ·
+`vote_duplicates` **87** · `retracted_votes` **713** · open reconciliation flags **382** ·
+migrations **35 files, 0001-0034 + 0018a, ALL APPLIED** · suite **2,704 pass / 0 fail**.
+(`npm run status` is still the only live figure; these are a dated snapshot.)
+
+**THE BIG ONE — 713 vote rows retracted, all misattributed to bills that never held them.**
+Found by an 8-dimension adversarial audit (66 agents; 28 findings raised, **19 refuted by
+skeptics, 9 survived**), then independently re-verified before any code was written.
+LegiScan's 2023 MO dataset mints a SEPARATE `roll_call_id` per bill for ONE physical House floor
+vote — three HB 10 roll calls were stored **232 times each, against 232 different bills**, with
+full cast lists. The ingest had no bug: `source_key` IS the provider's roll_call_id and each was
+genuinely unique, so `insertIfAbsent` stored every copy with no error, warning, or failed parse.
+**196 bills displayed ONLY votes never cast on them; 47 of those had published summaries in the
+public `/bills` index.** HB 114, "Reduces the tax on diapers and feminine hygiene products,"
+publicly showed a 155-2 conference-committee vote on an appropriations bill.
+Retracted in two passes (693 + 20) behind migration **0033 `retracted_votes`** — a tombstone
+carrying the COMPLETE cast list, so every retraction replays backwards. Verified after:
+**0 orphan casts, 0 votes dated before their own session's start anywhere, 0 missing survivors**,
+aggregates refreshed. Rep. Louis Riggs's 2023 record went 1,182 yea → **489 yea / 37 nay**, exactly
+the real record the audit predicted. `docs/audits/2026-08-26-system-audit.md` has the full trail.
+
+**Guards now in place so it cannot re-enter:** `src/lib/source-url-granularity.js` declares, per URL
+shape, whether a `source_url` names ONE vote or a CONTAINER of many — and `ingest-legiscan.js`
+refuses any roll call whose per-vote document already belongs to a different bill. The scoping IS
+the job: a naive "same URL + different bill" rule flags 1,101 live votes of which only 693 are
+real (**408 false positives**), because a MO Senate journal PDF legitimately prints every roll call
+of a sitting.
+
+**⚠️ THREE OF MY OWN ERRORS TODAY — read these, they are the reusable part:**
+1. The same-source dedup was applied and **17 of its 38 pairs were FALSE — they hid real votes.**
+   Caught by reading the apply output, reversed with a new `--prune` mode. Live: 21 correct pairs.
+2. A retraction plan was about to **delete the correct row and keep the misattributed one** for
+   SB 1/3/4, because both bills are literally named "SB 4" (Missouri renumbers each session) and
+   `rows.find()` picked arbitrarily. Caught by reading the plan before running it.
+3. A session opened with a notice that the Supabase MCP needed auth. I never surfaced it and
+   instead built a ~400-line Postgres client and asked Lance to rotate his DB password — for a
+   capability one click away. **New standing rule in CLAUDE.md.**
+PLAYBOOK lessons **51-55** carry all of it.
+
+**Tooling changed today:**
+- **Supabase MCP is authorized** and is now the fastest path to the database (raw SQL, atomic
+  guarded transactions, and `get_advisors` — which is NOT reachable over REST and found the
+  unindexed `votes.bill_id` behind every bill page, fixed by migration 0034). See
+  `docs/MCP_REQUIREMENTS.md`.
+- **`scripts/preflight.mjs`** runs at SessionStart (`.claude/settings.json`), checking MCP
+  availability AND plugin binaries.
+- **`typescript-lsp` installed** + `typescript-language-server` 6.0.0 + `jsconfig.json`.
+  **Needs a session restart to activate.**
+- `src/lib/pg.js` is a deliberately-kept, currently INERT fallback (no DB password exists).
+
+### OPEN — what a fresh session should pick up
+
+1. **150 thin-cast rows** — a `mo-house-xml` stub sitting beside a complete LegiScan copy of the
+   same roll call with the identical tally. These are `vote_duplicates` supersessions, **not**
+   retractions (same vote, right bill, redundant copy). Detection is measured; the marking is not
+   written yet. Do NOT touch the other 511 thin rows: 383 are the SOLE record of their vote and
+   375 of those are committee actions where the tally is known but the roster was never published.
+2. **Profile vote rows discard date and question** (audit HIGH, visitor-visible) — distinct roll
+   calls render as indistinguishable repeats. Needs a browser, not curl; `playwright` is installed.
+3. **`006.004.pdf`** — one roll call claimed by BOTH HB 1979 and SB 903 with different questions.
+   Genuinely ambiguous; **needs Lance to read the PDF**:
+   https://house.mo.gov/billtracking/bills161/rollcalls/006.004.pdf
+4. **Cloudflare Web Analytics (audit D8)** — still Lance's call: disable the beacon, or allow it in
+   the CSP and add a line to the trust page saying what is collected.
+5. **Summary coverage (audit D5)** — a decision, not a build. 1,112 published; the honest
+   recommendation is still to get the site in front of real readers first.
+6. **382 reconciliation flags** — a human adjudication queue by design. `resolve-matched-
+   reconciliation-flags.mjs` resolves **0**; do not run it expecting a drain.
+7. **`pyright-lsp`** is installed and this repo has zero Python. Lance's call whether to remove it.
+
+---
+
+## ⏱ Superseded resume block — verified live 2026-08-23
 
 **✅ USC GLOSSARY DRAIN COMPLETE AND LIVE (2026-08-21 evening) — API balance went to $0 (Lance:
 "out of api credits"), then Lance loaded **$7 more** the same evening (console is the truth; if
