@@ -22,3 +22,10 @@ node_modules/
 
 # Playwright snapshot artifacts written with --filename to repo root
 *-resolved.yml
+
+# Retraction manifests (scripts/find-misattributed-votes.mjs --out). Generated, ~228KB, and stale
+# the moment the scheduler ticks — retract-misattributed-votes.mjs deliberately regenerates from
+# the live database rather than reading one of these back, so a committed copy would only ever be
+# a misleading snapshot.
+manifest.json
+*-manifest.json
