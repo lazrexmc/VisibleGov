@@ -174,7 +174,7 @@ per-legislator vote coverage," for the full evidence trail.
 
 **Four standing rules that are easy to violate without noticing:**
 - **A REQUIRED MCP CONNECTION THAT IS NOT AUTHORIZED IS A BLOCKER TO RAISE, NEVER A FORK IN THE
-  ROAD TO QUIETLY TAKE.** At session start `scripts/preflight-mcp.mjs` runs (SessionStart hook in
+  ROAD TO QUIETLY TAKE.** At session start `scripts/preflight.mjs` runs (SessionStart hook in
   `.claude/settings.json`) and prints which MCP servers this project depends on. It cannot check
   OAuth state — that is per-session runtime — so **you** must: if a system notice says a server
   needs authentication, or an MCP call fails as unauthorized, **stop and tell Lance, and help him

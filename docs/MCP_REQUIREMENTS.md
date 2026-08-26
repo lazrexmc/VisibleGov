@@ -5,7 +5,7 @@
 below needs authentication, or a tool call fails as unauthorized, stop and say so, help the
 operator authorize it, and only then continue.
 
-`scripts/preflight-mcp.mjs` runs automatically at session start (SessionStart hook in
+`scripts/preflight.mjs` runs automatically at session start (SessionStart hook in
 `.claude/settings.json`) and prints what is installed. It **cannot** check authorization — OAuth
 state is per-session runtime, not on disk — so the behavioural half above is what actually holds.
 
@@ -52,6 +52,34 @@ credential — it is a dormant path with setup instructions.
 
 If it is ever enabled: read-only enforced by Postgres (`BEGIN TRANSACTION READ ONLY`), bypasses RLS
 entirely, and must never appear in `site/`, a Pages Function, or any write path.
+
+---
+
+## Tooling prerequisites (a plugin can be installed and completely inert)
+
+### `typescript-lsp` -> needs `typescript-language-server` on PATH
+
+Installed 2026-08-26. The plugin is **only wiring**: it declares a language server, it does not
+ship one. Without the binary the LSP answers nothing and reports no error — installed-but-inert
+looks identical to working right up until you rely on it. That is why `scripts/preflight.mjs` now
+checks binaries as well as plugins.
+
+```
+npm install -g typescript-language-server typescript
+```
+
+Live: typescript-language-server 6.0.0, typescript 7.0.2.
+
+Covers `.ts .tsx .js .jsx .mts .cts .mjs .cjs` — this project is 177 `.js` + 12 `.mjs` and **zero
+TypeScript**, so the `.js` coverage is the whole point. `jsconfig.json` at the repo root tells it
+to resolve modules the way Node does (`"type": "module"` with explicit `.js` extensions); without
+that the server reports phantom "cannot find module" errors on correct code. `checkJs` is off
+deliberately — the correctness bar here is the 2,700-test suite, not a type checker retrofitted
+onto 177 untyped files.
+
+**Note:** `pyright-lsp` is also installed and this repo contains **zero Python files**. It is
+carrying cost for nothing; removing it is a one-liner (`claude plugin uninstall pyright-lsp`) but
+was left alone pending Lance's word, since it may serve his other projects.
 
 ---
 

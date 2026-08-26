@@ -1,4 +1,11 @@
-// Preflight: are the MCP connections this project depends on installed and ready?
+// Preflight: are the session capabilities this project depends on installed and ready?
+//
+// Covers two kinds of silently-inert state:
+//   1. An MCP server that is not installed or not authorized.
+//   2. A plugin that IS installed but whose out-of-process binary is missing — the
+//      typescript-lsp plugin is only wiring; without `typescript-language-server` on PATH it
+//      reports no error, it simply never answers. Installed-but-inert looks identical to
+//      working right up until you rely on it.
 //
 // WHY THIS EXISTS. On 2026-08-26 a session opened with a system notice that
 // `plugin:supabase:supabase` required authentication. That notice was not surfaced to the operator.
@@ -15,10 +22,11 @@
 // installed and tell the operator exactly how to check and fix the rest.
 //
 // Run by the SessionStart hook in .claude/settings.json; also runnable by hand:
-//   node scripts/preflight-mcp.mjs
+//   node scripts/preflight.mjs
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 // What this project actually needs, and what breaks without it. Keep this list honest: an entry
 // here means work should STOP and ask, so a "nice to have" does not belong.
@@ -32,6 +40,19 @@ const REQUIRED = [
     verify: 'Ask Claude to run a trivial MCP query, or check /mcp in an interactive session.',
     fix: 'In an interactive Claude Code session run /mcp, select supabase, and authorize. '
       + 'The OAuth flow cannot run in a headless or background session.',
+  },
+];
+
+// Out-of-process binaries a plugin needs in order to do anything. A plugin can be installed and
+// still be completely inert without these, with no error anywhere to say so.
+const REQUIRED_TOOLING = [
+  {
+    bin: 'typescript-language-server',
+    args: ['--version'],
+    forPlugin: 'typescript-lsp',
+    why: 'Code intelligence over the 177 .js files here — find-references, go-to-definition. '
+      + 'The plugin declares the language server; npm provides it.',
+    fix: 'npm install -g typescript-language-server typescript',
   },
 ];
 
@@ -72,6 +93,31 @@ for (const req of REQUIRED) {
 
 console.log('MCP PREFLIGHT — connections this project depends on');
 console.log(lines.join('\n'));
+// ---- out-of-process tooling ----
+const toolLines = [];
+for (const t of REQUIRED_TOOLING) {
+  // One command string rather than (bin, args, {shell:true}): passing an args array THROUGH a shell
+  // is deprecated (DEP0190, args are concatenated unescaped), and a deprecation warning printed at
+  // every session start is how a preflight teaches people to stop reading it. shell:true is still
+  // needed on Windows, where these binaries are .cmd shims that spawn cannot exec directly.
+  const r = spawnSync([t.bin, ...t.args].join(' '), { encoding: 'utf8', shell: true });
+  const ok = r.status === 0;
+  if (ok) {
+    const version = String(r.stdout || '').trim().split(/\r?\n/)[0] || '(unknown version)';
+    toolLines.push(`  present  ${t.bin} v${version}  (for ${t.forPlugin})`);
+  } else {
+    missing += 1;
+    toolLines.push(`  MISSING  ${t.bin}  — ${t.forPlugin} is installed but INERT without it`);
+    toolLines.push(`           why it matters: ${t.why}`);
+    toolLines.push(`           fix: ${t.fix}`);
+  }
+}
+if (toolLines.length) {
+  console.log('');
+  console.log('TOOLING the installed plugins depend on');
+  console.log(toolLines.join('\n'));
+}
+
 console.log('');
 console.log('AUTHORIZATION IS NOT CHECKED HERE and cannot be: it is per-session runtime state.');
 console.log('Claude: if a system notice says one of the servers above needs authentication, or an');

@@ -1,0 +1,29 @@
+{
+  "//": [
+    "Configuration for the JavaScript language server ONLY (typescript-lsp plugin, and VS Code's",
+    "built-in JS intelligence). This project ships no TypeScript and does not compile: nothing here",
+    "affects runtime, tests, or the build. It exists so go-to-definition and find-references resolve",
+    "ESM imports correctly instead of guessing.",
+    "",
+    "package.json declares \"type\": \"module\" and every import carries an explicit .js extension",
+    "(Node ESM requires it), so the server must be told to resolve the same way Node does — the",
+    "default 'classic'/bundler resolution silently fails on './foo.js' style specifiers and produces",
+    "'cannot find module' noise on correct code.",
+    "",
+    "checkJs is deliberately OFF. Turning it on would flood 177 untyped JS files with implicit-any",
+    "and property-does-not-exist errors, and this project's correctness bar is its 2,700-test suite,",
+    "not a type checker retrofitted after the fact. Navigation is the goal here, not type enforcement."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "baseUrl": "."
+  },
+  "include": ["src/**/*.js", "scripts/**/*.js", "scripts/**/*.mjs", "tests/**/*.js", "site/js/**/*.js"],
+  "exclude": ["node_modules", ".superpowers", "site/vendor"]
+}
