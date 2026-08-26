@@ -1349,6 +1349,24 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-26) TOPIC TAGS on bills — idea, not a commitment.** Prompted by Lance finding
+  keepinglawsimple.org/states/missouri, which does plain-English Missouri bill summaries
+  (3,143 bills for 2026, sourced from MO House + Senate) and — unlike VisibleGov — appears to
+  carry **no vote data at all**: no legislator profiles, no roll calls. So it answers "what does
+  this bill do?" while VisibleGov answers that *and* "who voted for it, here is the receipt."
+  The vote layer is the hard part and is the differentiator, not the summary.
+  **NOT a data source:** no API, no download, no license stated — and ingesting someone else's
+  summaries would break the one non-negotiable, since another site's prose carries no receipt
+  traceable to official text.
+  **The idea worth taking, legitimately and independently:** they tag bills by topic (Education,
+  Healthcare, Taxes). VisibleGov does not. That unlocks a question the data can already answer but
+  the UI cannot ask — *"every education bill my representative voted on."* Derivable from bill text
+  we already hold, so no borrowing required. Would need: a tag vocabulary, a way to assign tags
+  that respects the trust model (facts-only, receipt-bearing — a tag is an editorial act unless it
+  is defensible from the text), and UI on both the bill and profile pages. Parked as an idea; the
+  trust-model question is the real design work, not the tagging.
+
+
 - **(2026-08-26) FULL SYSTEM AUDIT — `docs/audits/2026-08-26-system-audit.md`.** Run against the
   live DB, live site and repo on Lance's request. **Verdict: data and trust layers are sound; the
   defects are signal quality, a duplicate class, and coverage — not correctness of what is
