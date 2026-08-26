@@ -5907,3 +5907,32 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   senator while he serves in the US House. Blast radius measured rather than assumed: of 731
   open-ended terms only 2 also lack a start date and exactly 1 has zero votes — one wrong row, not
   a broken directory. Gameplan written into TODO in value order, nothing started.
+- **Lance: "Proceed correctiong #1, when complete restate the list" → audit gameplan item 1
+  (signal death, defect D2) is DONE and live-verified** (2026-08-26). Reading the code before
+  writing any corrected two of my own audit's claims. **First: the classifier already existed.**
+  `scripts/scheduled-ingest.js`'s `isExpectedTailProbeOutcome()` was written, commented and
+  unit-tested months ago and returned the right verdict — but it fed only the scheduler's in-memory
+  `healthy` flag (a log line and an optional healthcheck ping). The `ingestion_runs` row still said
+  `partial`, and `public_freshness` — what `npm run status` prints and what an operator actually
+  reads — renders that row. The gap was never classification; the verdict never reached the durable
+  record. **Second, found while implementing: the audit's plan was incomplete.** A probe window that
+  only looks PAST the known edge cannot distinguish "no new votes" from "the source moved" — if
+  clerk.house.gov changed its URL structure every roll would 404, and the absence/failure split I
+  was about to add would have closed that `succeeded` with confidence. Worse than before, not
+  better. **Shipped:** `isAbsentRecordError()` (`src/lib/errors.js`) calls a 404 and senate.gov's
+  HTTP-200 "Roll Call Vote Unavailable" stub an *answer*, while a 5xx, rate limit, network error,
+  body-read failure or parse error stays a failure; `recordMiss()` (`src/cli/ingest.js`) is the one
+  filing point both federal collectors share, writing `detail.absent` vs `detail.failures` with
+  `status` and `url` as their own fields (the old message alone rendered a 404 and a 500
+  identically, so 121 stored runs could not be re-read to tell which); only failures decide the
+  status word; and `computeRollWindow` now starts AT the last roll on file — a canary that must come
+  back — with `findRegressedAbsences()` forcing the tick unhealthy if it does not, even when the
+  child exits 0 and its row says `succeeded`. **Live-verified, not just tested:** `us-congress`
+  rolls 283-293 and `us-senate` votes 231-241 both closed **succeeded, failures 0, absent 10**,
+  exit 0, canaries returning 431 casts (House roll 283, 2026-07-23) and 100 (Senate vote 231);
+  `npm run status` INGESTION FRESHNESS flipped from `partial` to `succeeded` for both. Suite **2,645
+  pass / 0 fail** (was 2,630 — 15 new, including the load-bearing one: a break is caught DESPITE a
+  `succeeded` row). One contract change rippled into two existing tests (window lo is now maxKnown,
+  not maxKnown+1) — updated with the reason inline, not silently. PLAYBOOK lesson 51 records all
+  three mechanics, and the transferable one: audit a status field by its DISTRIBUTION — "121
+  partial, 0 anything else" is a defect signature on its own.

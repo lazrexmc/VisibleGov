@@ -1270,11 +1270,19 @@ session's own direct work, not assumed.**
   **Method warning worth keeping:** the audit's first trust-model pass reported 708 unverified
   summaries — false, caused by a `.limit(20000)` read PostgREST capped at 1,000. Paginated, the
   answer is 0. A count from a single unpaginated read is not evidence (PLAYBOOK lesson 20).
-  **Gameplan, in order (none started):** (1) fix signal death on always-partial sources — classify
-  an expected miss (404 on the NEXT roll call = "no more votes yet", close `succeeded`) apart from
-  a real failure (5xx, timeout, changed URL shape, 404 on a roll call already held), and stop
-  collapsing every message to `HTTP N`; until then a real outage is indistinguishable from a quiet
-  week. (2) the same-source dedup (see the 08-24 entry) — one job, two payoffs. (3) Bob Onder's
+  **Gameplan, in order — item 1 DONE 2026-08-26, items 2-7 open:** ~~(1) fix signal death on
+  always-partial sources~~ **DONE, live-verified.** Both stated changes shipped, and the plan was
+  wrong about one thing and short by another. Wrong: the classifier ALREADY existed —
+  `isExpectedTailProbeOutcome()` had been correct for months but fed only the scheduler's in-memory
+  `healthy` flag, never the `ingestion_runs` row that `public_freshness` and `npm run status` show.
+  Short by: a window that only probes PAST the known edge cannot tell "nothing new" from "the source
+  moved" — if the Clerk changed its URL structure every probe would 404, and the new absent/failure
+  split would have closed that `succeeded` with confidence. So `computeRollWindow` now starts AT the
+  last roll already on file (a canary that must come back) and `findRegressedAbsences()` forces the
+  tick unhealthy if it does not. Live: both federal sources ran and closed **succeeded / failures 0
+  / absent 10**, canaries returning 431 and 100 casts; `npm run status` reads `us-congress
+  succeeded` / `us-senate succeeded` where it read `partial` an hour before. Suite 2,645/0 (15 new
+  tests). PLAYBOOK lesson 51. (2) the same-source dedup (see the 08-24 entry) — one job, two payoffs. (3) Bob Onder's
   phantom MO Senate term row (no start_date, no end_date, 0 votes) renders him as a currently
   serving MO senator though he now serves in the US House — fix via a `correct-data` correction
   with a written reason, then guard: no start_date AND no votes must never read as "serving now"

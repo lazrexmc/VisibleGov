@@ -10,7 +10,7 @@ import {
   parseArgs, isLockStale, acquireLock, releaseLock, updateLockMaxDuration,
   computeSourceDueness, pickMostOverdue,
   parseUsHouseRoll, parseUsSenateVote, computeRollWindow,
-  isExpectedTailProbeOutcome,
+  isExpectedTailProbeOutcome, findRegressedAbsences,
   moSenateWroteSomething, usCongressWroteSomething, usSenateWroteSomething, moHouseWroteSomething,
   legiscanWroteSomething, defaultWroteSomething,
   parseChildOutput,
@@ -378,8 +378,13 @@ test('parseUsSenateVote returns null for a us-house key or anything else', () =>
   assert.equal(parseUsSenateVote(null), null);
 });
 
-test('computeRollWindow: starts one past the max known roll, spans windowSize', () => {
-  assert.deepEqual(computeRollWindow(350, 10), { lo: 351, hi: 360 });
+// Contract CHANGED 2026-08-26 (audit defect D2): the window used to start one PAST the max known
+// roll. It now starts AT it, re-probing one roll call already on file as a canary. Without that,
+// a window that only ever looked past the edge would 404 on every roll if the Clerk changed its
+// URL structure - byte-identical, at the ingest layer, to a recess. The canary is the one probe
+// whose 404 is unambiguously a regression (findRegressedAbsences).
+test('computeRollWindow: starts AT the max known roll (canary re-probe), spans windowSize past it', () => {
+  assert.deepEqual(computeRollWindow(350, 10), { lo: 350, hi: 360 });
 });
 
 test('computeRollWindow: zero/no prior rolls on file starts the window at roll 1', () => {
@@ -405,6 +410,34 @@ test('isExpectedTailProbeOutcome: false when a failure is NOT a roll/vote step (
 test('isExpectedTailProbeOutcome: false when a roll/vote failure is AT OR BELOW the previously-known edge', () => {
   assert.equal(isExpectedTailProbeOutcome('us-congress', [{ step: 'roll 283' }], 283), false);
   assert.equal(isExpectedTailProbeOutcome('us-congress', [{ step: 'roll 200' }], 283), false);
+});
+
+// ---- findRegressedAbsences (2026-08-26, audit defect D2) ----
+
+test('findRegressedAbsences: an absence AT the known edge is the canary failing — a regression', () => {
+  const hits = findRegressedAbsences('us-congress', [{ step: 'roll 283', status: 404 }], 283);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].step, 'roll 283');
+});
+
+test('findRegressedAbsences: absences strictly PAST the edge are routine — nothing new published', () => {
+  const absent = [{ step: 'roll 284' }, { step: 'roll 285' }, { step: 'roll 290' }];
+  assert.deepEqual(findRegressedAbsences('us-congress', absent, 283), []);
+  assert.deepEqual(findRegressedAbsences('us-senate', [{ step: 'vote 661' }], 660), []);
+});
+
+test('findRegressedAbsences: catches the URL-structure change — canary AND tail all absent', () => {
+  // The failure mode the canary exists for: every probe 404s. Without the canary in the window
+  // this is indistinguishable from a recess; with it, exactly one hit is enough to force unhealthy.
+  const absent = [{ step: 'roll 283' }, { step: 'roll 284' }, { step: 'roll 285' }];
+  assert.equal(findRegressedAbsences('us-congress', absent, 283).length, 1);
+});
+
+test('findRegressedAbsences: empty for a non-windowed source, an unknown edge, or no absences', () => {
+  assert.deepEqual(findRegressedAbsences('mo-senate-web', [{ step: 'roll 1' }], 283), []);
+  assert.deepEqual(findRegressedAbsences('us-congress', [{ step: 'roll 1' }], undefined), []);
+  assert.deepEqual(findRegressedAbsences('us-congress', [], 283), []);
+  assert.deepEqual(findRegressedAbsences('us-congress', undefined, 283), []);
 });
 
 test('isExpectedTailProbeOutcome: false for a non-windowed source, or when there are no failures to explain away', () => {
@@ -707,7 +740,8 @@ test('resolveUsCongressRollWindow computes {lo,hi,maxKnown} from the max roll nu
     },
   });
   const window = await resolveUsCongressRollWindow(client, { congress: 119, year: 2026, windowSize: 10 });
-  assert.deepEqual(window, { lo: 356, hi: 365, maxKnown: 355 });
+  // lo === maxKnown, not maxKnown + 1: the canary re-probe (see computeRollWindow, D2 2026-08-26).
+  assert.deepEqual(window, { lo: 355, hi: 365, maxKnown: 355 });
 });
 
 test('resolveUsCongressRollWindow starts at roll 1 when nothing is on file yet for this congress/year', async () => {
@@ -728,7 +762,8 @@ test('resolveUsSenateVoteWindow (I5) computes {lo,hi,maxKnown} from the max vote
     },
   });
   const window = await resolveUsSenateVoteWindow(client, { congress: 119, session: 2, windowSize: 10 });
-  assert.deepEqual(window, { lo: 662, hi: 671, maxKnown: 661 });
+  // lo === maxKnown, not maxKnown + 1: the canary re-probe (see computeRollWindow, D2 2026-08-26).
+  assert.deepEqual(window, { lo: 661, hi: 671, maxKnown: 661 });
 });
 
 test('resolveUsSenateVoteWindow defaults to US_CONGRESS_CONGRESS/US_SENATE_SESSION/US_SENATE_VOTE_WINDOW', async () => {
@@ -1411,6 +1446,84 @@ test('runChosenSource: a NORMAL successful child (which writes its own row) is N
   assert.equal(result.outcome.status, 'succeeded');
   assert.equal(result.outcome.healthy, true);
   assert.equal(result.outcome.wroteRows, true);
+});
+
+// ---- D2 (2026-08-26 audit): the post-fix shape — absences, not failures ----
+//
+// After the fix a recess tick closes `succeeded` with detail.absent populated, so the old
+// tailProbeOnly path (which requires status === 'partial') never fires for it. These two tests
+// cover what replaced it, and they are the pair that matters: the first says a quiet week is
+// healthy, the second says a BREAK is caught even though the child exited 0 and wrote `succeeded`.
+
+test('D2: a recess tick — succeeded, every absence past the canary — is healthy and says so', async () => {
+  const chosen = {
+    key: 'us-congress',
+    minIntervalMs: 60 * 60 * 1000,
+    lastStartedAtIso: '2026-07-31T10:00:00.000Z',
+    resolvable: true,
+    scriptPath: 'src/cli/ingest.js',
+    cliArgs: ['--source', 'us-congress', '--year', '2026', '--rolls', '283-293'],
+    windowMaxKnown: 283,
+    wroteSomething: usCongressWroteSomething,
+  };
+  const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
+
+  // roll 283 is the canary and came back fine (it is not in `absent`); 284-293 do not exist yet.
+  const absent = Array.from({ length: 10 }, (_, i) => ({
+    step: `roll ${284 + i}`, message: `HTTP 404 from us-congress: .../roll${284 + i}.xml`, status: 404, url: `https://clerk.house.gov/evs/2026/roll${284 + i}.xml`,
+  }));
+  const inserted = await client.from('ingestion_runs').insert({ source: 'us-congress', status: 'running' }).select('id').single();
+  await client.from('ingestion_runs').update({
+    status: 'succeeded', detail: { counts: { votes: 0, casts: 0, failures: 0, absent: 10 }, failures: [], absent },
+  }).eq('id', inserted.data.id);
+
+  const spawnFn = () => ({ status: 0, stdout: JSON.stringify({ mode: 'live', status: 'succeeded' }), stderr: '' });
+  const result = await runChosenSource(client, chosen, {
+    runChildCliFn: (scriptPath, cliArgs) => runChildCli(scriptPath, cliArgs, { spawnFn }),
+  });
+
+  assert.equal(result.outcome.status, 'succeeded', 'a healthy recess must no longer be reported as `partial`');
+  assert.equal(result.outcome.healthy, true);
+  assert.equal(result.outcome.absentCount, 10);
+  assert.deepEqual(result.outcome.regressedAbsences, []);
+  assert.match(result.outcome.note, /canary OK/);
+});
+
+test('D2 LOAD-BEARING: the canary going absent forces UNHEALTHY even though the run closed `succeeded`', async () => {
+  // The exact failure this whole fix exists for: clerk.house.gov changes its URL structure, so
+  // every probe 404s. ingest.js correctly files all of them as absences (the source did answer)
+  // and closes `succeeded` with zero failures — so status alone would call this a quiet week.
+  // Only the canary, roll 283, which we ALREADY HOLD, distinguishes them.
+  const chosen = {
+    key: 'us-congress',
+    minIntervalMs: 60 * 60 * 1000,
+    lastStartedAtIso: '2026-07-31T10:00:00.000Z',
+    resolvable: true,
+    scriptPath: 'src/cli/ingest.js',
+    cliArgs: ['--source', 'us-congress', '--year', '2026', '--rolls', '283-293'],
+    windowMaxKnown: 283,
+    wroteSomething: usCongressWroteSomething,
+  };
+  const client = fakeIngestionRunsClient({ started_at: chosen.lastStartedAtIso, status: 'succeeded', detail: {} });
+
+  const absent = Array.from({ length: 11 }, (_, i) => ({
+    step: `roll ${283 + i}`, message: `HTTP 404 from us-congress: .../roll${283 + i}.xml`, status: 404, url: `https://clerk.house.gov/evs/2026/roll${283 + i}.xml`,
+  }));
+  const inserted = await client.from('ingestion_runs').insert({ source: 'us-congress', status: 'running' }).select('id').single();
+  await client.from('ingestion_runs').update({
+    status: 'succeeded', detail: { counts: { votes: 0, casts: 0, failures: 0, absent: 11 }, failures: [], absent },
+  }).eq('id', inserted.data.id);
+
+  const spawnFn = () => ({ status: 0, stdout: JSON.stringify({ mode: 'live', status: 'succeeded' }), stderr: '' });
+  const result = await runChosenSource(client, chosen, {
+    runChildCliFn: (scriptPath, cliArgs) => runChildCli(scriptPath, cliArgs, { spawnFn }),
+  });
+
+  assert.equal(result.outcome.status, 'succeeded', 'the child really did close succeeded — that is the point');
+  assert.equal(result.outcome.healthy, false, 'a record we already hold vanishing from the source is never healthy');
+  assert.deepEqual(result.outcome.regressedAbsences, ['roll 283']);
+  assert.match(result.outcome.note, /REGRESSION/);
+  assert.match(result.outcome.note, /NOT a quiet week/);
 });
 
 test('runChosenSource: a windowed source whose ONLY failures are expected tail 404s reads as healthy (I4a), and wroteRows reflects the real counts (I4b) independently', async () => {

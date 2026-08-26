@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { getClient, openRun, closeRun, insertIfAbsent, isMissingRelationError } from '../lib/db.js';
-import { SourceFetchError } from '../lib/errors.js';
+import { SourceFetchError, isAbsentRecordError } from '../lib/errors.js';
 import * as us from '../adapters/us-congress.js';
 import * as mo from '../adapters/mo-legislature.js';
 import * as senate from '../adapters/us-senate.js';
@@ -39,10 +39,33 @@ export function parseArgs(argv) {
   return out;
 }
 
+// recordMiss - the ONE place a per-record SourceFetchError is filed, so us-congress and us-senate
+// cannot drift into two different verdicts on the same error (2026-08-26 audit, defect D2).
+//
+// Two changes from the old `failures.push({step, message})`:
+//   1. An ABSENT record (a 404, or senate.gov's not-yet-published stub) goes to its own list. It is
+//      the source answering "no such vote", which is exactly what a probe window past the last real
+//      roll call is SUPPOSED to get - counting it as a failure is what made us-congress close 121
+//      of 121 runs `partial` through a recess and buried any real break in the same word.
+//   2. `status` and `url` are recorded as their own fields. The message alone renders a 404 and a
+//      500 identically (`HTTP ${status} from ${source}: ${url}`), so a run row could not be re-read
+//      later to tell which had happened. The message is kept as well - it is what an operator reads.
+//
+// A miss is only *expected* at the tail of a probe window. A 404 on a record we already hold is a
+// regression (the Clerk changing URL structure looks exactly like this), and catching that is the
+// caller's job - see scheduled-ingest.js's findRegressedAbsences - because only the caller knows
+// where the edge is.
+export function recordMiss(err, step, { failures, absent }) {
+  const entry = { step, message: err.message, status: err.status ?? null, url: err.url ?? null };
+  if (isAbsentRecordError(err)) absent.push(entry);
+  else failures.push(entry);
+}
+
 // ---- collection (pure of DB: returns canonical rows + failures, never swallows into []) ----
 
 export async function collectUsCongress({ rolls, year }) {
   const failures = [];
+  const absent = [];
   const memberJson = await us.fetchMemberList('MO'); // throws on failure: fatal, nothing to reconcile
   const legislators = us.parseMemberList(memberJson);
   const bills = new Map();
@@ -66,10 +89,10 @@ export async function collectUsCongress({ rolls, year }) {
       votes.push({ vote, casts });
     } catch (err) {
       if (!(err instanceof SourceFetchError)) throw err;
-      failures.push({ step: `roll ${roll}`, message: err.message }); // skip != empty: recorded, not silent
+      recordMiss(err, `roll ${roll}`, { failures, absent }); // skip != empty: recorded, and recorded as WHICH kind
     }
   }
-  return { legislators, bills: [...bills.values()], votes, failures, notes: [], sessionIdentifier: '119' };
+  return { legislators, bills: [...bills.values()], votes, failures, absent, notes: [], sessionIdentifier: '119' };
 }
 
 export async function collectMoLegislature({ session, pages }) {
@@ -113,7 +136,7 @@ export async function collectMoLegislature({ session, pages }) {
   // casts arrays. `votes` above legitimately has entries with casts: [] — that is not a failure.
   return {
     legislators: [{ openstates_id: person.openstates_id, full_name: person.full_name, party: person.party, roles }],
-    bills, votes, failures, notes,
+    bills, votes, failures, absent: [], notes,
     sessionIdentifier: session, sessionMeta: sessions.find((s) => s.identifier === session) ?? null,
   };
 }
@@ -125,6 +148,7 @@ export async function collectMoLegislature({ session, pages }) {
 // `issue` context (needed for finalizeSenateVote's nomination/treaty question composition) only
 // lives in the menu, not in the individual roll-call XML.
 export async function collectUsSenate({ session, votes, dryRun }) {
+  const absent = [];
   const congress = 119; // mirrors collectUsCongress's hardcoded 119th-Congress assumption
   const failures = [];
   const menuXml = await senate.fetchSenateVoteMenu(congress, session); // fatal: nothing to reconcile without it
@@ -143,7 +167,7 @@ export async function collectUsSenate({ session, votes, dryRun }) {
       parsed = senate.parseSenateRollCall(xmlText);
     } catch (err) {
       if (!(err instanceof SourceFetchError)) throw err;
-      failures.push({ step: `vote ${num}`, message: err.message }); // skip != empty
+      recordMiss(err, `vote ${num}`, { failures, absent }); // skip != empty: recorded, and recorded as WHICH kind
       continue;
     }
     const menuEntry = menuByNumber.get(num) ?? null;
@@ -162,7 +186,7 @@ export async function collectUsSenate({ session, votes, dryRun }) {
     }
     voteRows.push({ vote: finalVote, casts: parsed.casts });
   }
-  return { bills: [...bills.values()], votes: voteRows, failures, notes: [], sessionIdentifier: '119' };
+  return { bills: [...bills.values()], votes: voteRows, failures, absent, notes: [], sessionIdentifier: '119' };
 }
 
 // ---- persistence ----
@@ -481,7 +505,7 @@ async function runUsSenate(args) {
     const counts = {
       votes: data.votes.length, bills: data.bills.length, casts: stats.casts,
       resolved: stats.resolved, unresolved: stats.unresolved, senators_in_db: senators.length,
-      failures: data.failures.length,
+      failures: data.failures.length, absent: data.absent.length,
     };
     const sample = {
       vote: data.votes[0]?.vote ?? null,
@@ -492,7 +516,7 @@ async function runUsSenate(args) {
       note,
       'ensureSenateMembers and bill-detail fetch are LIVE-ONLY and were NOT run this pass (dry-run makes senate.gov requests only, per Task 2 hard constraint)',
     ].filter(Boolean);
-    console.log(JSON.stringify({ mode: 'dry-run', source: 'us-senate', counts, sample, notes, failures: data.failures }, null, 2));
+    console.log(JSON.stringify({ mode: 'dry-run', source: 'us-senate', counts, sample, notes, failures: data.failures, absent: data.absent }, null, 2));
     if (data.failures.length > 0) process.exitCode = 2;
     return;
   }
@@ -513,9 +537,15 @@ async function runUsSenate(args) {
       votes: data.votes.length, bills: data.bills.length, senate_members_ensured: ensured.count,
       senate_members_filtered_historical: ensured.filteredHistorical,
       casts: resolved + unresolved.length, resolved, unresolved: unresolved.length, failures: totalFailures,
+      // absent != failures (D2): vote numbers senate.gov affirmatively has no roll call for. The
+      // probe window is designed to overshoot the last real vote, so a healthy recess tick reports
+      // absent > 0, failures 0, status succeeded - and a real break can finally be seen.
+      absent: data.absent.length,
     };
     const status = totalFailures === 0 ? 'succeeded' : 'partial';
-    await closeRun(client, runId, status, { counts, unresolved, failures: [...data.failures, ...ensured.failures] });
+    await closeRun(client, runId, status, {
+      counts, unresolved, failures: [...data.failures, ...ensured.failures], absent: data.absent,
+    });
     console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts }, null, 2));
     if (totalFailures > 0) process.exitCode = 2;
   } catch (err) {
@@ -540,6 +570,8 @@ async function main() {
     votes: data.votes.length,
     casts: data.votes.reduce((n, v) => n + v.casts.length, 0),
     failures: data.failures.length,
+    // absent != failures (D2) - see recordMiss. A recess tick is absent > 0 / failures 0 / succeeded.
+    absent: data.absent.length,
   };
   const sample = {
     legislator: data.legislators[0] ?? null,
@@ -551,14 +583,16 @@ async function main() {
   // the flag, a missing/incomplete Supabase client still falls back to dry-run automatically.
   const client = args.dryRun ? null : getClient();
   if (!client) {
-    console.log(JSON.stringify({ mode: 'dry-run', source: args.source, counts, sample, notes: data.notes, failures: data.failures }, null, 2));
+    console.log(JSON.stringify({ mode: 'dry-run', source: args.source, counts, sample, notes: data.notes, failures: data.failures, absent: data.absent }, null, 2));
   } else {
     const runId = await openRun(client, args.source);
     try {
       if (args.source === 'us-congress') await persistUsCongress(client, runId, data);
       else await persistMoLegislature(client, runId, data);
       const status = data.failures.length === 0 ? 'succeeded' : 'partial';
-      await closeRun(client, runId, status, { counts, notes: data.notes, failures: data.failures });
+      await closeRun(client, runId, status, {
+        counts, notes: data.notes, failures: data.failures, absent: data.absent,
+      });
       console.log(JSON.stringify({ mode: 'live', run_id: runId, status, counts, failures: data.failures }, null, 2));
     } catch (err) {
       await closeRun(client, runId, 'failed', { counts, error: String(err) });

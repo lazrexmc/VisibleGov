@@ -62,14 +62,43 @@ pair, and raises `ambiguous_tally_match`. All 4 open flags of that reason have t
 Migration 0022's dedup is structurally blind to it — it pairs LegiScan against a *primary* source,
 and both rows here are the same source.
 
-### D2 — Signal death on always-partial sources — **a real break would be invisible**
+### D2 — Signal death on always-partial sources — **FIXED 2026-08-26, live-verified**
 `us-congress` 121/121 runs `partial`, `us-senate` 121/121, `scheduled-summaries` 6/6. Every
 us-congress failure across 121 runs collapses to a single message shape, `HTTP N from us-congress:
 .../rollN.xml` — the template renders 404 and 500 identically. The sources are healthy today
 (verified above), but the status word and the message both carry zero information, so an actual
 outage — the Clerk changing URL structure, sustained 500s, an auth change — would look exactly
-like a quiet week. This is the most dangerous finding in the audit: not a defect now, but a
+like a quiet week. This was the most dangerous finding in the audit: not a defect now, but a
 guarantee that the next real defect goes unnoticed.
+
+**Fixed the same day** (gameplan item 1 below; PLAYBOOK lesson 51). Three things, and the audit's
+own stated plan was wrong about the first and incomplete about the third:
+
+1. **The classifier already existed.** `scripts/scheduled-ingest.js`'s `isExpectedTailProbeOutcome()`
+   was written, commented, and unit-tested months ago, and returned the right verdict. It fed only
+   the scheduler's in-memory `healthy` flag — a log line and an optional healthcheck ping. The
+   `ingestion_runs` row still said `partial`, and `public_freshness` (what `npm run status` prints)
+   renders that row. The gap was never classification; it was that the verdict never reached the
+   durable record.
+2. **Absence is now separated from failure at the ingest layer.** `isAbsentRecordError()`
+   (`src/lib/errors.js`) calls a 404, and senate.gov's HTTP-200 "Roll Call Vote Unavailable" stub,
+   an *answer*; a 5xx, a rate limit, a network error, a body-read failure or a parse error remains
+   a failure. `recordMiss()` (`src/cli/ingest.js`) files them into `detail.absent` vs
+   `detail.failures`, each entry now carrying `status` and `url` as their own fields so a 404 and a
+   500 are distinguishable from a stored row alone. Only failures decide the status word.
+3. **The window now probes a canary.** This hole was found while implementing, not during the
+   audit: a forward-only window would 404 on *every* roll if the Clerk changed its URL structure —
+   indistinguishable from a recess, and after change 2 it would have closed `succeeded` with
+   confidence. `computeRollWindow` now starts AT the last roll already on file rather than one past
+   it, and `findRegressedAbsences()` forces the tick unhealthy if that record comes back absent.
+   One extra request per tick; re-ingest is idempotent.
+
+Live verification, 2026-08-26: `us-congress` and `us-senate` both ran with the new window and
+closed **`succeeded`, failures 0, absent 10**, exit 0 — the canary returning 431 casts (House roll
+283, 2026-07-23) and 100 casts (Senate vote 231). `npm run status` INGESTION FRESHNESS now reads
+`us-congress succeeded` / `us-senate succeeded` where it read `partial` an hour earlier. Suite
+2,645 pass / 0 fail (15 new tests, incl. one asserting a break is caught *despite* a `succeeded`
+row).
 
 ### D3 — 382 reconciliation flags will not self-drain — **expectation corrected**
 Documented until 2026-08-26 as something the next LegiScan tick would clear in bulk. Measured: the
@@ -118,14 +147,11 @@ feedback loop the project currently lacks).
 
 Ordered by value per unit of effort. Nothing here is started; each is a discrete piece of work.
 
-**1. Fix D2 (signal death) — smallest effort, highest protective value.**
-Make "partial" mean something. Two changes: (a) classify an expected miss separately from a real
-failure — a 404 on the *next* roll-call number is the source saying "no more votes yet" and should
-close the run `succeeded` with a counter, while a 5xx, a timeout, a changed URL shape, or a 404 on
-a roll call we already hold is a genuine failure; (b) make the failure message carry the status
-code and URL distinctly instead of collapsing to `HTTP N`. Until this lands, no one can tell a
-healthy recess from a broken adapter. *Touches `src/adapters/us-congress.js`, `us-senate.js`, and
-their CLIs; TDD against the real fixtures.*
+**1. ~~Fix D2 (signal death)~~ — DONE 2026-08-26, live-verified.**
+Both stated changes shipped, plus a third the plan had missed. See D2 above for what was actually
+found (the classifier already existed and simply never reached the run row) and the canary the
+forward-only probe window needed. *Touched `src/lib/errors.js`, `src/cli/ingest.js`,
+`scripts/scheduled-ingest.js`; `tests/absent-vs-failure.test.js` is new.*
 
 **2. Fix D1 (duplicates) — one job, two payoffs.**
 Extend dedup to same-source pairs sharing bill + chamber + date + tally **and** identical cast

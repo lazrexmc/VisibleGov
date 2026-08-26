@@ -73,6 +73,7 @@ with offset/limit or jump by grep.
 | 48 | 08-23 | A grammar verified on two fixtures is a hypothesis; ground-truth EVERY quarantined instance |
 | 49 | 08-23 | "Needs human review" is honest only if a human could resolve it; a bill-less roll call is a typed record |
 | 50 | 08-23 | A never-exercised fallback is a hope; "not derivable" is true only of the derivation tried |
+| 51 | 08-26 | A status word that is always the same value carries zero bits; probe one record you already hold |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 — lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1137,3 +1138,45 @@ hardened the rule). Before accepting that a gap is
 permanent, enumerate the derivations the source's own printed data allows and measure each over
 the whole corpus — and spot-check the per-item endpoint before concluding a bulk-export sentinel
 is the source's final word (here it was, but that is a query, not an assumption).
+
+## Lesson 51 — A status word that never varies carries zero bits, and a classifier that only reaches a log line is not wired (2026-08-26)
+
+`us-congress` closed 121 of 121 scheduled runs `partial`. `us-senate`, 121 of 121. Both sources
+were perfectly healthy the entire time: the probe window is DESIGNED to overshoot the last real
+roll call, so every tick 404s on the numbers past the edge, and every one of those 404s was being
+recorded as a *failure*. The run status was therefore a constant. A constant cannot signal.
+
+Three separate mechanics came out of fixing it, and the first two are the transferable ones.
+
+**1. Distinguish "the source answered, and its answer is no such record" from "we got no answer."**
+They arrive as the same exception type through the same catch, which is exactly why they got filed
+together. A 404 (or senate.gov's HTTP-200 "Roll Call Vote Unavailable" stub) is a source that is up,
+reachable, and telling you something true. A 500, a timeout, a rate limit, a body-read failure, a
+parse error is a source you could not read. Only the second kind should degrade a run. Once split,
+a recess tick closes `succeeded` with `absent: 10` and the word means something again.
+
+**2. A classification that does not reach the durable record has not been wired.** This is the part
+that would have been easy to miss and is the reason to check before building: the classifier
+ALREADY EXISTED. `isExpectedTailProbeOutcome()` was written, commented, and unit-tested months
+earlier, and it correctly returned "this partial is just tail probing." But its verdict fed only the
+scheduler's own in-memory `healthy` flag — one log line and an optional healthcheck ping. The
+`ingestion_runs` row still said `partial`, and `public_freshness`, which is what `npm run status`
+prints and what an operator actually reads, renders that row. **Before writing a classifier, grep
+for one; then follow its return value all the way to the surface a human reads.** Half this fix was
+deleting the assumption that it was missing.
+
+**3. A window that only probes PAST the known edge cannot tell "nothing new" from "the source
+moved."** This was the hole in the audit's own stated plan, found while implementing it. If
+clerk.house.gov changed its URL structure, every roll in a forward-only window would 404 — byte-
+identical, at the ingest layer, to a quiet week, and now *worse* than before, because the
+absent-vs-failure split would confidently close it `succeeded`. The fix is one extra request:
+start the window AT the last roll already on file instead of one past it. That record must come
+back. An absence at or below the known edge is never routine — it is the shape a retired endpoint,
+a changed path, or an auth change makes — and it forces the tick unhealthy even though the child
+exited 0 and its own run row says `succeeded`. **Every liveness probe needs one input whose correct
+answer you already know.** A test suite full of "does not exist" assertions passes just as happily
+against a server that has ceased to exist.
+
+Generalization worth carrying: audit a status field by its **distribution**, not by reading one
+row. `select status, count(*) group by status` over a source's history is a two-second query, and
+"121 partial, 0 anything else" is a defect signature on its own, independent of what the rows say.

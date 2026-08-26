@@ -373,7 +373,14 @@ export function parseUsSenateVote(sourceKey) {
 
 export function computeRollWindow(maxKnownRoll, windowSize = US_CONGRESS_ROLL_WINDOW) {
   const base = Number.isFinite(maxKnownRoll) && maxKnownRoll > 0 ? maxKnownRoll : 0;
-  return { lo: base + 1, hi: base + windowSize };
+  // lo starts AT the last known roll, not one past it (2026-08-26 audit, defect D2). Re-probing one
+  // roll call we already hold is a CANARY, and it is what separates "no new votes yet" from "the
+  // source moved out from under us": if clerk.house.gov changed its URL structure, every roll in a
+  // window that only looked PAST the edge would 404, which at the ingest layer is indistinguishable
+  // from a recess. The canary must come back 200. Every roll past the edge 404ing is routine; the
+  // canary 404ing is a regression (findRegressedAbsences). Re-ingesting a roll already on file is
+  // idempotent - insertIfAbsent all the way down - so this costs exactly one extra request a tick.
+  return { lo: Math.max(1, base), hi: base + windowSize };
 }
 
 // isExpectedTailProbeOutcome (I4a, fix round 1): the probe window is DESIGNED to overshoot — most
@@ -396,6 +403,26 @@ export function isExpectedTailProbeOutcome(sourceKey, failures, windowMaxKnown) 
   return failures.every((f) => {
     const m = re.exec(f?.step ?? '');
     return m !== null && Number(m[1]) > windowMaxKnown;
+  });
+}
+
+// findRegressedAbsences - the other half of D2's fix, and the reason computeRollWindow now probes
+// the canary. ingest.js can tell "the source answered, and says this record does not exist" from
+// "we could not get an answer" (isAbsentRecordError), and files the first kind under detail.absent
+// instead of detail.failures - which is why a recess tick now closes `succeeded` rather than
+// `partial`. What ingest.js CANNOT tell is an expected absence from an alarming one, because only
+// the scheduler knows where the real edge is.
+//
+// That judgement is here: an absence at or below windowMaxKnown means a roll call we already hold
+// has vanished from the source. That is never routine - it is the shape a URL-structure change, a
+// silently retired endpoint, or an auth change makes - so it forces the tick unhealthy even though
+// the child process exited 0 and its run row says `succeeded`.
+export function findRegressedAbsences(sourceKey, absent, windowMaxKnown) {
+  const re = TAIL_FAILURE_STEP_RE[sourceKey];
+  if (!re || windowMaxKnown === undefined || windowMaxKnown === null) return [];
+  return (absent ?? []).filter((a) => {
+    const m = re.exec(a?.step ?? '');
+    return m !== null && Number(m[1]) <= windowMaxKnown;
   });
 }
 
@@ -924,6 +951,10 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
   const detail = selfRecordedFailure ? {} : (latestRun?.detail ?? {});
   const status = selfRecordedFailure ? 'failed' : (latestRun?.status ?? null);
   const failures = detail.failures ?? [];
+  // detail.absent: records the source affirmatively says do not exist (ingest.js recordMiss). These
+  // are NOT failures and no longer degrade the run's status - but an absence at or below the known
+  // edge is a regression, so they are still read, just judged differently. See findRegressedAbsences.
+  const absent = detail.absent ?? [];
   // Round 3, NEW-1 fix: chosen.wroteSomething is THIS source's own registry-declared predicate
   // (buildRegistry) — never a generic key-dispatched function guessing at a shape it was never
   // checked against. defaultWroteSomething is the fail-open fallback for the (should-never-happen)
@@ -931,12 +962,28 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
   const wroteRows = !selfRecordedFailure && (chosen.wroteSomething ?? defaultWroteSomething)(detail, status);
   const tailProbeOnly = !selfRecordedFailure && status === 'partial'
     && isExpectedTailProbeOutcome(chosen.key, failures, chosen.windowMaxKnown);
-  const healthy = !selfRecordedFailure && !killedByScheduler && (status === 'succeeded' || tailProbeOnly);
+  // Kept alongside the newer absent-list path on purpose: isExpectedTailProbeOutcome still governs
+  // run rows written BEFORE this fix, and any manual `--rolls` invocation whose misses land in
+  // failures for a reason other than a 404.
+  const regressedAbsences = selfRecordedFailure
+    ? [] : findRegressedAbsences(chosen.key, absent, chosen.windowMaxKnown);
+  const healthy = !selfRecordedFailure && !killedByScheduler && regressedAbsences.length === 0
+    && (status === 'succeeded' || tailProbeOnly);
 
   let note = null;
   if (killedByScheduler) {
     note = `scheduler killed this run (${launchError.code}) after its ${formatCooldownWait(launchError.timeoutMs ?? chosen.timeoutMs)} timeout — `
       + `${killClosedRunIds.length} orphaned 'running' row(s) closed honestly`;
+  } else if (regressedAbsences.length > 0) {
+    const unit = chosen.key === 'us-congress' ? 'roll' : 'vote';
+    note = `REGRESSION: ${regressedAbsences.length} ${unit}(s) at or below the known edge `
+      + `(${unit} ${chosen.windowMaxKnown}) came back absent — ${regressedAbsences.map((a) => a.step).join(', ')}. `
+      + 'Records already on file have vanished from the source; suspect a changed URL structure, a '
+      + 'retired endpoint, or an auth change, NOT a quiet week.';
+  } else if (absent.length > 0 && status === 'succeeded') {
+    const unit = chosen.key === 'us-congress' ? 'roll' : 'vote';
+    note = `${absent.length} ${unit}(s) past ${unit} ${chosen.windowMaxKnown} absent, canary OK — `
+      + 'nothing new published yet. Healthy.';
   } else if (tailProbeOnly) {
     note = `${failures.length} tail 404(s) past ${chosen.key === 'us-congress' ? 'roll' : 'vote'} ${chosen.windowMaxKnown} — expected from the probe window, not a failure`;
   }
@@ -950,7 +997,8 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
     killClosedRunIds,
     launchError: launchError ? launchError.message : null,
     outcome: {
-      status, healthy, wroteRows, tailProbeOnly, note,
+      status, healthy, wroteRows, tailProbeOnly, absentCount: absent.length,
+      regressedAbsences: regressedAbsences.map((a) => a.step), note,
     },
   };
 }

@@ -15,6 +15,29 @@ export class RateLimitedError extends SourceFetchError {
   }
 }
 
+// isAbsentRecordError - 2026-08-26 system audit, defect D2 ("signal death on always-partial
+// sources"). The distinction that was missing everywhere: "the source answered, and its answer is
+// that this record does not exist" is NOT "we failed to get an answer". Both arrive as a
+// SourceFetchError through the same per-record catch, so until this existed both were recorded as
+// `failures` - which is why us-congress closed 121 of 121 runs `partial` through a recess, and why
+// a genuine outage would have looked exactly like a quiet week.
+//
+// ABSENT (a real, informative negative answer - the source is healthy and told us something):
+//   - HTTP 404: clerk.house.gov affirmatively has no such roll call.
+//   - RollCallNotYetPublishedError: senate.gov's "Roll Call Vote Unavailable" stub, which is the
+//     same statement dressed as an HTTP 200 (see us-senate.js). Matched by NAME, not instanceof,
+//     because that class lives in an adapter that imports this module - an instanceof check here
+//     would be an import cycle.
+//
+// FAILURE (everything else): 5xx, 429/RateLimitedError, a network error (status undefined), a
+// body-read failure, a parse error. Note that absence is only *expected* at the tail of a probe
+// window; a 404 on a record we already hold is a regression, and catching that is the caller's job
+// (scheduled-ingest.js's findRegressedAbsences) because only the caller knows where the edge is.
+export function isAbsentRecordError(err) {
+  if (!(err instanceof SourceFetchError)) return false;
+  return err.status === 404 || err.name === 'RollCallNotYetPublishedError';
+}
+
 // InvalidFlagValueError — FINAL WHOLE-BRANCH REVIEW, finding 6 (.superpowers/sdd/
 // 2026-07-29-profile-completeness/final-review-findings.md): a CLI flag whose VALUE is malformed.
 // Lives here, shared, rather than being declared twice: enrich-federal-bills.js and
