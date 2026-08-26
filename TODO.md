@@ -60,11 +60,21 @@ PLAYBOOK lessons **51-55** carry all of it.
 
 ### OPEN — what a fresh session should pick up
 
-1. **150 thin-cast rows** — a `mo-house-xml` stub sitting beside a complete LegiScan copy of the
-   same roll call with the identical tally. These are `vote_duplicates` supersessions, **not**
-   retractions (same vote, right bill, redundant copy). Detection is measured; the marking is not
-   written yet. Do NOT touch the other 511 thin rows: 383 are the SOLE record of their vote and
-   375 of those are committee actions where the tally is known but the roster was never published.
+1. ~~**150 thin-cast rows**~~ **DONE 2026-08-26: 126 marked superseded** (`vote_duplicates` 87 ->
+   213; nothing deleted, votes/casts unchanged). Re-measured in SQL rather than trusting the
+   earlier JS figure: of 661 thin rows, only **126** have DECISIVE evidence — an identical
+   `source_url`, meaning both rows cite the SAME roll-call document. These are CROSS-source
+   duplicates that migration 0022 missed because the primary row resolved just 1 cast (the
+   one-legislator mo-house-xml roster), so 0022's cast comparison could not match them.
+   **535 thin rows remain public and must stay:** 24 whose thin row has no source_url, 2 citing a
+   different document, and the sole-record majority — 375 of which are committee actions where the
+   tally is known but the per-member roster was never published. Those are a display question, not
+   a dedup one.
+   *Trap worth remembering:* the safety check "would any cast lose its only record?" first answered
+   **126 — all of them**, because it compared `legislator_id`. This project unifies humans by
+   `person_id`, and Mark Matthiesen has two legislator rows (mo-house-xml and LegiScan). Compared
+   by person: 126/126 represented on the survivor with the SAME position. Third time in one day a
+   raw-id comparison gave a false reading where the identity model was the right lens.
 2. **Profile vote rows discard date and question** (audit HIGH, visitor-visible) — distinct roll
    calls render as indistinguishable repeats. Needs a browser, not curl; `playwright` is installed.
 3. **`006.004.pdf`** — one roll call claimed by BOTH HB 1979 and SB 903 with different questions.
