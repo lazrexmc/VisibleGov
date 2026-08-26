@@ -1282,7 +1282,22 @@ session's own direct work, not assumed.**
   tick unhealthy if it does not. Live: both federal sources ran and closed **succeeded / failures 0
   / absent 10**, canaries returning 431 and 100 casts; `npm run status` reads `us-congress
   succeeded` / `us-senate succeeded` where it read `partial` an hour before. Suite 2,645/0 (15 new
-  tests). PLAYBOOK lesson 51. (2) the same-source dedup (see the 08-24 entry) — one job, two payoffs. (3) Bob Onder's
+  tests). PLAYBOOK lesson 51. ~~(2) the same-source dedup~~ **BUILT 2026-08-26, dry-run verified — the `--apply` is Lance's
+  one step:** `node --env-file=.env scripts/dedup-same-source-votes.mjs` (add `--apply` to write).
+  Re-measuring corrected the finding badly: 217 groups / 278 rows, not 171/195, and "identical cast
+  lists" is not a test of identity at all — on 2025-06-30 the US Senate cast TEN roll calls on one
+  bill with byte-identical 100-cast lists, identical question and identical result, because everyone
+  voted the party line every time. A cast-list rule would have hidden nine real votes. The shipped
+  rule makes the SOURCE prove sameness: identical `source_url` **carrying a #fragment** (one
+  anchored journal location), plus same bill/chamber/day, identical non-null result, and >=5 casts.
+  38 pairs survive, all LegiScan-vs-LegiScan on MO Senate journal anchors; 179 groups are refused
+  with the reason recorded. Rulings I made since they were left open: canonical = **lowest source
+  record id** (not "earliest ingested" — ingestion order is not reproducible and a rebuild could
+  swap which vote displays), and **auto-pair this class, flag nothing** (the refused groups are
+  judged distinct, so flagging them would add 179 false items to a 382-item queue). Nothing is
+  deleted; no legislator loses a vote (the cast lists are identical, so the canonical row carries
+  every cast). Also corrected: this relieves **zero** reconciliation flags — the earlier "one job,
+  two payoffs" claim was wrong. (3) Bob Onder's
   phantom MO Senate term row (no start_date, no end_date, 0 votes) renders him as a currently
   serving MO senator though he now serves in the US House — fix via a `correct-data` correction
   with a written reason, then guard: no start_date AND no votes must never read as "serving now"

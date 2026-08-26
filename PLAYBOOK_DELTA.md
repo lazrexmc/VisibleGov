@@ -74,6 +74,7 @@ with offset/limit or jump by grep.
 | 49 | 08-23 | "Needs human review" is honest only if a human could resolve it; a bill-less roll call is a typed record |
 | 50 | 08-23 | A never-exercised fallback is a hope; "not derivable" is true only of the derivation tried |
 | 51 | 08-26 | A status word that is always the same value carries zero bits; probe one record you already hold |
+| 52 | 08-26 | Identical payloads are not identical identity; prove sameness from the source's own record pointer |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 — lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1180,3 +1181,47 @@ against a server that has ceased to exist.
 Generalization worth carrying: audit a status field by its **distribution**, not by reading one
 row. `select status, count(*) group by status` over a source's history is a two-second query, and
 "121 partial, 0 anything else" is a defect signature on its own, independent of what the rows say.
+
+## Lesson 52 — Identical payloads are not identical identity; make the SOURCE prove sameness, not the data (2026-08-26)
+
+An audit finding said 195 vote rows were stored twice, "measured by comparing cast lists (the only
+honest test)". Building the fix started by re-measuring, which produced a different number (278) and
+then, on inspection, destroyed the method entirely.
+
+On 2025-06-30 the US Senate cast ten roll calls on one bill in one day. Every senator voted the
+party line every time. Ten byte-identical 100-cast lists, identical question ("On the Motion"),
+identical result ("Motion Rejected"), same bill, same chamber, same date. **Ten real votes.** The
+"only honest test" would have hidden nine of them — and hiding a real recorded vote from a
+legislator's record is precisely the thing this project exists not to do.
+
+The generalization: **a payload fingerprint proves two records CONTAIN the same thing, never that
+they ARE the same thing.** Any process that can legitimately repeat will eventually emit identical
+payloads — a legislature voting the party line, a sensor reading a steady value, a job retried with
+the same input. Deduplicating on content silently destroys real repetitions, and the destruction is
+invisible because the survivor looks correct.
+
+What actually proves identity is the source's own pointer at its own record. Here that was the
+`source_url` fragment: two LegiScan `roll_call` records citing
+`…RDay250220426-442.pdf#430.2` are the source saying "these are the same spot in the same journal".
+Three refinements were each forced by a real case, and they are the reusable shape of the problem:
+
+- **The document is not the record.** A MO journal PDF covers a whole sitting; `mo-senate-web`
+  numbers several distinct votes against that one bare URL (`…-vote3`, `…-vote4`). Require the
+  pointer to identify one record — here, a `#fragment` — not merely the container.
+- **Even a fine-grained pointer can be shared.** Anchor `#521` (2019-03-14) carries both a 29-4 and
+  a 33-0 roll call. Corroborating fields must still agree.
+- **Vacuous agreement is not agreement.** Two NULL results satisfy "same result" while carrying no
+  information. Require the corroborating field to be PRESENT, not just equal.
+
+Two more things worth carrying. **State the asymmetry of the two errors out loud before choosing a
+threshold** — a missed duplicate shows one redundant row; a false duplicate hides real evidence, so
+the rule should be tuned to refuse under doubt, and 179 of 217 candidate groups being refused is a
+success, not a shortfall. And **record WHY each refusal happened** (`different_source_url` 147,
+`source_url_pins_no_specific_vote` 19, `cast_list_too_small` 13): a dry run that only lists what it
+would change cannot be audited, because a silently-dropped group looks the same as one that was
+never considered.
+
+Postscript on the audit that raised it: three of the finding's four factual claims were wrong — the
+count, the method, the cited example (SB 68's duplicate is 2019, not 2025), and the claim that
+fixing it would drain reconciliation flags (it drains exactly zero). All were written confidently.
+An audit finding is a lead, not a result; re-measure before building on one, including your own.

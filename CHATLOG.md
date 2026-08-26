@@ -5936,3 +5936,36 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   not maxKnown+1) — updated with the reason inline, not silently. PLAYBOOK lesson 51 records all
   three mechanics, and the transferable one: audit a status field by its DISTRIBUTION — "121
   partial, 0 anything else" is a defect signature on its own.
+- **Lance: "Proceed correctiong #2, when complete restate the list" → same-source vote dedup is
+  BUILT and dry-run verified; the `--apply` is his step** (2026-08-26). He did not answer the two
+  rulings I said were blocking, so I made them, stated them, and stopped at a measured dry run
+  rather than mutating 195 production rows on my own judgment (draft-then-apply). **Re-measuring
+  first destroyed the audit's own method.** The finding claimed 171 groups / 195 rows "measured by
+  comparing cast lists (the only honest test)". Real count: 217 groups / 278 rows — and the test is
+  not a test. On 2025-06-30 the US Senate cast TEN roll calls on one bill in one day (119-1-332
+  through 119-1-353), every senator voting the party line every time: ten byte-identical 100-cast
+  lists, identical question "On the Motion", identical result "Motion Rejected". Ten real votes. A
+  cast-list rule would have hidden nine — the exact failure this project exists not to commit.
+  Three more confounders fell out of the same inspection: a MO journal PDF URL with no `#fragment`
+  covers a whole sitting (mo-senate-web numbers several distinct votes against one such URL); one
+  anchor can still carry two roll calls (#521, 2019-03-14, holds both a 29-4 and a 33-0); and
+  mo-house-xml's one-legislator roster makes any single-cast row match any other (HB2010-4, a
+  conference report at 133-17, "matched" HB2010-5, a third reading at 132-17). **The rule that
+  shipped makes the SOURCE prove sameness:** identical `source_url` carrying a fragment — one
+  anchored journal location like `…RDay250220426-442.pdf#430.2` — plus same adapter, bill, chamber
+  and day, identical non-null result, byte-identical cast list of >=5. **38 pairs survive**, every
+  one two LegiScan `roll_call` records on one MO Senate journal anchor (25 of the 38 differ only by
+  http:// vs https://); 179 groups are refused with the reason recorded — 147 different source URL,
+  19 whole-document URL only, 13 cast list too small. **Rulings, since they were left open:**
+  canonical = **lowest source record id**, explicitly NOT "earliest ingested" (ingestion order is
+  not reproducible, so a rebuild-from-scratch could silently swap which vote the public site shows);
+  and **auto-pair this class, flag nothing** (the 179 are actively judged distinct, so flagging them
+  would put 179 false items into a queue already holding 382 real ones). Two further audit claims
+  corrected: SB 68's duplicate is the **2019-05-13** 25-8 vote, not a 2025 29-5 one, and this
+  relieves **zero** reconciliation flags — measured, none of the 382 sit on a confirmed pair or even
+  on the same bill+date+chamber. Shipped `src/lib/same-source-dedup.js` (every rejection argued
+  against the real case that defeated the weaker rule), `scripts/dedup-same-source-votes.mjs`
+  (dry-run default, `insertIfAbsent` on the unique `superseded_vote_id` so re-runs are no-ops), and
+  23 tests encoding each real confounder. Suite **2,668 pass / 0 fail** (was 2,645). Nothing
+  deleted, nothing applied; no legislator can lose a vote since the cast lists are identical.
+  PLAYBOOK lesson 52: identical payloads are not identical identity.

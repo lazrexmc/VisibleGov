@@ -8,6 +8,11 @@ repo — not from documentation. Every number below was measured on 2026-08-26; 
 Scale at audit time: 10,878 roll calls, 1,503,954 casts, 1,112 published summaries, 382 open
 reconciliation flags, 33 migrations (all applied), 2,630 tests passing.
 
+> **Two findings below were substantially wrong and are corrected in place:** D2's premise (the
+> classifier already existed — it just never reached the durable run row) and D1's measurement,
+> method, cited example, and claimed flag relief. Both corrections are recorded inside their own
+> entries rather than quietly edited away. Suite is 2,668 passing as of the D1 build.
+
 ---
 
 ## Verdict
@@ -49,18 +54,39 @@ audit — the fail-loud guard from the 2026-08-03 audit working as designed.
 
 ## Defects found, ranked by what they cost
 
-### D1 — Same-source duplicate vote rows (195 rows) — **visitor-visible AND blocking**
-One vote stored more than once, byte-identical cast lists, same source. Measured by comparing cast
-lists (the only honest test): 171 groups / 195 redundant rows — legiscan 171, mo-* 19, us-* 5;
-worst in the sessions people actually read, 2025 (58) and 2026 (34). A visitor to MO SB 68 (2025)
-sees the same 29-5 Senate vote listed twice.
+### D1 — Same-source duplicate vote rows — **RESOLVED 2026-08-26; three claims below were wrong**
+One vote stored more than once by ONE adapter. Migration 0022's dedup is structurally blind to it —
+it pairs LegiScan against a *primary* source, and both rows here are the same source. That much
+held up. Almost nothing else in this entry's original text did, and the corrections are the
+substance of the finding:
 
-**Raised in value 2026-08-26:** it is also a *cause* of unresolvable reconciliation flags. For
-HCR 50 (MO Senate, 2018-01-08) the journal has one vote and LegiScan has two roll calls both
-printing 31-0, so `crossCheckAgainstPrimarySource` cannot say which is which, correctly refuses to
-pair, and raises `ambiguous_tally_match`. All 4 open flags of that reason have this shape.
-Migration 0022's dedup is structurally blind to it — it pairs LegiScan against a *primary* source,
-and both rows here are the same source.
+- **The count was wrong.** The original said 171 groups / 195 rows, "measured by comparing cast
+  lists (the only honest test)". Re-measured properly (loose grouping on family+bill+chamber+date,
+  then byte-identical cast lists): **217 groups / 278 rows**. The first pass had under-counted.
+- **"The only honest test" was not a test at all.** Identical cast lists do not establish identity.
+  On 2025-06-30 the US Senate cast **ten** roll calls on one bill in one day — 119-1-332 through
+  119-1-353 — every senator voting the party line every time: ten byte-identical 100-cast lists,
+  identical question ("On the Motion"), identical result ("Motion Rejected"). Ten real votes. The
+  cast-list rule would have hidden nine of them. Three further confounders turned up the same way:
+  a MO journal PDF URL with no `#` fragment covers a whole sitting (mo-senate-web numbers several
+  distinct votes against one such URL); one anchor can still carry two roll calls (#521 on
+  2019-03-14 holds both a 29-4 and a 33-0); and mo-house-xml's one-legislator roster makes any
+  single-cast row match any other.
+- **The flag-relief claim was wrong.** The original said this defect *causes* the
+  `ambiguous_tally_match` flags and that fixing it would drain a subset. Measured: **zero** of the
+  382 open flags sit on a confirmed pair, and zero sit on the same bill+date+chamber as one. Fixing
+  D1 relieves no flags at all.
+- **The cited example was wrong in its details.** SB 68's duplicate is the **2019-05-13** vote
+  (25-8), not a 2025 29-5 vote.
+
+**What is actually true, and now shipped:** of the 217 fingerprint-matched groups, **38** survive a
+rule that requires the source itself to point at one specific vote — same adapter, same bill,
+chamber and day, byte-identical cast list of at least 5 casts, identical non-null result, and an
+identical `source_url` *carrying a fragment* (`…RDay250220426-442.pdf#430.2`). Every one of the 38
+is a pair of LegiScan `roll_call` records on one anchored MO Senate journal location; 25 of the 38
+pairs differ only by `http://` vs `https://`. The other 179 groups are left untouched, with the
+reason recorded: 147 point at genuinely different source URLs, 19 share only a whole-document URL,
+13 rest on a cast list too small to prove anything.
 
 ### D2 — Signal death on always-partial sources — **FIXED 2026-08-26, live-verified**
 `us-congress` 121/121 runs `partial`, `us-senate` 121/121, `scheduled-summaries` 6/6. Every
@@ -153,14 +179,24 @@ found (the classifier already existed and simply never reached the run row) and 
 forward-only probe window needed. *Touched `src/lib/errors.js`, `src/cli/ingest.js`,
 `scripts/scheduled-ingest.js`; `tests/absent-vs-failure.test.js` is new.*
 
-**2. Fix D1 (duplicates) — one job, two payoffs.**
-Extend dedup to same-source pairs sharing bill + chamber + date + tally **and** identical cast
-lists; mark the later row superseded in `vote_duplicates`. The public views already exclude
-superseded rows, so the display self-corrects and nothing is deleted. Two design questions need
-Lance's ruling first: **which row is canonical** (lowest roll-call id? earliest ingested?), and
-**whether a same-source pair should auto-pair or mint a review flag** — unlike the cross-source
-case, no second source corroborates that they are the same event. Expect a measurable drop in
-`ambiguous_tally_match` flags as a side effect.
+**2. ~~Fix D1 (duplicates)~~ — BUILT 2026-08-26, dry-run verified; the `--apply` is Lance's step.**
+`src/lib/same-source-dedup.js` (the rule, 23 tests) and `scripts/dedup-same-source-votes.mjs`
+(dry-run by default). See D1 above for what re-measurement corrected. The two open design questions
+were ruled on rather than left blocking:
+
+- **Which row is canonical: the lowest source record id** (for LegiScan, the numeric `roll_call_id`
+  in the source_key) — explicitly *not* "earliest ingested", because ingestion order is not
+  reproducible and a rebuild from scratch could silently swap which vote the public site displays.
+  The source's own record id is a property of the data and identical on every rebuild.
+- **Auto-pair or flag: auto-pair this class only, and flag nothing.** The evidence here is
+  decisive — the source is pointing at one anchored location — so a review flag would add no
+  information. The 179 refused groups are *not* suspected duplicates that need adjudication; they
+  are groups the rule actively judged to be distinct votes, so flagging them would put 179 false
+  items into a queue that already holds 382 real ones.
+
+Nothing is deleted: both rows stay in `votes` forever and the public views exclude the superseded
+side, exactly as 0022 does. Because the two rows carry byte-identical cast lists, no legislator
+loses a vote from their record — the canonical row carries every cast the superseded one did.
 
 **3. Fix D4 (phantom row) — minutes, and it removes a factually wrong claim.**
 Bob Onder's empty MO Senate term row needs an `end_date` (he left the seat) or removal. Do it as a
