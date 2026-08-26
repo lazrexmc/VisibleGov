@@ -77,9 +77,13 @@ PLAYBOOK lessons **51-55** carry all of it.
    raw-id comparison gave a false reading where the identity model was the right lens.
 2. **Profile vote rows discard date and question** (audit HIGH, visitor-visible) — distinct roll
    calls render as indistinguishable repeats. Needs a browser, not curl; `playwright` is installed.
-3. **`006.004.pdf`** — one roll call claimed by BOTH HB 1979 and SB 903 with different questions.
-   Genuinely ambiguous; **needs Lance to read the PDF**:
-   https://house.mo.gov/billtracking/bills161/rollcalls/006.004.pdf
+3. ~~**`006.004.pdf`**~~ **RESOLVED 2026-08-26 by Lance reading the source PDF.** The document
+   names **HB 1979** explicitly (Session Day 6, Roll Call 4, 1/14/2016, "HBs FOR THIRD READING",
+   sponsor ROWDEN (044), draft 5624H.02P) and **SB 903 appears nowhere on it**; its printed tally
+   (Yes 141 / No 16 / Absent 6) matches the stored result 141-16 exactly. The SB 903 row was
+   retracted with the PDF's own wording recorded in the tombstone's `evidence`. This is the
+   detector working as designed: it refused to guess between two rows that each claimed their own
+   bill, and a human settled it in one reading.
 4. **Cloudflare Web Analytics (audit D8)** — still Lance's call: disable the beacon, or allow it in
    the CSP and add a line to the trust page saying what is collected.
 5. **Summary coverage (audit D5)** — a decision, not a build. 1,112 published; the honest
