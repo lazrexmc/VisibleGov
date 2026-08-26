@@ -263,8 +263,29 @@ function renderVoteRow(voteRow, oneLinerMap) {
       { class: 'vote-bill-link', href: billHref(voteRow.bill_id, voteRow.bill_identifier || voteRow.bill_title || voteRow.bill_id) },
       `${voteRow.bill_identifier || '(no bill identifier)'} — ${voteRow.bill_title || '(no title)'}`,
     ));
+    // The QUESTION is what separates one roll call from another on the same bill, and it used to
+    // render only in the else-branch below — so a chamber that voted on a bill several times in one
+    // day produced rows that were byte-identical on the page. Measured before this fix: 369,063
+    // feed rows across 1,048 legislators looked like repeats, and 225,025 of those groups were
+    // GENUINELY DIFFERENT votes. The worst real case was 25 identical-looking rows on one profile
+    // for SB 724 (2022-05-10) — 25 separate amendment votes, tallies from 0-124 to 128-6. A record
+    // that cannot tell two votes apart is not a record; it reads as a broken page.
+    if (voteRow.question) {
+      main.appendChild(el('p', { class: 'vote-question' }, voteRow.question));
+    }
   } else {
     main.appendChild(el('p', { class: 'vote-procedural' }, voteRow.question || '(procedural vote, no associated bill)'));
+  }
+
+  // Date and recorded tally, both printed EXACTLY as stored — the tally is the raw yea-nay string
+  // the source recorded (`97-42`), never a computed pass/fail word, matching how votes.result is
+  // written in the first place. Either may legitimately be absent (a vote whose date the source
+  // never printed, a chamber that publishes no tally), so each is emitted only when present rather
+  // than rendering an empty separator or a "null".
+  const voteDay = String(voteRow.vote_date ?? '').slice(0, 10);
+  const meta = [voteDay || null, voteRow.result || null].filter(Boolean);
+  if (meta.length) {
+    main.appendChild(el('p', { class: 'vote-meta' }, meta.join(' · ')));
   }
 
   const oneLiner = voteRow.bill_id ? oneLinerMap.get(voteRow.bill_id) : undefined;

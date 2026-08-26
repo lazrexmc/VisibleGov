@@ -899,3 +899,97 @@ test('mountProfile: NEW-B — the votes fetch fires even while freshness\'s fetc
   await mountPromise;
   assert.equal(callOrder.includes('freshness-fetch-resolved'), true, 'freshness still completes once released — nothing was dropped, only the ordering vs. votes changed');
 });
+
+// ============================================================================
+// 2026-08-26 audit (survivor: "profile vote rows discard the vote date and the question,
+// collapsing distinct roll calls into indistinguishable repeats").
+//
+// MEASURED live before writing these: 369,063 feed rows across 1,048 legislators render as visual
+// repeats, and 225,025 of those groups are GENUINELY DIFFERENT votes — the renderer was simply
+// hiding what told them apart. Worst real case: Rusty Black's profile showed 25 identical-looking
+// rows for SB 724 on 2022-05-10, which are 25 separate amendment votes with tallies ranging from
+// 0-124 to 128-6. To a visitor that reads as a broken page, not as a record.
+//
+// The data was always present in public_vote_feed (vote_date, question, result). Only the render
+// dropped it.
+// ============================================================================
+
+function sb724Row(castId, question, result) {
+  return {
+    cast_id: castId,
+    vote_id: `v-${castId}`,
+    position: 'absent',
+    bill_id: 'bill-sb724',
+    bill_identifier: 'SB 724',
+    bill_title: 'Modifies provisions relating to elementary and secondary education',
+    question,
+    result,
+    vote_date: '2022-05-10T00:00:00+00:00',
+    jurisdiction_id: 'mo-legislature',
+    chamber: 'house',
+    source_url: 'https://www.house.mo.gov/billtracking/bills221/rollcalls/065.012.pdf',
+  };
+}
+
+test('AUDIT: two amendment votes on ONE bill, same day, same position must NOT render identically', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => voteFeedResponse([
+    sb724Row('c1', 'House: SB 724 (HA 2 HA 7) SBs FOR THIRD READING', '97-42'),
+    sb724Row('c2', 'House: SB 724 (HA 12) SBs FOR THIRD READING', '0-124'),
+  ]));
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
+
+  const rows = [...container.querySelectorAll('.vote-row')];
+  assert.equal(rows.length, 2, 'both votes render');
+  assert.notEqual(
+    rows[0].textContent.trim(),
+    rows[1].textContent.trim(),
+    'two DIFFERENT roll calls must be distinguishable on the page — this is the whole defect',
+  );
+});
+
+test('AUDIT: a bill-linked vote renders its question, not only procedural votes', async () => {
+  // The old code rendered `question` ONLY in the else-branch for votes with no bill_id. For a
+  // bill-linked vote the question is exactly what separates "HA 12" from "HA 2 HA 7".
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => voteFeedResponse([
+    sb724Row('c1', 'House: SB 724 (HA 12) SBs FOR THIRD READING', '0-124'),
+  ]));
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
+  assert.match(container.textContent, /HA 12/, 'the question text must be on the page');
+});
+
+test('AUDIT: a vote row renders its date and its recorded tally', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => voteFeedResponse([
+    sb724Row('c1', 'House: SB 724 SBs FOR THIRD READING', '97-42'),
+  ]));
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
+
+  assert.match(container.textContent, /2022-05-10/, 'the vote date must render');
+  assert.match(container.textContent, /97-42/, 'the recorded tally must render, exactly as stored');
+});
+
+test('AUDIT: a missing date or tally degrades quietly — never prints "null" or "undefined"', async () => {
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async () => voteFeedResponse([{
+    cast_id: 'c1',
+    vote_id: 'v1',
+    position: 'yea',
+    bill_id: null,
+    question: 'Procedural',
+    result: null,
+    vote_date: null,
+    jurisdiction_id: 'us-congress',
+    chamber: 'house',
+    source_url: 'https://clerk.house.gov/evs/2026/roll283.xml',
+  }]));
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
+
+  assert.equal(container.querySelectorAll('.vote-row').length, 1);
+  assert.doesNotMatch(container.textContent, /null|undefined|NaN/, 'no placeholder leakage');
+});

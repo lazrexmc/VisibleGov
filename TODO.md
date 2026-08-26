@@ -75,8 +75,15 @@ PLAYBOOK lessons **51-55** carry all of it.
    `person_id`, and Mark Matthiesen has two legislator rows (mo-house-xml and LegiScan). Compared
    by person: 126/126 represented on the survivor with the SAME position. Third time in one day a
    raw-id comparison gave a false reading where the identity model was the right lens.
-2. **Profile vote rows discard date and question** (audit HIGH, visitor-visible) — distinct roll
-   calls render as indistinguishable repeats. Needs a browser, not curl; `playwright` is installed.
+2. ~~**Profile vote rows discard date and question**~~ **FIXED 2026-08-26.** Confirmed by reading
+   `renderVoteRow`: it rendered `question` ONLY for bill-less procedural votes, and never rendered
+   `vote_date` or `result` at all. Measured before fixing: **369,063 feed rows across 1,048
+   legislators** looked like repeats, and **225,025 of those groups were genuinely DIFFERENT votes**
+   — the data was always in `public_vote_feed`, only the render dropped it. Worst real case: Rusty
+   Black's profile showed **25 identical rows** for SB 724 (2022-05-10), which are 25 separate
+   amendment votes with tallies from 0-124 to 128-6. Now renders the question for bill-linked votes
+   plus a `date · tally` line, both printed exactly as stored. 4 new tests. **Not yet seen in a real
+   browser** — worth a `playwright` pass on a live profile before calling it visually done.
 3. ~~**`006.004.pdf`**~~ **RESOLVED 2026-08-26 by Lance reading the source PDF.** The document
    names **HB 1979** explicitly (Session Day 6, Roll Call 4, 1/14/2016, "HBs FOR THIRD READING",
    sponsor ROWDEN (044), draft 5624H.02P) and **SB 903 appears nowhere on it**; its printed tally

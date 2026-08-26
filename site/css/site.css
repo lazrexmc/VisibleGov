@@ -736,6 +736,29 @@ footer#site-footer {
   margin: 0.25rem 0;
 }
 
+/* .vote-question / .vote-meta — 2026-08-26 audit fix. These carry the two facts that tell one roll
+   call apart from another on the SAME bill: the question ("SB 724 (HA 12) ...") and the date +
+   recorded tally. Before they rendered, a chamber that voted several times on one bill in a day
+   produced rows identical to the pixel — 25 of them on one real profile — which reads as a broken
+   page rather than a record.
+
+   Styled BELOW the bill link and above the one-liner: secondary to the bill, but never hidden or
+   truncated, because the whole point is that they are what distinguishes the row. The tally is
+   printed as stored (a raw yea-nay string) so it is deliberately monospace-ish in feel — aligned
+   numbers read as data, not prose. */
+.vote-question {
+  color: var(--muted);
+  font-size: 0.9em;
+  margin: 0.2rem 0 0;
+}
+
+.vote-meta {
+  color: var(--faint);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+  margin: 0.15rem 0 0;
+}
+
 /* Lit mono position (mockup: "● YEA"/"● NAY"). Text stays exactly `Position: ${voteRow.position}`
    (person-page.js) — untouched, byte-identical — the ONLY JS change is the added
    `vote-position-${voteRow.position}` class hook; the "●" is CSS-generated content on the yea/nay
