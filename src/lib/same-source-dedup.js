@@ -23,14 +23,30 @@
 //      are adjacent but different votes, and one anchor (#521, 2019-03-14) covers two roll calls
 //      that differ 29-4 vs 33-0 — so result must agree too, and must not be NULL (two NULLs satisfy
 //      "same result" vacuously, which is no evidence at all).
-//   4. A TINY CAST LIST PROVES NOTHING. The mo-house-xml adapter resolves against a roster holding
+//   4a. A "#0" FRAGMENT IS NOT AN ANCHOR. LegiScan emits `…RDay02010981-89.pdf#0` when it has no
+//      page location for the vote at all. It satisfies "has a fragment" while pinning exactly
+//      nothing — the same evidentiary value as the bare journal URLs rejected by condition 2, so it
+//      must be rejected the same way. Found 2026-08-26 AFTER the first version of this rule had
+//      already been applied to the live database; 4 of its 38 pairs rested on it.
+//   4b. THE QUESTION MUST MATCH. A MO Senate journal anchor is a PAGE pointer, and a page holds
+//      more than one roll call — so two rows can share an anchor and still be different votes. The
+//      Senate routinely adopts a substitute and then third-reads the same bill on the same day,
+//      both passing with the identical tally from the identical members: "Senate: Adopt Substitute"
+//      and "Senate: Third Reading" are two real votes with one cast fingerprint. This is condition
+//      1's confounder wearing a different hat, and it defeated the first applied version of this
+//      rule in 13 of 38 pairs. Like result, the question must be PRESENT, not merely equal.
+//   5. A TINY CAST LIST PROVES NOTHING. The mo-house-xml adapter resolves against a roster holding
 //      one real legislator (a known, documented defect), so its rows can carry a single cast that
 //      matches any other single cast. HB2010-4 and HB2010-5 matched on one cast while being a
 //      conference-report adoption (133-17) and a third reading (132-17) — plainly different votes.
 //
 // Measured against the live database 2026-08-26: of 217 groups that share family+bill+chamber+date
-// AND have byte-identical cast lists, only 38 survive all four conditions. Every one is a pair of
-// LegiScan roll_call records on one anchored MO Senate journal location.
+// AND have byte-identical cast lists, only 21 survive all conditions. Every one is a pair of
+// LegiScan roll_call records on one anchored MO Senate journal location, agreeing on the question.
+//
+// HISTORY, kept deliberately: the first version of this rule lacked 4a and 4b, confirmed 38 pairs,
+// and was applied live. 17 of those 38 were FALSE — they hid real votes. The pruning path in
+// scripts/dedup-same-source-votes.mjs exists because of that, and PLAYBOOK lesson 53 records it.
 
 export const DEFAULT_CAST_FLOOR = 5;
 
@@ -56,11 +72,17 @@ export function normalizeSourceUrl(url) {
   return s.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
 }
 
-// True when the URL pins one specific vote rather than a whole document. See condition 2.
+// True when the URL pins one specific vote rather than a whole document, or nothing at all.
+// See conditions 2 and 4a — a fragment must exist AND mean something.
 export function urlPinsOneVote(normalized) {
   if (!normalized) return false;
   const hash = normalized.indexOf('#');
-  return hash !== -1 && hash < normalized.length - 1;
+  if (hash === -1) return false;
+  const fragment = normalized.slice(hash + 1);
+  if (!fragment) return false;
+  // '#0' (and '#00', '#0.0') is LegiScan's "no location known" placeholder, not a location.
+  if (/^0+(\.0+)*$/.test(fragment)) return false;
+  return true;
 }
 
 // Order-independent identity of who voted and how. Sorted, so two rows built by different code
@@ -104,7 +126,19 @@ export function confirmDuplicateGroup(rows, { castFloor = DEFAULT_CAST_FLOOR, ca
   if (results.size !== 1) return { duplicate: false, reason: 'different_result' };
   const result = [...results][0];
   if (result === null || result === '') return { duplicate: false, reason: 'result_missing' };
-  return { duplicate: true, reason: 'identical_casts_result_and_anchored_source_url', url, result };
+  // Condition 4b. Checked LAST because it is the one that most often fires on otherwise-perfect
+  // evidence: same anchor, same tally, same members, different motion.
+  const questions = new Set(rows.map((r) => (r.question == null ? null : String(r.question).trim())));
+  if (questions.size !== 1) return { duplicate: false, reason: 'different_question' };
+  const question = [...questions][0];
+  if (question === null || question === '') return { duplicate: false, reason: 'question_missing' };
+  return {
+    duplicate: true,
+    reason: 'identical_casts_result_question_and_anchored_source_url',
+    url,
+    result,
+    question,
+  };
 }
 
 // RULING (2026-08-26): the canonical row is the one whose SOURCE RECORD ID is lowest — for LegiScan,

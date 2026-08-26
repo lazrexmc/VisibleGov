@@ -8,6 +8,10 @@ import {
 // 2026-08-26 audit, defect D1. Every rejection test below is a REAL group from the live database
 // that a weaker version of this rule accepted. They are the whole value of this file: the rule is
 // only trustworthy to the extent it refuses these.
+//
+// Conditions 4a and 4b (the two REGRESSION blocks) were added AFTER the first version of this rule
+// was applied to production and 17 of its 38 pairs turned out to hide real votes. That is the
+// costliest mistake in this file's history and these tests are its wall.
 
 // ---- sourceFamily ----
 
@@ -26,7 +30,7 @@ test('sourceFamily returns null for an empty key rather than a bogus family', ()
 
 // ---- normalizeSourceUrl / urlPinsOneVote ----
 
-test('normalizeSourceUrl erases ONLY the scheme — 25 of the 38 real pairs differ by http vs https', () => {
+test('normalizeSourceUrl erases ONLY the scheme — most real pairs differ by http vs https', () => {
   const a = 'http://www.senate.mo.gov/25info/Journals/RDay250220426-442.pdf#430.2';
   const b = 'https://www.senate.mo.gov/25info/Journals/RDay250220426-442.pdf#430.2';
   assert.equal(normalizeSourceUrl(a), normalizeSourceUrl(b));
@@ -66,9 +70,10 @@ test('castFingerprint is order-independent', () => {
 });
 
 test('castFingerprint separates who from how — a flipped position is a different fingerprint', () => {
-  const yea = [{ legislator_id: 'a', position: 'yea' }];
-  const nay = [{ legislator_id: 'a', position: 'nay' }];
-  assert.notEqual(castFingerprint(yea), castFingerprint(nay));
+  assert.notEqual(
+    castFingerprint([{ legislator_id: 'a', position: 'yea' }]),
+    castFingerprint([{ legislator_id: 'a', position: 'nay' }]),
+  );
 });
 
 test('castFingerprint of no casts is empty — never accidentally equal to a real one', () => {
@@ -91,25 +96,80 @@ test('candidateKey separates rows that cannot be the same vote', () => {
     'a different adapter is the CROSS-source case migration 0022 owns, not this one');
 });
 
-// ---- confirmDuplicateGroup: the accepting case ----
+// ---- the accepting case ----
 
 const anchored = 'https://www.senate.mo.gov/25info/Journals/RDay250220426-442.pdf#430.2';
 
 function legiscanPair(over = {}) {
   return [
-    { source_key: 'legiscan-2169-rollcall-1495613', source_url: anchored.replace('https', 'http'), result: '32-0', ...over },
-    { source_key: 'legiscan-2169-rollcall-1497726', source_url: anchored, result: '32-0', ...over },
+    {
+      source_key: 'legiscan-2169-rollcall-1495613', source_url: anchored.replace('https', 'http'),
+      result: '32-0', question: 'Senate: Third Reading', ...over,
+    },
+    {
+      source_key: 'legiscan-2169-rollcall-1497726', source_url: anchored,
+      result: '32-0', question: 'Senate: Third Reading', ...over,
+    },
   ];
 }
 
 test('CONFIRMS the real duplicate: two LegiScan roll_calls on one anchored journal location', () => {
   const v = confirmDuplicateGroup(legiscanPair(), { castCount: 32 });
   assert.equal(v.duplicate, true);
-  assert.equal(v.reason, 'identical_casts_result_and_anchored_source_url');
+  assert.equal(v.reason, 'identical_casts_result_question_and_anchored_source_url');
   assert.equal(v.result, '32-0');
 });
 
-// ---- confirmDuplicateGroup: every rejection is a real group from the live database ----
+// ---- REGRESSION: conditions 4a and 4b, added after 17 false pairs reached production ----
+
+test('REGRESSION 4a: a "#0" fragment pins nothing — LegiScan emits it when it has no location', () => {
+  // 4 of the first applied batch rested on this. "#0" satisfied "has a fragment" while carrying
+  // exactly as much evidence as the bare journal URLs condition 2 already refused.
+  assert.equal(urlPinsOneVote('www.senate.mo.gov/25info/Journals/RDay02010981-89.pdf#0'), false);
+  assert.equal(urlPinsOneVote('x.pdf#00'), false);
+  assert.equal(urlPinsOneVote('x.pdf#0.0'), false);
+  assert.equal(urlPinsOneVote('x.pdf#430.2'), true, 'a real anchor must still pass');
+  assert.equal(urlPinsOneVote('x.pdf#1126'), true, 'a bare page anchor is still a location');
+  const rows = legiscanPair({ source_url: 'https://www.senate.mo.gov/25info/Journals/RDay02010981-89.pdf#0' });
+  const v = confirmDuplicateGroup(rows, { castCount: 34 });
+  assert.equal(v.duplicate, false);
+  assert.equal(v.reason, 'source_url_pins_no_specific_vote');
+});
+
+test('REGRESSION 4b: "Adopt Substitute" and "Third Reading" are TWO real votes with one fingerprint', () => {
+  // 13 of the first applied batch were this. The MO Senate adopts a substitute and then third-reads
+  // the same bill the same day; both pass with the identical tally from the identical members, and
+  // a journal anchor is a PAGE pointer, so both rows legitimately carry it. Superseding one hid a
+  // real recorded vote — precisely the failure this project exists to prevent.
+  const rows = [
+    {
+      source_key: 'legiscan-1640-rollcall-863858', source_url: 'https://x/RDay66.pdf#1240',
+      result: '25-8', question: 'Senate: Adopt Substitute',
+    },
+    {
+      source_key: 'legiscan-1640-rollcall-863859', source_url: 'https://x/RDay66.pdf#1240',
+      result: '25-8', question: 'Senate: Third Reading',
+    },
+  ];
+  const v = confirmDuplicateGroup(rows, { castCount: 33 });
+  assert.equal(v.duplicate, false);
+  assert.equal(v.reason, 'different_question');
+});
+
+test('REGRESSION 4b: a missing question is vacuous agreement, not agreement', () => {
+  assert.equal(confirmDuplicateGroup(legiscanPair({ question: null }), { castCount: 32 }).reason, 'question_missing');
+  assert.equal(confirmDuplicateGroup(legiscanPair({ question: '   ' }), { castCount: 32 }).reason, 'question_missing');
+});
+
+test('REGRESSION 4b: question comparison trims whitespace only, never wording', () => {
+  const rows = legiscanPair();
+  rows[1].question = '  Senate: Third Reading  ';
+  assert.equal(confirmDuplicateGroup(rows, { castCount: 32 }).duplicate, true);
+  rows[1].question = 'Senate: Third Readings';
+  assert.equal(confirmDuplicateGroup(rows, { castCount: 32 }).reason, 'different_question');
+});
+
+// ---- every other rejection is also a real group from the live database ----
 
 test('REFUSES the US Senate vote-a-rama — ten identical party-line roll calls are ten real votes', () => {
   // 2025-06-30, one bill, one day: identical 100-cast lists, identical question ("On the Motion")
@@ -118,17 +178,18 @@ test('REFUSES the US Senate vote-a-rama — ten identical party-line roll calls 
     source_key: `us-senate-119-1-${n}`,
     source_url: `https://www.senate.gov/legislative/LIS/roll_call_votes/vote1191/vote_119_1_00${n}.xml`,
     result: 'Motion Rejected',
+    question: 'On the Motion',
   }));
   const v = confirmDuplicateGroup(rows, { castCount: 100 });
   assert.equal(v.duplicate, false);
   assert.equal(v.reason, 'different_source_url');
 });
 
-test('REFUSES a bare journal PDF shared by several distinct votes (mo-senate-web …-vote3/-vote4)', () => {
+test('REFUSES a bare journal PDF shared by several distinct votes (mo-senate-web vote3/vote4)', () => {
   const url = 'https://www.senate.mo.gov/26info/Journals/RDay6305071560-1614.pdf';
   const rows = [
-    { source_key: 'mo-senate-web-2026-RDay6305071560-1614-vote3', source_url: url, result: '30-0' },
-    { source_key: 'mo-senate-web-2026-RDay6305071560-1614-vote4', source_url: url, result: '30-0' },
+    { source_key: 'mo-senate-web-2026-RDay6305071560-1614-vote3', source_url: url, result: '30-0', question: 'Third Reading' },
+    { source_key: 'mo-senate-web-2026-RDay6305071560-1614-vote4', source_url: url, result: '30-0', question: 'Third Reading' },
   ];
   const v = confirmDuplicateGroup(rows, { castCount: 32 });
   assert.equal(v.duplicate, false);
@@ -136,8 +197,7 @@ test('REFUSES a bare journal PDF shared by several distinct votes (mo-senate-web
 });
 
 test('REFUSES a NULL result — two nulls satisfy "same result" vacuously, which is no evidence', () => {
-  const rows = legiscanPair({ result: null });
-  const v = confirmDuplicateGroup(rows, { castCount: 32 });
+  const v = confirmDuplicateGroup(legiscanPair({ result: null }), { castCount: 32 });
   assert.equal(v.duplicate, false);
   assert.equal(v.reason, 'result_missing');
 });
@@ -145,8 +205,8 @@ test('REFUSES a NULL result — two nulls satisfy "same result" vacuously, which
 test('REFUSES differing results on one anchor — #521 (2019-03-14) carries both 29-4 and 33-0', () => {
   const url = 'https://www.senate.mo.gov/19info/Journals/RDay370314512-532.pdf#521';
   const rows = [
-    { source_key: 'legiscan-1640-rollcall-821639', source_url: url, result: '33-0' },
-    { source_key: 'legiscan-1640-rollcall-821723', source_url: url, result: '29-4' },
+    { source_key: 'legiscan-1640-rollcall-821639', source_url: url, result: '33-0', question: 'Senate: Third Reading' },
+    { source_key: 'legiscan-1640-rollcall-821723', source_url: url, result: '29-4', question: 'Senate: Third Reading' },
   ];
   const v = confirmDuplicateGroup(rows, { castCount: 33 });
   assert.equal(v.duplicate, false);
@@ -158,8 +218,8 @@ test('REFUSES a tiny cast list — mo-house-xml resolves against a one-legislato
   // resolved cast, so their fingerprints matched. Different votes entirely.
   const url = 'https://www.house.mo.gov/billtracking/bills261/rollcalls/067.019.pdf#x';
   const rows = [
-    { source_key: 'mo-house-xml-HB2010-4', source_url: url, result: '133-17' },
-    { source_key: 'mo-house-xml-HB2010-5', source_url: url, result: '133-17' },
+    { source_key: 'mo-house-xml-HB2010-4', source_url: url, result: '133-17', question: 'Third Read and Passed' },
+    { source_key: 'mo-house-xml-HB2010-5', source_url: url, result: '133-17', question: 'Third Read and Passed' },
   ];
   const v = confirmDuplicateGroup(rows, { castCount: 1 });
   assert.equal(v.duplicate, false);
@@ -168,8 +228,8 @@ test('REFUSES a tiny cast list — mo-house-xml resolves against a one-legislato
 
 test('REFUSES a cross-source pair — that is migration 0022 territory, never this rule', () => {
   const rows = [
-    { source_key: 'legiscan-2169-rollcall-1495613', source_url: anchored, result: '32-0' },
-    { source_key: 'mo-senate-web-2025-RDay25-vote1', source_url: anchored, result: '32-0' },
+    { source_key: 'legiscan-2169-rollcall-1495613', source_url: anchored, result: '32-0', question: 'Senate: Third Reading' },
+    { source_key: 'mo-senate-web-2025-RDay25-vote1', source_url: anchored, result: '32-0', question: 'Senate: Third Reading' },
   ];
   const v = confirmDuplicateGroup(rows, { castCount: 32 });
   assert.equal(v.duplicate, false);
@@ -178,8 +238,7 @@ test('REFUSES a cross-source pair — that is migration 0022 territory, never th
 
 test('REFUSES a single row, and refuses a missing source_url', () => {
   assert.equal(confirmDuplicateGroup([legiscanPair()[0]], { castCount: 32 }).reason, 'not_a_group');
-  const rows = legiscanPair({ source_url: null });
-  assert.equal(confirmDuplicateGroup(rows, { castCount: 32 }).reason, 'different_source_url');
+  assert.equal(confirmDuplicateGroup(legiscanPair({ source_url: null }), { castCount: 32 }).reason, 'different_source_url');
 });
 
 test('the cast floor is exclusive at the boundary and defaults to DEFAULT_CAST_FLOOR', () => {
@@ -196,7 +255,7 @@ test('sourceRecordId reads the trailing source record number', () => {
 });
 
 test('chooseCanonical picks the LOWEST source record id, regardless of array order', () => {
-  const [a, b] = legiscanPair();          // a = …1495613, b = …1497726
+  const [a, b] = legiscanPair();          // a = ...1495613, b = ...1497726
   assert.equal(chooseCanonical([a, b]).canonical.source_key, 'legiscan-2169-rollcall-1495613');
   assert.equal(chooseCanonical([b, a]).canonical.source_key, 'legiscan-2169-rollcall-1495613');
   assert.equal(chooseCanonical([b, a]).superseded.length, 1);
@@ -208,15 +267,16 @@ test('chooseCanonical is stable across a rebuild — it reads the DATA, never in
   // rebuild-from-scratch re-inserts in a different order, and a display that flips on rebuild is a
   // defect even though both rows remain stored.
   const rows = legiscanPair();
-  const forward = chooseCanonical(rows).canonical.source_key;
-  const reversed = chooseCanonical([...rows].reverse()).canonical.source_key;
-  assert.equal(forward, reversed);
+  assert.equal(
+    chooseCanonical(rows).canonical.source_key,
+    chooseCanonical([...rows].reverse()).canonical.source_key,
+  );
 });
 
 test('chooseCanonical falls back to lexicographic order when there is no trailing number', () => {
   const rows = [
-    { source_key: 'weird-key-b', source_url: anchored, result: '1-0' },
-    { source_key: 'weird-key-a', source_url: anchored, result: '1-0' },
+    { source_key: 'weird-key-b', source_url: anchored, result: '1-0', question: 'Q' },
+    { source_key: 'weird-key-a', source_url: anchored, result: '1-0', question: 'Q' },
   ];
   assert.equal(chooseCanonical(rows).canonical.source_key, 'weird-key-a');
 });

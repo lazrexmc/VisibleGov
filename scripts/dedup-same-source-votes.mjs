@@ -12,7 +12,16 @@
 // Dry-run by default; --apply writes. insertIfAbsent on superseded_vote_id (its own unique
 // constraint) makes a re-run a harmless no-op on already-marked pairs, never a duplicate-key error.
 //
-// Usage: node --env-file=.env scripts/dedup-same-source-votes.mjs [--apply] [--json]
+// --prune is the self-healing path, and it exists because the FIRST version of this rule was
+// applied live and 17 of its 38 pairs were false — they hid real votes (an anchor of "#0" pins
+// nothing, and one journal page anchor covers both "Adopt Substitute" and "Third Reading", two real
+// votes with one cast fingerprint). --prune re-derives the rule over the whole database and DELETES
+// any vote_duplicates row THIS rule wrote that the rule no longer confirms, restoring those votes to
+// public view. It never touches migration 0022's cross-source rows: it matches only on the reason
+// prefix this script writes. Deleting a marking row is non-destructive — the votes themselves were
+// never modified.
+//
+// Usage: node --env-file=.env scripts/dedup-same-source-votes.mjs [--apply] [--prune] [--json]
 import { getClient, selectAll, insertIfAbsent } from '../src/lib/db.js';
 import {
   candidateKey, castFingerprint, confirmDuplicateGroup, chooseCanonical, sourceFamily,
@@ -20,6 +29,8 @@ import {
 } from '../src/lib/same-source-dedup.js';
 
 const apply = process.argv.includes('--apply');
+const prune = process.argv.includes('--prune');
+const SAME_SOURCE_REASON_PREFIX = 'same-source duplicate';
 const asJson = process.argv.includes('--json');
 const client = getClient();
 if (!client) { console.log(JSON.stringify({ mode: 'blocked', reason: 'no DB client configured' })); process.exit(1); }
@@ -93,9 +104,14 @@ for (const [key, rows] of candidates) {
 }
 
 // ---- 5. never re-mark what is already marked ----
-const { data: existing, error: eErr } = await selectAll(client, 'vote_duplicates', 'canonical_vote_id,superseded_vote_id');
+const { data: existing, error: eErr } = await selectAll(client, 'vote_duplicates', 'id,canonical_vote_id,superseded_vote_id,reason');
 if (eErr) throw new Error(`vote_duplicates: ${eErr.message}`);
 const alreadySuperseded = new Set(existing.map((r) => r.superseded_vote_id));
+// Rows THIS rule wrote that it would no longer write. Scoped by the reason prefix so migration
+// 0022's cross-source pairings can never be caught by it.
+const confirmedSupersededIds = new Set(confirmed.flatMap((g) => g.superseded.map((s) => s.id)));
+const stale = existing.filter((r) => String(r.reason ?? '').startsWith(SAME_SOURCE_REASON_PREFIX)
+  && !confirmedSupersededIds.has(r.superseded_vote_id));
 const pending = confirmed.flatMap((g) => g.superseded
   .filter((s) => !alreadySuperseded.has(s.id))
   .map((s) => ({ canonical_vote_id: g.canonical.id, superseded_vote_id: s.id, group: g })));
@@ -106,6 +122,7 @@ const summary = {
   candidate_groups: candidates.length,
   confirmed_groups: confirmed.length,
   rows_to_supersede: pending.length,
+  stale_rows_to_prune: stale.length,
   already_marked: confirmed.reduce((n, g) => n + g.superseded.length, 0) - pending.length,
   cast_floor: DEFAULT_CAST_FLOOR,
   refused_groups_by_reason: Object.fromEntries([...refused.entries()].sort((a, b) => b[1] - a[1])),
@@ -122,6 +139,7 @@ if (asJson) {
   console.log(`mode                : ${summary.mode}`);
   console.log(`confirmed groups    : ${summary.confirmed_groups}`);
   console.log(`rows to supersede   : ${summary.rows_to_supersede}  (already marked: ${summary.already_marked})`);
+  console.log(`STALE rows to prune : ${summary.stale_rows_to_prune}  (written by an earlier version of this rule, no longer confirmed — pruning RESTORES these votes to public view)`);
   console.log(`by family           : ${JSON.stringify(summary.by_family)}`);
   console.log(`by year             : ${JSON.stringify(summary.by_year)}`);
   console.log('refused groups (left untouched, by reason):');
@@ -137,8 +155,19 @@ if (asJson) {
 
 if (!apply) {
   log('');
-  log('DRY RUN — nothing written. Re-run with --apply to write these vote_duplicates rows.');
+  log('DRY RUN — nothing written. --apply writes the confirmed pairs; add --prune to also delete');
+  log('the stale rows an earlier version of this rule wrote (that restores hidden votes).');
   process.exit(0);
+}
+
+let pruned = 0;
+if (prune) {
+  for (const r of stale) {
+    // eslint-disable-next-line no-await-in-loop
+    const { error } = await client.from('vote_duplicates').delete().eq('id', r.id);
+    if (error) throw new Error(`prune ${r.id}: ${error.message}`);
+    pruned += 1;
+  }
 }
 
 let written = 0;
@@ -147,8 +176,8 @@ for (const p of pending) {
   await insertIfAbsent(client, 'vote_duplicates', [{
     canonical_vote_id: p.canonical_vote_id,
     superseded_vote_id: p.superseded_vote_id,
-    reason: 'same-source duplicate: identical cast list, result and anchored source_url',
+    reason: 'same-source duplicate: identical cast list, result, question and anchored source_url',
   }], 'superseded_vote_id');
   written += 1;
 }
-console.log(JSON.stringify({ mode: 'apply', superseded_rows_written: written }));
+console.log(JSON.stringify({ mode: 'apply', superseded_rows_written: written, stale_rows_pruned: pruned }));

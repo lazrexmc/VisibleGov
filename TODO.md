@@ -1297,7 +1297,17 @@ session's own direct work, not assumed.**
   judged distinct, so flagging them would add 179 false items to a 382-item queue). Nothing is
   deleted; no legislator loses a vote (the cast lists are identical, so the canonical row carries
   every cast). Also corrected: this relieves **zero** reconciliation flags — the earlier "one job,
-  two payoffs" claim was wrong. (3) Bob Onder's
+  two payoffs" claim was wrong. **APPLIED by Lance 2026-08-26 — then CORRECTED the same hour: 17 of
+  the 38 pairs were FALSE and had hidden real votes.** Two causes, one error (trusting a
+  discriminator without checking it discriminates): `#0` is what LegiScan emits when it has NO page
+  location, so it satisfied "has a #fragment" while pinning nothing (4 pairs); and a journal anchor
+  is a PAGE pointer covering several roll calls, so "Senate: Adopt Substitute" and "Senate: Third
+  Reading" — two real votes, identical tally, identical members, same day — shared an anchor and the
+  rule never compared `question` (13 pairs). Fixed by adding both conditions plus a `--prune` mode
+  that re-derives the rule and deletes any pairing it no longer confirms; ran `--apply --prune`,
+  which removed the 17 and restored those votes to public view. **Live now: `vote_duplicates` = 87
+  (66 cross-source + 21 same-source), re-run is a clean no-op, 0 suspect pairs.** Suite 2,672/0.
+  PLAYBOOK lesson 53. (3) Bob Onder's
   phantom MO Senate term row (no start_date, no end_date, 0 votes) renders him as a currently
   serving MO senator though he now serves in the US House — fix via a `correct-data` correction
   with a written reason, then guard: no start_date AND no votes must never read as "serving now"

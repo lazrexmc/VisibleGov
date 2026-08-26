@@ -75,6 +75,7 @@ with offset/limit or jump by grep.
 | 50 | 08-23 | A never-exercised fallback is a hope; "not derivable" is true only of the derivation tried |
 | 51 | 08-26 | A status word that is always the same value carries zero bits; probe one record you already hold |
 | 52 | 08-26 | Identical payloads are not identical identity; prove sameness from the source's own record pointer |
+| 53 | 08-26 | Writing the lesson does not mean obeying it; enumerate the discriminators BEFORE applying |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 — lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1225,3 +1226,53 @@ Postscript on the audit that raised it: three of the finding's four factual clai
 count, the method, the cited example (SB 68's duplicate is 2019, not 2025), and the claim that
 fixing it would drain reconciliation flags (it drains exactly zero). All were written confidently.
 An audit finding is a lead, not a result; re-measure before building on one, including your own.
+
+## Lesson 53 — Writing the lesson does not mean you obeyed it; and a rule that hides evidence must be dry-run against its own rejects (2026-08-26)
+
+Lesson 52 was written the same hour this happened, and says in plain words: *a legislature voting
+the party line twice emits byte-identical records, so make the SOURCE prove sameness.* The rule
+shipped alongside it then went to production and **hid 17 real votes out of 38 pairs** — for exactly
+that reason. The lesson was correct, freshly written, and did not prevent the defect it described.
+
+What went wrong mechanically, both instances of one error — accepting a discriminator without
+checking that it discriminates:
+
+- **`#0` is not an anchor.** The rule demanded the `source_url` carry a `#fragment`, on the argument
+  that a bare journal PDF covers a whole sitting and pins nothing. Sound. But LegiScan emits
+  `…RDay02010981-89.pdf#0` when it has no page location at all, which *satisfies "has a fragment"*
+  while carrying precisely the evidence the rule had just rejected as insufficient. 4 pairs.
+- **A journal anchor is a PAGE pointer, and a page holds several roll calls.** The MO Senate adopts
+  a substitute and then third-reads the same bill the same day; both pass with the identical tally
+  from the identical members, and both rows legitimately carry the same page anchor. Only the
+  `question` text separates "Senate: Adopt Substitute" from "Senate: Third Reading" — and the rule
+  never compared it, despite having *measured* that 31 of 57 candidate pairs disagreed on question
+  and then not acting on the number. 13 pairs.
+
+Three transferable mechanics:
+
+1. **Enumerate what each field can mean, including its null/placeholder form, before trusting it.**
+   "Has a fragment" was tested; "the fragment means something" was not. Every identifier has a
+   sentinel — `0`, `-1`, `0000-00-00`, `unknown`, the empty string — and a rule that treats presence
+   as meaning will accept the sentinel as evidence. This project already had a lesson about the
+   `0000-00-00` date sentinel; it did not generalise it to fragments.
+2. **When a measurement contradicts the rule, act on it or write down why not.** The verification
+   pass printed `question: 31` — thirty-one candidate pairs whose two rows had different question
+   text — and it was read as a curiosity instead of a refutation. A number you produce and then do
+   not explain is a finding you have decided to ignore.
+3. **For any rule that HIDES data, dry-run it against its own rejects.** The dry run listed the 38
+   it would supersede and nothing about the 179 it refused. Had it printed a sample of both, "keeps
+   Adopt Substitute, hides Third Reading" would have been visible in one screen. A destructive or
+   concealing rule should be reviewed by what it removes AND by whether its rejects look like the
+   things it accepted.
+
+Cost and recovery: caught within minutes because the apply output was actually read rather than
+skimmed for the success line — the `#0` URLs were visible in it. Recovery was cheap only because the
+design was non-destructive: nothing was deleted, the marking table is separate from `votes`, and
+un-hiding was a `DELETE` of 17 marking rows. **Build the reversal path before the forward path when
+the operation conceals evidence** — the `--prune` mode that fixed this had to be written after the
+fact, under pressure, and should have existed first.
+
+Postscript on the process: the two rulings behind this rule were the owner's to make. He was asked,
+did not answer, and the work proceeded on stated assumptions — which was right. But "proceed under
+stated assumptions" raises the bar on verification rather than lowering it, and that is the part
+that slipped.

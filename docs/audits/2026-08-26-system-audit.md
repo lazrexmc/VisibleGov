@@ -79,14 +79,32 @@ substance of the finding:
 - **The cited example was wrong in its details.** SB 68's duplicate is the **2019-05-13** vote
   (25-8), not a 2025 29-5 vote.
 
-**What is actually true, and now shipped:** of the 217 fingerprint-matched groups, **38** survive a
-rule that requires the source itself to point at one specific vote — same adapter, same bill,
-chamber and day, byte-identical cast list of at least 5 casts, identical non-null result, and an
-identical `source_url` *carrying a fragment* (`…RDay250220426-442.pdf#430.2`). Every one of the 38
-is a pair of LegiScan `roll_call` records on one anchored MO Senate journal location; 25 of the 38
-pairs differ only by `http://` vs `https://`. The other 179 groups are left untouched, with the
-reason recorded: 147 point at genuinely different source URLs, 19 share only a whole-document URL,
-13 rest on a cast list too small to prove anything.
+**What is actually true, and now shipped — after the first version of the fix hid 17 real votes.**
+That first rule confirmed 38 pairs, was applied to production, and **17 of the 38 were false**. Both
+causes were the same error, accepting a discriminator without checking that it discriminates:
+
+- **`#0` is not an anchor** (4 pairs). The rule required the `source_url` to carry a `#fragment`,
+  since a bare journal PDF covers a whole sitting. But LegiScan emits `…RDay02010981-89.pdf#0` when
+  it has no page location at all — satisfying "has a fragment" while carrying exactly the evidence
+  the rule had just rejected as insufficient.
+- **A journal anchor is a PAGE pointer, and a page holds several roll calls** (13 pairs). The MO
+  Senate adopts a substitute and then third-reads the same bill the same day; both pass with the
+  identical tally from the identical members and both rows carry the same page anchor. Only the
+  `question` separates "Senate: Adopt Substitute" from "Senate: Third Reading" — and the rule never
+  compared it, even though the verification pass had measured that 31 of 57 candidate pairs
+  disagreed on question and did not act on the number.
+
+Caught by reading the apply output rather than skimming it for the success line. Recovery was cheap
+because the design is non-destructive: nothing was deleted, `votes` was never modified, and
+un-hiding was a delete of 17 rows from the marking table via a new `--prune` mode that re-derives
+the rule and removes any pairing it no longer confirms. PLAYBOOK lesson 53.
+
+**The corrected rule confirms 21 pairs**, all LegiScan `roll_call` records on one anchored MO Senate
+journal location, agreeing on bill, chamber, day, result AND question, with at least 5 casts. Live
+after the prune: `vote_duplicates` holds 87 rows — 66 cross-source from 0022, 21 same-source — and a
+re-run is a clean no-op (0 to write, 0 to prune). The refused groups are left untouched with reasons
+recorded: 147 point at genuinely different source URLs, 19 share only a whole-document URL, 13 rest
+on a cast list too small to prove anything, plus the question and `#0` rejects above.
 
 ### D2 — Signal death on always-partial sources — **FIXED 2026-08-26, live-verified**
 `us-congress` 121/121 runs `partial`, `us-senate` 121/121, `scheduled-summaries` 6/6. Every
@@ -179,7 +197,7 @@ found (the classifier already existed and simply never reached the run row) and 
 forward-only probe window needed. *Touched `src/lib/errors.js`, `src/cli/ingest.js`,
 `scripts/scheduled-ingest.js`; `tests/absent-vs-failure.test.js` is new.*
 
-**2. ~~Fix D1 (duplicates)~~ — BUILT 2026-08-26, dry-run verified; the `--apply` is Lance's step.**
+**2. ~~Fix D1 (duplicates)~~ — DONE 2026-08-26 (applied by Lance), then CORRECTED the same hour.**
 `src/lib/same-source-dedup.js` (the rule, 23 tests) and `scripts/dedup-same-source-votes.mjs`
 (dry-run by default). See D1 above for what re-measurement corrected. The two open design questions
 were ruled on rather than left blocking:

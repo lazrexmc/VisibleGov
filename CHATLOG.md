@@ -5969,3 +5969,40 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   23 tests encoding each real confounder. Suite **2,668 pass / 0 fail** (was 2,645). Nothing
   deleted, nothing applied; no legislator can lose a vote since the cast lists are identical.
   PLAYBOOK lesson 52: identical payloads are not identical identity.
+- **The same-source dedup was applied by Lance — and 17 of its 38 pairs were WRONG, hiding real
+  votes; caught and fully reversed within the hour** (2026-08-26). He ran `--apply` and the output
+  printed `{"mode":"apply","superseded_rows_written":38}`. Reading that output rather than skimming
+  it for the success line is what caught this: several of the listed URLs ended in **`#0`**, and the
+  rule had just refused 19 other groups for having no usable anchor. Investigating found two
+  false-positive classes, both the same error — accepting a discriminator without checking that it
+  discriminates. **(1) `#0` is not an anchor** (4 pairs): LegiScan emits `…RDay02010981-89.pdf#0`
+  when it has no page location at all, which satisfies "has a fragment" while carrying exactly the
+  evidence the rule had already rejected as insufficient. **(2) A journal anchor is a PAGE pointer,
+  and a page holds several roll calls** (13 pairs): the MO Senate adopts a substitute and then
+  third-reads the same bill the same day, both passing with the identical tally from the identical
+  members, both rows legitimately carrying the same anchor — only `question` separates "Senate:
+  Adopt Substitute" from "Senate: Third Reading", and the rule never compared it. Worse: the
+  verification pass had MEASURED that 31 of 57 candidate pairs disagreed on question and that number
+  was read as a curiosity instead of a refutation. This is PLAYBOOK lesson 52's own scenario —
+  written the same hour — and the freshly-written lesson did not prevent it, which is lesson 53.
+  **Fix:** `urlPinsOneVote` now rejects `#0`/`#00`/`#0.0`; `confirmDuplicateGroup` requires an
+  identical, PRESENT `question`; and a new `--prune` mode re-derives the rule over the whole database
+  and deletes any pairing THIS rule wrote that it no longer confirms (scoped by reason prefix so
+  0022's cross-source rows can never be caught). Ran `--apply --prune`: **17 stale rows deleted, 0
+  written.** Live now: `vote_duplicates` **104 → 87** (66 cross-source + 21 same-source), **0 pairs
+  with a degenerate anchor, 0 with differing questions**, and a re-run reports 0 to write / 0 to
+  prune. Recovery was cheap only because the design was non-destructive — `votes` was never touched
+  and un-hiding was a delete of marking rows — but the reversal path had to be written after the
+  fact under pressure, and should have existed first. 27 dedup tests (4 new, each pinning a real
+  false-positive case); suite **2,672 pass / 0 fail**.
+- **Lance: "It appears we need to take a very deep sug-agent driven audit in the full system" +
+  "Fable5 and Ultra enabled"** → launched a Workflow-driven adversarial audit across 8 dimensions
+  (data integrity, trust model, security/RLS, public site, ingestion, test quality, docs-vs-reality,
+  spend controls). Every finding faces TWO independent skeptics on different lenses (correctness and
+  materiality), each instructed to refute and to re-measure rather than accept quoted evidence, and
+  survives only if neither kills it; then a completeness critic hunts what no dimension examined, and
+  a synthesiser writes the report. Agents run strictly read-only — no `--apply`, no billed API calls,
+  no `schtasks`, no `source .env` — and are briefed on this project's own measurement traps
+  (PostgREST's silent 1,000-row cap, docs as non-evidence, identical payloads not proving identity).
+  The adversarial structure is a direct response to today's record: three audit claims wrong (D2's
+  premise, D1's count/method/example/payoff) and one fix that hid real data.

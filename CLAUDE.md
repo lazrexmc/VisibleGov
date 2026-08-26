@@ -57,7 +57,10 @@ accountable with real information instead of spin.
 > such record" from "we got no answer", and probe one record you already hold as a canary (51,
 > 2026-08-26); and identical payloads are not identical identity — a legislature voting the party
 > line twice emits byte-identical records, so make the SOURCE prove sameness via its own record
-> pointer (52, 2026-08-26).
+> pointer (52, 2026-08-26); and writing the lesson does not mean obeying it — lesson 52's own rule
+> shipped an hour later and hid 17 real votes, because "has a #fragment" was tested but "the
+> fragment means something" was not, and a measurement that contradicted the rule (31 of 57 pairs
+> disagreed on question) was read and not acted on (53, 2026-08-26).
 
 > **Historical status snapshots — SUPERSEDED 2026-08-23, kept for the record only; resume from
 > `TODO.md`'s RESUME HERE, never from here.** **The site is DEPLOYED and
@@ -119,13 +122,13 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-52 lessons as of 2026-08-26 — lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
+53 lessons as of 2026-08-26 — lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
 H2s, so `grep -c '^## Lesson'` undercounts at 37; the "Index of lessons" table at the top of the
 file is the live count — several
 earned the hard way in THIS repo; lessons 37-38 were the newest as of 2026-08-10 — diagnose a
 silently-dead background task from its on-disk artifacts and resume from journaled state, and park
 a failing structural CLASS with written reasons rather than paying per-instance retries — and
-lessons 51-52 (2026-08-26) are the newest now, summarized in the banner above), `TODO.md` (the RESUME HERE block at the very top first — the NOW
+lessons 51-53 (2026-08-26) are the newest now, summarized in the banner above), `TODO.md` (the RESUME HERE block at the very top first — the NOW
 section below it is a long historical record where most entries are already resolved, so do NOT
 read the top NOW entry as "the current focus"),
 `docs/CONTROLLER_BRIEFING.md` (deep catch-up compiled from the full project history — carries its
