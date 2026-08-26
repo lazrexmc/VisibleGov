@@ -12,6 +12,11 @@ reconciliation flags, 33 migrations (all applied), 2,630 tests passing.
 > classifier already existed — it just never reached the durable run row) and D1's measurement,
 > method, cited example, and claimed flag relief. Both corrections are recorded inside their own
 > entries rather than quietly edited away. Suite is 2,668 passing as of the D1 build.
+>
+> **This audit was superseded the same day by a deeper adversarial one** — 8 dimensions, every
+> finding facing two independent skeptics instructed to refute it: 28 raised, **19 refuted, 9
+> survived**. It found a CRITICAL defect this audit missed entirely: 693 vote rows attached to
+> bills that never held them. See the entry at the end of this file.
 
 ---
 
@@ -252,3 +257,52 @@ What the project does **not** have is contact with a reader. Every defect above 
 largest open question — whether 23% summary coverage matters — cannot be answered from the
 database. That answer comes from putting `visiblegov.us` in front of five people and watching
 where they stall.
+
+---
+
+## Superseding audit, same day: 693 misattributed votes (RESOLVED)
+
+This document's audit ran solo. A second audit ran the same afternoon as an 8-dimension adversarial
+workflow — 66 agents, every finding facing two independent skeptics on different lenses (correctness
+and materiality), each instructed to refute rather than confirm and to re-measure rather than accept
+quoted evidence. **28 findings raised, 19 refuted, 9 survived.** The refuted:survived ratio is worth
+noting on its own: a review that confirms most of what it raises is not reviewing.
+
+Its headline finding is one this document missed completely, and it outranked everything here.
+
+**The defect.** LegiScan's 2023 MO dataset mints a separate `roll_call_id` per bill for one physical
+House floor vote. Three HB 10 roll calls were each stored 232 times against 232 different bills,
+with full cast lists — because `source_key` is the provider's roll_call_id, which is genuinely
+unique, so `insertIfAbsent` stored every copy without error, warning, or failed parse.
+
+- **693 phantom vote rows, 112,728 redundant casts** (7.5% of the entire cast corpus)
+- **196 bills displayed ONLY votes never cast on them**; 47 carried a published summary and sat in
+  the public `/bills` index
+- Per-legislator 2023 MO House totals inflated ~2.3x
+
+Independently re-verified before any code was written: each of the three documents held 232 rows
+across 232 distinct bills, all sharing ONE cast signature, and every copy's own question named
+HB 10 ("House: BILLS IN CONFERENCE - CCS SCS HCS HB 10").
+
+**Resolved 2026-08-26.** Migration `0033_retracted_votes` (a tombstone preserving the COMPLETE cast
+list, so any retraction replays backwards) applied by Lance; `scripts/retract-misattributed-votes.mjs`
+run with `--limit 1` first, verified end to end, then the remaining 692.
+
+| | before | after |
+|---|---|---|
+| `votes` | 10,879 | **10,186** |
+| `vote_casts` | 1,503,954 | **1,391,226** |
+| Bills showing only phantom votes | 196 | **0** |
+| Each fan-out document | 232 rows / 232 bills | **1 row, on HB 10** |
+| Rep. Louis Riggs, 2023 | 1,182 yea | **489 yea / 37 nay** |
+
+693 tombstones written, 112,728 casts preserved, 0 orphaned casts, aggregates refreshed.
+
+**Not retracted, deliberately:** 4 groups where one roll call hangs off two `bills` rows carrying
+the SAME identifier — that is TODO 25's duplicate-session defect, and retracting a vote would be the
+wrong repair — and 1 genuinely ambiguous case (`006.004.pdf`, claimed by both HB 1979 and SB 903
+with different questions) that needs review against the source document.
+
+**Still open from the 9 survivors:** the 0-4 cast MO House rows (a roster gap, duplicating the
+complete LegiScan copy on the same page), profile vote rows discarding date and question, and four
+docs-vs-reality staleness findings.

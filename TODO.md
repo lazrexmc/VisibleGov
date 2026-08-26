@@ -156,7 +156,8 @@ text (ingestion) remain from earlier inventories. Waves are built from LIVE unat
   contain its own latest commit hash). Suite 2,300+ green (`node --test` in a clean shell for
   the exact count — see the `.env` trap below; last full run 2,389/0 after the parens-gate fix,
   commit 92816ff).
-- Migrations: **33 files on disk (0001-0032 + 0018a), ALL applied live.** Nothing is awaiting an
+- Migrations: **34 files on disk (0001-0033 + 0018a), ALL applied live** (`0033_retracted_votes.sql` applied by Lance 2026-08-26; the 693-row retraction ran the same hour).
+- ~~Migrations: 33 files on disk (0001-0032 + 0018a), ALL applied live.~~ Nothing is awaiting an
   apply (0030/0031 verified live 2026-08-05; `0032_vote_date_provenance.sql` applied by Lance
   2026-08-23, and the 2024 MO House re-ingest ran the same hour — 185 votes + 30,105 casts).
   CLAUDE.md trap #2 carries the same statement.
@@ -1577,3 +1578,29 @@ draft — see NOW.
   among them), 5 re-flagged on real second issues the parens failure had masked. Zero
   gate-mechanics flags in the 9 waves after the fix.
 - **`npm run status` "summaries draft/flagged" gauge misleading since drain campaign (2026-08-09, ~~STILL OPEN~~ RESOLVED 2026-08-16, commit c9b3560 — `scripts/data-status.js` now counts `status=eq.draft` and prints "summaries retired (superseded)" on its own line):** it counts `summaries?status=neq.published`, which includes the drafts retired to 'rejected' by --replace-drafts — reads 478 when actual open drafts are 359 (as of 2026-08-10). Fix: count `status=eq.draft` (and maybe show rejected separately). One-line change in scripts/data-status.js; PLAYBOOK lesson 36 documents the class.
+
+- **(2026-08-26) RESOLVED — 693 misattributed vote rows retracted; the single worst public-trust
+  defect the project has had.** Found by an 8-dimension adversarial audit (66 agents; 28 findings
+  raised, **19 refuted by skeptics, 9 survived**), independently re-verified before any code was
+  written. **LegiScan's 2023 MO dataset mints a separate `roll_call_id` per bill for ONE physical
+  House floor vote** — three HB 10 roll calls each stored 232 times against 232 different bills with
+  full cast lists. Our ingest was working as designed: `source_key` is the provider's roll_call_id,
+  genuinely unique, so `insertIfAbsent` wrote all 232 with no error, warning, or failed parse.
+  **196 bills displayed ONLY votes never cast on them, 47 with published summaries in the public
+  `/bills` index**; per-legislator 2023 totals inflated ~2.3x. A visitor reading HB 114 ("Reduces
+  the tax on diapers and feminine hygiene products") saw a 155-2 conference committee vote on an
+  appropriations bill. **Fixed:** migration `0033_retracted_votes` (tombstone preserving the COMPLETE
+  cast list, so any retraction replays backwards) + `scripts/find-misattributed-votes.mjs` (read-only
+  manifest with per-group confidence) + `scripts/retract-misattributed-votes.mjs` (tombstone written
+  and VERIFIED before any delete; `--limit 1` proved end to end first). Live: votes 10,879 -> **10,186**,
+  casts 1,503,954 -> **1,391,226**, bills showing only phantom votes 196 -> **0**, each fan-out
+  document now 1 row on HB 10, Rep. Riggs 2023 1,182 yea -> **489 yea / 37 nay**, 0 orphan casts,
+  aggregates refreshed. **The guard is source-family scoped and that scoping IS the job** — the naive
+  "same source_url + different bill_id" rule flags 1,101 votes of which only 693 are real (408 false
+  positives, 37%), because a MO Senate journal PDF legitimately prints every roll call of a sitting;
+  granularity is DECLARED per URL shape in `src/lib/source-url-granularity.js`, unknown shapes
+  defaulting to permissive. PLAYBOOK lesson 54.
+  **STILL OPEN, deliberately not retracted:** 4 groups where one roll call hangs off two `bills` rows
+  with the SAME identifier (TODO 25's duplicate-session defect — merging the bill rows is the right
+  repair, not retracting a vote), and 1 ambiguous case (`006.004.pdf`, claimed by both HB 1979 and
+  SB 903 with different questions) needing review against the source PDF.

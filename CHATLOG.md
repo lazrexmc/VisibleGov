@@ -6006,3 +6006,37 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   (PostgREST's silent 1,000-row cap, docs as non-evidence, identical payloads not proving identity).
   The adversarial structure is a direct response to today's record: three audit claims wrong (D2's
   premise, D1's count/method/example/payoff) and one fix that hid real data.
+- **Lance applied migration 0033 and approved the run: 693 misattributed vote rows RETRACTED**
+  (2026-08-26). The deep adversarial audit's critical finding, independently re-verified by me before
+  a line of code was written: LegiScan's 2023 MO dataset mints a separate `roll_call_id` per bill for
+  ONE physical House floor vote, so three HB 10 roll calls sat in the database 232 times each against
+  232 different bills, each with a full 162-cast list. The ingest had no bug — `source_key` is the
+  provider's roll_call_id and it IS unique, so `insertIfAbsent` faithfully stored every copy with no
+  error, no warning, no failed parse. **196 bills displayed ONLY votes never cast on them; 47 carried
+  a published summary and sat in the public `/bills` index.** HB 114, "Reduces the tax on diapers and
+  feminine hygiene products," publicly showed a 155-2 conference committee vote on an appropriations
+  bill. **Lance's own pushback shaped the fix** — he rejected my proposed universal "same source_url +
+  different bill_id" guard as needing source-family awareness, and Codex independently said the same.
+  Measured: the naive rule flags **1,101 live votes of which only 693 are real — 408 false positives,
+  37%**, because a MO Senate journal PDF is one day's sitting and legitimately prints every roll call
+  taken across every bill considered. Inference from the payload fails too, in the dangerous
+  direction: "many distinct questions means container" waves the real fan-out through, since its 232
+  copies carry 2 question variants. So granularity is DECLARED per URL shape
+  (`src/lib/source-url-granularity.js`), with unknown shapes defaulting to CONTAINER — the permissive
+  answer, because wrongly calling a URL per-vote DELETES a real recorded vote. **Codex's three
+  additions were better than my plan and all three shipped:** a tombstone rather than a bare delete,
+  a full manifest before anything is touched, and per-document confidence so `046.021.pdf`'s weaker
+  basis (LegiScan-attributed, not independently corroborated) is preserved rather than flattened.
+  Ran `--limit 1` first: HB 114's row tombstoned with all 162 casts, **and the tally reconstructed
+  from the preserved casts as 155-2, exactly matching the stored result** — proof the tombstone is
+  replayable, not merely explanatory — vote and casts gone, kept row intact. Then the remaining 692.
+  **Live after: votes 10,879 -> 10,186, casts 1,503,954 -> 1,391,226, bills showing only phantom
+  votes 196 -> 0, each fan-out document 1 row on HB 10, 693 tombstones holding 112,728 casts, 0
+  orphan casts.** Aggregates refreshed; Rep. Louis Riggs's 2023 record went from a published 1,182
+  yea to **489 yea / 37 nay** — exactly the real record the audit predicted, independent confirmation
+  the retraction was correct and complete. Two of my own measurement bugs caught along the way, both
+  the same shape: `(data || [])` around a query that can ERROR silently turns a broken query into a
+  confident zero (a wrong table name reported "0 open reconciliation flags"; `selectAll`'s default
+  `orderBy: 'id'` against a view keyed on `cast_id` reported "0 feed rows"). PLAYBOOK lesson 54
+  records the provider-id trap and that hygiene rule. Deliberately NOT retracted: 4 duplicate-bill-row
+  groups (TODO 25) and 1 ambiguous case needing source review. Suite 2,690 pass / 0 fail.

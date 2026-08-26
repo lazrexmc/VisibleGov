@@ -76,6 +76,7 @@ with offset/limit or jump by grep.
 | 51 | 08-26 | A status word that is always the same value carries zero bits; probe one record you already hold |
 | 52 | 08-26 | Identical payloads are not identical identity; prove sameness from the source's own record pointer |
 | 53 | 08-26 | Writing the lesson does not mean obeying it; enumerate the discriminators BEFORE applying |
+| 54 | 08-26 | A provider's record id is not an identity; N ids can name one physical event |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 — lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1276,3 +1277,53 @@ Postscript on the process: the two rulings behind this rule were the owner's to 
 did not answer, and the work proceeded on stated assumptions — which was right. But "proceed under
 stated assumptions" raises the bar on verification rather than lowering it, and that is the part
 that slipped.
+
+## Lesson 54 — An upstream provider's record id is not an identity, and `insertIfAbsent` on it will faithfully store the same event N times (2026-08-26)
+
+For months the live site showed 196 Missouri bills whose ENTIRE public vote list belonged to a
+different bill — 47 of them with published summaries, sitting in the `/bills` index. A visitor
+reading HB 114, "Reduces the tax on diapers and feminine hygiene products," saw a 155-2 conference
+committee vote on HB 10, an appropriations bill. Per-legislator 2023 totals were inflated 2.3x
+(one member published as 1,182 yea when his real record was 489).
+
+Cause: LegiScan's 2023 MO dataset mints a **separate `roll_call_id` per bill** for one physical
+House floor vote. Three HB 10 roll calls were each carried under 232 different ids. Our ingest was
+working exactly as designed — `source_key` is the provider's roll_call_id and it is genuinely
+unique, so `insertIfAbsent` dutifully wrote 232 rows with 232 full cast lists. **No error, no
+warning, no failed parse.** 693 phantom vote rows and 112,728 redundant casts, silently.
+
+The generalizable trap: **a provider's identifier answers "is this the same RECORD I gave you
+before", never "is this the same EVENT in the world".** Any dedup keyed on it inherits the
+provider's identity model, including its bugs. Ask separately what the real-world event is and
+what independently identifies it. Here that was the roll-call document itself — one PDF is one
+physical vote — and the vote's own question text, which named HB 10 in all 232 copies.
+
+Three mechanics worth carrying:
+
+1. **The correct guard is source-family scoped, and the scoping is the whole job.** The obvious
+   rule — "same source_url on a different bill_id is a defect" — flags 1,101 live votes of which
+   only 693 are real: 408 false positives, because a MO Senate journal PDF is one day's sitting and
+   legitimately prints every roll call taken that day across every bill. Granularity per URL shape
+   must be DECLARED, and inference from the payload fails in the dangerous direction: "many
+   distinct questions means container" waves the real fan-out through, since its 232 copies carry 2
+   question variants. Unrecognized shapes default to the permissive answer, because the two errors
+   are not symmetric — wrongly calling a URL per-vote deletes a real recorded vote.
+2. **Retract, do not suppress, when the RELATIONSHIP is wrong.** A duplicate-marking table hides a
+   redundant copy of a real vote on the right bill. It is the wrong tool when the `bill_id` itself
+   is false: the row would still assert, in the base table, that a bill held a vote it never held,
+   queryable by anything that does not join the exclusion perfectly. But retract to a **tombstone
+   carrying the full cast list**, never a bare delete — that is what makes the operation replayable
+   backwards if the rule proves wrong, and on this same day a rule DID prove wrong (lesson 53).
+3. **Adversarial review earns its cost on exactly this shape of defect.** This was found by an
+   8-dimension audit where every finding faced two independent skeptics instructed to refute it and
+   re-measure rather than trust quoted evidence: 28 findings raised, **19 refuted, 9 survived**. A
+   solo audit of the same system that morning had missed it entirely and had instead produced three
+   confidently-wrong claims. The refuted:survived ratio is the point — a review process that
+   confirms most of what it raises is not reviewing.
+
+Postscript on verification hygiene, which failed three times in one day and each time produced a
+false reading: `(data || [])` around a query that can ERROR silently converts a broken query into a
+confident zero. It reported "0 open reconciliation flags" (wrong table name), then "0 feed rows for
+this legislator" (`selectAll` defaults to `orderBy: 'id'` and the view's key is `cast_id`). **Check
+the error before using the data, every time** — a swallowed error does not look like a bug, it looks
+like a finding.
