@@ -73,6 +73,7 @@ async function main() {
     legislators, persons, personLinks, terms,
     sumPublished, sumDraft, sumStale, sumRejected, sumNotPublished, glossPublished, glossTotal,
     identityOpen, reconOpen,
+    voteDuplicates, retractedVotes,
   ] = await Promise.all([
     count('vote_casts?select=id'), count('votes?select=id'), count('bills?select=id'),
     count('bill_texts?select=id'), count('bill_sponsors?select=id'),
@@ -82,6 +83,7 @@ async function main() {
     count('glossary_terms?status=eq.published&select=id'), count('glossary_terms?select=id'),
     count('identity_flags?resolved=is.false&select=id'),
     count('vote_reconciliation_flags?resolved=is.false&select=id'),
+    count('vote_duplicates?select=id'), count('retracted_votes?select=id'),
   ]);
 
   // Glossary needs a breakdown, not just a total: the gap between published and total is dominated
@@ -279,6 +281,17 @@ async function main() {
   console.log(`  summaries retired ............ ${sumRejected}`);
   console.log(`  glossary awaiting review ...... ${n(glossDraftMappable)}`);
   console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (curation backlog, not errors)`);
+
+  // REPAIR LEDGER (added 2026-08-26). `votes` alone stopped telling the whole truth the day rows
+  // began being hidden and removed: 714 vote rows were RETRACTED as misattributed (attached to
+  // bills that never held them) and 213 are SUPERSEDED (a redundant copy of a real vote, hidden but
+  // never deleted). Without these two lines a fresh session reads `votes` and has no idea either
+  // number exists. The two are NOT interchangeable and the distinction is the whole point:
+  // superseded = right bill, redundant row, recoverable by deleting a marking row.
+  // retracted   = WRONG bill, row deleted, recoverable only from the tombstone's preserved casts.
+  console.log('\nREPAIR LEDGER  (what has been hidden or removed, and why it is recoverable)');
+  console.log(`  superseded (hidden, not deleted) ${n(voteDuplicates)}  <- vote_duplicates; public views exclude them`);
+  console.log(`  retracted (deleted, tombstoned) . ${n(retractedVotes)}  <- retracted_votes; full cast list preserved`);
 
   console.log('\nINGESTION FRESHNESS');
   for (const f of freshness) {

@@ -229,6 +229,31 @@ The glossary is the one asymmetric case: **8 of 116 published glossary terms car
 
 Say **"~1,850 published entries of ~7,300 terms"** — and say the date.
 
+### 7. `vote_duplicates` vs `retracted_votes` — hidden vs removed, and why the difference matters
+
+Both exist because a vote row turned out not to belong where it was. They are **not**
+interchangeable, and choosing the wrong one leaves a false claim in the database.
+
+| | `vote_duplicates` (213) | `retracted_votes` (714) |
+|---|---|---|
+| The defect | a REDUNDANT copy of a real vote, on the RIGHT bill | the `bill_id` is WRONG — the bill never held this vote |
+| What happens to the row | stays in `votes`; public views exclude it | **deleted** from `votes`, casts deleted too |
+| How it is recorded | a marking row naming canonical + superseded | a tombstone carrying the COMPLETE cast list as jsonb |
+| How to undo | delete the marking row | replay the tombstone's preserved casts |
+| Migration | 0022 | 0033 |
+
+**Why hiding is wrong for a misattribution:** a suppressed row still asserts, in the base table,
+that a bill held a vote it never held — queryable by anything that does not join the exclusion
+perfectly. The relationship has to go, not just its visibility.
+
+**Why a tombstone rather than a bare delete:** a retraction rule can be wrong, and on 2026-08-26 one
+was — an earlier dedup rule was applied and 17 of its 38 pairings were false, hiding real votes.
+Recovery was possible only because that design was non-destructive. The tombstone preserves every
+cast so a retraction replays backwards row-for-row.
+
+`npm run status` prints both under **REPAIR LEDGER**. `votes` alone stopped telling the whole truth
+the day rows began being hidden and removed.
+
 ### 6. Materialized views are snapshots, not tables
 
 `public_position_totals`, `public_party_alignment` and `public_party_position_totals` are **materialized views** — frozen aggregates that only match the live tables after a refresh runs.

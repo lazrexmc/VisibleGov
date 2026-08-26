@@ -283,10 +283,31 @@ Re-registration is Lance's step — an agent never runs `schtasks`. The ingestio
   2026-07-31**, additions since have kept landing in the same commits as the work they document.
 - `CHATLOG.md`, `TODO.md`, `PLAYBOOK_DELTA.md`, `README.md`, `CLAUDE.md` — the decision trail.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` — the approved designs.
-- `supabase/migrations/` — the schema, 0001–0032 (plus the out-of-sequence `0018a_refresh_timeout.sql`),
-  33 files total, **all applied live** (0001–0031 +0018a verified 2026-08-05;
-  `0032_vote_date_provenance.sql` applied by Lance 2026-08-23 and confirmed by a live column
-  check). `TODO.md`'s RESUME HERE block is the live source of truth if this drifts again.
+- `supabase/migrations/` — the schema, 0001–0034 (plus the out-of-sequence `0018a_refresh_timeout.sql`),
+  **35 files total, all applied live** (0001–0031 +0018a verified 2026-08-05; `0032` applied
+  2026-08-23; `0033_retracted_votes.sql` and `0034_bill_page_indexes.sql` applied 2026-08-26).
+  `TODO.md`'s RESUME HERE block is the live source of truth if this drifts again.
+- **Vote-integrity toolchain (built 2026-08-26, after the adversarial audit).** Read
+  `src/lib/source-url-granularity.js` FIRST — it is the shared judgement about what a `source_url`
+  proves, and both the detector and the guard depend on it:
+  - `src/lib/source-url-granularity.js` — declares, per URL shape, whether a url names ONE vote or
+    is a CONTAINER holding many. Unknown shapes default to CONTAINER (the permissive answer).
+    Also holds `assessSessionDateViolation` (a vote cannot predate its own session) and
+    `identifierFromQuestion`.
+  - `src/lib/same-source-dedup.js` — when two rows from the SAME adapter are one vote. Deliberately
+    strict; its comments argue each condition against the real case that defeated the weaker rule.
+  - `scripts/find-misattributed-votes.mjs` — READ ONLY. Emits a full retraction manifest with a
+    per-group confidence rating. `--plan-json` prints the exact rows for another tool to execute.
+  - `scripts/retract-misattributed-votes.mjs` — dry-run by default; refuses unless 0033 is applied;
+    tombstones and VERIFIES before deleting anything.
+  - `scripts/dedup-same-source-votes.mjs` — dry-run by default; `--prune` re-derives the rule and
+    removes pairings it no longer confirms (this exists because an earlier version of the rule was
+    applied and 17 of its 38 pairs were false).
+  - `scripts/preflight.mjs` — SessionStart hook; checks required MCP servers AND the out-of-process
+    binaries plugins need. See `docs/MCP_REQUIREMENTS.md`.
+  - `src/lib/pg.js` + `scripts/verify-pg.mjs` — a direct-Postgres READ-ONLY fallback, currently
+    INERT (no `SUPABASE_DB_URL`, and no database password has ever been created). Kept because MCP
+    auth drops; never for writes, never in `site/`.
 - `tests/fixtures/` — captured real payloads (incl. the LegiScan API manual PDF the status codebook
   was extracted from, and the congress-legislators excerpts).
 

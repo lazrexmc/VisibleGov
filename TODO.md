@@ -4,9 +4,132 @@
 
 ---
 
-## ⏱ RESUME HERE — verified live 2026-08-26, read this block first
+## ⏱ RESUME HERE — verified live 2026-08-26 (end of session), read this block first
 
-### 2026-08-26 — the day the adversarial audit ran. Read this before anything below it.
+**Lance is AFK for an extended break. This block is written so a cold session can resume without
+reading anything else first.** Everything below was measured against the live database at the end
+of 2026-08-26, not remembered.
+
+### Live state
+
+| | |
+|---|---|
+| `votes` | **10,165** |
+| `vote_casts` | **1,389,888** |
+| published summaries | **1,112** (40 awaiting review) |
+| published glossary | **1,858** |
+| `vote_duplicates` (hidden, not deleted) | **213** |
+| `retracted_votes` (deleted, tombstoned) | **714** (114,066 casts preserved) |
+| open reconciliation flags | **382** |
+| migrations | **35 on disk (0001-0034 + 0018a), ALL APPLIED** |
+| tests | **2,714 pass / 0 fail** |
+| site | https://visiblegov.us (apex 200, `www` 301) |
+
+`npm run status` now prints a **REPAIR LEDGER** section with the superseded/retracted counts —
+added 2026-08-26 because `votes` alone stopped telling the whole truth once rows began being
+hidden and removed.
+
+### What 2026-08-26 was: an adversarial audit, and the repairs it forced
+
+An 8-dimension Workflow audit (66 agents; **28 findings raised, 19 refuted by skeptics, 9
+survived**) found one genuinely critical live defect, plus several smaller ones. All are now fixed.
+
+1. **713 vote rows retracted as misattributed.** LegiScan's 2023 MO dataset mints a SEPARATE
+   `roll_call_id` per bill for ONE physical House floor vote — three HB 10 roll calls were stored
+   **232 times each, against 232 different bills**, with full cast lists. The ingest had no bug:
+   `source_key` IS the provider's roll_call_id and each was unique, so `insertIfAbsent` stored every
+   copy silently. **196 bills displayed ONLY votes never cast on them; 47 had published summaries.**
+   A further **20** were votes dated before their own session began (special-session datasets
+   carrying regular-session roll calls), and **1** was resolved by Lance reading the source PDF.
+2. **Signal death fixed.** `us-congress` and `us-senate` had closed 121 of 121 runs `partial` while
+   perfectly healthy, because a probe window that deliberately overshoots counted every 404 as a
+   failure. Absence is now distinguished from failure, and the window re-probes the last known roll
+   call as a CANARY so a URL-structure change cannot masquerade as a quiet week.
+3. **126 thin `mo-house-xml` rows superseded** — stubs resolving 1 cast beside a complete 158-cast
+   LegiScan copy of the same roll-call document. 0022 could not pair them because it compares cast
+   lists and one cast never matches 158.
+4. **Profile pages were unreadable.** `renderVoteRow` never rendered the date or tally, and rendered
+   the question only for bill-less votes — so **369,063 rows across 1,048 legislators** looked like
+   repeats (one profile showed the same row 25 times for SB 724). Now renders question, date, tally,
+   and the source's own roll-call number. **Verified in a browser: 50/50 distinct rows, zero
+   duplicated.**
+5. **Two indexes** (`0034`) behind every bill page — both reads were sequential scans.
+
+### ⚠ Read `PLAYBOOK_DELTA.md` lessons 51-55 before touching vote data
+
+They are all from this one day and they are all about the same failure shape — a confident claim
+that measurement then contradicted:
+
+- **51** — a status word that never varies carries zero bits; probe a record you already hold.
+- **52** — identical payloads are not identical identity. A legislature voting the party line twice
+  emits byte-identical records.
+- **53** — writing the lesson does not mean obeying it. Lesson 52's own rule shipped an hour later
+  and **hid 17 real votes**, because "has a `#fragment`" was tested but "the fragment means
+  something" was not.
+- **54** — a provider's record id is not an identity.
+- **55** — a missing capability is a blocker to RAISE, not a fork to quietly take.
+
+**The single most useful habit for the next session: measure, THEN claim.** Three times this day a
+stated estimate was wrong by orders of magnitude and the measurement corrected it — "~49,900
+duplicate rows" was really **117**; "126 casts would be lost" was really **0** (compared by
+`legislator_id` instead of `person_id`); "identical cast lists prove duplication" was really ten
+real Senate votes. The measurements converged; the predictions did not.
+
+### Tooling that changed today (a fresh session inherits all of it)
+
+- **Supabase MCP is authorized and is the fastest path to the database.** Raw SQL, atomic guarded
+  transactions, and `get_advisors` — which is NOT reachable over REST and found the unindexed
+  `votes.bill_id`. See `docs/MCP_REQUIREMENTS.md`. **Standing rule in CLAUDE.md: an unauthorized MCP
+  is a blocker to raise, never a detour to take.**
+- **`scripts/preflight.mjs`** runs at SessionStart (`.claude/settings.json`) — checks required MCP
+  servers AND plugin binaries.
+- **`typescript-lsp`** + `typescript-language-server` 6.0.0 + `typescript@5` (workspace devDep, NOT
+  v7 — the Go rewrite ships no `tsserver.js`) + `jsconfig.json`. Caveat: `findReferences`
+  under-reports on a cold index; warm it or cross-check with grep.
+- **Permission allowlist** in `.claude/settings.json` (42 entries) for read-only MCP + routine git.
+  Deliberately excludes `node --env-file`, `python`, `execute_sql`, `apply_migration`.
+- **`src/lib/pg.js`** — an INERT direct-Postgres fallback. No `SUPABASE_DB_URL` and no database
+  password has ever been created, so it cannot connect. Kept because MCP auth drops.
+
+### OPEN — pick up here
+
+**Lance's decisions (nothing blocked on code):**
+1. **Cloudflare Web Analytics.** The only console error on the live site is the CSP blocking
+   Cloudflare's auto-injected `beacon.min.js`. Two paths, both fully specced 2026-08-26:
+   **(A) disable** — dashboard toggle, 2 minutes, no code; **(B) enable** — add
+   `https://static.cloudflareinsights.com/beacon.min.js` to `script-src` in `site/_headers`
+   (`connect-src 'self'` is already sufficient for automatic injection), update the CSP assertion in
+   `tests/site-modules.test.js` (it pins the header), and add a disclosure line to the trust page.
+   *Context: the audit's standing recommendation is that whether 23% summary coverage matters
+   CANNOT be answered from the database — it needs contact with readers.*
+2. **Summary coverage (audit D5)** — a decision, not a build. 1,112 published.
+
+**Buildable without a decision:**
+3. **`vote_date_provenance` is not exposed publicly** (audit D6). 185 votes carry a derived date
+   with a stored receipt, and `public_votes` does not list the column — so the site serves those
+   dates without the action they were derived from. Needs a small migration + a render. **This is a
+   real trust-model gap**: a fact whose receipt the reader cannot see.
+4. **One `correct-data` run row stuck at `status=running` since 2026-08-03.** Cosmetic, one row.
+5. **382 reconciliation flags** — a human adjudication queue BY DESIGN. Do NOT run
+   `resolve-matched-reconciliation-flags.mjs` expecting a drain: measured, it resolves **0**.
+6. **`pyright-lsp` is installed and this repo has zero Python files.** Lance's call.
+
+**Known and deliberately NOT fixed:**
+- **535 thin vote rows stay public.** 383 are the SOLE record of their vote, and 375 of those are
+  committee actions where the tally is known but the per-member roster was never published. Hiding
+  them would delete real information.
+- **50,070 rendered rows share a bill+day+position with another** — every one a genuinely DIFFERENT
+  vote (measured: zero are the same vote twice). They now carry the source's own roll-call number,
+  which is what separates them. Cross-source pairing was investigated and is **impossible**: by
+  person, every LegiScan row matches every journal row with zero contradictions, which is exactly
+  the `ambiguous_tally_match` case the ingest already refuses.
+
+---
+
+## ⏱ Superseded — the mid-day 2026-08-26 block (kept for its detail; the block at the top of
+this file supersedes it)
+
+### 2026-08-26 (mid-day) — the day the adversarial audit ran.
 
 **Live numbers right now:** votes **10,166** · casts **1,390,051** · published summaries **1,112** ·
 `vote_duplicates` **87** · `retracted_votes` **713** · open reconciliation flags **382** ·

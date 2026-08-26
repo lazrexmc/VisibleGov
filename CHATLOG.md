@@ -6040,3 +6040,68 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   `orderBy: 'id'` against a view keyed on `cast_id` reported "0 feed rows"). PLAYBOOK lesson 54
   records the provider-id trap and that hygiene rule. Deliberately NOT retracted: 4 duplicate-bill-row
   groups (TODO 25) and 1 ambiguous case needing source review. Suite 2,690 pass / 0 fail.
+- **Session close 2026-08-26 — the rest of the day's work, and the AFK handoff.** Logged together
+  because the individual commits carry the detail; this is the connective tissue.
+  **126 thin `mo-house-xml` rows superseded.** Re-measured in SQL rather than trusting the earlier
+  JS figure of 150: of 661 thin rows (<=4 casts, 522 with zero), only **126** have decisive
+  evidence — an identical `source_url`, i.e. both rows citing the SAME roll-call document. These are
+  CROSS-source duplicates migration 0022 was built for but could not catch: 0022 pairs by comparing
+  cast lists, and the primary row resolves exactly ONE cast because mo-house-xml's roster holds one
+  real legislator. One cast never matches 158. **The safety check nearly stopped it wrongly** — "would
+  any cast lose its only record?" first answered *126, all of them*, because it compared
+  `legislator_id`. This project unifies humans by `person_id`; Mark Matthiesen has two legislator
+  rows, one per source. By person: 126/126 present on the survivor with the same position.
+  **SB 903 retracted — resolved by Lance reading the PDF.** The one case the detector deliberately
+  refused: `006.004.pdf` was claimed by both HB 1979 and SB 903, each row's question naming its own
+  bill, so the text could not arbitrate. Lance read it: *Session Day 6, Roll Call 4, 1/14/2016, HBs
+  FOR THIRD READING, ROWDEN (044), 5624H.02P, **HB 1979*** — SB 903 appears nowhere, and the printed
+  tally 141/16/6 matches the stored 141-16 exactly. The machine said precisely what evidence it
+  lacked; the human supplied it in one reading. Misattribution queue now empty.
+  **Profile pages made readable.** `renderVoteRow` never rendered `vote_date` or `result`, and
+  rendered `question` only for bill-less votes — so **369,063 rows across 1,048 legislators** looked
+  like repeats (Rusty Black's profile showed the SAME row 25 times for SB 724, which is 25 separate
+  amendment votes with tallies from 0-124 to 128-6). The data was never missing;
+  `public_vote_feed` already carried all three and `profile-model.js` sends no `select=`. Pure
+  render defect. Fixed, then measured again: 369,063 -> 50,070.
+  **Then the residual turned out not to be a dedup problem at all** — and this is the part worth
+  keeping. I proposed pairing "~49,900 unpaired cross-source duplicates". Measuring killed both
+  halves: only **146** bill/date groups contain both sources (117 unambiguous — off by ~400x), and
+  `distinct_votes_rendering_alike` = 50,070 with `same_vote_appearing_twice` = **0**. Every residual
+  row is a genuinely different vote. They collapse because the SOURCE's own label is generic — the
+  US Senate calls twenty separate vote-a-rama motions "On the Motion". Pairing is also *impossible*:
+  by person, every LegiScan row matches every journal row with ZERO contradictions, which is exactly
+  the `ambiguous_tally_match` case the ingest already refuses. **The fix was additive, not
+  subtractive**: `rollCallLabel()` renders the source's own identifier (`Roll call 283`,
+  `Journal p. 1876.2`), covering 49,737 of 50,070 and returning null for the rest rather than
+  guessing. Verified in a browser: **50/50 distinct, zero duplicated**.
+  *Browser-verification trap worth remembering:* the first check showed ZERO labels and looked like
+  the fix had failed. It had not — Pages serves JS as `max-age=14400, must-revalidate`, and the page
+  was running a cached build while `curl` from the shell returned the new one. **Browser
+  verification must cache-bust or it will confidently report a working fix as broken.**
+  **Lance's process corrections, both acted on.** (1) *"Claude needs to check the MCP connections we
+  require... rather than taking alternative routes"* — a fair hit: this session opened with a notice
+  that the Supabase MCP needed auth, never surfaced it, and instead built a ~400-line Postgres
+  client and asked him to rotate his database password to reach something one `/mcp` click away.
+  Shipped `scripts/preflight.mjs` (SessionStart hook, checks MCP servers AND plugin binaries),
+  `docs/MCP_REQUIREMENTS.md`, and a fourth standing rule in CLAUDE.md. PLAYBOOK 55.
+  (2) *"add all the items required to... proceed successfully rather than repeatedly stopping"* —
+  42-entry allowlist in `.claude/settings.json`, scanned from 3,903 real Bash calls. Deliberately
+  excludes `node --env-file`, `python`, `execute_sql`, `apply_migration`: those are arbitrary
+  execution or destructive, and the two hard stops today were the auto-mode classifier refusing bulk
+  DELETEs — which **earned its keep**, since the second refusal forced me to print a plan whose
+  reading caught a bug that would have deleted the CORRECT vote row and kept the misattributed one.
+  (3) *"are we just cycling back and forth or are all of these instances different datasets?"* —
+  fair challenge, answered from the ledger: six disjoint datasets, nothing retracted then
+  un-retracted. But the flip-flopping he sensed was real and it was in my CLAIMS, not the data: I
+  stated conclusions before measuring, three times, each wrong by orders of magnitude. Corrected
+  behaviour for the rest of the session: measure, then claim.
+  **Tooling:** `typescript-lsp` installed — and the install instruction was wrong twice. `npm
+  install -g typescript` now pulls **TypeScript 7**, the Go rewrite, which ships no `tsserver.js`;
+  and the server resolves `typescript` from the WORKSPACE, not globally. Correct form is
+  `typescript@5` as a devDependency. Also `jsconfig.json` (NodeNext, `checkJs` off).
+  **Handoff:** `npm run status` gained a REPAIR LEDGER section (superseded 213 / retracted 714) —
+  `votes` alone stopped telling the whole truth once rows began being hidden and removed.
+  `DISASTER_RECOVERY.md` had **zero** mention of 0033/0034, so a cold rebuild would have missed two
+  migrations; its table and count are fixed. CLAUDE.md's migration trap said "33 migrations" for
+  hours after 35 were applied — the third time that exact line has drifted, despite carrying its own
+  standing caveat about it. TODO's RESUME HERE rewritten for a cold start.

@@ -33,15 +33,20 @@ accountable with real information instead of spin.
 >    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
 >    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
 >    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
-> 2. **All 33 migrations (0001-0032 + 0018a) are APPLIED.** `0032_vote_date_provenance.sql`
->    was applied by Lance on 2026-08-23 and the LegiScan 2024 re-ingest ran the same hour: 185 MO
->    House roll calls that the source prints with the `0000-00-00` date sentinel are now stored
->    under a date derived from the one dated, tallied action in the bill's own history that prints
->    their exact AYES/NOES, each carrying that action in `votes.vote_date_provenance`; the other 90
->    stay refused. Older text saying any migration is "drafted, awaiting Lance" is stale.
+> 2. **All 35 migrations (0001-0034 + 0018a) are APPLIED** (verified live 2026-08-26). `0032`
+>    landed 2026-08-23 with the LegiScan 2024 re-ingest: 185 MO House roll calls the source prints
+>    with the `0000-00-00` date sentinel are stored under a date derived from the one dated, tallied
+>    action in the bill's own history that prints their exact AYES/NOES, each carrying that action
+>    in `votes.vote_date_provenance`; the other 90 stay refused. **`0033_retracted_votes.sql`**
+>    (tombstone for votes attached to a bill that never held them — preserves the full cast list, so
+>    a retraction replays backwards) and **`0034_bill_page_indexes.sql`** (the two indexes every bill
+>    page needs; without them both reads were sequential scans) both landed 2026-08-26. Older text
+>    saying any migration is "drafted, awaiting Lance" is stale.
 >    **Standing caveat: whoever drafts a migration edits this trap (and the migration count in the
->    Status paragraph below) in the same commit** — this trap read "nothing awaits an apply" while
->    0032 sat drafted on 2026-08-23, which is exactly the misdirection it exists to prevent.
+>    Status paragraph below) in the same commit** — this trap read "33 migrations" for hours after
+>    0033 and 0034 were applied on 2026-08-26, which is the third time it has drifted and exactly
+>    the misdirection it exists to prevent. If you are reading this and have just applied one, edit
+>    these two places NOW, before anything else.
 >
 > **Newer traps, pointers only — `PLAYBOOK_DELTA.md` lessons 43-50 (2026-08-21..23):** verify a
 > background runner's liveness by PID, never by command-line grep (43); a spend cap that only gates
@@ -62,7 +67,10 @@ accountable with real information instead of spin.
 > fragment means something" was not, and a measurement that contradicted the rule (31 of 57 pairs
 > disagreed on question) was read and not acted on (53, 2026-08-26); and an upstream provider's
 > record id is not an identity — LegiScan minted 232 roll_call_ids for ONE physical House vote,
-> so `insertIfAbsent` stored it 232 times against 232 bills with no error at all (54, 2026-08-26).
+> so `insertIfAbsent` stored it 232 times against 232 bills with no error at all (54, 2026-08-26);
+> and a missing capability is a blocker to RAISE, not a fork to quietly take — an unauthorized MCP
+> was routed around with a ~400-line Postgres client and a request to rotate a live credential, to
+> reach something one click away (55, 2026-08-26; `scripts/preflight.mjs` + `docs/MCP_REQUIREMENTS.md`).
 
 > **Historical status snapshots — SUPERSEDED 2026-08-23, kept for the record only; resume from
 > `TODO.md`'s RESUME HERE, never from here.** **The site is DEPLOYED and
@@ -113,9 +121,10 @@ real scheduled `pg_cron` ticks are succeeding; the site is now DEPLOYED and veri
 https://visiblegov.pages.dev (2026-08-05); **the custom domain `visiblegov.us` went LIVE
 2026-08-24** (apex 200, `www` 301 to apex — re-verified 2026-08-26) and is the primary address —
 see `TODO.md` RESUME HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
-the public site (`site/`), schema migrations (`supabase/migrations/`, **34 files on disk as of
-2026-08-26 (0001-0033 + 0018a), ALL applied** — `0032_vote_date_provenance.sql` was applied
-2026-08-23 and `0033_retracted_votes.sql` on 2026-08-26; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
+the public site (`site/`), schema migrations (`supabase/migrations/`, **35 files on disk as of
+2026-08-26 (0001-0034 + 0018a), ALL applied** — `0032_vote_date_provenance.sql` was applied
+2026-08-23; `0033_retracted_votes.sql` (the retraction tombstone) and
+`0034_bill_page_indexes.sql` (the two indexes every bill page needs) both on 2026-08-26; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
 anon vote-list timeout found on deploy night, both verified live 2026-08-05; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
 missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-backed tests (`tests/`,
 2,200+ green — run `node --test` for the exact current count; a senior engineering audit,
