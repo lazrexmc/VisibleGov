@@ -98,6 +98,26 @@ PLAYBOOK lessons **51-55** carry all of it.
    votes: two unpaired cross-source duplicates that migration 0022 never matched. Rendering the raw
    anchor would be meaningless to a visitor; pairing the cross-source rows would remove them
    outright. That is the next move here, and it is non-destructive (`vote_duplicates` marking).
+   **RESOLVED 2026-08-26 — and the plan in the sentence above was WRONG on both counts.** Measuring
+   before acting killed it: (a) only **146** bill/date groups contain both sources at all, 117 of
+   them 1:1 — the "~49,900 rows" estimate was off by ~400x; and (b) the residual contains **no
+   duplicates whatsoever** — `distinct_votes_rendering_alike` = 50,070, `same_vote_appearing_twice`
+   = 0. Every one is a genuinely different vote. Pairing was also checked and is impossible: for
+   SB 1019, comparing BY PERSON (legislator_id is useless across sources), every LegiScan row agrees
+   with every journal row at 31 casts with ZERO contradictions — all four combinations match equally
+   well, which is exactly the `ambiguous_tally_match` case `crossCheckAgainstPrimarySource` already
+   refuses, correctly.
+   **The actual fix was additive:** `rollCallLabel()` in `site/js/receipts.js` renders the SOURCE's
+   own roll-call identifier, parsed from the url already linked as "source" — `Roll call 283`
+   (US House), `Roll call 332` (US Senate), `Roll call 046.022` (MO House, verbatim so it matches
+   the PDF), `Journal p. 1876.2` (MO Senate). Covers 49,737 of 50,070 rows; returns null for the
+   333 with nothing derivable rather than guessing. **Verified live in a browser: Schnelting's page
+   went 48/50 distinct -> 50/50, zero duplicated**, with the two formerly-identical SB 1019 rows now
+   reading `Journal p. 1876.2` and `Journal p. 1876.3`.
+   *Operational note:* Pages serves JS with `Cache-Control: public, max-age=14400, must-revalidate`
+   + ETag, so a returning visitor can see the previous render for up to 4 hours before revalidating.
+   Bounded and self-healing, not a defect — but browser verification needs a cache-bust or it will
+   show the OLD build and look like the fix failed. That is what happened on the first check here.
 3. ~~**`006.004.pdf`**~~ **RESOLVED 2026-08-26 by Lance reading the source PDF.** The document
    names **HB 1979** explicitly (Session Day 6, Roll Call 4, 1/14/2016, "HBs FOR THIRD READING",
    sponsor ROWDEN (044), draft 5624H.02P) and **SB 903 appears nowhere on it**; its printed tally
