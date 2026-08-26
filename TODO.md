@@ -1281,8 +1281,8 @@ session's own direct work, not assumed.**
   (blast radius measured: exactly 1 row of 731 open-ended terms). (4) decide the Cloudflare
   Web Analytics question, and if allowed add a line to the trust page saying what is collected.
   (5) expose `vote_date_provenance` on `public_votes` + render it (the 185 derived dates currently
-  ship without their receipt). (6) coverage is a DECISION not a build — \$0 waves cannot close
-  2,481 bills (~526M tokens, ~35 h) vs ~\$306 billed. (7) accept the 382 flags as a human queue;
+  ship without their receipt). (6) coverage is a DECISION not a build — $0 waves cannot close
+  2,481 bills (~526M tokens, ~35 h) vs ~$306 billed. (7) accept the 382 flags as a human queue;
   close the one orphaned `correct-data` run row stuck at `running` since 08-03.
 
 - **(2026-08-26) CORRECTION: the reconciliation flags will NOT drain on their own — the earlier
