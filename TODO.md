@@ -79,7 +79,11 @@ appropriations day, 31 votes (23 of them the CCR/third-reading pairs the old gra
 attribute at all). The 2018 backlog (52 days) is untouched and remains Lance's call (INBOX).
 **Next:** the LegiScan tick at ~16:45Z daily re-cross-checks all 604 roll calls against the primary
 sources; yesterday's ran when only 6 of 15 days had replayed and paired just 3. After today's,
-run `node --env-file=.env scripts/resolve-matched-reconciliation-flags.mjs` (dry-run; `--apply`
+~~run `node --env-file=.env scripts/resolve-matched-reconciliation-flags.mjs`~~ **SUPERSEDED
+2026-08-26 — do NOT run this expecting a drain: measured, it resolves 0.** The expectation that the
+journal replay would let it close these in bulk was wrong (see the CORRECTION entry in the INBOX);
+the resolver reports `resolvable: 0` against 184 open `no_tally_corresponding_primary` flags. The
+command still exists and is still correct, it simply has nothing to do. Original text: (dry-run; `--apply`
 on Lance's go) to close the `no_tally_corresponding_primary` flags whose journal twin now exists
 (177 open at 11:30Z; 368 flags open overall).
 ✅ **2024 MO House votes RECOVERED (2026-08-23): migration 0032 applied by Lance, re-ingest done

@@ -5,7 +5,7 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-23): DEPLOYED and live at https://visiblegov.pages.dev — ~1,100 plain-language
+**Status (2026-08-26): DEPLOYED and live at https://visiblegov.us — ~1,100 plain-language
 summaries published (1,090 when the $0 drain lane ran to empty on 2026-08-22; `npm run status`
 for the live count): the open drafts are parked bills with written reasons (reasons in
 `.superpowers/artifacts/scheduled-summaries/parked.json`; `npm run status` prints the live count
@@ -37,9 +37,11 @@ database and outranks this paragraph, which is a dated snapshot.)* The
 site is deployed to Cloudflare Pages and was verified end-to-end in a real browser (2026-08-05,
 zero console errors): directory → legislator profile with real recorded votes and mechanical
 vote-aggregate charts → click through to a bill page with sponsors, plain-language summary, and the
-roll-call tally. Only the custom domain remains — DECIDED 2026-08-22 as the apex `visiblegov.us`
-(Lance owns it; this supersedes the 2026-07-28 `visiblegov.helpingpeoplehelpingpeople.com`
-subdomain plan), with Phases 3-4 of `docs/CLOUDFLARE_DEPLOY.md` rewritten for it — console/DNS
+roll-call tally. ~~Only the custom domain remains~~ **The custom domain is LIVE: the apex
+`visiblegov.us` serves the site (verified 2026-08-24, 11/11 post-switch checks; re-verified
+2026-08-26: apex 200, `www` 301 to apex preserving path and query). This superseded the 2026-07-28
+`visiblegov.helpingpeoplehelpingpeople.com` subdomain plan.** Phases 3-4 of
+`docs/CLOUDFLARE_DEPLOY.md` are COMPLETE — the console/DNS
 work that is his. Getting here: a comprehensive 8-domain
 accuracy audit (4 critical findings fixed live), a senior-engineering-lens audit (21 confirmed, 19
 fixed same-day), a two-phase deep audit (Fable 5, zero criticals across both), a 3-layer
@@ -82,10 +84,13 @@ RESUME HERE block.
   RECOVERED 2026-08-23 (commits 2e420d9 + migration 0032, applied by Lance): 185 of the 275 are now stored under a date derived from the one dated, tallied action in the bill's own history printing their exact AYES/NOES, each carrying that action as its receipt; the other 90 stay refused by design.
   `docs/DATA_INVENTORY.md` GAP 1 has the breakdown.
 - **~38k bills · 3,630 official bill texts · 46,268 sponsorships · 1,607 legislator rows.** Text
-  coverage is deliberately targeted, not broad: **99.3% of the bills that got a passage vote**
-  (3,319 of 3,341 as of 2026-08-05; the ratio still held on 2026-08-23 — `npm run status` BILL
-  FUNNEL) have their official text — that passage-vote set is itself only ~9% of all bills,
-  because most bills die in committee without a recorded vote.
+  coverage is deliberately targeted, not broad: **96.4% of the bills that got a passage vote**
+  (3,124 of 3,242, measured 2026-08-26 — `npm run status` BILL FUNNEL is the live figure; treat any
+  number typed here as stale) have their official text — that passage-vote set is itself only ~8%
+  of all bills, because most bills die in committee without a recorded vote. *(Was cited as 99.3%
+  / 3,319 of 3,341 from 2026-08-05 until 2026-08-26. Two things moved it: 118 bills now lack text
+  where 22 did, and the denominator fell because the 2026-08-26 retraction removed 693
+  misattributed vote rows — 196 bills correctly stopped counting as having had a vote at all.)*
 - **Plain-language pipeline live under trust model v3, with two independent trust axes**: an
   author model writes facts-only summaries from official text only; sonnet-5 adversarially refutes
   each claim (*nothing false*); a second checker independently lists the bill's key provisions
@@ -120,8 +125,8 @@ RESUME HERE block.
   browser against live data (2026-08-03): a visitor can browse the directory, open a legislator
   from any of US Senate/US House/MO Senate/MO House, see their real recorded votes, and click
   through to the actual bill. **Deployed 2026-08-05 to https://visiblegov.pages.dev** and
-  re-verified live end-to-end there (same loop, zero console errors); custom domain
-  (`visiblegov.us`, decided 2026-08-22) still pending.
+  re-verified live end-to-end there (same loop, zero console errors); **the custom domain
+  `visiblegov.us` went live 2026-08-24** and is the primary address now (`pages.dev` still serves).
   See `docs/CLOUDFLARE_DEPLOY.md` for the runbook and `TODO.md`'s RESUME HERE block for current
   status.
 - **Standing policy: every model-calling run is mechanically gated on explicit per-run owner

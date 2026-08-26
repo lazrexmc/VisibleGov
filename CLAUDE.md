@@ -110,11 +110,12 @@ against live data; a 3-layer `refresh_vote_aggregates()` timeout saga (a Supabas
 timeout, then a Postgres `statement_timeout` arm-timing trap, then a query-planner anti-join
 misestimation) was root-caused and fixed live 2026-08-04 — manual refresh now completes in ~19s and
 real scheduled `pg_cron` ticks are succeeding; the site is now DEPLOYED and verified live at
-https://visiblegov.pages.dev (2026-08-05), custom domain still pending — see `TODO.md` RESUME
-HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
-the public site (`site/`), schema migrations (`supabase/migrations/`, 0001-0031 all applied — 33
-files on disk as of 2026-08-23, including 0018a and the DRAFTED, not-yet-applied
-`0032_vote_date_provenance.sql` (trap 2 above); 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
+https://visiblegov.pages.dev (2026-08-05); **the custom domain `visiblegov.us` went LIVE
+2026-08-24** (apex 200, `www` 301 to apex — re-verified 2026-08-26) and is the primary address —
+see `TODO.md` RESUME HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
+the public site (`site/`), schema migrations (`supabase/migrations/`, **34 files on disk as of
+2026-08-26 (0001-0033 + 0018a), ALL applied** — `0032_vote_date_provenance.sql` was applied
+2026-08-23 and `0033_retracted_votes.sql` on 2026-08-26; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
 anon vote-list timeout found on deploy night, both verified live 2026-08-05; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
 missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-backed tests (`tests/`,
 2,200+ green — run `node --test` for the exact current count; a senior engineering audit,
