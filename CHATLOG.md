@@ -5864,3 +5864,23 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   design questions (which row is canonical; whether a same-source pair should mint a review flag
   instead of auto-pairing, since no second source corroborates that they are the same event).
   Not built — awaiting Lance's go.
+- **A prediction of mine failed and the diagnosis was worth more than the prediction** (2026-08-26).
+  I had told Lance the reconciliation flags would start draining once the journal replay finished
+  and the next LegiScan tick re-cross-checked. That tick ran 2026-08-25T22:15, after the replay,
+  over all 604 roll calls — and `vote_duplicates` is UNCHANGED at 66, `tally_unique_match` is
+  still 3, open flags went UP 368 -> 382, and the resolver still reports 0 resolvable. Said so
+  plainly rather than letting the number drift, then traced one flag to ground: HCR 50, MO Senate,
+  2018-01-08 — the journal has ONE vote, LegiScan has TWO roll calls (684182, 684527) both
+  printing 31-0, so `crossCheckAgainstPrimarySource` cannot say which one the journal vote is and
+  correctly refuses to pair, raising `ambiguous_tally_match`. All 4 open flags of that reason have
+  the same shape. **The insight: the same-source duplicate class catalogued on 08-24 (195 redundant
+  rows) is not merely a display defect — it BLOCKS pairings that would otherwise close flags.** The
+  two TODO items were separate; they are one piece of work with two payoffs. Also measured the open
+  flag composition (382: no_tally 184, hard_mismatch 102, primary_cast_not_comparable 77, soft 15,
+  ambiguous 4; mo-senate-web 192 / mo-house-xml 190 — an even split, so not a one-source defect)
+  and recorded the correction that these flags are a human-adjudication queue plus a
+  dedup-unblockable subset, NOT a backlog that clears itself — no future tick will drain them.
+  Separately, from the same status read: the summary scheduler's cost is FLAT at ~$0.355/tick
+  regardless of output (last five ticks $0.36/$0.36/$0.36/$0.35/$0.39 for 1/4/1/4/6 published), so
+  "$0.12 per summary" is a cross-tick average, not a per-bill price; the ~$306 backlog estimate is
+  unaffected.

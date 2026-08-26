@@ -1258,6 +1258,25 @@ session's own direct work, not assumed.**
 
 ## 📥 INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-08-26) CORRECTION: the reconciliation flags will NOT drain on their own — the earlier
+  expectation was wrong.** After the MO Senate journal replay completed (2026-08-24), the standing
+  expectation recorded in TODO/CHATLOG was that the next LegiScan tick would re-cross-check against
+  the now-complete journal record, mark matched pairs in `vote_duplicates`, and let
+  `scripts/resolve-matched-reconciliation-flags.mjs` close the `no_tally_corresponding_primary`
+  flags in bulk. **Measured 2026-08-26, it did not happen.** The 2026-08-25T22:15 LegiScan tick ran
+  AFTER the replay, processed all 604 roll calls, and produced `tally_unique_match: 3` —
+  `vote_duplicates` is unchanged at 66 and open flags went UP, 368 -> 382. The resolver still
+  reports 0 resolvable.
+  **Open-flag composition (live 2026-08-26, 382 open):** `no_tally_corresponding_primary` 184,
+  `hard_mismatch` 102, `primary_cast_data_not_comparable` 77, `soft_mismatch` 15,
+  `ambiguous_tally_match` 4; by counterpart source, mo-senate-web 192 / mo-house-xml 190 — an even
+  split, so this is not a one-source defect.
+  **What this means:** these flags are a HUMAN ADJUDICATION queue by design (that is what the
+  trust model says a flag is), plus a mechanical subset that the same-source dedup above would
+  unblock. They are not a backlog that clears itself, and no future ingest tick will drain them.
+  Anything that says otherwise (including the older RESUME HERE wording) is superseded by this
+  entry. Do not re-run ingest expecting a different number.
+
 - **(2026-08-24) SAME-SOURCE duplicate vote rows — 195 redundant rows, measured. A visitor sees
   one vote listed twice.** Found by answering a plain question ("what is Missouri SB 68?"): the
   2025 SB 68 page shows two Senate roll calls, both 2025-02-27, both 29-5, both
@@ -1276,6 +1295,14 @@ session's own direct work, not assumed.**
   2026 (34) are the worst, so the CURRENT session is the most affected. Note the grouping key
   alone is NOT sufficient evidence — federal `result` is a word, not a tally — which is exactly
   why the cast-list comparison has to be the test.
+  **RAISED IN VALUE 2026-08-26 — this is also a CAUSE of unresolvable reconciliation flags, not
+  just a display defect.** Traced while diagnosing why the flags did not drain after the journal
+  replay: for HCR 50 (MO Senate, 2018-01-08) the journal has ONE vote and LegiScan has TWO roll
+  calls (684182, 684527) both printing 31-0. `crossCheckAgainstPrimarySource` cannot tell which
+  LegiScan roll call the journal vote corresponds to, so it correctly refuses to pair and raises
+  `ambiguous_tally_match`. All 4 open `ambiguous_tally_match` flags were checked and all 4 have
+  this shape. So the same-source duplicates BLOCK pairings that would otherwise close flags —
+  fixing them removes the ambiguity, not only the double render.
   **Fix shape (not built, needs Lance's go):** extend the dedup to same-source pairs that share
   bill + chamber + date + tally AND have identical cast lists, marking the later row superseded
   in `vote_duplicates` (the public views already exclude superseded rows, so the display fixes
