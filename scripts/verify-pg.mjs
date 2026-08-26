@@ -12,12 +12,15 @@ if (!getPgPool()) {
 SUPABASE_DB_URL is not set — the direct-Postgres path is simply absent (nothing is broken).
 
 To enable it:
-  1. Supabase dashboard -> Project Settings -> Database -> Connection string -> URI
-  2. Choose the SESSION POOLER entry (port 5432), not the transaction pooler (6543):
-     transaction mode does not support prepared statements, which node-postgres uses.
+  1. In the Supabase dashboard, click CONNECT at the very top of the page (beside the branch
+     selector; keyboard shortcut: O then C). It is NOT under Project Settings -> Database any
+     more — that page now shows only project/region/service versions.
+  2. In the Connect sheet, open the "Session pooler" entry (port 5432). NOT "Transaction pooler"
+     (6543): transaction mode does not support prepared statements, which node-postgres uses.
+     "Direct connection" also works but is IPv6-only on most projects.
   3. Substitute your database password for [YOUR-PASSWORD] in that URI. That password is NOT the
-     service-role key and is not interchangeable with it. If you do not know it, the same page has
-     "Reset database password".
+     service-role key and is not interchangeable with it. If you do not know it, Project Settings
+     -> Database has "Reset database password".
   4. Add it to .env as a single line:
 
        SUPABASE_DB_URL=postgresql://postgres.<project>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres

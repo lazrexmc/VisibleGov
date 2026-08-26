@@ -32,9 +32,12 @@
 //      to the supabase-js path — the same "unset env var = feature simply absent" contract
 //      getClient() and pingHealthcheck() already follow. Nothing breaks if it is never configured.
 //
-// SETUP: Supabase dashboard -> Project Settings -> Database -> Connection string -> URI.
-// Use the SESSION POOLER (port 5432) URI. Put it in .env as SUPABASE_DB_URL. It contains the
-// database password, which is NOT the service-role key and is NOT interchangeable with it.
+// SETUP: click CONNECT at the top of the Supabase dashboard (beside the branch selector; shortcut
+// O then C), then the "Session pooler" entry (port 5432 — not the 6543 transaction pooler, which
+// cannot do the prepared statements node-postgres uses). As of 2026-08 this is NOT under Project
+// Settings -> Database; that page shows only project name, region and service versions.
+// Put the URI in .env as SUPABASE_DB_URL. It contains the database password, which is NOT the
+// service-role key and is NOT interchangeable with it.
 // .env is already gitignored; never paste this string into a doc, a commit, or a chat message.
 
 import pg from 'pg';
