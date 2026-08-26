@@ -115,24 +115,27 @@ export function urlIdentifiesOneVote(url) {
 // Given every live vote row sharing one source_url, is this a misattribution? Only meaningful for
 // PER_VOTE shapes; a container legitimately holds many bills and must never be reported.
 //
-// Note it reports rows sharing a bill IDENTIFIER too (via billIdentifierOf): four live cases are
-// two `bills` rows with the same identifier, which is a duplicate-bill defect rather than a
-// vote defect, and conflating them would send someone to retract the wrong record. The caller gets
-// the distinction, not a merged verdict.
-export function assessSharedUrl(rows, { billIdentifierOf } = {}) {
+// `billIdentityOf(bill_id)` must return an identity that is stable ACROSS SESSIONS — the identifier
+// alone is not one. Missouri renumbers bills from 1 every session, so "SB 3" in the 2025 Regular
+// Session and "SB 3" in the 2025 1st Special Session are entirely different bills (fee offices vs
+// taxation, different Senate URLs). An earlier version of this function compared bare identifiers
+// and therefore labelled four genuine misattributions as `duplicate_bill_rows` — which would have
+// led to MERGING two unrelated bills. Pass `${identifier}|${session_id}`.
+export function assessSharedUrl(rows, { billIdentityOf } = {}) {
   const url = rows && rows.length ? rows[0].source_url : null;
   if (!rows || rows.length < 2) return { flagged: false, reason: 'not_shared' };
   if (!urlIdentifiesOneVote(url)) return { flagged: false, reason: 'container_url' };
   const billIds = new Set(rows.map((r) => r.bill_id));
   if (billIds.size < 2) return { flagged: false, reason: 'same_bill' };
-  const identifiers = billIdentifierOf
-    ? new Set(rows.map((r) => billIdentifierOf(r.bill_id)).filter((x) => x != null))
+  const identities = billIdentityOf
+    ? new Set(rows.map((r) => billIdentityOf(r.bill_id)).filter((x) => x != null))
     : null;
-  if (identifiers && identifiers.size === 1) {
+  if (identities && identities.size === 1) {
     return {
       flagged: true,
       reason: 'duplicate_bill_rows',
-      detail: 'one roll call attached to two `bills` rows carrying the SAME identifier — a duplicate-bill defect, not a misattributed vote',
+      detail: 'one roll call attached to two `bills` rows that are the same bill in the same session — '
+        + 'a duplicate-bill defect, not a misattributed vote; merging the bill rows is the repair',
       rows: rows.length,
     };
   }
@@ -142,5 +145,65 @@ export function assessSharedUrl(rows, { billIdentifierOf } = {}) {
     detail: 'a URL that names exactly one roll call is attached to votes on different bills',
     rows: rows.length,
     bills: billIds.size,
+  };
+}
+
+// ---- second defect class: a vote dated before the session it is attached to ----
+//
+// A bill's roll call cannot predate the session that bill belongs to. Twenty live rows violated
+// this: twelve 2017 appropriations votes (Feb-Apr 2017) attached to a session starting 2017-06-12,
+// and eight 2025 votes (Mar-May 2025) attached to a session starting 2025-06-02. Same root cause as
+// the HB 10 fan-out — a provider attaching one roll call to bills that never held it — but it needs
+// its own detector because the copies live on DIFFERENT source documents, so the shared-URL test
+// never sees them.
+//
+// This is deliberately NOT "merge the bill rows". The two bills are genuinely different: Missouri
+// renumbers from 1 each session, so the 2025 Regular Session's SB 3 (Department of Revenue fee
+// offices) and the 1st Special Session's SB 3 (taxation) are unrelated laws. Merging them would
+// fuse two real bills into one.
+
+export function sessionContainsDay(session, day) {
+  if (!session || !session.start_date) return false;
+  const start = String(session.start_date).slice(0, 10);
+  const end = session.end_date ? String(session.end_date).slice(0, 10) : '9999-12-31';
+  return day >= start && day <= end;
+}
+
+// Verdict for one vote whose date precedes its own session's start.
+//
+// `siblings` are the OTHER votes carrying the identical source_url. It is a clean retraction only
+// when exactly one of them sits on a bill with the same identifier whose session DOES contain the
+// date — that row is where the vote really belongs, it already exists, and nothing is lost by
+// dropping this copy. Zero or several such siblings means the vote might be the only record of a
+// real event, so it is reported for review and never touched.
+export function assessSessionDateViolation({ vote, bill, session, siblings, billOf, sessionOf }) {
+  const day = String(vote?.vote_date ?? '').slice(0, 10);
+  if (!day) return { flagged: false, reason: 'no_vote_date' };
+  if (!session || !session.start_date) return { flagged: false, reason: 'session_has_no_start_date' };
+  if (day >= String(session.start_date).slice(0, 10)) return { flagged: false, reason: 'date_within_session' };
+
+  const good = (siblings ?? []).filter((s) => {
+    const sb = billOf(s.bill_id);
+    if (!sb || sb.identifier !== bill.identifier) return false;
+    return sessionContainsDay(sessionOf(sb.session_id), day);
+  });
+  if (good.length !== 1) {
+    return {
+      flagged: true,
+      reason: 'vote_predates_session_NEEDS_REVIEW',
+      detail: `vote dated ${day} but session "${session.name}" starts `
+        + `${String(session.start_date).slice(0, 10)}; ${good.length} sibling copies sit on a bill whose `
+        + 'session contains the date, so this may be the only record of a real vote — not retracted',
+      candidates: good.length,
+    };
+  }
+  return {
+    flagged: true,
+    reason: 'vote_predates_session',
+    detail: `vote dated ${day} predates session "${session.name}" (starts `
+      + `${String(session.start_date).slice(0, 10)}); the identical roll call is already stored on the `
+      + 'same bill number in a session that DOES contain the date',
+    keepVoteId: good[0].id,
+    keepBillId: good[0].bill_id,
   };
 }

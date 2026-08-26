@@ -38,6 +38,12 @@ const live = votes.filter((v) => !superseded.has(v.id));
 const { data: bills } = await selectAll(client, 'bills', 'id,identifier,title,session_id');
 const billById = new Map((bills ?? []).map((b) => [b.id, b]));
 const identifierOf = (id) => billById.get(id)?.identifier ?? null;
+// Identity must include the SESSION: Missouri renumbers bills from 1 each session, so "SB 3" in
+// the 2025 Regular Session and "SB 3" in the 1st Special Session are different bills entirely.
+const identityOf = (id) => {
+  const b = billById.get(id);
+  return b ? `${b.identifier}|${b.session_id}` : null;
+};
 log(`votes ${votes.length} | superseded ${superseded.size} | live ${live.length} | bills ${bills.length}`);
 
 // ---- group live votes by exact source_url ----
@@ -52,7 +58,7 @@ for (const v of live) {
 // ---- PER_VOTE families: a shared URL across bills is the defect ----
 const findings = [];
 for (const [url, rows] of byUrl) {
-  const verdict = assessSharedUrl(rows, { billIdentifierOf: identifierOf });
+  const verdict = assessSharedUrl(rows, { billIdentityOf: identityOf });
   if (!verdict.flagged) continue;
   findings.push({ url, rows, verdict, shape: classifySourceUrl(url).id });
 }

@@ -25,7 +25,7 @@ import { getClient, selectAll } from '../src/lib/db.js';
 // Imported from the LIBRARY, never from find-misattributed-votes.mjs: that file is a top-level
 // script, so importing it would run its entire database sweep as an import side effect.
 import {
-  classifySourceUrl, assessSharedUrl, identifierFromQuestion,
+  classifySourceUrl, assessSharedUrl, identifierFromQuestion, assessSessionDateViolation,
 } from '../src/lib/source-url-granularity.js';
 
 const apply = process.argv.includes('--apply');
@@ -62,8 +62,14 @@ if (error) throw new Error(`votes: ${error.message}`);
 const { data: dupes } = await selectAll(client, 'vote_duplicates', 'superseded_vote_id');
 const superseded = new Set((dupes ?? []).map((r) => r.superseded_vote_id));
 const live = votes.filter((v) => !superseded.has(v.id));
-const { data: bills } = await selectAll(client, 'bills', 'id,identifier');
-const identifierOf = (id) => (bills ?? []).find((b) => b.id === id)?.identifier ?? null;
+const { data: bills } = await selectAll(client, 'bills', 'id,identifier,session_id');
+const billById = new Map((bills ?? []).map((b) => [b.id, b]));
+const identifierOf = (id) => billById.get(id)?.identifier ?? null;
+// Session-scoped identity — see assessSharedUrl's contract.
+const identityOf = (id) => {
+  const b = billById.get(id);
+  return b ? `${b.identifier}|${b.session_id}` : null;
+};
 
 const byUrl = new Map();
 for (const v of live) {
@@ -76,7 +82,7 @@ for (const v of live) {
 const planned = [];
 const skipped = [];
 for (const [url, rows] of byUrl) {
-  const verdict = assessSharedUrl(rows, { billIdentifierOf: identifierOf });
+  const verdict = assessSharedUrl(rows, { billIdentityOf: identityOf });
   if (!verdict.flagged) continue;
   if (verdict.reason !== 'multiple_bills_on_one_vote_document') {
     skipped.push({ url, reason: verdict.reason, rows: rows.length }); continue;
@@ -93,20 +99,71 @@ for (const [url, rows] of byUrl) {
     planned.push({
       row: r, url, keptBill: named[0], keptVoteId: keep.id, keptSourceKey: keep.source_key,
       shape: classifySourceUrl(url).id,
+      klass: 'shared_document',
+      reasonText: 'misattributed: this source document names one roll call, and its own question text names a different bill',
     });
   }
 }
 
+// ---- second class: a vote dated BEFORE the session its bill belongs to ----
+// The copies here live on DIFFERENT source documents, so the shared-URL test above never sees them.
+// Twelve 2017 appropriations votes and eight 2025 votes sit on special-session bills whose sessions
+// had not convened on the vote date. Retracted only when the identical roll call already exists on
+// the same bill number in a session that DOES contain the date — otherwise reported, never touched.
+const { data: sessions } = await selectAll(client, 'sessions', 'id,identifier,name,start_date,end_date');
+const sessById = new Map((sessions ?? []).map((s) => [s.id, s]));
+const sessionOf = (id) => sessById.get(id) ?? null;
+const billOf = (id) => billById.get(id) ?? null;
+const sessionSkips = new Map();
+for (const v of live) {
+  const b = billById.get(v.bill_id);
+  if (!b) continue;
+  const siblings = (byUrl.get(String(v.source_url ?? '')) ?? []).filter((o) => o.id !== v.id);
+  const verdict = assessSessionDateViolation({
+    vote: v, bill: b, session: sessionOf(b.session_id), siblings, billOf, sessionOf,
+  });
+  if (!verdict.flagged) continue;
+  if (verdict.reason !== 'vote_predates_session') {
+    sessionSkips.set(verdict.reason, (sessionSkips.get(verdict.reason) ?? 0) + 1);
+    continue;
+  }
+  const keepVote = live.find((o) => o.id === verdict.keepVoteId);
+  planned.push({
+    row: v, url: String(v.source_url ?? ''), keptBill: identifierOf(verdict.keepBillId),
+    keptVoteId: verdict.keepVoteId, keptSourceKey: keepVote?.source_key ?? null,
+    shape: classifySourceUrl(v.source_url).id,
+    klass: 'session_date',
+    reasonText: `misattributed: ${verdict.detail}`,
+  });
+}
+for (const [reason, n] of sessionSkips) skipped.push({ url: '(session-date scan)', reason, rows: n });
+
+// The two detectors overlap: the 2025 special-session rows are BOTH a shared per-vote document and
+// a vote predating its session. Without this, one row would be planned twice, the second tombstone
+// insert would violate retracted_votes' unique vote_id index, and the run would abort mid-way — with
+// some rows already deleted. Dedupe by vote id, keeping the first (shared_document) classification
+// and recording that the other detector agreed.
+const plannedById = new Map();
+for (const p of planned) {
+  const existing = plannedById.get(p.row.id);
+  if (!existing) { plannedById.set(p.row.id, { ...p, alsoDetectedBy: [] }); continue; }
+  if (!existing.alsoDetectedBy.includes(p.klass)) existing.alsoDetectedBy.push(p.klass);
+}
+const deduped = [...plannedById.values()];
+
 // already tombstoned?
 const { data: existingTombs } = await selectAll(client, 'retracted_votes', 'vote_id');
 const tombstoned = new Set((existingTombs ?? []).map((r) => r.vote_id));
-const todo = planned.filter((p) => !tombstoned.has(p.row.id)).slice(0, limit);
+const todo = deduped.filter((p) => !tombstoned.has(p.row.id)).slice(0, limit);
 
 console.log(JSON.stringify({
   mode: apply ? 'apply' : 'dry-run',
   live_votes: live.length,
-  planned_retractions: planned.length,
-  already_tombstoned: planned.length - planned.filter((p) => !tombstoned.has(p.row.id)).length,
+  planned_retractions: deduped.length,
+  raw_detections_before_dedupe: planned.length,
+  by_class: deduped.reduce((a, p) => { a[p.klass] = (a[p.klass] ?? 0) + 1; return a; }, {}),
+  detected_by_both_classes: deduped.filter((p) => p.alsoDetectedBy.length > 0).length,
+  already_tombstoned: deduped.length - deduped.filter((p) => !tombstoned.has(p.row.id)).length,
   this_run: todo.length,
   skipped_groups: skipped,
 }, null, 2));
@@ -141,8 +198,10 @@ for (const p of todo) {
     source_key: v.source_key,
     casts: castPayload,
     cast_count: castPayload.length,
-    reason: 'misattributed: this source document names one roll call, and its own question text names a different bill',
+    reason: p.reasonText,
     evidence: {
+      defect_class: p.klass,
+      also_detected_by: p.alsoDetectedBy,
       url_shape: p.shape,
       bill_named_by_question: p.keptBill,
       kept_vote_id: p.keptVoteId,

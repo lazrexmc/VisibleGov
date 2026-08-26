@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classifySourceUrl, urlIdentifiesOneVote, assessSharedUrl, identifierFromQuestion,
-  PER_VOTE, CONTAINER,
+  assessSessionDateViolation, sessionContainsDay, PER_VOTE, CONTAINER,
 } from '../src/lib/source-url-granularity.js';
 
 // Every case below is a real URL shape from the live database, and the container cases are the
@@ -105,14 +105,14 @@ test('FLAGS the real defect: one MO House roll-call PDF attached to different bi
     { source_url: MO_HOUSE, bill_id: 'bill-hb10' },
     { source_url: MO_HOUSE, bill_id: 'bill-hb114' },
   ];
-  const v = assessSharedUrl(rows, { billIdentifierOf: (id) => (id === 'bill-hb10' ? 'HB 10' : 'HB 114') });
+  const v = assessSharedUrl(rows, { billIdentityOf: (id) => (id === 'bill-hb10' ? 'HB 10|s1' : 'HB 114|s1') });
   assert.equal(v.flagged, true);
   assert.equal(v.reason, 'multiple_bills_on_one_vote_document');
 });
 
 test('NEVER flags a container, no matter how many bills share it', () => {
   const rows = Array.from({ length: 13 }, (_, i) => ({ source_url: MO_SENATE, bill_id: `bill-${i}` }));
-  const v = assessSharedUrl(rows, { billIdentifierOf: (id) => id });
+  const v = assessSharedUrl(rows, { billIdentityOf: (id) => id });
   assert.equal(v.flagged, false);
   assert.equal(v.reason, 'container_url');
 });
@@ -125,7 +125,7 @@ test('separates a DUPLICATE BILL ROW from a misattributed vote — they need opp
     { source_url: MO_HOUSE, bill_id: 'bill-a' },
     { source_url: MO_HOUSE, bill_id: 'bill-b' },
   ];
-  const v = assessSharedUrl(rows, { billIdentifierOf: () => 'SB 4' });
+  const v = assessSharedUrl(rows, { billIdentityOf: () => 'SB 4|session-regular-2025' });
   assert.equal(v.flagged, true);
   assert.equal(v.reason, 'duplicate_bill_rows');
 });
@@ -135,7 +135,7 @@ test('does not flag one bill legitimately holding several rows on its own docume
     { source_url: MO_HOUSE, bill_id: 'bill-a' },
     { source_url: MO_HOUSE, bill_id: 'bill-a' },
   ];
-  assert.equal(assessSharedUrl(rows, { billIdentifierOf: () => 'HB 10' }).reason, 'same_bill');
+  assert.equal(assessSharedUrl(rows, { billIdentityOf: () => 'HB 10|s1' }).reason, 'same_bill');
 });
 
 test('a single row is never a shared-url finding', () => {
@@ -151,4 +151,89 @@ test('assessSharedUrl works without a billIdentifierOf resolver, defaulting to t
   const v = assessSharedUrl(rows);
   assert.equal(v.flagged, true);
   assert.equal(v.reason, 'multiple_bills_on_one_vote_document');
+});
+
+// ---- assessSessionDateViolation: a vote cannot predate the session it is attached to ----
+// Twenty live rows violated this. Missouri renumbers bills from 1 every session, so LegiScan's
+// special-session datasets carried regular-session roll calls onto same-numbered special-session
+// bills. Merging those bills would fuse unrelated laws — the 2025 Regular Session's SB 3 is about
+// Department of Revenue fee offices, the 1st Special Session's SB 3 is about taxation.
+
+const REGULAR = { id: 's-reg', name: '2025 Regular Session', start_date: '2025-01-08', end_date: null };
+const SPECIAL = { id: 's-sp1', name: '2025 1st Special Session', start_date: '2025-06-02', end_date: null };
+const BILL_REG = { id: 'b-reg', identifier: 'SB 3', session_id: 's-reg' };
+const BILL_SP = { id: 'b-sp', identifier: 'SB 3', session_id: 's-sp1' };
+const DOC = 'https://documents.house.mo.gov/billtracking/bills251/rollcalls/072.006.pdf';
+const billOf = (id) => ({ 'b-reg': BILL_REG, 'b-sp': BILL_SP }[id] ?? null);
+const sessionOf = (id) => ({ 's-reg': REGULAR, 's-sp1': SPECIAL }[id] ?? null);
+
+test('sessionContainsDay: open-ended sessions run to the far future, missing start dates never match', () => {
+  assert.equal(sessionContainsDay(REGULAR, '2025-05-15'), true);
+  assert.equal(sessionContainsDay(SPECIAL, '2025-05-15'), false);
+  assert.equal(sessionContainsDay(SPECIAL, '2025-06-02'), true, 'the start date itself is inside');
+  assert.equal(sessionContainsDay({ start_date: null }, '2025-05-15'), false);
+  assert.equal(sessionContainsDay(null, '2025-05-15'), false);
+  assert.equal(sessionContainsDay({ start_date: '2025-01-08', end_date: '2025-05-30' }, '2025-06-15'), false);
+});
+
+test('FLAGS a vote 18 days before its session convened, when the real copy already exists', () => {
+  const vote = { id: 'v-sp', bill_id: 'b-sp', vote_date: '2025-05-15T00:00:00+00:00', source_url: DOC };
+  const sibling = { id: 'v-reg', bill_id: 'b-reg', vote_date: '2025-05-15T00:00:00+00:00', source_url: DOC };
+  const v = assessSessionDateViolation({
+    vote, bill: BILL_SP, session: SPECIAL, siblings: [sibling], billOf, sessionOf,
+  });
+  assert.equal(v.flagged, true);
+  assert.equal(v.reason, 'vote_predates_session');
+  assert.equal(v.keepVoteId, 'v-reg', 'keeps the copy on the session that actually contains the date');
+  assert.equal(v.keepBillId, 'b-reg');
+});
+
+test('REFUSES to retract when no sibling copy exists — it may be the only record of a real vote', () => {
+  const vote = { id: 'v-sp', bill_id: 'b-sp', vote_date: '2025-05-15T00:00:00+00:00', source_url: DOC };
+  const v = assessSessionDateViolation({
+    vote, bill: BILL_SP, session: SPECIAL, siblings: [], billOf, sessionOf,
+  });
+  assert.equal(v.flagged, true);
+  assert.equal(v.reason, 'vote_predates_session_NEEDS_REVIEW');
+  assert.equal(v.candidates, 0);
+  assert.equal(v.keepVoteId, undefined, 'nothing is nominated for retraction');
+});
+
+test('REFUSES when several siblings qualify — ambiguous, so untouched', () => {
+  const vote = { id: 'v-sp', bill_id: 'b-sp', vote_date: '2025-05-15T00:00:00+00:00', source_url: DOC };
+  const extra = { id: 'b-reg2', identifier: 'SB 3', session_id: 's-reg' };
+  const billOf2 = (id) => (id === 'b-reg2' ? extra : billOf(id));
+  const v = assessSessionDateViolation({
+    vote,
+    bill: BILL_SP,
+    session: SPECIAL,
+    siblings: [{ id: 'v-a', bill_id: 'b-reg' }, { id: 'v-b', bill_id: 'b-reg2' }],
+    billOf: billOf2,
+    sessionOf,
+  });
+  assert.equal(v.reason, 'vote_predates_session_NEEDS_REVIEW');
+  assert.equal(v.candidates, 2);
+});
+
+test('a sibling with a DIFFERENT bill number does not qualify', () => {
+  const vote = { id: 'v-sp', bill_id: 'b-sp', vote_date: '2025-05-15T00:00:00+00:00', source_url: DOC };
+  const other = { id: 'b-other', identifier: 'SB 999', session_id: 's-reg' };
+  const billOf2 = (id) => (id === 'b-other' ? other : billOf(id));
+  const v = assessSessionDateViolation({
+    vote, bill: BILL_SP, session: SPECIAL, siblings: [{ id: 'v-x', bill_id: 'b-other' }], billOf: billOf2, sessionOf,
+  });
+  assert.equal(v.reason, 'vote_predates_session_NEEDS_REVIEW');
+});
+
+test('does NOT flag a vote inside its own session, or a session with no start date', () => {
+  const ok = { id: 'v-reg', bill_id: 'b-reg', vote_date: '2025-05-15T00:00:00+00:00', source_url: DOC };
+  assert.equal(assessSessionDateViolation({
+    vote: ok, bill: BILL_REG, session: REGULAR, siblings: [], billOf, sessionOf,
+  }).reason, 'date_within_session');
+  assert.equal(assessSessionDateViolation({
+    vote: ok, bill: BILL_REG, session: { name: 'x', start_date: null }, siblings: [], billOf, sessionOf,
+  }).reason, 'session_has_no_start_date');
+  assert.equal(assessSessionDateViolation({
+    vote: { ...ok, vote_date: null }, bill: BILL_REG, session: REGULAR, siblings: [], billOf, sessionOf,
+  }).reason, 'no_vote_date');
 });

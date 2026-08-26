@@ -26,6 +26,28 @@ import {
 // Imported from src/lib (not correct-data.js directly) since senior engineering audit 2026-08-03,
 // finding 16 — this exact import used to be one edge of a genuine 3-node cli/cli import cycle.
 import { mapMoStatusCode } from '../lib/mo-status-codes.js';
+import { urlIdentifiesOneVote } from '../lib/source-url-granularity.js';
+
+// loadPerVoteUrlOwners — which bill each already-stored PER-VOTE source document belongs to.
+//
+// Backs the misattribution guard in ingestLegiscanRollCalls. Only PER_VOTE url shapes are loaded:
+// a MO Senate journal PDF is one sitting and legitimately carries many bills' roll calls, so
+// guarding on it would refuse real votes (measured: 408 of them). Routed through selectAll — a bare
+// .select() would cap at 1,000 rows and leave most documents unguarded, which is the silent-partial
+// failure mode this project has been bitten by repeatedly.
+export async function loadPerVoteUrlOwners(client) {
+  const owners = new Map();
+  const { data, error } = await selectAll(client, 'votes', 'id,bill_id,source_url,source_key');
+  if (error) throw new Error(`ingest-legiscan: loading per-vote url owners failed: ${error.message}`);
+  for (const row of data ?? []) {
+    const url = String(row.source_url ?? '');
+    if (!url || !urlIdentifiesOneVote(url)) continue;
+    // First writer wins; a same-url/different-bill row already in the table is exactly the defect
+    // this guard exists to stop repeating, and picking a side here would be a guess.
+    if (!owners.has(url)) owners.set(url, { bill_id: row.bill_id, source_key: row.source_key });
+  }
+  return owners;
+}
 
 // LegiScan bulk adapter — driver (Task 9 of docs/superpowers/plans/2026-07-29-legiscan-bulk-
 // adapter.md). Composes Tasks 2/4/5/6/7 into the full dataset-bulk backfill pipeline: dataset
@@ -492,6 +514,10 @@ function emptyRollCallResult() {
     },
     quarantinedVotes: 0,
     quarantinedRollCalls: [],
+    // 2026-08-26: roll calls refused because their own source document is already stored against a
+    // DIFFERENT bill. See loadPerVoteUrlOwners.
+    misattributedRefused: 0,
+    misattributedDetails: [],
     retractedVotes: 0,
     retractedRollCalls: [],
     unresolvedCasts: { count: 0, sample: [] },
@@ -518,6 +544,18 @@ export async function ingestLegiscanRollCalls(client, runId, {
     );
   }
   const result = emptyRollCallResult();
+
+  // MISATTRIBUTION GUARD (2026-08-26). LegiScan's 2023 MO dataset minted a SEPARATE roll_call_id
+  // per bill for one physical House floor vote — three HB 10 roll calls arrived 232 times each,
+  // against 232 different bills, and were all stored, because source_key IS the provider's
+  // roll_call_id and every copy's was genuinely unique. 693 phantom vote rows and 112,728 casts,
+  // with no error at any layer. This map is what makes the second occurrence refusable.
+  //
+  // Scoped to PER_VOTE url shapes ONLY (src/lib/source-url-granularity.js). A MO Senate journal PDF
+  // is one day's sitting and legitimately carries many bills' roll calls; guarding on it would
+  // refuse 408 real votes. An unrecognised shape is treated as a container and never guarded —
+  // the permissive default, because refusing a real vote is the worse error.
+  const perVoteUrlOwner = await loadPerVoteUrlOwners(client);
 
   // FIX (IMPORTANT 4, final-review-findings.md): --limit (or a reconcile-failing sibling) must
   // never truncate the SIBLING-TALLY POOL crossCheckAgainstPrimarySource's own tuple-disambiguation
@@ -705,9 +743,30 @@ export async function ingestLegiscanRollCalls(client, runId, {
       // without the column.
       ...(legiscanTallies.dateProvenance ? { vote_date_provenance: legiscanTallies.dateProvenance } : {}),
     };
+    // Guard: does this exact roll-call document already belong to a DIFFERENT bill?
+    const perVoteUrl = urlIdentifiesOneVote(voteRow.source_url) ? String(voteRow.source_url) : null;
+    const owner = perVoteUrl ? perVoteUrlOwner.get(perVoteUrl) : null;
+    if (owner && owner.bill_id !== voteRow.bill_id) {
+      // Refuse and record. Never store: one roll-call document is one physical vote, and it cannot
+      // have been cast on two different bills. Counted like a quarantine so the run closes 'partial'
+      // and the refusal is visible rather than silent.
+      result.misattributedRefused += 1;
+      if (result.misattributedDetails.length < 20) {
+        result.misattributedDetails.push({
+          rollCallId: legiscanTallies.rollCallId,
+          source_url: perVoteUrl,
+          offered_bill_id: voteRow.bill_id,
+          already_owned_by_bill_id: owner.bill_id,
+          owner_source_key: owner.source_key,
+        });
+      }
+      continue;
+    }
+
     try {
       // eslint-disable-next-line no-await-in-loop
       await insertIfAbsent(client, 'votes', [voteRow], 'source_key');
+      if (perVoteUrl && !owner) perVoteUrlOwner.set(perVoteUrl, { bill_id: voteRow.bill_id, source_key: voteRow.source_key });
     } catch (err) {
       if (legiscanTallies.dateProvenance && isMissingColumnError(err.cause ?? err, 'vote_date_provenance')) {
         // Migration 0032 not applied yet: refuse to store this vote (its date is derived and the
@@ -1031,6 +1090,8 @@ export async function runLegiscanIngest(client, runId, args, deps = {}) {
     crossCheckFlags: rollCallResult.crossCheckFlags,
     queriesUsed: detail.queries_used,
     quarantinedVotes: rollCallResult.quarantinedVotes,
+    misattributedRefused: rollCallResult.misattributedRefused ?? 0,
+    misattributedDetails: rollCallResult.misattributedDetails ?? [],
     quarantinedRollCalls: rollCallResult.quarantinedRollCalls,
     retractedVotes: rollCallResult.retractedVotes,
     retractedRollCalls: rollCallResult.retractedRollCalls,
@@ -1273,8 +1334,12 @@ async function main() {
     const result = await runLegiscanIngest(client, runId, args);
 
     // A gated or conflicting derived date is a refusal the operator must see: 'partial', exit 2.
+    // A refused misattribution is a real refusal the operator must see, exactly like a gated
+    // derived date: the source offered a roll call already belonging to another bill, and we
+    // declined to store it. Silent would be the whole defect repeating.
     const status = (result.counts.reconciliationFailures === 0 && result.counts.parseFailures === 0
-      && (result.counts.datesDerivedGated ?? 0) === 0 && (result.counts.datesDerivedConflicts ?? 0) === 0) ? 'succeeded' : 'partial';
+      && (result.counts.datesDerivedGated ?? 0) === 0 && (result.counts.datesDerivedConflicts ?? 0) === 0
+      && (result.counts.misattributedRefused ?? 0) === 0) ? 'succeeded' : 'partial';
     await closeRun(client, runId, status, buildSuccessCloseDetail(result.counts));
     console.log(JSON.stringify({
       mode: 'live', run_id: runId, status, source: SOURCE, counts: result.counts,
