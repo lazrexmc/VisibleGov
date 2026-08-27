@@ -6105,3 +6105,36 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   migrations; its table and count are fixed. CLAUDE.md's migration trap said "33 migrations" for
   hours after 35 were applied — the third time that exact line has drifted, despite carrying its own
   standing caveat about it. TODO's RESUME HERE rewritten for a cold start.
+- **Lance: "How are the summaries and glosses looking?" -> a live trust-model breach found and
+  closed** (2026-08-26). Both pipelines are in good shape, and the audit-check on them turned up one
+  real defect that no audit had caught.
+  **Summaries: clean.** 1,112 published, and **zero** carry a failing verdict on either axis — 0
+  with `support = flagged`, 0 with `completeness = incomplete`, 0 with an empty body. 1,102 are
+  fully verified on both; the other 10 predate the completeness axis entirely (published 07-28 to
+  07-30) and are already disclosed on the trust page. 600 rejected attempts sit in the audit trail
+  as designed. *One false alarm of my own along the way:* I first measured "1,102 published with a
+  non-clean verdict", which is nonsense — the two axes use DIFFERENT vocabularies (`clean`/`flagged`
+  for support, `complete`/`incomplete` for completeness), so `overall <> 'clean'` swept in every
+  passing completeness verdict. Checked the actual value distribution before reporting it.
+  **Glossary: 8 published glosses were carrying an UNSUPPORTED claim.** Their latest verification
+  verdict was `flagged`, and unpacking the `verdicts` jsonb showed 16 bullets across the 8 with
+  exactly **8 unsupported** — one per term. The reasons are precisely what the trust model exists to
+  catch, not nitpicks: *"The excerpt itself never states that the Act is 'the federal law governing
+  money in federal election campaigns'; that characterization..."*; *"The gloss omits a key condition
+  from the source: investment of funds is only permitted 'with the permission of the head of the
+  Fed...'"*; *"it never uses or..."*. All 8 were published **2026-07-28**, the glossary's first day,
+  the same pre-gate cohort as the 10 summaries missing completeness — consistent with the mechanical
+  auto-publish gate not yet being fully wired.
+  Under trust model v3 a flagged item awaits Lance's review; it does not publish. **Set all 8 back
+  to `status='draft'`** in one guarded transaction (exactly-8 check, every term must actually carry
+  an unsupported bullet, no clean term may be touched, published count must land on 1850). RLS
+  policy `anon_read_published` gates on `status='published'`, so they left the public site
+  immediately and entered the review queue. Content preserved, `published_at` cleared, fully
+  reversible — an UPDATE, not a deletion.
+  **After: glossary 1,858 -> 1,850 published, 0 still flagged, 0 missing a receipt; summaries 1,112
+  published, 0 flagged.** Lance's review queue 508 -> 516.
+  **Coverage, measured properly:** the accountability set (bills with a passage/third-reading/
+  perfection vote) is **2,880**; 2,764 of those have official text; **680 are summarized**; **2,084
+  are READY** (text on hand, no summary). Note this differs from `npm run status`'s BILL FUNNEL,
+  which uses its own passage-vote definition — the funnel is the canonical figure, this query was
+  scoped to cross-check the trust axes rather than to restate coverage.
