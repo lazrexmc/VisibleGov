@@ -6172,3 +6172,38 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   verbatim instead. Lesson 46 applied to the last place it was still being violated. Launched by
   `scriptPath`, not `name` (lesson 47 — name resolution can serve a session-cached pre-edit script,
   and this one had just been edited).
+- **Overnight summary run (2026-08-26 into 08-27): +42 published, and two wave-transit defects
+  found and fixed.** Lance authorized spend "until I'm out of credits" and then went AFK; this is
+  what ran.
+  **Billed lane, once:** `$3.6765` of a `$4.00` cap, 32 bills, 127 calls, 28 stopped by the budget
+  guard $0.32 short of the cap (the PLAYBOOK-44 projection fix working). Gates: **10 published**,
+  21 flagged, 1 rejected.
+  **Free lane, five fresh waves of 12:** published 9, 9, 8, 6, 6 = **38 attempted-to-published
+  across 60 bills**. Wave 4 lost one author agent to an API server error mid-response; the workflow
+  marked it failed, carried on, and still wrote all 12 envelopes.
+  **TWO DEFECTS, BOTH THE SAME SHAPE — completed work failing to survive TRANSIT, neither a data
+  problem, neither surfacing as an error.** (1) The wave manifest had no pointer form, so every
+  launch hand-retyped a dozen uuids and sha256 hashes; the file's own comment already named the
+  hazard next to the note that a 14KB inline prior lost ONE character on 2026-08-22 and killed a
+  whole wave at JSON.parse. (2) Worse: the wave RETURNED ~250KB of envelopes, and the completion
+  notification truncates at ~250k chars — so wave 1 ran perfectly (51 agents, 3.16M tokens, zero
+  errors) and handed back a truncated blob with NO `envelopes` key, stranding 12 bills of finished
+  work in the journal. Workflow scripts have no filesystem access but AGENTS do, so the wave now
+  writes `records-wave.json` itself and returns a small receipt. Wave 1 was recovered by resuming
+  from its run id — 51 cached agents replayed, only the new writer ran. Left unfixed, this would
+  have silently eaten every future wave.
+  **YIELD DECLINED AND IT IS NOT NOISE: 75%, 75%, 67%, 50%, 50%.** Measured the cause rather than
+  guessing: of 34 new drafts, **23 carry a flagged SUPPORT verdict** (the author wrote bullets the
+  source text does not back) and only 11 were held by completeness. The adversarial verifier is
+  catching real grounding failures, and they rise as the recency-first queue moves off the easy
+  bills. Two-thirds of new output therefore needs RE-AUTHORING, not Lance's review — so continuing
+  to grind fresh waves grows his queue faster than it grows the site. Switched to the re-author
+  drain lane (`build-drain-wave.mjs`, 46 re-authorable drafts, priors shipped as pointer files) to
+  compare its conversion against the 50% fresh-wave floor.
+  **Economics, measured:** billed $0.368/published vs the daily scheduler's $0.107/published — the
+  scheduler is ~3.4x more efficient, so the remaining ~$1.17 was deliberately NOT spent. It buys ~3
+  summaries here or ~11 there, and leaving it keeps the 06:00 tick alive.
+  **Trust model intact throughout:** after every run, 0 published summaries carry a flagged support
+  verdict, 0 lack a support verification, 0 carry an incomplete completeness verdict. Four
+  `MalformedSummaryError` rejections across the night, each one the gate refusing to publish on a
+  checker whose own output it could not trust.
