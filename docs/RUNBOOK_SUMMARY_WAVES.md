@@ -140,6 +140,36 @@ Division of labor that minimizes $ per published bill:
   front; never assume a further reload. Week-to-date spend: `npm run status`, SUMMARY SCHEDULER
   block.)*
 
+## Which lane converts: MEASURED 2026-08-26/27, and it reverses the obvious answer
+
+Ran five fresh 12-bill waves back to back, then a re-author drain wave, same night, same models,
+same gates. Publish rate per wave:
+
+| Lane | Waves | Published / attempted | Rate |
+|---|---|---|---|
+| Fresh opus wave | 5 | 38 / 60 | 75%, 75%, 67%, **50%, 50%** |
+| **Re-author drain** | 1 | **5 / 6** | **83%** |
+| Billed API chain | 1 | 10 / 32 | 31% |
+
+**Fresh-wave yield DECAYS as the recency-first queue drains.** It is not noise — it fell from 75%
+to a 50% floor across one night. The cause was measured, not guessed: of 34 new drafts, **23 carried
+a flagged SUPPORT verdict** (the author wrote bullets the source text does not back) and only 11
+were held by completeness. Recency-first hands out the easy bills first; what remains is harder to
+ground, so the adversarial verifier refuses more of it.
+
+**That inverts the value of grinding fresh waves.** At a 50% floor, every wave adds ~6 published
+summaries AND ~6 flagged drafts to Lance's review queue. His queue doubled (40 -> 80) the same night
+the site gained 48. Fresh waves stop being progress and start being a queue-generating machine.
+
+**The drain lane converts better because the author is TOLD what failed.** `build-drain-wave.mjs`
+ships each prior draft's specific recorded objections as a `reAuthor_file` pointer, so the re-author
+pass fixes named grounding failures instead of re-authoring blind and re-rolling the same dice.
+
+**Standing guidance: when fresh-wave yield drops below ~60%, stop exporting fresh waves and drain
+the draft queue instead.** Check with `build-drain-wave.mjs <WAVE> 12 --pointer` — it reports
+`re-authorable drafts` before building anything. Re-authored records MUST be recorded with
+`--replace-drafts`, or the record step mints a second draft beside the first.
+
 ## Standing traps
 
 - Never hand-type or "reconstruct" any part of the manifest — read the file, pass it verbatim.
