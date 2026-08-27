@@ -98,8 +98,11 @@ silently eaten every future wave.
 **~$1.17 of API credit deliberately NOT spent.** Billed converts at $0.368/published; the daily
 scheduler at $0.107. The remainder is worth ~11 summaries there against ~3 here.
 
-**⚠ CHECK WHEN BACK: the scheduler had not ticked since 2026-08-26 11:00 UTC.** Its 06:00 run may
-not have fired. An agent never runs `schtasks` — this is Lance's to verify.
+~~**⚠ CHECK WHEN BACK: the scheduler had not ticked since 2026-08-26 11:00 UTC.**~~ **FALSE ALARM,
+resolved 2026-08-27:** it ticked normally at 11:00:34 UTC — the check above simply ran BEFORE that
+tick fired, so "last tick yesterday" was true at the time and stale within hours. Scheduler is
+healthy: $1.50 of $5.00 this ISO week, 6 published, balance not depleted. A one-shot "has X happened
+yet" reading is a timestamp, not a verdict.
 
 ### ⚠ Read `PLAYBOOK_DELTA.md` lessons 51-55 before touching vote data
 

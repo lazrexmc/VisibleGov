@@ -90,7 +90,18 @@ async function main() {
   // by `needs_mapping` — terms the extractor could not confidently resolve to a citation. Those are
   // a curation backlog, NOT failures, and reporting only "116 published" hid 704 of them for weeks.
   const glossNeedsMapping = await count('glossary_terms?needs_mapping=is.true&select=id');
-  const glossDraftMappable = glossTotal - glossPublished - glossNeedsMapping;
+
+  // COUNT this, never derive it. It used to be `glossTotal - glossPublished - glossNeedsMapping`,
+  // which silently swept in every status that is neither draft nor published — 47 REJECTED terms
+  // were being reported to the operator as work awaiting his review (2026-08-27).
+  //
+  // And a mappable draft is TWO different queues wearing one number. Splitting on gloss_md:
+  //   - no gloss text  -> never authored. Needs a GLOSS RUN, not a human. (396 on 2026-08-27)
+  //   - has gloss text -> authored AND verified AND flagged. This is the human queue. (427)
+  // Reporting the sum told Lance his review queue was 870 when it was 427.
+  const glossDraftMappable = await count('glossary_terms?status=eq.draft&needs_mapping=is.false&select=id');
+  const glossUnauthored = await count('glossary_terms?status=eq.draft&needs_mapping=is.false&gloss_md=is.null&select=id');
+  const glossFlagged = glossDraftMappable - glossUnauthored;
 
   // ---- identity: rows vs unified people ----
   const linkedRows = await count('legislators?person_id=not.is.null&select=id');
@@ -245,7 +256,8 @@ async function main() {
   console.log(`  terms (seats held) ...... ${n(terms)}`);
   console.log(`  glossary published ...... ${n(glossPublished)} of ${n(glossTotal)}`);
   console.log(`    ...needs_mapping ...... ${n(glossNeedsMapping)}  <- extractor couldn't resolve a citation (curation backlog)`);
-  console.log(`    ...draft, mappable .... ${n(glossDraftMappable)}  <- awaiting review/publish`);
+  console.log(`    ...flagged, awaiting Lance ${n(glossFlagged)}  <- authored + verified, verifier raised an objection`);
+  console.log(`    ...not yet authored ... ${n(glossUnauthored)}  <- citation resolved, no gloss written yet (needs a gloss run)`);
 
   console.log('\nPEOPLE  (rows vs unified people — these are different things)');
   console.log(`  legislator rows ......... ${n(legislators)}  <- every one identified, with its own votes`);
@@ -279,7 +291,7 @@ async function main() {
   console.log(`  reconciliation flags open ..... ${reconOpen}`);
   console.log(`  summaries awaiting review ..... ${sumDraft + sumStale}${sumStale > 0 ? ` (draft: ${sumDraft}, stale: ${sumStale})` : ''}`);
   console.log(`  summaries retired ............ ${sumRejected}`);
-  console.log(`  glossary awaiting review ...... ${n(glossDraftMappable)}`);
+  console.log(`  glossary awaiting review ...... ${n(glossFlagged)}  (flagged only; ${n(glossUnauthored)} more need a gloss run, not a human)`);
   console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (curation backlog, not errors)`);
 
   // REPAIR LEDGER (added 2026-08-26). `votes` alone stopped telling the whole truth the day rows
