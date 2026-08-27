@@ -324,6 +324,23 @@ the LegiScan wave and evidently not internalized.
 The rule, mechanically: **gate on the extracted fail count, never on a command's exit status when
 that command is a filter.**
 
+**THIRD occurrence, 2026-08-27 — a new disguise, so record it: the harness's own "exit code 0".**
+Launched a long fetch as `node scripts/gloss-batch-mo.mjs --fetch-only | tail -15` as a background
+task. It reported **`[exited with code 0]`** and the task notification said *completed (exit code
+0)*. It had not completed — it died on an `ECONNRESET` from revisor.mo.gov partway through. The
+exit status belonged to **`tail`**, the last command in the pipeline, not to `node`.
+
+This is the same bug wearing a uniform that is much easier to trust, because the *harness* is the
+one telling you it succeeded. A green task notification on a piped command is worth nothing.
+
+- **Never pipe a long-running or failure-prone command whose success you intend to believe.**
+  Redirect instead: `node script.mjs > out.log 2> err.log` — then the reported exit status is the
+  program's own.
+- If you must pipe, in bash set `set -o pipefail` first, or check `${PIPESTATUS[0]}`.
+- **Verify from the artifact, not the status.** This run was caught because the expected final line
+  (`{"fetched":N,...}`) was absent from the output — the checkpoint files on disk were the honest
+  record, and `--resume` picked up from them with nothing lost.
+
 ```bash
 FAILCOUNT=$(node --test 2>&1 | grep -E "^ℹ fail" | awk '{print $3}')
 if [ "$FAILCOUNT" = "0" ]; then git commit ... && git push; else echo "RED — NOT COMMITTING"; fi
