@@ -247,6 +247,22 @@ The glossary is the one asymmetric case: **8 of 116 published glossary terms car
   makes them ELIGIBLE for a billed gloss run — it publishes nothing by itself. Everything else needs a
   new source adapter or a decision to gloss named entities from something other than statute text.
   **Do not quote 5,328 as a backlog anyone can drain.**
+- **A whole class of gloss terms can NEVER be fetched, and it is not a source problem (found
+  2026-08-27).** Bills routinely cite section numbers **they themselves create**. RSMo contains
+  ENACTED law only, so revisor.mo.gov has nothing at that number until the bill passes and is
+  codified — it serves its bot page, which this pipeline reads (correctly) as the
+  nonexistent-section signal. Confirmed by joining the parked terms back to their bills:
+  *"Authorizes the Missouri Child Tax Credit Act"* → `RSMo 135.320`; *"Student Screen-Time Standards
+  Act"* → `RSMo 160.068`; *"Authorizes a tax credit for certain contraception"* → `RSMo 135.610`.
+  Every one is a section the bill would ADD.
+
+  **This costs real time to rediscover: each such term burns a 10-minute cooldown plus one retry
+  before parking.** The `--fetch-only` sweep on 2026-08-27 parked 19 this way. The cheap fix, if it
+  is ever worth building, is to check the citation against the bill's own "to enact ... new
+  sections" list BEFORE fetching and park it immediately with that reason — a bill that creates a
+  section is stating, in its own text, that the section does not yet exist. Until then, treat these
+  parks as CORRECT behaviour and not a fetch failure. (PLAYBOOK lesson 38: park the structural
+  class with written reasons rather than paying per-instance retries.)
 - **47 rows are `rejected`:** RSMo sections for which revisor.mo.gov served its bot page twice, 10 minutes apart at 5-second pacing — the nonexistent-section signal (rate limiting would have cleared) — parked with a `glossary_notes` row carrying the evidence; unpark by setting `status` back to `draft` if the section appears. Not quality judgments.
 - **Two sources, one pipeline (trust model v3, unchanged):** Missouri statutes (RSMo, fetched from revisor.mo.gov by `src/adapters/mo-statutes.js`; `src/cli/backfill-mo-glossary-citations.js` first normalised and de-duplicated the stored RSMo citations so `needs_mapping` stubs could become mappable) and the U.S. Code (`src/adapters/uscode.js`). `scripts/gloss-batch-mo.mjs --source mo|usc` is the drain runner: Haiku authors → mechanical gates (verbatim quote, non-empty) → one retry → Sonnet escalation → Sonnet adversarial verification → the shared verdict gate, every billed call through the Message Batches API, checkpointed per phase and resumable; it persisted 1,217 RSMo glosses ($12.45, 2026-08-21) and 525 U.S.C. glosses ($8.31 against an $8 cap on 2026-08-21/22 — disclosed; the runner now projects each batch's cost from the banked text before submitting, PLAYBOOK lesson 44). `src/cli/auto-publish-glossary.js` (zero model calls) moves any draft whose latest verification derives CLEAN through `approved` → `published`. All four appear as sources in the freshness table.
 - **What a reader sees:** a published gloss renders inline where the summary's marking can place it, and otherwise in the bill page's collapsed "Referenced laws and terms" list (`site/js/glossary-inline.js`, `renderReferencedLaws`) with its full receipt. At the 2026-08-21 measurement ~649 of ~1,045 published summaries showed at least one gloss.
