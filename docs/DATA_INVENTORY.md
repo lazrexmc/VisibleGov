@@ -224,6 +224,29 @@ The glossary is the one asymmetric case: **8 of 116 published glossary terms car
 - **~4,964 of those stubs are `needs_mapping`** — the extractor could not resolve the citation to an official source, so there is nothing to gloss *from*. That is the curation backlog (a human mapping decision), not errors and not API spend; it still dominates at ~98% of stubs.
 - **The mappable remainder is TWO queues, and `npm run status` used to print them as one number (fixed 2026-08-27).** Splitting on whether a gloss was ever written: **427 are authored, verified, and FLAGGED** — the verifier raised an objection and the runner never publishes a flagged gloss, so these are Lance's review queue; **396 have a resolved citation but NO gloss text at all** — nobody has written them, so they need a billed gloss run under per-run approval, not his eyes. (2026-08-27 counts: 359 RSMo + 37 U.S.C.) The unauthored pile GROWS every time summaries publish — 307 of the 396 were minted overnight 2026-08-26/27 by the +99 summary run, because new summaries cite statutes nothing has glossed yet. **This is a standing consequence of publishing summaries, not a backlog that drains once.**
 - **Two reporting traps this same line taught (both fixed 2026-08-27):** the figure was computed as `total − published − needs_mapping` rather than counted, so all **47 REJECTED** terms were reported to the operator as work awaiting his review; and summing the two queues above told him 870 when his actual queue was 427. **A queue number must be COUNTED with the predicate that defines the queue** — derive it by subtraction and every status you did not think of lands in it silently.
+- **What the `needs_mapping` pile ACTUALLY contains — measured 2026-08-27, never characterized before.**
+  The line is labelled "curation backlog," which reads like a queue somebody could work through. It is
+  not one queue, and **the majority of it cannot be glossed at all under trust model v3.** A gloss
+  needs a receipt — a verbatim quote from official text — so a term with no citation has no source to
+  quote and is structurally ungossable, not pending. Of 5,328 rows:
+
+  | Bucket | Rows | Can it ever be glossed? |
+  |---|---|---|
+  | `agency` + `program` names ("Office of the Attorney General", "Fast Track Workforce Incentive Grant Program") | **2,784 (52%)** | **No** — no citation exists to fetch official text from |
+  | named `act`s ("Megan Meier Act") | 836 | Only via a name→citation lookup nothing implements |
+  | MO compound / range / chapter-level cites ("sections 302.302 to 302.309", "chapter 303") | 831 | **Yes, with a parser upgrade** — `parseMoCitation` handles single sections only |
+  | U.S.C. cites ("26 U.S.C. Section 103") | 199 | **Yes** — `src/adapters/uscode.js` already fetches these |
+  | `public_law` ("Public Law 118-42") | 153 | Needs a GovInfo adapter that does not exist |
+  | Missouri Constitution ("Article I, Section 15") | 77 | Needs a constitution source |
+  | bill references mis-typed as acts ("house bill no. 117") | 9 | Resolvable against our OWN bills table |
+  | unclassified statute-kind remainder | 439 | Unknown |
+
+  **`parseMoCitation` rejects 5,305 of 5,328** — so re-running the normalizer converts ~10 rows, not
+  thousands, and the 2026-08-27 run did exactly that (10 updates, 13 merges). **The genuinely
+  recoverable-by-code subset is ~1,030 rows** (831 compound/chapter + 199 U.S.C.), and recovering them
+  makes them ELIGIBLE for a billed gloss run — it publishes nothing by itself. Everything else needs a
+  new source adapter or a decision to gloss named entities from something other than statute text.
+  **Do not quote 5,328 as a backlog anyone can drain.**
 - **47 rows are `rejected`:** RSMo sections for which revisor.mo.gov served its bot page twice, 10 minutes apart at 5-second pacing — the nonexistent-section signal (rate limiting would have cleared) — parked with a `glossary_notes` row carrying the evidence; unpark by setting `status` back to `draft` if the section appears. Not quality judgments.
 - **Two sources, one pipeline (trust model v3, unchanged):** Missouri statutes (RSMo, fetched from revisor.mo.gov by `src/adapters/mo-statutes.js`; `src/cli/backfill-mo-glossary-citations.js` first normalised and de-duplicated the stored RSMo citations so `needs_mapping` stubs could become mappable) and the U.S. Code (`src/adapters/uscode.js`). `scripts/gloss-batch-mo.mjs --source mo|usc` is the drain runner: Haiku authors → mechanical gates (verbatim quote, non-empty) → one retry → Sonnet escalation → Sonnet adversarial verification → the shared verdict gate, every billed call through the Message Batches API, checkpointed per phase and resumable; it persisted 1,217 RSMo glosses ($12.45, 2026-08-21) and 525 U.S.C. glosses ($8.31 against an $8 cap on 2026-08-21/22 — disclosed; the runner now projects each batch's cost from the banked text before submitting, PLAYBOOK lesson 44). `src/cli/auto-publish-glossary.js` (zero model calls) moves any draft whose latest verification derives CLEAN through `approved` → `published`. All four appear as sources in the freshness table.
 - **What a reader sees:** a published gloss renders inline where the summary's marking can place it, and otherwise in the bill page's collapsed "Referenced laws and terms" list (`site/js/glossary-inline.js`, `renderReferencedLaws`) with its full receipt. At the 2026-08-21 measurement ~649 of ~1,045 published summaries showed at least one gloss.
