@@ -4,7 +4,7 @@
 
 ---
 
-## ⏱ RESUME HERE — verified live 2026-08-26 (end of session), read this block first
+## ⏱ RESUME HERE — verified live 2026-08-27, read this block first
 
 **Lance is AFK for an extended break. This block is written so a cold session can resume without
 reading anything else first.** Everything below was measured against the live database at the end
@@ -14,10 +14,12 @@ of 2026-08-26, not remembered.
 
 | | |
 |---|---|
-| `votes` | **10,176** |
+| `votes` | **10,180** |
 | `vote_casts` | **1,389,890** |
-| published summaries | **1,211** (31 awaiting review) — +99 overnight, see below |
-| published glossary | **1,850** (8 unpublished 08-26: they carried unsupported claims) |
+| published summaries | **1,228** (38 drafts, 670 retired) — +17 on 08-27, see below |
+| published glossary | **1,850** — the OTHER glossary numbers were being misreported; see below |
+| glossary: Lance's actual review queue | **427** flagged (NOT the 870 status used to print) |
+| glossary: needs a gloss run, not a human | **527** unauthored + **5,557** unmappable |
 | `vote_duplicates` (hidden, not deleted) | **213** |
 | `retracted_votes` (deleted, tombstoned) | **714** (114,066 casts preserved) |
 | open reconciliation flags | **382** |
@@ -55,7 +57,83 @@ survived**) found one genuinely critical live defect, plus several smaller ones.
    duplicated.**
 5. **Two indexes** (`0034`) behind every bill page — both reads were sequential scans.
 
-### The overnight summary run (2026-08-26 into 08-27): +99 published, and WHICH LANE to use
+### 2026-08-27 — PAUSED MID-LOOP by Lance. What was running, and how to restart it.
+
+**Nothing is running now.** Two background jobs were stopped deliberately at his "pause" (a drain
+wave W12, and a $0 statute fetch). Neither had written anything half-finished — W12 never reached
+its record step, and the fetch is checkpointed and resumes cleanly.
+
+**The loop he asked for ("keep draining… continue draining waves on repeat") and why it is shaped
+this way:** fresh waves alone yield ~50% and add one draft to Lance's review queue for every summary
+they publish. The drain lane re-authors a flagged draft while SHOWING it the prior draft's recorded
+objections, and converts far better. **Run them as a pair and the queue stops growing:**
+
+| Cycle | Fresh | Drain | Net |
+|---|---|---|---|
+| 1 (08-27) | 12 bills → 6 published, 6 drafts | 7 → 4 published, 3 drafts | **10 published from 12; queue +3, not +6** |
+| 2 (08-27) | 12 bills → 5 published, 7 drafts (1 gated on completeness) | *W12 stopped mid-run* | — |
+
+**To restart the loop, this exact sequence:**
+```
+node --env-file=.env scripts/export-summary-wave.mjs 12          # fresh manifest
+Workflow scriptPath=.claude/workflows/summary-wave.js  args={"manifest_file":".superpowers/artifacts/wave3/manifest.json"}
+node --env-file=.env src/cli/summary-queue.js record --file .superpowers/artifacts/wave3/records-wave.json
+node --env-file=.env scripts/build-drain-wave.mjs W13 10 --pointer
+Workflow scriptPath=.claude/workflows/summary-wave.js  args={"manifest_file":".superpowers/artifacts/wave3/wave-W13-args.json"}
+node --env-file=.env src/cli/summary-queue.js record --file ... --replace-drafts   # NOTE the flag
+```
+**`--replace-drafts` on the DRAIN record only.** Without it the record step mints a SECOND draft
+beside the first and doubles the queue it exists to drain. Launch workflows by `scriptPath`, never
+by name (PLAYBOOK 47). Each 12-bill wave runs ~65 min, 50 agents, $0.
+
+### Where the project actually stands, end to end (measured 2026-08-27, not quoted)
+
+| Link | State | Complete |
+|---|---|---|
+| Votes downloaded | 10,180 roll calls / 1,389,890 casts | ✅ |
+| Cast → politician | 1,389,890 of 1,389,890, 1,052 distinct voters | **100%** |
+| Vote → bill | 9,729 of 10,180 (the other 451 are procedural votes with no bill — a different record type, not a failure) | **95.6%** |
+| Bill → plain language | 1,228 published | **~28%** of the accountability set |
+| Plain language → gloss | 758 of 1,219 summaries show ≥1 published gloss | **62%** |
+
+**The honest "% complete" is ~28%** — 760 of 2,697 bills that got a passage vote AND have text on
+hand. Against all 38,256 bills it is 3.2%, but that denominator is misleading: most bills never got
+a floor vote, so there is no accountability story to tell about them. **The spine is done; plain-
+language coverage is the only real constraint.** 2,224 bills have text and no summary, so the
+current corpus supports ~3,400 summaries with no new ingestion.
+
+### THREE reporting/structure defects found 2026-08-27 — read before trusting any glossary number
+
+1. **`npm run status` overstated Lance's glossary review queue by 443 (870 → really 427).** The
+   figure was DERIVED (`total − published − needs_mapping`) instead of counted, so 47 REJECTED terms
+   were reported as work awaiting him; and "mappable draft" is really two unrelated queues — 427
+   authored-and-flagged (his) vs 396 with no gloss text at all (needs a gloss run, not a human).
+   Fixed: each queue is now counted with the predicate that defines it. **A queue number must be
+   COUNTED — derive it by subtraction and every status you did not think of lands in it silently.**
+2. **The 5,328 `needs_mapping` "curation backlog" is mostly ungossable by design.** 52% are agency
+   and program names ("Office of the Attorney General") with NO citation — trust model v3 needs a
+   verbatim quote from official text, so there is nothing to quote. `parseMoCitation` rejects 5,305
+   of 5,328. Only ~1,030 are recoverable by code (831 compound/range/chapter cites + 199 U.S.C.),
+   and recovering them only makes them ELIGIBLE for a billed run. Full table in
+   `docs/DATA_INVENTORY.md`. **Do not quote 5,328 as a backlog anyone can drain.**
+3. **A term citing a section its OWN bill creates can never be fetched.** RSMo holds enacted law
+   only. "Authorizes the Missouri Child Tax Credit Act" → `RSMo 135.320`, which does not exist until
+   the bill passes. revisor.mo.gov serves its bot page; the pipeline correctly reads that as
+   "no such section" and parks. **Each one costs a 10-minute cooldown plus a retry** — 19 parked
+   this way on 08-27. Correct behaviour, not a fetch failure.
+
+### Also done 2026-08-27
+
+- **Scheduler false alarm CLEARED.** The 08-26 note said it had not ticked since 11:00 UTC. It had —
+  the check simply ran BEFORE that day's tick. Healthy: $1.50 of $5.00 this ISO week, 6 published.
+  **A one-shot "has X happened yet" reading is a timestamp, not a verdict.**
+- **MO citation normalizer applied** ($0, no model calls): 10 stubs mapped, 13 duplicate stubs merged.
+- **PLAYBOOK lesson 14 gained a THIRD occurrence** — and this one is nastier: a background task
+  reported **"completed (exit code 0)"** when the program had died on an ECONNRESET, because the
+  command was piped into `tail` and the status belonged to `tail`. **Never pipe a long-running
+  command whose success you intend to believe; redirect instead.**
+
+### Superseded — the overnight run (2026-08-26 into 08-27): +99 published, and WHICH LANE to use
 
 Lance authorized billed spend "until I'm out of credits" and went AFK. Published **1,112 -> 1,211**;
 his review queue **40 -> 31** (it went UP to 80 first, then came back down — that swing is the

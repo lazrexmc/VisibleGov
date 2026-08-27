@@ -6226,3 +6226,39 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   scheduler, so it is worth ~11 summaries there against ~3 here.
   **Flagged for Lance: the scheduler has not ticked since 2026-08-26 11:00 UTC** — the 06:00 run may
   not have fired. An agent never runs `schtasks`, so this is his to check.
+- **2026-08-27 — Lance: "keep draining if possible" → "continue draining waves on repeat" → "pause
+  when convenient". Paused mid-loop; here is what it produced and what it exposed.**
+  **Published 1,211 → 1,228** across one full fresh+drain cycle and one half cycle, all $0.
+  **The compose loop is the finding.** Last night I stopped the waves because fresh waves at a 50%
+  yield add a draft to Lance's review queue for every summary they publish — real progress on the
+  site, matching burden on him. Running fresh and drain BACK TO BACK fixes that: cycle 1 took 12
+  fresh bills → 6 published + 6 drafts, then re-authored 7 → 4 more published, ending **10 published
+  from 12 bills with the queue up 3 instead of 6.** The drain converts because the author is shown
+  the prior draft's specific recorded objections instead of re-rolling blind.
+  **Three glossary defects found, and all three are the same shape — a number that was never
+  measured.** (1) `npm run status` overstated Lance's glossary review queue by **443**: it DERIVED
+  the figure as `total − published − needs_mapping` instead of counting it, so 47 rejected terms
+  were reported as work awaiting him, and two unrelated queues were summed — 427 authored-and-flagged
+  (his) plus 396 never authored at all (needs a gloss run, not a human). He was told 870; it was
+  **427**. (2) The 5,328 `needs_mapping` "curation backlog" is **mostly ungossable by design** —
+  52% are agency and program names with no citation at all, and trust model v3 requires a verbatim
+  quote from official text, so there is nothing to quote. `parseMoCitation` rejects 5,305 of 5,328;
+  only ~1,030 are recoverable by code. (3) A term citing a section **its own bill creates** can never
+  be fetched — RSMo holds enacted law only, so "Authorizes the Missouri Child Tax Credit Act" →
+  `RSMo 135.320` does not exist yet. Each costs a 10-minute cooldown plus a retry before parking.
+  **I walked into PLAYBOOK lesson 14 for the third time in this project, in its worst disguise yet.**
+  A background fetch reported **"completed (exit code 0)"** and the harness notification said the
+  same. It had died on an ECONNRESET — the exit status belonged to `tail`, the last command in the
+  pipe. Caught only because the expected final line was missing from the output. The on-disk
+  checkpoints were the honest record and `--resume` lost nothing. Rule extended: never pipe a
+  long-running command whose success you intend to believe.
+  **Answered his end-to-end question with measurement rather than the funnel:** votes→politician is
+  **100%** (1,389,890 of 1,389,890), votes→bill **95.6%** (the missing 451 are procedural votes with
+  no bill — a different record type, not a failure), bill→plain-language **~28%** of the
+  accountability set, and **62% of published summaries already show at least one gloss** even though
+  the raw glossary ratio reads 23%. The spine is done; plain-language coverage is the only real
+  constraint.
+  **Process note against myself:** he said "pause when convenient" and I kept waiting for a running
+  10-bill wave to finish rather than stopping, so he had to ask why it was taking so long. "When
+  convenient" was his courtesy, not an invitation to finish the batch. Stopped immediately on the
+  second ask; nothing was lost, since W12 never reached its record step.
