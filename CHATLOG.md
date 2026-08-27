@@ -6138,3 +6138,37 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   are READY** (text on hand, no summary). Note this differs from `npm run status`'s BILL FUNNEL,
   which uses its own passage-vote definition — the funnel is the canonical figure, this query was
   scoped to cross-check the trust axes rather than to restate coverage.
+- **Lance: "Process as many bills as possible with free and api calls until I'm out of credits" —
+  explicit authorization for billed spend with a defined stop** (2026-08-26). Stated the cost up
+  front per the standing rule: the scheduler ledger showed **$2.15 spent of the ~$7 loaded
+  2026-08-21** across 6 ticks / 20 summaries ($0.107 each), so **~$4.85 estimated remaining** — with
+  the caveat that the ledger is not the Anthropic console, which is the real truth.
+  **Billed run: `summary-probe-api.mjs --budget-usd 4.00 --max-chars 100000`** over a fresh
+  60-bill recency-first manifest (all 2026 session). Budget set deliberately UNDER the estimate to
+  leave the next scheduler tick (~$0.36) alive. Result: **$3.6765 spent, 32 bills completed, 127 API
+  calls, 28 skipped by the budget guard** — the guard stopped it $0.32 short of the cap rather than
+  overrunning, which is the PLAYBOOK-44 fix working (it projects each bill's cost from the batch's
+  own worst observed before starting it, instead of only gating before submission).
+  **The mechanical gates then decided, as designed:** 32 recorded -> **10 published, 21 flagged to
+  Lance's review queue, 1 rejected** (`MalformedSummaryError` — the completeness checker emitted 8
+  coverage entries for 7 provisions with a duplicate provision_index, so the gate refused to trust
+  its own checker's output rather than publish on it). Live after: summaries **1,112 -> 1,122**
+  published, drafts 40 -> 61; trust model intact (0 published carrying a flagged support verdict,
+  0 missing a support verification).
+  **Cost reality worth recording: $3.68 for 10 published = $0.368/published**, versus the daily
+  scheduler's measured **$0.107/published**. The scheduler is roughly 3.4x more efficient per
+  published summary, so the remaining ~$1.17 is better left to it than spent here.
+  **A documented trap avoided.** The runbook's "hybrid" lane (dollars buy Haiku authoring at
+  $0.01-0.03/bill, subscription buys the Sonnet-priced verification) looks 4x cheaper per attempt.
+  Its MEASURED yield was **1 published out of 40** (waves C+D, 2026-08-08) against 55-75% for fresh
+  opus waves, and 85 banked author-only checkpoints from that experiment still sit undrained. Read
+  the yield before taking the cheaper-looking path.
+  **Then the $0 lane**, and a workflow fix on the way in: `.claude/workflows/summary-wave.js` took
+  its manifest ONLY as inline `args`, so every launch retyped a dozen uuids and sha256 hashes by
+  hand. Its own comment already named that hazard — "the manifest is retyped into the launch call by
+  hand", next to the note that on 2026-08-22 a 14KB inline prior lost ONE character in transit and
+  killed a whole wave at JSON.parse before any agent ran. The re-author prior had been given a
+  pointer form; the manifest had not. Added `{manifest_file: <path>}`: one agent Reads the file
+  verbatim instead. Lesson 46 applied to the last place it was still being violated. Launched by
+  `scriptPath`, not `name` (lesson 47 — name resolution can serve a session-cached pre-edit script,
+  and this one had just been edited).

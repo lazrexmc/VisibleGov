@@ -13,7 +13,28 @@ let BILLS = args
 if (typeof BILLS === 'string') {
   try { BILLS = JSON.parse(BILLS) } catch (e) { throw new Error(`args string is not valid JSON: ${e.message}`) }
 }
-if (!Array.isArray(BILLS) || BILLS.length === 0) throw new Error('manifest args required (array of bills)')
+// POINTER FORM for the manifest itself (2026-08-26). The comment below on reAuthor_file already
+// names this hazard — "the manifest is retyped into the launch call by hand" — and on 2026-08-22 a
+// 14KB inline prior lost ONE character in transit and killed the whole wave at JSON.parse before
+// any agent ran. The re-author prior got a pointer; the manifest did not, so every launch still
+// retyped a dozen uuids and sha256 hashes by hand. Pass {manifest_file: '.superpowers/artifacts/
+// wave3/manifest.json'} and a single agent Reads it instead. Lesson 46, applied to the last place
+// it was still being violated.
+if (BILLS && !Array.isArray(BILLS) && typeof BILLS === 'object' && BILLS.manifest_file) {
+  const raw = await agent(
+    // Repo root spelled out rather than reusing REPO: that const is declared BELOW this block, and
+    // referencing it here would throw on the temporal dead zone before any agent ran.
+    `Read the file F:/VisibleGov/${BILLS.manifest_file} and return its ENTIRE contents verbatim as `
+    + 'raw JSON. Return ONLY the JSON array — no prose, no code fence, no commentary, nothing added '
+    + 'or removed. Do not summarise, reformat, or truncate it.',
+    { label: 'read-manifest', phase: 'Summarize' },
+  )
+  const cleaned = String(raw).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+  try { BILLS = JSON.parse(cleaned) } catch (e) {
+    throw new Error(`manifest_file ${BILLS.manifest_file} did not come back as valid JSON: ${e.message}`)
+  }
+}
+if (!Array.isArray(BILLS) || BILLS.length === 0) throw new Error('manifest args required (array of bills, or {manifest_file})')
 
 const REPO = 'F:/VisibleGov'
 
