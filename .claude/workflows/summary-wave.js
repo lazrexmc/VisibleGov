@@ -171,4 +171,22 @@ const results = await pipeline(
 
 const envelopes = results.filter(Boolean)
 log(`${envelopes.filter((e) => !e.failed).length}/${BILLS.length} bills produced full envelopes`)
-return { envelopes }
+
+// WRITE the records file rather than only returning it (2026-08-26). A 12-bill wave's envelopes are
+// ~250KB, and the completion notification TRUNCATES at ~250k chars — so the first run of this wave
+// finished perfectly and then handed back a truncated blob with no `envelopes` key at all, leaving
+// 12 bills' work stranded in the journal. Workflow scripts have no filesystem access, but agents
+// do, so one agent writes the file the record CLI consumes. The return value stays small on purpose.
+const RECORDS_PATH = '.superpowers/artifacts/wave3/records-wave.json'
+await agent(
+  `Write a file at F:/VisibleGov/${RECORDS_PATH}. Its ENTIRE contents must be exactly this JSON, `
+  + 'byte for byte, with nothing added, removed, reordered, reformatted or summarised — no prose, '
+  + 'no code fence, no trailing commentary. Then read the file back and confirm it parses as JSON '
+  + `and that its "results" array has exactly ${envelopes.length} entries. Reply with only the word `
+  + `OK followed by the entry count.
+
+${JSON.stringify({ results: envelopes })}`,
+  { label: 'write-records', phase: 'Summarize' },
+)
+
+return { wrote: RECORDS_PATH, envelope_count: envelopes.length, failed: envelopes.filter((e) => e.failed).length }
