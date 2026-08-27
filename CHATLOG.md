@@ -6207,3 +6207,22 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   verdict, 0 lack a support verification, 0 carry an incomplete completeness verdict. Four
   `MalformedSummaryError` rejections across the night, each one the gate refusing to publish on a
   checker whose own output it could not trust.
+- **Overnight run closed out (2026-08-27): +99 published, drain pool exhausted, stopped
+  deliberately.** Final tally across 13 runs: billed 10/32 (31%), five fresh opus waves 38/60
+  (75/75/67/50/50 — decaying), six re-author drain waves **51/61 (84%)**, with the drain lane hitting
+  92% on the LARGEST bills in the pool (9,635-31,776 chars) — size was never the constraint,
+  groundedness was. Published **1,112 -> 1,211**; review queue **40 -> 80 -> 31**.
+  **The swing in that queue number is the whole finding.** Fresh waves at a 50% floor add roughly one
+  draft to Lance's queue for every summary they add to the site, so they LOOK like progress while
+  shifting work onto him. The drain lane reverses it because the re-author pass is handed the prior
+  draft's specific recorded objections instead of authoring blind. Standing rule written into
+  `docs/RUNBOOK_SUMMARY_WAVES.md`: below ~60% fresh-wave yield, stop exporting fresh and drain.
+  **Stopped at 3 remaining re-authorable rather than falling back to fresh waves** — rebuilding his
+  review queue while he sleeps is not work he asked for, and restarting is a judgement call for him.
+  **Verified rather than assumed at every step:** 0 published summaries with a flagged support
+  verdict, 0 without a verification, 0 published glossary entries missing a receipt, and 0 bills with
+  duplicate drafts (the `--replace-drafts` failure mode would have quietly doubled the queue).
+  **~$1.17 credit left unspent on measured grounds** — $0.368/published billed vs $0.107 through the
+  scheduler, so it is worth ~11 summaries there against ~3 here.
+  **Flagged for Lance: the scheduler has not ticked since 2026-08-26 11:00 UTC** — the 06:00 run may
+  not have fired. An agent never runs `schtasks`, so this is his to check.

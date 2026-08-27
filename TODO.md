@@ -14,10 +14,10 @@ of 2026-08-26, not remembered.
 
 | | |
 |---|---|
-| `votes` | **10,165** |
-| `vote_casts` | **1,389,888** |
-| published summaries | **1,112** (40 awaiting review) |
-| published glossary | **1,858** |
+| `votes` | **10,176** |
+| `vote_casts` | **1,389,890** |
+| published summaries | **1,211** (31 awaiting review) — +99 overnight, see below |
+| published glossary | **1,850** (8 unpublished 08-26: they carried unsupported claims) |
 | `vote_duplicates` (hidden, not deleted) | **213** |
 | `retracted_votes` (deleted, tombstoned) | **714** (114,066 casts preserved) |
 | open reconciliation flags | **382** |
@@ -54,6 +54,52 @@ survived**) found one genuinely critical live defect, plus several smaller ones.
    and the source's own roll-call number. **Verified in a browser: 50/50 distinct rows, zero
    duplicated.**
 5. **Two indexes** (`0034`) behind every bill page — both reads were sequential scans.
+
+### The overnight summary run (2026-08-26 into 08-27): +99 published, and WHICH LANE to use
+
+Lance authorized billed spend "until I'm out of credits" and went AFK. Published **1,112 -> 1,211**;
+his review queue **40 -> 31** (it went UP to 80 first, then came back down — that swing is the
+finding). Trust model intact throughout: 0 published summaries carry a flagged support verdict,
+0 lack a verification, 0 bills have duplicate drafts.
+
+**MEASURED CONVERSION, same night, same models, same gates — the obvious lane was the wrong one:**
+
+| Lane | Published / attempted | Rate |
+|---|---|---|
+| Billed API chain | 10 / 32 | 31% ($0.368 per published) |
+| Fresh opus waves (x5) | 38 / 60 | 75%, 75%, 67%, **50%, 50%** — decaying |
+| **Re-author drain (x6)** | **51 / 61** | **84%**, and 92% on the LARGEST bills |
+
+**Fresh-wave yield decays** because recency-first hands out the easy bills first. Cause measured,
+not guessed: of 34 new drafts, **23 carried a flagged SUPPORT verdict** (bullets the source text
+does not back), only 11 were held by completeness.
+
+**At a 50% floor a fresh wave is not progress** — it adds ~6 published summaries AND ~6 drafts to
+Lance's queue. The drain lane converts because the author is TOLD what failed (each prior draft's
+recorded objections ship as a `reAuthor_file` pointer) instead of re-rolling blind.
+
+**Standing rule now in `docs/RUNBOOK_SUMMARY_WAVES.md`: below ~60% fresh-wave yield, stop exporting
+fresh waves and drain the draft queue instead.** Re-authored records MUST be recorded with
+`--replace-drafts` or the record step mints a SECOND draft beside the first, doubling the queue it
+is meant to drain. (Verified after every wave: 0 bills with multiple drafts.)
+
+**The drain pool is now EXHAUSTED — 46 -> 3 re-authorable.** Stopped there deliberately rather than
+falling back to fresh waves, which would rebuild the review queue overnight. Restarting is a
+judgement call, not an obvious continuation.
+
+**Two wave defects fixed, both the same shape — completed work failing to survive TRANSIT, neither
+a data problem, neither surfacing as an error:** (1) the manifest had no pointer form, so every
+launch hand-retyped a dozen uuids and sha256 hashes; (2) the wave RETURNED ~250KB of envelopes into
+a notification channel that truncates at ~250k, so wave 1 ran perfectly and handed back a blob with
+no `envelopes` key, stranding 12 bills in the journal. Workflow scripts have no filesystem access
+but agents do — the wave now writes `records-wave.json` itself. Left unfixed this would have
+silently eaten every future wave.
+
+**~$1.17 of API credit deliberately NOT spent.** Billed converts at $0.368/published; the daily
+scheduler at $0.107. The remainder is worth ~11 summaries there against ~3 here.
+
+**⚠ CHECK WHEN BACK: the scheduler had not ticked since 2026-08-26 11:00 UTC.** Its 06:00 run may
+not have fired. An agent never runs `schtasks` — this is Lance's to verify.
 
 ### ⚠ Read `PLAYBOOK_DELTA.md` lessons 51-55 before touching vote data
 
