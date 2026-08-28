@@ -80,9 +80,16 @@ const VIEWS = ['public_vote_feed', 'public_votes'];
 function findLatestViewDefinition(viewName) {
   const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
   let latest = null;
-  // `create view <name>\b` — cannot match `create materialized view` (literal differs), and
-  // `public_votes\b` cannot match `public_vote_feed` (no 's' after 'vote' there).
-  const createPattern = new RegExp(`create view ${viewName}\\b`, 'i');
+  // `create [or replace] view <name>\b` — cannot match `create materialized view` (literal
+  // differs), and `public_votes\b` cannot match `public_vote_feed` (no 's' after 'vote' there).
+  //
+  // `or replace` added 2026-08-28. Before this the pattern matched only the bare `create view`
+  // form, so migration 0035 — which appends a column with `create or replace view` precisely
+  // BECAUSE that form preserves the existing grants — was invisible to this guard. The test kept
+  // asserting against 0031 while a LATER migration defined the live view: the exact view-drift
+  // class 0023 is named after, reintroduced inside the guard built to prevent it. A valid SQL form
+  // the checker cannot see is worse than no checker, because it reports green.
+  const createPattern = new RegExp(`create (?:or replace )?view ${viewName}\\b`, 'i');
   for (const file of files) {
     const rawSql = readFileSync(`${MIGRATIONS_DIR}/${file}`, 'utf8');
     if (createPattern.test(rawSql)) {
@@ -111,9 +118,9 @@ for (const view of VIEWS) {
   });
 }
 
-test('sanity: as of this writing, 0031 is genuinely the file this test is exercising for both views', () => {
+test('sanity: as of this writing, 0035 is genuinely the file this test is exercising for both views', () => {
   for (const view of VIEWS) {
     const latest = findLatestViewDefinition(view);
-    assert.equal(latest.file, '0031_fix_public_views_antijoin_planner_misestimate.sql', `expected 0031 to be the latest migration defining ${view}`);
+    assert.equal(latest.file, '0035_expose_vote_date_provenance.sql', `expected 0035 to be the latest migration defining ${view}`);
   }
 });

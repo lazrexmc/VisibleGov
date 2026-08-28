@@ -759,6 +759,18 @@ footer#site-footer {
   margin: 0.15rem 0 0;
 }
 
+/* .vote-date-derived — the receipt for a date the source never printed (migrations 0032/0035).
+   185 of 10,195 votes carry one; every other row renders nothing here. Deliberately quieter than
+   .vote-meta but NOT hidden: it is the evidence for the date immediately above it, and a reader
+   who wants to check the claim against the bill history has to be able to read it. */
+.vote-date-derived {
+  color: var(--faint);
+  font-size: 0.78em;
+  font-style: italic;
+  line-height: 1.35;
+  margin: 0.1rem 0 0;
+}
+
 /* Lit mono position (mockup: "● YEA"/"● NAY"). Text stays exactly `Position: ${voteRow.position}`
    (person-page.js) — untouched, byte-identical — the ONLY JS change is the added
    `vote-position-${voteRow.position}` class hook; the "●" is CSS-generated content on the yea/nay

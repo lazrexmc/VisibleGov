@@ -19,7 +19,7 @@ import {
 import {
   el, clearChildren, sectionState, mountFooter, isSafeSrc,
 } from './render.js';
-import { voteReceiptUrl, photoUrl, rollCallLabel } from './receipts.js';
+import { voteReceiptUrl, photoUrl, rollCallLabel, voteDateDerivedNote } from './receipts.js';
 import { extractOneLiner } from './summary-parse.js';
 import {
   buildIdentity, voteFilterQuery, groupSponsorships, chamberLabel,
@@ -293,6 +293,15 @@ function renderVoteRow(voteRow, oneLinerMap) {
   const meta = [voteDay || null, voteRow.result || null, rollCallLabel(voteRow.source_url)].filter(Boolean);
   if (meta.length) {
     main.appendChild(el('p', { class: 'vote-meta' }, meta.join(' · ')));
+  }
+
+  // The receipt for a DERIVED date (migrations 0032/0035). 185 of 10,195 votes carry one; for
+  // every other row voteDateDerivedNote returns null and nothing renders. It sits directly under
+  // the meta line so the claim and its evidence are adjacent — the date above is the assertion,
+  // this is the source text it was taken from.
+  const derivedDateNote = voteDateDerivedNote(voteRow);
+  if (derivedDateNote) {
+    main.appendChild(el('p', { class: 'vote-date-derived' }, derivedDateNote));
   }
 
   const oneLiner = voteRow.bill_id ? oneLinerMap.get(voteRow.bill_id) : undefined;

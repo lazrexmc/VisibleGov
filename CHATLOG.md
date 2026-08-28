@@ -6262,3 +6262,60 @@ cost); waves proceed 12-at-a-time up the size ladder until the pool dries or Lan
   10-bill wave to finish rather than stopping, so he had to ask why it was taking so long. "When
   convenient" was his courtesy, not an invitation to finish the batch. Stopped immediately on the
   second ask; nothing was lost, since W12 never reached its record step.
+
+---
+
+## 2026-08-28 — Audit D6 closed: the derived-date receipt (0035)
+
+**Lance:** "Can you fix VisibleGov for me then?" — after a cross-project analysis (in `F:\RapidForge`)
+sorted every open VisibleGov item into decisions vs builds and found **one genuinely buildable
+item**: `vote_date_provenance` was stored but never publicly exposed.
+
+**Verified live before touching anything** (read-only, anon + service):
+`votes.vote_date_provenance` EXISTS (0032 applied); **185 of 10,195 votes** carry a derived date;
+`public_votes` and `public_vote_feed` both list columns explicitly and **neither carries it**. Repo
+and remote were in sync (`main`, 0/0, clean) before and after.
+
+**A wrong assumption, caught by reading the code.** 0032's own note said the fix needed "the view and
+bill page." The bill page does **not** render a vote date at all — `bill-page.js renderVotes` emits
+chamber, question, result, tally, source link and flag badge, and reads `vote_date` only to ORDER the
+list. The reader only ever sees a derived date on the **profile** page
+(`person-page.js renderVoteRow`, the `[date · result · roll call]` meta line). So the live gap was
+`public_vote_feed`, not the bill page.
+
+**A second assumption, also wrong, and worth recording.** I nearly warned that the site must not
+deploy before the migration, since PostgREST 400s on an unknown column in a select list. Checked:
+`profile-model.js voteFilterQuery` builds its URL with filters and an order but **no `select=`
+parameter**, so PostgREST returns every column and the page just receives one more field. The bill
+page IS a select-list consumer (`VOTES_SELECT`) and is deliberately untouched. **No deploy ordering
+is forced** — the renderer returns null when the field is absent, so the site is safe either side of
+the migration.
+
+**Shipped (code committed; SQL is draft-then-apply, Lance runs it in the Supabase editor):**
+- `supabase/migrations/0035_expose_vote_date_provenance.sql` — appends the column to **both** public
+  views via `create or replace` (which preserves grants, unlike 0031's drop+create). Both views,
+  deliberately: this repo has already been bitten by the two public surfaces drifting apart (0023 is
+  literally named for it), and updating one would recreate that class the first time anyone renders a
+  date on the bill page.
+- `site/js/receipts.js` — `voteDateDerivedNote()`, same contract as `rollCallLabel`: read a stored
+  field, render it **verbatim**, return null rather than guess. Null for an unrecognised `source`,
+  null for incomplete evidence, null for the 10,010 votes with a printed date.
+- `site/js/person-page.js` — renders it directly under the meta line, so the claim and its evidence
+  are adjacent.
+- `site/css/site.css` — `.vote-date-derived`, quieter than `.vote-meta` but deliberately **not**
+  hidden; it is the evidence for the date above it.
+- `tests/vote-date-provenance.test.js` — 6 tests against a **real** payload copied from a live row.
+
+**A defect I introduced, and the lesson.** `tests/vote-duplicates-antijoin-migration.test.js` finds
+"the LATEST migration to define" each view with the pattern `create view <name>`. 0035 uses
+`create or replace view` — so **the guard could not see it**, kept asserting against 0031, and
+reported green while a later migration defined the live view. Had 0035 used the catastrophic
+LEFT JOIN anti-join idiom, nothing would have caught it. Fixed the pattern to
+`create (?:or replace )?view` and re-pinned the sanity assertion to 0035.
+
+> **Lesson: a valid form the checker cannot see is worse than no checker, because it reports green.**
+> This is the view-drift class 0023 is named after — reintroduced *inside the guard built to prevent
+> it*. Worth adding to `PLAYBOOK_DELTA.md`.
+
+**Full suite: 2,720 tests, 2,720 pass, 0 fail** (gated on the extracted counts, not the exit code —
+lesson 14).

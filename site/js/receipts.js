@@ -59,6 +59,47 @@ export function rollCallLabel(sourceUrl) {
   return null;
 }
 
+// voteDateDerivedNote — the receipt for a vote date the source never printed.
+//
+// WHY (migrations 0032 and 0035). LegiScan prints 275 of the 2024 Missouri House floor roll calls
+// with the missing-date sentinel 0000-00-00, and the ingest refuses to invent a date. For 185 votes
+// it derives one from the SAME source's own dated, tallied history action, and stores the evidence
+// in votes.vote_date_provenance. Until 0035 those views did not carry the column, so the profile
+// page printed a date whose origin the reader could not see — the one fact on the row that most
+// needs a receipt, because it is the one that was not printed on the roll call at all.
+//
+// This is the same contract as rollCallLabel above: read a field already stored with the row,
+// render it verbatim, and return null rather than guess. The quoted action text is the source's
+// own string, tally included, so a reader can match it against the bill's printed history.
+//
+// Returns null — rendering nothing — for the overwhelming majority of votes, whose date WAS
+// printed and therefore carries no provenance object. Also null when the payload is present but
+// unrecognised or incomplete: an unfamiliar `source` means a new derivation rule this function has
+// not been taught, and a missing action date/text means there is no evidence to show. In every one
+// of those cases printing nothing is correct and printing a partial claim would be worse.
+const DERIVED_DATE_SOURCES = new Set(['legiscan_history_tally_match']);
+
+export function voteDateDerivedNote(voteRow) {
+  const p = voteRow?.vote_date_provenance;
+  if (!p || typeof p !== 'object') return null;
+  if (!DERIVED_DATE_SOURCES.has(p.source)) return null;
+
+  const action = p.action;
+  if (!action || typeof action !== 'object') return null;
+  const actionDate = String(action.date ?? '').trim();
+  const actionText = String(action.action ?? '').trim();
+  if (!actionDate || !actionText) return null;
+
+  // legislative_day is nullable by design (0032) — it is the extra guard the driver applies when
+  // the roll-call PDF link prints a day number, not something every derived date has.
+  const day = Number.isFinite(Number(p.legislative_day)) && p.legislative_day != null
+    ? ` (legislative day ${p.legislative_day})`
+    : '';
+
+  return `Date not printed on this roll call — derived from the bill's own history: `
+    + `${actionDate} “${actionText}”${day}`;
+}
+
 // Bioguide photo derivation (design spec §3, "the ruled no-NEW-column decision"): legislators.
 // image_url (OpenStates-era) wins when a source already provided one; otherwise the well-known
 // unitedstates/images bioguide path is derived at render time from bioguide_id, never stored.

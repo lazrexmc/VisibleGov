@@ -232,10 +232,24 @@ real Senate votes. The measurements converged; the predictions did not.
 2. **Summary coverage (audit D5)** — a decision, not a build. 1,112 published.
 
 **Buildable without a decision:**
-3. **`vote_date_provenance` is not exposed publicly** (audit D6). 185 votes carry a derived date
-   with a stored receipt, and `public_votes` does not list the column — so the site serves those
-   dates without the action they were derived from. Needs a small migration + a render. **This is a
-   real trust-model gap**: a fact whose receipt the reader cannot see.
+3. ~~**`vote_date_provenance` is not exposed publicly** (audit D6).~~ **BUILT 2026-08-28 — one
+   action left, and it is yours.** Code is committed; the SQL is draft-then-apply.
+   - **▶ LANCE: run `supabase/migrations/0035_expose_vote_date_provenance.sql` in the Supabase SQL
+     editor.** It appends `vote_date_provenance` to `public_vote_feed` and `public_votes` via
+     `create or replace` — metadata-only, instant, no data touched, grants preserved (unlike 0031's
+     drop+create). Verify commands are in the migration header.
+   - Site side is already written and **safe to deploy either side of the migration**: the renderer
+     returns null when the field is absent, and the profile page sends no `select=` list so it
+     cannot 400. New `voteDateDerivedNote()` in `receipts.js`, rendered by `person-page.js` under
+     the meta line, styled `.vote-date-derived`.
+   - **Correction to the old note above:** the gap was on the PROFILE page, not the bill page — the
+     bill page renders no vote date at all, only orders by it. 0032's note said "the view and bill
+     page"; that was wrong and is now recorded in CHATLOG.
+   - Found and fixed en route: `tests/vote-duplicates-antijoin-migration.test.js` matched only
+     `create view`, so it could not see a `create or replace view` migration and reported green
+     while asserting against a superseded file. **A valid form the checker cannot see is worse than
+     no checker.** Candidate `PLAYBOOK_DELTA.md` lesson.
+   - Full suite after: **2,720 pass, 0 fail.**
 4. **One `correct-data` run row stuck at `status=running` since 2026-08-03.** Cosmetic, one row.
 5. **382 reconciliation flags** — a human adjudication queue BY DESIGN. Do NOT run
    `resolve-matched-reconciliation-flags.mjs` expecting a drain: measured, it resolves **0**.
