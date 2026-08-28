@@ -220,6 +220,16 @@ real Senate votes. The measurements converged; the predictions did not.
 
 ### OPEN — pick up here
 
+**▶ LANCE — one migration drafted and awaiting you: `0036_revoke_internal_tables_from_anon.sql`.**
+Found by `npm run verify:migrations` on its first run. Three tables their own migrations call
+internal (`legiscan_datasets`, `vote_reconciliation_flags`, `ingestion_runs`) return `200 []` to
+anon — the grant is still there and only the absent RLS policy is holding the door, which is the
+exact `200 []` signature the Glizzness playbook §8.7 warns about. **Nothing is exposed today**;
+this is defence-in-depth, and 0024 dropped the policy in 2026-08-03 but never revoked 0010's grant.
+Three `revoke select` statements, no consumer breaks. After applying, re-run
+`npm run verify:migrations` — the 0036 row must flip from MISSING to OK and 0024 from POLICY-ONLY.
+
+
 **Lance's decisions (nothing blocked on code):**
 1. **Cloudflare Web Analytics.** The only console error on the live site is the CSP blocking
    Cloudflare's auto-injected `beacon.min.js`. Two paths, both fully specced 2026-08-26:

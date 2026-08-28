@@ -1,0 +1,65 @@
+-- 0036: revoke anon's leftover table GRANTs on the three internal tables.
+--
+-- FOUND BY `scripts/verify-migrations.mjs` ON ITS FIRST RUN, 2026-08-28. Not a leak — nothing is
+-- exposed today — but the protection is the wrong layer, and the repo already has a rule about it.
+--
+-- WHAT WAS MEASURED (anon key, live):
+--
+--   summaries                  -> 401 / 42501   grant revoked, column-scoped (0025 did this properly)
+--   glossary_terms             -> 401 / 42501   same
+--   legiscan_datasets          -> 200 []        GRANT PRESENT, policy absent
+--   vote_reconciliation_flags  -> 200 []        GRANT PRESENT, policy absent
+--   ingestion_runs             -> 200 []        GRANT PRESENT, policy absent
+--
+-- All three of the `200 []` tables are documented in their own migrations as internal:
+--   * `ingestion_runs`   — 0003:21, reaffirmed 0016:7-10, "ingestion_runs internals are not public"
+--   * `vote_reconciliation_flags` — 0010:64-66, "internal QA ledger, deliberately NOT anon-readable"
+--   * `legiscan_datasets` — 0024, "this table becomes service-role-only"
+--
+-- WHY `200 []` IS NOT GOOD ENOUGH. Each of those tables is protected by the ABSENCE of an RLS
+-- policy, not by the absence of a privilege. Anon still holds SELECT; RLS is simply returning no
+-- rows. The Glizzness replication playbook (§4.2, and §8.7's verification step) is explicit:
+--
+--     "That REVOKE is the whole ballgame. Without it, the ONLY thing between the public key and
+--      your client's data is the absence of a policy — one `disable row level security` during a
+--      late-night fix and it's wide open. Verify it by testing... If you get `200 []`, your REVOKE
+--      is missing and only RLS is holding the door."
+--
+-- 0024 dropped the policy on legiscan_datasets but never revoked 0010's grant, so it landed in
+-- exactly the state that playbook names. The other two never had a revoke at all.
+--
+-- SEVERITY: low. No data is reachable now, no consumer breaks (nothing in `site/` reads any of
+-- these three — the same grep 0024 recorded), and 0016 already established that operational
+-- freshness for readers comes from `public_freshness`, not from `ingestion_runs` directly. This is
+-- defence-in-depth: after this migration anon is refused at the privilege layer, so an RLS mistake
+-- can no longer expose these tables on its own.
+--
+-- NOT REVOKED HERE, deliberately: `votes`, `summaries`, `glossary_terms` and every other
+-- anon-readable public surface. Those are meant to be readable and their grants are load-bearing.
+-- This migration touches only the three tables their own migrations already call internal.
+--
+-- VERIFY AFTER APPLYING — all three must return 401 with code 42501, NOT `200 []`:
+--   for t in legiscan_datasets vote_reconciliation_flags ingestion_runs; do
+--     curl -s -o /dev/null -w "$t %{http_code}\n" \
+--       "$SUPABASE_URL/rest/v1/$t?select=*&limit=1" \
+--       -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+--   done
+--
+-- Or simply re-run the script that found it — the 0024 row must flip from POLICY-ONLY to OK:
+--   node --env-file=.env scripts/verify-migrations.mjs
+--
+-- Draft-then-apply: Lance applies.
+
+-- DELIBERATELY NOT INCLUDED: `alter default privileges in schema public revoke select on tables
+-- from anon`. It was drafted here and removed before this file was committed. It is a sound
+-- hardening step in general (the Glizzness playbook recommends it, and LinkedUmp's §1.1 sets the
+-- equivalent Supabase project toggle), but it changes the posture of EVERY table created from now
+-- on, in a project whose public surface depends on anon grants. Bundling a repo-wide default change
+-- with three targeted revokes makes a small, safe migration into one that needs a much longer
+-- review — and a migration nobody wants to apply does not get applied. If that hardening is wanted
+-- it belongs in its own migration, with its own audit of what would have to be granted explicitly
+-- afterwards.
+
+revoke select on legiscan_datasets from anon;
+revoke select on vote_reconciliation_flags from anon;
+revoke select on ingestion_runs from anon;

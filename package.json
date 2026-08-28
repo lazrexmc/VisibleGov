@@ -22,7 +22,8 @@
     "link:persons": "node --env-file=.env src/cli/link-persons.js",
     "refresh:aggregates": "node --env-file=.env scripts/refresh-aggregates.js",
     "review": "node --env-file=.env src/review/server.js",
-    "schedule:ingest": "node --env-file=.env scripts/scheduled-ingest.js"
+    "schedule:ingest": "node --env-file=.env scripts/scheduled-ingest.js",
+    "verify:migrations": "node --env-file=.env scripts/verify-migrations.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
