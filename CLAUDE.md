@@ -33,7 +33,16 @@ accountable with real information instead of spin.
 >    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
 >    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
 >    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
-> 2. **All 35 migrations (0001-0034 + 0018a) are APPLIED** (verified live 2026-08-26). `0032`
+> 2. **36 migration files on disk (0001-0035 + 0018a). 35 are APPLIED; `0035` is NOT — it is the
+>    ONE pending item** (re-verified live against the DATABASE, not from memory, 2026-08-28: the
+>    `0032` column, the `0033` table and both `0034` indexes are present; `vote_date_provenance`
+>    is absent from BOTH `public_votes` and `public_vote_feed`, which is 0035's entire job).
+>    `0035_expose_vote_date_provenance.sql` exposes the derived-date receipt on the two public
+>    views — 185 votes currently render a date the reader cannot audit. It is `create or replace`
+>    with the column APPENDED, so grants survive and no re-grant is needed; safe to apply alone,
+>    in either order with the site render, because `profile-model.js` sends no `select=`.
+>    **Verify by artifact, never by recollection** — on 2026-08-28 the operator did not recall
+>    running 0034; the two indexes were live with the migration's exact definitions. `0032`
 >    landed 2026-08-23 with the LegiScan 2024 re-ingest: 185 MO House roll calls the source prints
 >    with the `0000-00-00` date sentinel are stored under a date derived from the one dated, tallied
 >    action in the bill's own history that prints their exact AYES/NOES, each carrying that action
@@ -121,10 +130,12 @@ real scheduled `pg_cron` ticks are succeeding; the site is now DEPLOYED and veri
 https://visiblegov.pages.dev (2026-08-05); **the custom domain `visiblegov.us` went LIVE
 2026-08-24** (apex 200, `www` 301 to apex — re-verified 2026-08-26) and is the primary address —
 see `TODO.md` RESUME HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
-the public site (`site/`), schema migrations (`supabase/migrations/`, **35 files on disk as of
-2026-08-26 (0001-0034 + 0018a), ALL applied** — `0032_vote_date_provenance.sql` was applied
-2026-08-23; `0033_retracted_votes.sql` (the retraction tombstone) and
-`0034_bill_page_indexes.sql` (the two indexes every bill page needs) both on 2026-08-26; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
+the public site (`site/`), schema migrations (`supabase/migrations/`, **36 files on disk as of
+2026-08-28 (0001-0035 + 0018a); 35 applied, `0035` PENDING** — `0032_vote_date_provenance.sql` was
+applied 2026-08-23; `0033_retracted_votes.sql` (the retraction tombstone) and
+`0034_bill_page_indexes.sql` (the two indexes every bill page needs) both on 2026-08-26, both
+re-verified live by their artifacts 2026-08-28; `0035_expose_vote_date_provenance.sql` (the
+derived-date receipt on the two public views) is drafted and awaiting Lance — see trap 2 above; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
 anon vote-list timeout found on deploy night, both verified live 2026-08-05; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
 missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-backed tests (`tests/`,
 2,200+ green — run `node --test` for the exact current count; a senior engineering audit,
