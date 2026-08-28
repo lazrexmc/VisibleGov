@@ -33,14 +33,21 @@ accountable with real information instead of spin.
 >    client is configured). Verified deterministically, and it fired AGAIN during the 2026-08-05
 >    doc sync when a live-`curl` check and a test run got batched into one shell. Run tests in a
 >    clean shell; every CLI takes `--env-file=.env` for this reason. (PLAYBOOK_DELTA lesson 30.)
-> 2. **36 migration files on disk (0001-0035 + 0018a). 35 are APPLIED; `0035` is NOT — it is the
->    ONE pending item** (re-verified live against the DATABASE, not from memory, 2026-08-28: the
->    `0032` column, the `0033` table and both `0034` indexes are present; `vote_date_provenance`
->    is absent from BOTH `public_votes` and `public_vote_feed`, which is 0035's entire job).
->    `0035_expose_vote_date_provenance.sql` exposes the derived-date receipt on the two public
->    views — 185 votes currently render a date the reader cannot audit. It is `create or replace`
->    with the column APPENDED, so grants survive and no re-grant is needed; safe to apply alone,
->    in either order with the site render, because `profile-model.js` sends no `select=`.
+> 2. **36 migration files on disk (0001-0035 + 0018a). ALL 36 ARE APPLIED as of 2026-08-28** —
+>    `0035` was the last pending item and Lance ran it in the Supabase SQL editor that morning.
+>    Verified live by artifact immediately after, not from recollection: anon reads
+>    `vote_date_provenance` from BOTH `public_vote_feed` and `public_votes` (HTTP 200, real
+>    payload), and a plain feed read still returns 200 — so `create or replace` preserved the
+>    grants exactly as 0035's header claimed, and no re-grant was needed.
+>
+>    **This block itself drifted within eight minutes of being written** — it was committed
+>    (`08f11ab`, 09:33) saying 0035 was PENDING, which was true at 09:33 and false by the time
+>    Lance applied it. That is the *fifth* recorded drift of a migration count in this file.
+>    **The durable fix is a script, not another careful edit:** every claim here is checkable
+>    through PostgREST alone by testing each migration's observable artifact — does this view
+>    return this column, does this table respond, does anon get `42501` here — the same technique
+>    `scripts/probe-public-surface.js` already uses. Until that exists, **verify by artifact,
+>    never by this paragraph.**
 >    **Verify by artifact, never by recollection** — on 2026-08-28 the operator did not recall
 >    running 0034; the two indexes were live with the migration's exact definitions. `0032`
 >    landed 2026-08-23 with the LegiScan 2024 re-ingest: 185 MO House roll calls the source prints
@@ -131,11 +138,12 @@ https://visiblegov.pages.dev (2026-08-05); **the custom domain `visiblegov.us` w
 2026-08-24** (apex 200, `www` 301 to apex — re-verified 2026-08-26) and is the primary address —
 see `TODO.md` RESUME HERE.** The repo holds the ingestion CLIs and adapters (`src/`),
 the public site (`site/`), schema migrations (`supabase/migrations/`, **36 files on disk as of
-2026-08-28 (0001-0035 + 0018a); 35 applied, `0035` PENDING** — `0032_vote_date_provenance.sql` was
+2026-08-28 (0001-0035 + 0018a); ALL 36 APPLIED** — `0032_vote_date_provenance.sql` was
 applied 2026-08-23; `0033_retracted_votes.sql` (the retraction tombstone) and
 `0034_bill_page_indexes.sql` (the two indexes every bill page needs) both on 2026-08-26, both
 re-verified live by their artifacts 2026-08-28; `0035_expose_vote_date_provenance.sql` (the
-derived-date receipt on the two public views) is drafted and awaiting Lance — see trap 2 above; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
+derived-date receipt on the two public views) applied by Lance 2026-08-28 and verified live the
+same morning — see trap 2 above; 0030 revoked a stray `authenticated` EXECUTE grant, 0031 fixed a live
 anon vote-list timeout found on deploy night, both verified live 2026-08-05; 0025's column-scoping had one real fallout, a `site/js/bill-page.js` query
 missing an explicit `select=`, fixed same pass — see TODO.md), and fixture-backed tests (`tests/`,
 2,200+ green — run `node --test` for the exact current count; a senior engineering audit,
