@@ -1,0 +1,54 @@
+# Daily LegiScan ingestion — kept apart from the hourly tick on purpose.
+#
+# WHY ITS OWN WORKFLOW. LegiScan runs average 9.5 minutes and have reached 53 (measured over 30 days
+# of real runs). If it shared `concurrency: ingest` with the hourly job, one long LegiScan run would
+# block the next several hourly ticks — turning a slow bulk fetch into a freshness outage for the
+# three fast Missouri/federal sources that had nothing to do with it.
+#
+# It also has its own budget shape: ~30 runs/month at ~9.5 min is ~285 Actions minutes, and that is
+# a number worth being able to see and change independently of the hourly cron.
+#
+# CADENCE. scheduled-ingest.js already gates LegiScan behind its own 24h interval, so running this
+# daily is belt-and-braces rather than a second source of truth: if the workflow fires early, the
+# script simply reports the source is not due and exits cheaply. That means a late or duplicated
+# cron cannot cause a double-fetch or burn LegiScan API quota (LEGISCAN_MONTHLY_QUERY_CAP).
+
+name: ingest-legiscan
+
+on:
+  schedule:
+    - cron: '23 9 * * *'   # 09:23 UTC daily — off the hour, and away from the :07 hourly tick so the
+                           # two are not competing for a runner at the same instant.
+  workflow_dispatch:
+
+concurrency:
+  group: ingest-legiscan   # separate group from `ingest` — that separation is the whole point
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  legiscan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90    # observed max is 53 min; 90 leaves headroom without letting a wedged run
+                           # sit burning metered minutes for the 6h GitHub default
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Ingest LegiScan
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LEGISCAN_API_KEY: ${{ secrets.LEGISCAN_API_KEY }}
+          LEGISCAN_MONTHLY_QUERY_CAP: ${{ vars.LEGISCAN_MONTHLY_QUERY_CAP }}
+          HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
+        run: node scripts/scheduled-ingest.js --only legiscan

@@ -1,0 +1,66 @@
+# Run the suite on every push and PR.
+#
+# WHY (2026-08-29). `scripts/probe-public-surface.js` pinned an exact column list for
+# public_vote_feed. Migration 0035 appended `vote_date_provenance` and the list was not updated, so
+# that probe was red — and nobody knew for a day, because nothing in this repo ran automatically.
+# The suite has been green the whole time and could not have caught it; only actually running things
+# catches that class. This workflow is the cheap half of the fix.
+#
+# ⚠ THE TRAP THAT WILL BITE THE NEXT PERSON WHO EDITS THIS FILE:
+#
+#   DO NOT give the `node --test` step SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
+#
+# `tests/review-logic.test.js` asserts the API's behaviour when NO database client is configured —
+# it expects HTTP 500. Hand the test process real Supabase credentials and it builds a real client,
+# returns 200, and TWO CORRECT TESTS GO RED. This has cost real time twice locally (it is trap #1 in
+# CLAUDE.md and PLAYBOOK_DELTA lesson 30, where the cause was `source .env` in the same shell). In CI
+# the equivalent mistake is adding the secrets to this job "for consistency" with the ingest
+# workflows. The absence of those env vars here is deliberate and load-bearing, not an oversight.
+#
+# WHY `npm run verify:migrations` IS NOT RUN HERE, though it would have caught related drift:
+# this project works draft-then-apply — a migration is committed, then Lance applies it by hand,
+# sometimes days later. The verifier exits 1 while a migration is drafted-but-unapplied, which is a
+# NORMAL and expected state. Wiring it to push would paint CI red for ordinary workflow and train
+# everyone to ignore it, which is worse than not running it. It stays operator-run, on purpose.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true   # unlike ingest, superseding an in-flight test run is exactly right
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # No env block. See the trap above — this is intentional.
+      - name: Run the suite
+        run: node --test
+
+      # Production dependencies only: dev-tree advisories are noise for a project that ships no
+      # bundled client code. Informational — a new advisory should be visible, not a merge blocker,
+      # and one current finding (fast-xml-parser GHSA-gh4j-gqv2-49f6) is in XMLBuilder, which this
+      # repo does not import. Blocking on it would force a pointless semver-major upgrade.
+      - name: Dependency audit (informational)
+        continue-on-error: true
+        run: npm audit --omit=dev

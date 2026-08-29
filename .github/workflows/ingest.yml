@@ -1,0 +1,91 @@
+# Hourly ingestion — the fast sources.
+#
+# WHY THIS EXISTS (2026-08-29). Ingestion used to run on Windows Task Scheduler on Lance's desktop,
+# every 15 minutes, in a process holding SUPABASE_SERVICE_ROLE_KEY — a key that bypasses every RLS
+# wall. That process also parses PDFs fetched from EXTERNAL government sites, and pdfjs-dist 6.1.200
+# carried GHSA-hq66-cqwq-w95j ("arbitrary JavaScript execution upon opening a malicious PDF").
+# Patching the CVE removed the instance; it did not change the blast radius. A successful RCE would
+# have executed on a personal machine, beside a browser profile and several other projects'
+# credentials — a credential harvest, not a scoped compromise.
+#
+# Here, the same code runs in a throwaway container that is destroyed when the job ends, and the key
+# lives in GitHub Secrets rather than in a .env at rest on a desktop.
+#
+# CADENCE: hourly, not */15. This repo is PRIVATE, so Actions minutes are metered (2,000/month on
+# the Free plan). Measured over 30 days, real ingestion work is ~1,321 minutes; add ~0.5-0.75 min of
+# runner start + install per job and */15 (2,880 jobs) would blow the free tier and cost $30-55/mo,
+# which defeats the project's $0/month stack. Hourly (720 jobs) lands around 1,600-1,900 min/month —
+# inside the tier, but the margin IS thin. If it ever runs over, the lever is this cron line, not
+# the code. Roll calls do not change every 15 minutes; hourly is well inside what the data warrants.
+#
+# CRON DRIFT IS SAFE HERE, which is why hourly works at all. GitHub's scheduler is best-effort and
+# routinely fires late under load. scheduled-ingest.js does not care: it decides per-source due-ness
+# by reading ingestion_runs, so a late tick simply finds more work due and does it. There is no
+# fixed-interval assumption to violate.
+#
+# LEGISCAN IS DELIBERATELY NOT HERE — see ingest-legiscan.yml. Its runs average 9.5 min and have hit
+# 53. Sharing a concurrency group with the hourly job would let one LegiScan run block the next
+# several hourly ticks.
+
+name: ingest
+
+on:
+  schedule:
+    - cron: '7 * * * *'   # :07 past the hour — off the top-of-hour stampede, which is when GitHub's
+                          # scheduler is most heavily delayed.
+  workflow_dispatch:      # so Lance can force a tick without waiting for cron
+
+# Never let two ingest ticks overlap: they would race on the same ingestion_runs rows and double-
+# fetch the same sources. cancel-in-progress:false because a half-finished ingest is worse than a
+# late one — let the running tick finish and skip this one.
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+permissions:
+  contents: read          # the job only reads code; it writes to Supabase, never back to the repo
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # the four fast sources; anything longer means something is wedged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'     # matches the version the suite is green on locally
+          cache: npm             # keeps `npm ci` around 15s instead of ~60s — directly protects the
+                                 # minute budget above, since install overhead is paid every job
+
+      - run: npm ci
+
+      # Each source runs independently: one source being down (a government site 500ing) must not
+      # stop the other three. The loop records failures and exits non-zero at the end, so a genuine
+      # outage still turns the run red rather than being swallowed — the signal-death failure this
+      # project already fixed once inside the ingest code itself.
+      - name: Ingest fast sources
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+          OPENSTATES_API_KEY: ${{ secrets.OPENSTATES_API_KEY }}
+          HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
+        run: |
+          set -u
+          failed=""
+          for src in mo-senate-web mo-house-xml us-congress us-senate; do
+            echo "::group::$src"
+            if node scripts/scheduled-ingest.js --only "$src"; then
+              echo "$src ok"
+            else
+              echo "$src FAILED"
+              failed="$failed $src"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::ingest failed for:$failed"
+            exit 1
+          fi
