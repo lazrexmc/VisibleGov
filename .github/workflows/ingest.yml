@@ -62,9 +62,17 @@ jobs:
       - run: npm ci
 
       # Each source runs independently: one source being down (a government site 500ing) must not
-      # stop the other three. The loop records failures and exits non-zero at the end, so a genuine
-      # outage still turns the run red rather than being swallowed — the signal-death failure this
-      # project already fixed once inside the ingest code itself.
+      # stop the other three.
+      #
+      # ⚠ THE EXIT CODE BELOW ONLY CATCHES CRASHES, NOT FAILED INGESTION — do not read a green tick
+      # here as "ingestion worked". scheduled-ingest.js exits 0 on operational failure BY DESIGN
+      # (see its comment at ~line 1253: "a transient/expected operational outcome exits 0 and relies
+      # on an honest log record, never process.exitCode"). That convention is correct and unchanged.
+      # It does mean this step's status is close to a constant, and a status that never varies
+      # carries zero bits — the exact shape that once let us-congress close 121 of 121 runs `partial`
+      # while perfectly healthy. The real verdict comes from the health-check step after this one,
+      # which reads ingestion_runs. Keep both: this catches a crashed process, that catches a broken
+      # feed, and neither can see the other's failure.
       - name: Ingest fast sources
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -86,6 +94,21 @@ jobs:
             echo "::endgroup::"
           done
           if [ -n "$failed" ]; then
-            echo "::error::ingest failed for:$failed"
+            echo "::error::ingest process CRASHED for:$failed"
             exit 1
           fi
+
+      # The verdict that actually means something. Reads ingestion_runs rather than an exit code,
+      # and is deliberately tolerant: a single failed run is weather (government sites 500), so a
+      # source must fail 3 times consecutively before this reddens. Failing hourly on transient
+      # noise would train everyone to ignore the one channel that will ever report something real.
+      #
+      # It also fires on SILENCE — a source that stopped being attempted at all has zero failures
+      # and looks perfect to any failure-counting check. `if: always()` so a crash in the step above
+      # does not skip the diagnosis that explains it.
+      - name: Verify ingestion actually worked
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-ingest-health.mjs

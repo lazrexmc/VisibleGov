@@ -27,5 +27,11 @@ node_modules/
 # the moment the scheduler ticks — retract-misattributed-votes.mjs deliberately regenerates from
 # the live database rather than reading one of these back, so a committed copy would only ever be
 # a misleading snapshot.
-manifest.json
-*-manifest.json
+# ANCHORED with a leading slash, deliberately. Unanchored, `manifest.json` matches that name at
+# ANY depth — so the day anyone adds `site/manifest.json` (a PWA web app manifest is the obvious
+# one for this site) git would silently refuse to track it, the file would never reach Cloudflare
+# Pages, and the page would 404 for a manifest that exists locally and looks committed. The
+# retraction manifests this rule targets are only ever written to the repo ROOT by
+# `scripts/find-misattributed-votes.mjs --out`. (RapidForge registry, 2026-08-29: the `data/` trap.)
+/manifest.json
+/*-manifest.json
