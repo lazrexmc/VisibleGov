@@ -30,6 +30,12 @@
 // KEEP IN SYNC WITH `site/_headers`'s `/*` block. The test will not let you forget.
 export const FUNCTION_SECURITY_HEADERS = {
   'Content-Security-Policy': "default-src 'self'; connect-src 'self' https://bplxjbhlyyeucuwfqcbp.supabase.co; img-src 'self' https:; script-src 'self'; style-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'",
+  // Added 2026-08-29 with the same line in site/_headers. Pages does NOT apply _headers to a
+  // Function response, so the /geocode endpoint would otherwise be the one origin path still
+  // answering without HSTS — which is the path that handles a typed home address. The drift guard
+  // in tests/site-modules.test.js caught this omission the moment _headers changed alone; that is
+  // exactly why the guard exists, so keep the two in lockstep.
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };

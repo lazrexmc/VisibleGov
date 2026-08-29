@@ -727,6 +727,43 @@ test('loadVotesSection: NEW-C(a) — the empty-legislatorIds message names the r
   assert.equal(container.textContent.includes('No recorded votes for this filter.'), false);
 });
 
+// Audit 2026-08-29: 555 of 1,607 directory profiles (34.5%) have zero votes — legislators who
+// left office before this site's coverage window. Every one of them rendered "No recorded votes
+// for this filter." even with NO filter applied, which invites the reading "this person cast no
+// votes" instead of "we do not hold this era". That is the site's own rule ("a gap must not be
+// mistaken for a record") failing at the exact point of confusion. Both branches are pinned here
+// because the fix is only correct if the FILTERED wording survives unchanged.
+test('loadVotesSection: an UNFILTERED empty vote list explains the coverage window, not "this filter"', async () => {
+  _setFetch(async () => emptyOkResponse());
+  const container = document.createElement('section');
+  await loadVotesSection(container, { legislatorIds: ['leg-1'], filters: {} });
+  const text = container.textContent;
+  assert.equal(
+    text.includes('No recorded votes for this filter.'), false,
+    'with no filter applied, blaming "this filter" is inaccurate — nothing was filtered',
+  );
+  assert.ok(text.includes('Missouri roll-call coverage begins'), `must name the window — got: ${text}`);
+  assert.ok(text.includes('2015'), 'must give the Missouri start year');
+  assert.ok(text.includes('119th Congress'), 'must give the federal start');
+});
+
+test('loadVotesSection: a FILTERED empty vote list still says "for this filter" (the filter really is why)', async () => {
+  for (const filters of [{ chamber: 'H' }, { year: 2019 }, { missedOnly: true }, { position: 'nay' }]) {
+    _setFetch(async () => emptyOkResponse());
+    const container = document.createElement('section');
+    // eslint-disable-next-line no-await-in-loop -- sequential by design; each case asserts its own render
+    await loadVotesSection(container, { legislatorIds: ['leg-1'], filters });
+    assert.ok(
+      container.textContent.includes('No recorded votes for this filter.'),
+      `filter ${JSON.stringify(filters)} must keep the filter wording — got: ${container.textContent}`,
+    );
+    assert.equal(
+      container.textContent.includes('Missouri roll-call coverage begins'), false,
+      `filter ${JSON.stringify(filters)} must NOT claim a coverage gap — the filter is the reason`,
+    );
+  }
+});
+
 // MED-5: a filter/page change while a PRIOR loadVotesSection call is still in flight is a real
 // race — network responses can resolve OUT OF ORDER. Without a generation guard, whichever call
 // resolves LAST wins the render even if it's the stale one, leaving the vote list mismatched

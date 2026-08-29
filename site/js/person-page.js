@@ -533,7 +533,26 @@ export async function loadVotesSection(container, { legislatorIds, filters, vote
   if (isStale()) return page;
 
   if (page.rows.length === 0) {
-    sectionState(container, { state: 'empty', message: 'No recorded votes for this filter.' });
+    // Audit finding (2026-08-29): 555 of 1,607 directory profiles — 34.5% — have zero votes, and
+    // every one of them rendered the bare "for this filter" line even with NO filter applied.
+    // On a site whose stated rule is "a gap must not be mistaken for a record", that is the one
+    // place the rule was not met: a visitor landing on a legislator who left office before our
+    // window (Todd Akin, 2013; Cori Bush, January 2025) could reasonably read an empty list as
+    // "this person cast no votes" rather than "we do not hold this era".
+    //
+    // trust.html already discloses the window, but that page is not where the confusion happens.
+    // So distinguish the two honestly at the point of use: a narrow FILTER keeps the original
+    // wording, while an unfiltered empty list says which years the site actually covers. Wording
+    // deliberately mirrors trust.html's own sentence rather than inventing a second phrasing.
+    const filtered = Boolean(filters.chamber || filters.year != null || filters.missedOnly || filters.position);
+    sectionState(container, {
+      state: 'empty',
+      message: filtered
+        ? 'No recorded votes for this filter.'
+        : 'No recorded votes on this site for this legislator. Missouri roll-call coverage begins '
+          + 'with the 2015 session (Senate roll calls with 2016) and federal coverage with the '
+          + '119th Congress (January 2025) — service before those years is not on this site.',
+    });
     return page;
   }
 

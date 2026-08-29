@@ -124,6 +124,28 @@ async function anonRevoked(relation) {
   return 'absent';
 }
 
+// Can ANON still CALL a function by name over /rpc/? The right probe for an EXECUTE revoke, and
+// it needs its own primitive because rest() above is GET-only while RPC is POST.
+//
+// The states are easy to mix up, so name them precisely:
+//   400 + 0A000 "cannot display a value of type event_trigger"
+//        -> anon HAS execute. PostgREST got far enough to try to serialise the return value and
+//           choked on the pseudo-type. The grant is still live => the migration is ABSENT.
+//   404 / 401 / 403 / 42501
+//        -> anon cannot reach the function at all => APPLIED.
+// Reading that 400 as "denied" would be the exact false-negative this script exists to prevent:
+// the call is refused by a serializer accident, not by a privilege.
+async function anonRpcDenied(fn) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const body = await res.text();
+  if (res.status === 404 || res.status === 401 || res.status === 403 || /42501/.test(body)) return 'applied';
+  return 'absent';
+}
+
 // Can ANON read a SPECIFIC column? The right probe for column-scoping migrations: after 0025,
 // `select=*` on summaries returns 401/42501 (there is no table-wide grant any more) while
 // `select=bill_id` returns 200. Probing with `*` there reports a false MISSING — the 401 is
@@ -225,6 +247,7 @@ const PROBES = {
   '0035_expose_vote_date_provenance.sql':                    { artifact: 'public_vote_feed.vote_date_provenance', run: () => columnExists('public_vote_feed', 'vote_date_provenance') },
   '0036_revoke_internal_tables_from_anon.sql':               { artifact: 'anon REVOKED (401/42501) on legiscan_datasets', run: () => anonRevoked('legiscan_datasets'), why: 'strict: `200 []` is policy-only and FAILS here — moving the protection to the privilege layer is the entire point of this migration' },
   '0037_revoke_bill_texts_from_anon.sql':                    { artifact: 'anon REVOKED (401/42501) on bill_texts', run: () => anonRevoked('bill_texts'), why: 'the rls-probe found bill_texts still anon-readable AFTER 0036 closed the other three; same strict rule — `200 []` is policy-only and FAILS. Safe to revoke because no site code reads bill_texts: the public surface serves the plain-language SUMMARY, never the raw text.' },
+  '0038_lock_down_rls_auto_enable.sql':                      { artifact: 'anon cannot call rpc/rls_auto_enable', run: () => anonRpcDenied('rls_auto_enable'), why: 'a SECURITY DEFINER function that runs DDL had EXECUTE granted to PUBLIC. Not exploitable today only because its event_trigger return type makes PostgREST refuse it with 400 — a serializer accident, not a privilege. This migration ALSO codifies the ensure_rls trigger itself, which existed only in the live database and would have been missing from any rebuild.' },
 };
 
 // ---------------------------------------------------------------------------

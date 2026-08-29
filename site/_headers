@@ -33,7 +33,20 @@
 #   frame-ancestors 'none' / base-uri 'none' / object-src 'none' / form-action 'self' — no
 #                         clickjacking frame, no <base> href rewrite of every relative link, no
 #                         plugin embeds, and the address-lookup form can only ever post to us.
+#   Strict-Transport-Security — added 2026-08-29 (audit finding: it was the one gap in an
+#                         otherwise complete header set). Tells the browser to refuse plain HTTP
+#                         to this host for a year, which closes the first-request downgrade window
+#                         that a redirect alone cannot: without it, a visitor typing
+#                         "visiblegov.us" makes one clear-text request before the 301 to HTTPS,
+#                         and that request is interceptable on a hostile network. For a site whose
+#                         whole product is "you can trust what this page says a legislator did",
+#                         a tamperable first byte is the wrong thing to leave open.
+#                         includeSubDomains is safe here: the zone serves the apex and `www` only,
+#                         both HTTPS. `preload` is deliberately NOT set — submitting to the
+#                         browser preload list is effectively irreversible on a human timescale
+#                         and is Lance's call to make separately, not a side effect of an audit.
 /*
   Content-Security-Policy: default-src 'self'; connect-src 'self' https://bplxjbhlyyeucuwfqcbp.supabase.co; img-src 'self' https:; script-src 'self'; style-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer

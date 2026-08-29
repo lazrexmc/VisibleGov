@@ -814,6 +814,24 @@ test('loadSiteHeaders: the real site/_headers carries a CSP with the exact direc
   assert.ok(!csp.includes('unsafe-eval'), "no 'unsafe-eval' anywhere");
 });
 
+test('loadSiteHeaders: the real site/_headers sends HSTS, so the first request cannot be downgraded', () => {
+  // Added 2026-08-29. A 301 from http:// to https:// still lets ONE clear-text request leave the
+  // browser, which is interceptable on a hostile network — and this site's entire product claim is
+  // that what it says a legislator did is trustworthy. HSTS closes that first-request window.
+  const hsts = loadSiteHeaders(SITE_ROOT)['Strict-Transport-Security'];
+  assert.ok(hsts, 'site/_headers must send Strict-Transport-Security for /*');
+
+  const maxAge = Number((hsts.match(/max-age=(\d+)/) ?? [])[1]);
+  assert.ok(Number.isFinite(maxAge), `HSTS must set a numeric max-age — got: ${hsts}`);
+  assert.ok(maxAge >= 31536000, `HSTS max-age must be at least one year (31536000) to be worth sending — got ${maxAge}`);
+  assert.ok(hsts.includes('includeSubDomains'), 'HSTS must cover subdomains — the zone serves apex + www, both HTTPS');
+
+  // `preload` is a deliberate omission, not an oversight: submitting to the browser preload list
+  // is effectively irreversible on a human timescale, so it is Lance's separate decision. If it is
+  // ever added on purpose, update this assertion in the SAME commit rather than deleting it.
+  assert.ok(!hsts.includes('preload'), 'preload must stay opt-in — see the note in site/_headers');
+});
+
 test("loadSiteHeaders: connect-src names the SAME Supabase origin site/config.js points at (hardcoded header vs config drift)", async () => {
   const { SUPABASE_URL } = await import('../site/config.js');
   const csp = loadSiteHeaders(SITE_ROOT)['Content-Security-Policy'];

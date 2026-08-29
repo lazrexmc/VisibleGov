@@ -49,7 +49,19 @@ export function reconstructPageText(items) {
 // ArrayBuffer (fetchWithLimit's `as: 'arrayBuffer'` return shape).
 export async function extractPdfText(pdfBuffer) {
   const data = new Uint8Array(pdfBuffer);
-  const doc = await getDocument({ data }).promise;
+  // isEvalSupported:false — defence in depth, added 2026-08-29 alongside the pdfjs-dist
+  // 6.1.200 -> 6.3.289 bump that closed GHSA-hq66-cqwq-w95j ("arbitrary JavaScript execution
+  // upon opening a malicious PDF", affected range >=5.6.83 <6.2.108).
+  //
+  // WHY IT IS WORTH SETTING EVEN ON A PATCHED VERSION: every byte this function parses was
+  // fetched from an EXTERNAL site (revisor.mo.gov, house.mo.gov, senate.mo.gov, LegiScan), and
+  // it runs unattended every 15 minutes under the `VisibleGov Scheduled Ingestion` task in a
+  // process that holds SUPABASE_SERVICE_ROLE_KEY — a key that bypasses RLS entirely. That makes
+  // "a hostile PDF executes script during parsing" a credential-disclosure path, not a crash.
+  // This pipeline only ever reads text positions; it has no use for the eval-backed font/colour
+  // machinery, so turning it off costs nothing and removes the class rather than one instance.
+  // Verified: all six PDF fixtures extract byte-identical text with this set.
+  const doc = await getDocument({ data, isEvalSupported: false }).promise;
   const pageTexts = [];
   for (let pageNum = 1; pageNum <= doc.numPages; pageNum += 1) {
     // eslint-disable-next-line no-await-in-loop -- sequential is deliberate; pages must stay in

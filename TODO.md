@@ -218,6 +218,25 @@ real Senate votes. The measurements converged; the predictions did not.
 - **`src/lib/pg.js`** — an INERT direct-Postgres fallback. No `SUPABASE_DB_URL` and no database
   password has ever been created, so it cannot connect. Kept because MCP auth drops.
 
+### ▶ LANCE — ONE migration awaiting you: `0038_lock_down_rls_auto_enable.sql` (2026-08-29 audit)
+
+`npm run verify:migrations` reports it MISSING; everything else in the audit is DONE and pushed.
+It does two things, and the second is the one that matters:
+
+1. **Revokes EXECUTE on `rls_auto_enable()` from PUBLIC/anon/authenticated.** Supabase's advisor
+   flagged it as an anon-callable SECURITY DEFINER function that runs DDL. **It is not exploitable
+   today** — verified, not assumed: `POST /rpc/rls_auto_enable` returns `400 "cannot display a value
+   of type event_trigger"`. But that refusal comes from PostgREST's serializer, not from a
+   privilege, so the protection is somebody else's accident rather than our decision.
+2. **Codifies the `ensure_rls` event trigger, which exists ONLY in the live database.**
+   `grep -rl rls_auto_enable supabase/ src/ scripts/` returns nothing, and `pg_event_trigger` shows
+   it owned by `postgres` (every platform-managed trigger is owned by `supabase_admin`). So it was
+   created by hand and never written down. **`docs/DISASTER_RECOVERY.md` rebuilds from
+   `supabase/migrations` alone — a rebuilt VisibleGov would come up with no auto-RLS trigger**, on
+   the exact day everything else is being restored under pressure. The function body in the
+   migration is `pg_get_functiondef()` output taken verbatim from the live DB, so applying it to
+   the current database is a behavioural no-op; its only live effect is the revokes.
+
 ### OPEN — pick up here
 
 ~~**▶ LANCE — one migration drafted and awaiting you: `0036`.**~~ **DONE — 0036 AND 0037 applied
