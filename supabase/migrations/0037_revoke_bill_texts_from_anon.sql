@@ -1,0 +1,50 @@
+-- 0037: revoke anon's leftover SELECT grant on bill_texts.
+--
+-- FOUND BY RapidForge's `rls-probe` module ON ITS FIRST RUN AGAINST THIS PROJECT, 2026-08-29 —
+-- immediately after 0036 was applied. Not a leak: nothing is exposed today. It is the same
+-- wrong-layer protection 0036 fixed for three other tables, on a fourth that 0036 missed.
+--
+-- WHAT WAS MEASURED (anon key, live, after 0036):
+--
+--   legiscan_datasets          -> 401 / 42501   revoked by 0036
+--   vote_reconciliation_flags  -> 401 / 42501   revoked by 0036
+--   ingestion_runs             -> 401 / 42501   revoked by 0036
+--   bill_texts                 -> 200 []        GRANT PRESENT, policy absent
+--
+-- WHY THIS TABLE, AND WHY IT WAS MISSED. `0016_public_read_surface.sql:7` states the intent in one
+-- sentence naming BOTH tables: "Lock-downs (spec: bill_texts raw text and ingestion_runs internals
+-- are not public)." 0036 revoked ingestion_runs and left its sibling behind — the two were
+-- specified together and remediated apart.
+--
+-- It survived because THIS REPO'S OWN PROBE CANNOT SEE THE FAILURE. scripts/probe-public-surface.js
+-- line 167 asserts:
+--
+--     locked.status !== 200 || (Array.isArray(locked.body) && locked.body.length === 0)
+--
+-- `200 []` satisfies that condition, so the probe has reported bill_texts as "locked to anon" the
+-- whole time. That is trap 6.8 of the supabase-rls-wall module — *a valid form the checker cannot
+-- see is worse than no checker, because it reports green* — and it is the second time this exact
+-- assertion shape has hidden a policy-only table on this machine. The migration below closes the
+-- hole; the FOLLOW-UP below closes the reason nobody knew about it.
+--
+-- SEVERITY: low. No data is reachable now (RLS returns no rows), nothing in site/ reads bill_texts
+-- (`grep -rn bill_texts site/` → no hits), and no consumer breaks. This is defence-in-depth: after
+-- this migration anon is refused at the PRIVILEGE layer, so an RLS mistake can no longer expose the
+-- raw bill text on its own.
+--
+-- VERIFY AFTER APPLYING — must be 401 with code 42501, NOT `200 []`:
+--   curl -s -o /dev/null -w "bill_texts %{http_code}\n" \
+--     "$SUPABASE_URL/rest/v1/bill_texts?select=id&limit=1" \
+--     -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+--
+-- Or re-run the instrument that found it (it distinguishes revoked / policy-only / open):
+--   python F:\RapidForge\modules\code\rls_probe.py --config <probe.json>
+--
+-- FOLLOW-UP, NOT INCLUDED HERE (deliberately — one concern per migration):
+--   scripts/probe-public-surface.js:167 must assert `locked.status === 401`, not
+--   "not 200 or empty". Until it does, this class of defect stays invisible to CI. That is a code
+--   change, not a migration, and it belongs in its own commit.
+--
+-- Draft-then-apply: Lance applies.
+
+revoke select on bill_texts from anon;
