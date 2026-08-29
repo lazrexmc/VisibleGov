@@ -218,24 +218,36 @@ real Senate votes. The measurements converged; the predictions did not.
 - **`src/lib/pg.js`** — an INERT direct-Postgres fallback. No `SUPABASE_DB_URL` and no database
   password has ever been created, so it cannot connect. Kept because MCP auth drops.
 
-### ▶ LANCE — ONE migration awaiting you: `0038_lock_down_rls_auto_enable.sql` (2026-08-29 audit)
+### 2026-08-29 audit — CLOSED. All findings fixed; nothing is awaiting Lance.
 
-`npm run verify:migrations` reports it MISSING; everything else in the audit is DONE and pushed.
-It does two things, and the second is the one that matters:
+`npm run verify:migrations` -> **39 probed, 29 applied, 0 MISSING, 0 drift.** Suite 2,723/0.
 
-1. **Revokes EXECUTE on `rls_auto_enable()` from PUBLIC/anon/authenticated.** Supabase's advisor
-   flagged it as an anon-callable SECURITY DEFINER function that runs DDL. **It is not exploitable
-   today** — verified, not assumed: `POST /rpc/rls_auto_enable` returns `400 "cannot display a value
-   of type event_trigger"`. But that refusal comes from PostgREST's serializer, not from a
-   privilege, so the protection is somebody else's accident rather than our decision.
-2. **Codifies the `ensure_rls` event trigger, which exists ONLY in the live database.**
-   `grep -rl rls_auto_enable supabase/ src/ scripts/` returns nothing, and `pg_event_trigger` shows
-   it owned by `postgres` (every platform-managed trigger is owned by `supabase_admin`). So it was
-   created by hand and never written down. **`docs/DISASTER_RECOVERY.md` rebuilds from
-   `supabase/migrations` alone — a rebuilt VisibleGov would come up with no auto-RLS trigger**, on
-   the exact day everything else is being restored under pressure. The function body in the
-   migration is `pg_get_functiondef()` output taken verbatim from the live DB, so applying it to
-   the current database is a behavioural no-op; its only live effect is the revokes.
+- **pdfjs-dist 6.1.200 -> 6.3.289** (GHSA-hq66-cqwq-w95j, arbitrary JS execution on a malicious
+  PDF) plus `isEvalSupported:false`. It sat in the unattended path — five adapters parse PDFs
+  fetched from external `.mo.gov`/LegiScan URLs every 15 minutes in a process holding
+  `SUPABASE_SERVICE_ROLE_KEY`. Proven safe by hashing all six PDF fixtures before and after:
+  **byte-identical**, twice. A green suite would not have shown that.
+- **HSTS** added to `site/_headers` AND `site/js/security-headers.js` (Pages does not apply
+  `_headers` to Function responses, so `/geocode` — which handles a typed home address — needed
+  the second copy; the drift guard caught the omission). `preload` deliberately omitted.
+- **Unfiltered empty profiles now name the coverage window** instead of blaming "this filter".
+  555 of 1,607 directory profiles (34.5%) have zero votes because the legislator predates the
+  window; the old wording invited "this person cast no votes".
+- **0038 applied 2026-08-29.** Revoked EXECUTE on `rls_auto_enable()` from PUBLIC/anon/authenticated
+  (ACL is now `postgres` + `service_role` only) and **codified the `ensure_rls` event trigger, which
+  had existed only in the live database** — a rebuild from `supabase/migrations` would have come up
+  without the auto-RLS safety net. **Verified empirically that the revoke did not break the
+  trigger:** created a throwaway table, confirmed `relrowsecurity = true`, dropped it. Both
+  `*_security_definer_function_executable` advisories have cleared.
+- **Stuck `correct-data` run closed** (25 days at `status=running`). 0 stuck runs remain.
+- **NOT fixed, deliberately:** the `fast-xml-parser` advisory is in `XMLBuilder`; this repo imports
+  only `XMLParser`. It will keep appearing in `npm audit` — that is noise, not risk.
+
+**The advisors that REMAIN are by design — do not "fix" them:** `rls_enabled_no_policy` (INFO, 12
+internal tables) is deny-all plus a revoked grant, which is the intended belt-and-braces;
+`security_definer_view` (ERROR, 5) are the `public_*` views that ARE the public read surface; and
+`materialized_view_in_api` (WARN, 3) are the aggregate matviews the site reads. Chasing them would
+break the site.
 
 ### OPEN — pick up here
 

@@ -6319,3 +6319,42 @@ LEFT JOIN anti-join idiom, nothing would have caught it. Fixed the pattern to
 
 **Full suite: 2,720 tests, 2,720 pass, 0 fail** (gated on the extracted counts, not the exit code —
 lesson 14).
+- **2026-08-29 — full audit, then executed it. Every finding closed; 0038 applied same day.**
+  The headline was real: **`pdfjs-dist` 6.1.200 carried GHSA-hq66-cqwq-w95j** ("arbitrary JavaScript
+  execution upon opening a malicious PDF"), sitting in the worst possible place — five adapters
+  parse PDFs fetched from EXTERNAL government URLs, running unattended every 15 minutes in a process
+  holding `SUPABASE_SERVICE_ROLE_KEY`, a key that bypasses RLS. That makes a hostile PDF a
+  credential-disclosure path, not a crash. Bumped to 6.3.289 and set `isEvalSupported:false`.
+  **Proven rather than assumed:** hashed the extracted text of all six PDF fixtures before the bump,
+  after the bump, and again after the eval flag — byte-identical all three times. A passing suite
+  would not have demonstrated that extraction was unchanged.
+  **A drift guard earned its keep mid-fix.** Adding HSTS to `site/_headers` alone failed the suite:
+  `site/js/security-headers.js` holds a second copy for Pages Functions and the test pins them
+  equal. Pages does not apply `_headers` to a Function response, so `/geocode` — the endpoint that
+  handles a typed home address — would have been the one origin path still answering without HSTS.
+  Left `preload` off deliberately: preload-list removal is irreversible on a human timescale, so it
+  is Lance's separate call, not an audit side effect.
+  **The subtlest finding was a wording one.** 555 of 1,607 directory profiles (34.5%) have zero
+  votes, and every one rendered "No recorded votes for this filter." even with no filter applied.
+  For a site whose stated rule is "a gap must not be mistaken for a record", a visitor on Todd Akin
+  (left office 2013) could reasonably read that as "he cast no votes". Unfiltered empty lists now
+  name the coverage window in trust.html's own words; the filtered wording is untouched, and both
+  branches are pinned by tests so the fix cannot rot into blaming a filter nobody applied.
+  **0038 turned out bigger than the advisor said.** Supabase flagged `rls_auto_enable()` as an
+  anon-callable SECURITY DEFINER function. Probing showed it is NOT exploitable — PostgREST returns
+  400 "cannot display a value of type event_trigger" — but that refusal comes from a serializer, not
+  a privilege. While checking it I found the real problem: **the `ensure_rls` event trigger existed
+  ONLY in the live database.** No match anywhere in `supabase/`, `src/` or `scripts/`, and owned by
+  `postgres` while every platform-managed trigger is owned by `supabase_admin` — created by hand,
+  never written down. `DISASTER_RECOVERY.md` rebuilds from migrations alone, so a restored VisibleGov
+  would have come up with no auto-RLS safety net, on the day everything else is being restored under
+  pressure. 0038 therefore codifies the function (`pg_get_functiondef()` verbatim, so applying it
+  live was a behavioural no-op) and guards the trigger with a catalog check rather than drop+create,
+  which would open a window where a concurrently-created table gets no RLS — the exact failure the
+  trigger exists to prevent.
+  **Verified the revoke did not break the trigger, by testing rather than asserting:** created a
+  throwaway table, confirmed `relrowsecurity = true`, dropped it. Both
+  `*_security_definer_function_executable` advisories cleared.
+  **Declined one finding on the evidence:** the `fast-xml-parser` advisory is in `XMLBuilder`, and
+  this repo imports only `XMLParser`. It will keep showing in `npm audit`; a semver-major upgrade
+  would buy nothing. Recorded so nobody re-litigates it.
