@@ -55,12 +55,17 @@ accountable with real information instead of spin.
 >    **Verify by artifact, never by recollection** — on 2026-08-28 the operator did not recall
 >    running 0034; the two indexes were live with the migration's exact definitions.
 >
->    **What the script found on its FIRST run, and what it means for the standing caveat below:**
->    `0036_revoke_internal_tables_from_anon.sql` is drafted and awaiting Lance — three tables their
->    own migrations call internal return `200 []` to anon, meaning the grant survives and only an
->    absent RLS policy is holding the door. So "no migration is awaiting Lance" is NOT currently
->    true, and any older sentence saying so is stale. **The script is the answer to that question;
->    this paragraph is not.**
+>    **What the script found on its first two runs — BOTH now closed (applied 2026-08-29).**
+>    `0036_revoke_internal_tables_from_anon.sql` (three tables their own migrations call internal —
+>    `legiscan_datasets`, `vote_reconciliation_flags`, `ingestion_runs` — were returning `200 []` to
+>    anon, meaning the GRANT survived and only an absent RLS policy held the door) and
+>    `0037_revoke_bill_texts_from_anon.sql` (the same defect on `bill_texts`, which the rls-probe
+>    found only AFTER 0036 closed the other three). Both verified live: anon now gets 401 on all
+>    four, while every table the site actually reads still returns 200 — `bills`, `public_votes`,
+>    `public_vote_feed`, `summaries`, `glossary_terms`, `legislators`. Revoking `bill_texts` is safe
+>    precisely because the public surface serves the plain-language SUMMARY and never the raw text;
+>    grep confirms no file under `site/` references it.
+>    **Do not restate applied-state here. Run the script — that is the whole point of it.**
 >
 >    `0032`
 >    landed 2026-08-23 with the LegiScan 2024 re-ingest: 185 MO House roll calls the source prints

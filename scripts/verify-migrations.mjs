@@ -224,6 +224,7 @@ const PROBES = {
   '0034_bill_page_indexes.sql':                              { artifact: 'index votes_bill_id_vote_date_idx', run: () => indexExists('votes_bill_id_vote_date_idx') },
   '0035_expose_vote_date_provenance.sql':                    { artifact: 'public_vote_feed.vote_date_provenance', run: () => columnExists('public_vote_feed', 'vote_date_provenance') },
   '0036_revoke_internal_tables_from_anon.sql':               { artifact: 'anon REVOKED (401/42501) on legiscan_datasets', run: () => anonRevoked('legiscan_datasets'), why: 'strict: `200 []` is policy-only and FAILS here — moving the protection to the privilege layer is the entire point of this migration' },
+  '0037_revoke_bill_texts_from_anon.sql':                    { artifact: 'anon REVOKED (401/42501) on bill_texts', run: () => anonRevoked('bill_texts'), why: 'the rls-probe found bill_texts still anon-readable AFTER 0036 closed the other three; same strict rule — `200 []` is policy-only and FAILS. Safe to revoke because no site code reads bill_texts: the public surface serves the plain-language SUMMARY, never the raw text.' },
 };
 
 // ---------------------------------------------------------------------------

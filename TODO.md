@@ -220,14 +220,20 @@ real Senate votes. The measurements converged; the predictions did not.
 
 ### OPEN — pick up here
 
-**▶ LANCE — one migration drafted and awaiting you: `0036_revoke_internal_tables_from_anon.sql`.**
-Found by `npm run verify:migrations` on its first run. Three tables their own migrations call
-internal (`legiscan_datasets`, `vote_reconciliation_flags`, `ingestion_runs`) return `200 []` to
-anon — the grant is still there and only the absent RLS policy is holding the door, which is the
-exact `200 []` signature the Glizzness playbook §8.7 warns about. **Nothing is exposed today**;
-this is defence-in-depth, and 0024 dropped the policy in 2026-08-03 but never revoked 0010's grant.
-Three `revoke select` statements, no consumer breaks. After applying, re-run
-`npm run verify:migrations` — the 0036 row must flip from MISSING to OK and 0024 from POLICY-ONLY.
+~~**▶ LANCE — one migration drafted and awaiting you: `0036`.**~~ **DONE — 0036 AND 0037 applied
+2026-08-29. No migration is awaiting Lance; `npm run verify:migrations` reports 0 MISSING, 0 drift.**
+Both were found by that script rather than by anyone remembering: four tables their own migrations
+call internal (`legiscan_datasets`, `vote_reconciliation_flags`, `ingestion_runs`, then `bill_texts`)
+were returning `200 []` to anon — the GRANT had survived and only an absent RLS policy held the
+door, the exact `200 []` signature the Glizzness playbook §8.7 warns about. 0024 dropped the policy
+on 2026-08-03 but never revoked 0010's grant. **Verified live after applying: anon gets 401 on all
+four, and all six tables the site actually reads still return 200.** `bill_texts` was safe to revoke
+because the public surface serves the plain-language summary, never the raw text — no file under
+`site/` references it.
+
+**The script caught its own gap the moment 0037 landed:** 0037 had no probe, so the run FAILED with
+`DRIFT: 1 migration file(s) have no probe`. That is the design working — an unprobed migration is an
+unverified claim. Probe added in the same pass. **Whoever adds a migration adds its probe.**
 
 
 **Lance's decisions (nothing blocked on code):**
