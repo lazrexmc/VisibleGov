@@ -1395,3 +1395,48 @@ script read the plugin registry's per-plugin ARRAY as an object and cheerfully p
 The general form worth carrying: **for any capability gate, separate what a script can prove from
 what only a human can resolve, and make the script loudly hand off the second half** rather than
 quietly implying it covered both.
+
+## Lesson 56 — a patched CVE is not a fixed architecture, and a finding split across two notes is a finding neither one makes (2026-08-29)
+
+`pdfjs-dist` 6.1.200 carried GHSA-hq66-cqwq-w95j, arbitrary JS execution on a malicious PDF. It was
+found, bumped to 6.3.289, proven byte-identical against six fixtures, and closed. The audit wrote
+the blast radius as *"a process holding SUPABASE_SERVICE_ROLE_KEY"*.
+
+That sentence is true and it is half the finding. **The other half is WHERE that process runs.** It
+was Windows Task Scheduler on a personal desktop, every 15 minutes, parsing PDFs fetched from
+external government sites, with the RLS-bypassing key sitting at rest in a `.env` beside a browser
+profile and several other projects' credentials. The exploit would not have landed in an ephemeral
+container that vanishes; it would have landed in the middle of everything the operator owns.
+
+**Upgrading the dependency removed the instance and changed nothing about the blast radius.** The
+next PDF-parser CVE — and there will be one, this is the third in that library's recent history —
+arrives into exactly the same conditions.
+
+### The reason it was missed twice
+
+Two separate notes each held one half:
+
+- one argued **availability**: a local scheduler dies while you are away;
+- the other argued **privilege**: the worker holds the highest key.
+
+Neither is wrong. Neither is the finding. The finding is the **product** of the two, and it only
+becomes visible when you ask *where does the privileged thing actually execute?* — a question
+neither note prompts on its own, because each is individually complete and individually reassuring.
+
+**The rule:** when two notes describe the same component from different axes, cross-link them and
+state the compound explicitly. A split finding is invisible in exactly proportion to how sensible
+each half looks alone. Both halves were read many times; the product was never stated once.
+
+### The corollary that saved money here
+
+"Fix the architecture" is not automatically "migrate to CI". Migrating this repo to GitHub Actions
+at its existing `*/15` cadence on a **private** repo would have cost $30-55/month against a 2,000
+free-minute tier — breaking the project's $0/month premise to close a security gap. The fix was
+real; the first-proposed shape of it was not affordable. **Measure the proposed remedy the same way
+you measured the defect** — real run durations out of `ingestion_runs`, not an estimate. Hourly
+lands inside the free tier and loses nothing, because roll calls do not change every 15 minutes.
+
+And check what a remedy drags with it: going public would have made minutes free and the git history
+was genuinely clean, but publishing exposes ALL history — here an unshipped commercial roadmap,
+client names, and a personal email. Cleaning that up means rewriting the history that is the
+project's own record of why. The cheap-looking option was the expensive one.

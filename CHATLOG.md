@@ -6358,3 +6358,35 @@ lesson 14).
   **Declined one finding on the evidence:** the `fast-xml-parser` advisory is in `XMLBuilder`, and
   this repo imports only `XMLParser`. It will keep showing in `npm audit`; a semver-major upgrade
   would buy nothing. Recorded so nobody re-litigates it.
+- **2026-08-29 (later) — three findings Lance brought back, all confirmed, all closed.**
+  **(1) The compound finding.** My audit described the pdfjs blast radius as "a process holding
+  SUPABASE_SERVICE_ROLE_KEY" — true, and half of it. That process is Windows Task Scheduler on his
+  desktop, so the key sits at rest in a `.env` beside a browser profile and every other project's
+  credentials, and the RCE would have executed there rather than in a container that vanishes.
+  Patching the CVE removed the instance, not the blast radius. Wrote workflows moving ingestion to
+  GitHub Actions. **Did not simply agree with the proposed remedy — measured it:** at `*/15` on a
+  PRIVATE repo that is ~2,880 jobs/month against a 2,000-minute free tier, $30-55/mo, breaking the
+  $0/month stack. Hourly is ~1,600-1,900 min and loses nothing, because due-ness is computed from
+  `ingestion_runs`, so GitHub's best-effort cron drifting late just finds more work due.
+  **Checked what going public would drag with it, before he flipped the switch.** History is clean
+  (692 commits, no `.env` ever tracked, no service-role JWT) — but publishing exposes ALL history,
+  and this repo carries an unshipped commercial roadmap, client names throughout CHATLOG, and a
+  personal email. Removing them means rewriting the history that IS the record of why. He chose
+  private; hourly buys the same security win.
+  **(2) The weak assertions — three, not two.** `probe-public-surface.js` accepted `200 []` as
+  "locked", the exact policy-only signature 0036/0037 exist to eliminate, and the opposite of what
+  `verify-migrations.mjs` demands. Two probes in one repo disagreeing on what "locked" means, with
+  the weaker one being what runs after an apply. Tightening it immediately exposed two bugs it had
+  been hiding: the `legiscan_datasets` check **never tested permission at all** (it queried
+  `?select=id` on a table with no `id` column, so PostgREST answered `400 42703` before reaching a
+  privilege check — the old assertion scored that as locked, the strict one as a leak, both wrong);
+  and `EXPECT_FEED` was stale because **I** appended `vote_date_provenance` in 0035 and never
+  updated it. A permission probe must never name a column.
+  **(3) No stuck-run detection.** The heartbeat proves the scheduler is ALIVE; it cannot prove a run
+  that STARTED ever finished. That is why `correct-data` sat stranded 25 days while every tick
+  stayed green. Not cosmetic — `scheduled-summaries.js` counts a stranded row as a FULL tick of
+  spend, so a crashed run quietly shrinks the weekly summary budget. `npm run status` now flags any
+  run >6h, and I **proved the detector fires** by inserting a synthetic stranded row, watching it
+  print, and deleting it — a detector that has never fired is a hope (lesson 50).
+  Recorded as PLAYBOOK lesson 56: a patched CVE is not a fixed architecture, and a finding split
+  across two notes is one neither note makes.
