@@ -40,7 +40,12 @@ async function allRows(url, headers, path) {
   }
 }
 
-const EXPECT_FEED = ['cast_id', 'legislator_id', 'position', 'vote_id', 'vote_date', 'chamber', 'question', 'result', 'source_url', 'jurisdiction_id', 'bill_id', 'bill_identifier', 'bill_title', 'session_id'];
+// `vote_date_provenance` appended by migration 0035 (2026-08-28), the derived-date receipt for
+// the 185 votes LegiScan prints with the 0000-00-00 sentinel. This list was NOT updated when
+// 0035 landed, so this probe went red the moment it was next run — which is exactly the drift a
+// pinned column list exists to catch, and it went unnoticed only because nothing runs this file
+// automatically. Whoever changes a public view updates this list in the same commit.
+const EXPECT_FEED = ['cast_id', 'legislator_id', 'position', 'vote_id', 'vote_date', 'chamber', 'question', 'result', 'source_url', 'jurisdiction_id', 'bill_id', 'bill_identifier', 'bill_title', 'session_id', 'vote_date_provenance'];
 // 0019 adds last_finished_status (and changes finished_at/quarantined_days to LATEST-FINISHED
 // semantics). Before 0019 is applied this expectation fails loud — that is the point: the probe is
 // how Lance confirms an apply actually landed.
@@ -163,14 +168,45 @@ export async function main() {
   const H = { apikey: anon, Authorization: `Bearer ${anon}` };
   const state = { failed: false };
 
-  const locked = await rows(url, H, 'bill_texts?select=id&limit=1');
-  check('bill_texts locked to anon', locked.status !== 200 || (Array.isArray(locked.body) && locked.body.length === 0), `status ${locked.status}`, state);
-  const runsLocked = await rows(url, H, 'ingestion_runs?select=id&limit=1');
-  check('ingestion_runs locked to anon', runsLocked.status !== 200 || (Array.isArray(runsLocked.body) && runsLocked.body.length === 0), `status ${runsLocked.status}`, state);
-  // Migration 0024 (senior engineering audit, 2026-08-03, finding 6): same "locked to anon" shape
-  // as bill_texts/ingestion_runs above — legiscan_datasets carries no anon-facing use case at all.
-  const legiscanDatasetsLocked = await rows(url, H, 'legiscan_datasets?select=id&limit=1');
-  check('legiscan_datasets locked to anon (migration 0024)', legiscanDatasetsLocked.status !== 200 || (Array.isArray(legiscanDatasetsLocked.body) && legiscanDatasetsLocked.body.length === 0), `status ${legiscanDatasetsLocked.status}`, state);
+  // LOCKED means the PRIVILEGE is gone — not that the table happened to answer empty.
+  //
+  // These three checks used to accept `status !== 200 || body.length === 0`, so a table that
+  // returned `200 []` PASSED. That is precisely the policy-only signature migrations 0036/0037
+  // were written to eliminate: the GRANT still present, an absent RLS policy alone holding the
+  // door, and the probe reporting green the whole time. This file therefore certified as "locked"
+  // exactly the state the repo's other probe refuses to accept — scripts/verify-migrations.mjs's
+  // anonRevoked() says it outright: "`200 []` here is ABSENT, not policy-only ... reporting it as
+  // the softer policy-only would let an unapplied migration exit 0."
+  //
+  // Two probes in one repo disagreeing about what "locked" means is worse than either standard
+  // alone, because the weaker one is the one that runs after an operator applies a migration.
+  // Aligned here on the strict definition: a 200 of ANY shape is a FAIL.
+  for (const [relation, label] of [
+    ['bill_texts', 'bill_texts locked to anon (migration 0037)'],
+    ['ingestion_runs', 'ingestion_runs locked to anon (migration 0036)'],
+    // 0024 dropped legiscan_datasets' RLS policy in 2026-08-03 but left 0010's grant in place —
+    // which is how it sat at `200 []` until 0036 revoked it. The very defect this loop now catches.
+    ['legiscan_datasets', 'legiscan_datasets locked to anon (migrations 0024 + 0036)'],
+    ['vote_reconciliation_flags', 'vote_reconciliation_flags locked to anon (migration 0036)'],
+  ]) {
+    // eslint-disable-next-line no-await-in-loop -- sequential keeps the PASS/FAIL log in a stable
+    // order an operator can diff between runs; four requests need no concurrency.
+    // select=* deliberately, NEVER a named column. `?select=id` made this check useless for
+    // legiscan_datasets, which has no `id` column: PostgREST resolved the column name first and
+    // answered `400 42703 column does not exist`, so the request never reached a privilege check
+    // at all. The old assertion counted that as "locked" (it was non-200) and the strict one
+    // counted it as a leak — both wrong, because the probe was never testing permission.
+    // `select=*` cannot miss: it is the same shape verify-migrations.mjs's anonRevoked() uses.
+    const res = await rows(url, H, `${relation}?select=*&limit=1`);
+    check(
+      label,
+      res.status === 401 || res.status === 403 || res.status === 404 || /42501/.test(JSON.stringify(res.body ?? '')),
+      res.status === 200
+        ? `status 200 — the GRANT is still live; an empty body is NOT "locked"`
+        : `status ${res.status}`,
+      state,
+    );
+  }
   for (const v of ['public_vote_feed', 'public_freshness', 'public_verification_notes', 'public_reconciliation_flags']) {
     // eslint-disable-next-line no-await-in-loop
     const r = await rows(url, H, `${v}?limit=1`);

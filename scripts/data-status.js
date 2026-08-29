@@ -305,10 +305,43 @@ async function main() {
   console.log(`  superseded (hidden, not deleted) ${n(voteDuplicates)}  <- vote_duplicates; public views exclude them`);
   console.log(`  retracted (deleted, tombstoned) . ${n(retractedVotes)}  <- retracted_votes; full cast list preserved`);
 
+  // ---- STRANDED RUNS (the other half of the dead-man's switch) ----------------------------
+  //
+  // scheduled-ingest.js already pings a heartbeat every tick, which answers "is the scheduler
+  // alive?". It cannot answer "did a run that STARTED ever finish?" -- and those are different
+  // failures with different causes. A `correct-data` row sat at status='running' for 25 DAYS while
+  // every heartbeat stayed green and every other source kept ticking, because nothing watched for
+  // the second shape. It was found by hand in the 2026-08-29 audit and written off as cosmetic.
+  // It was not cosmetic: it is precisely how a missing dead-man's switch presents.
+  //
+  // It is also not harmless. scheduled-summaries.js counts a row stranded at status='running' as a
+  // FULL tick of spend against the weekly cap, so one crashed run quietly shrinks the summary
+  // budget every week until somebody notices.
+  //
+  // Threshold 6h: the longest legitimate run here is the LegiScan child, documented at up to 75
+  // minutes, so 6h cannot fire on healthy work while still catching a crash the same day.
+  const STRANDED_AFTER_HOURS = 6;
+  const strandedCutoff = new Date(Date.now() - STRANDED_AFTER_HOURS * 3600 * 1000).toISOString();
+  const stranded = await rows(
+    'ingestion_runs?status=eq.running&started_at=lt.' + strandedCutoff
+    + '&select=source,started_at&order=started_at.asc',
+  );
+
   console.log('\nINGESTION FRESHNESS');
   for (const f of freshness) {
     const q = f.quarantined_days > 0 ? `  (${f.quarantined_days} days quarantined)` : '';
     console.log(`  ${String(f.source).padEnd(24)} ${String(f.status).padEnd(10)} last finished ${f.finished_at ? String(f.finished_at).slice(0, 19) : '(none)'}${q}`);
+  }
+
+  if (stranded.length > 0) {
+    console.log(`\n  !! ${stranded.length} STRANDED RUN(S) -- started, never closed (>${STRANDED_AFTER_HOURS}h):`);
+    for (const r of stranded) {
+      const hours = Math.floor((Date.now() - new Date(r.started_at).getTime()) / 3600000);
+      console.log(`     ${String(r.source).padEnd(24)} running ${hours}h, since ${String(r.started_at).slice(0, 19)}`);
+    }
+    console.log('     A run that never closed is a CRASH, not activity, and it counts as full spend');
+    console.log('     against the summary weekly cap. Close it (status=failed, finished_at=started_at,');
+    console.log('     reason recorded in detail) rather than deleting it -- the row is the evidence.');
   }
 
   console.log('\nSUMMARY SCHEDULER');
