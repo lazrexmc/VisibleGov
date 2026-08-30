@@ -4,7 +4,7 @@
 
 ---
 
-## RESUME HERE - verified live 2026-08-30 06:30 CDT, read this block first
+## RESUME HERE - verified live 2026-08-30 14:38 CDT, read this block first
 
 **You have none of the previous session's context and you do not need it. Everything needed is
 here.** The machine was powered off shortly after this was written. The session that did the work,
@@ -65,7 +65,12 @@ page you own. It catches a failure that is invisible by
 construction - a sibling project's Cloudflare Pages integration silently stopped deploying for six
 weeks with nothing reporting red.
 
-**4. Adopt RapidForge's `PROJECT_STANDARD.md`?** Touches `CLAUDE.md`, so it is his call.
+**4. ~~Adopt RapidForge's `PROJECT_STANDARD.md`?~~ DONE 2026-08-30 14:20 CDT (`d8c202a`)** - Lance
+approved in-session; `CLAUDE.md` now points at `F:\RapidForge\docs\PROJECT_STANDARD.md` and
+declares six deviations. **What is still open from it:** rule 8 asks for an expected-failures list
+with an expiry condition, and this repo has none - so `npm run verify:migrations` exits 1 on an
+EXPECTED failure (0039) plus ten `unverifiable` rows, with only prose separating those from a real
+one. Proposed to Lance, not built.
 
 **5. Three punctuation questions.** `CLAUDE.md` was deliberately NOT swept of em dashes (it is
 config); `CHATLOG.md` was NOT swept (it quotes him verbatim, and rewriting punctuation inside a
