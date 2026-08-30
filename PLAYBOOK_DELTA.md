@@ -1482,3 +1482,36 @@ fallback never ran, and the buggy file survived a full test run. A fallback chai
 failure, and "succeeded somewhere useless" is not failure. There was a durable copy the whole time -
 the commit - and reaching for an ad-hoc backup instead of `git checkout` is the same instinct as
 citing an ephemeral run: preferring the artifact you just made to the one that already exists.
+
+## Lesson 58 - a cold read reports the confusion, not the diagnosis (2026-08-30)
+
+Did a stranger's-eye read of another project's public page at its owner's request. Four findings,
+three of them right and acted on. The fourth was wrong, and it was the only one where I explained
+WHY rather than just reporting what I could not tell.
+
+The page showed the same Coca-Cola proposal four times, same meeting, different share counts, and
+different votes across the rows. I wrote: "several series are clearly voting their own shares here."
+
+Verified by the owner, who could read the field I could not: every row carried the same
+`voteSeries`. One fund. An SEC N-PX proxy table holds one to ten `<voteRecord>` LOTS per proposal,
+each with its own vote and share count. 10,387 proposals, 29,891 lots.
+
+**The confusion was real and useful. The cause I attached to it was invented and wrong.** "I cannot
+tell whether these four rows are one fund or several" was the entire job, and it was enough to get
+the defect fixed. Naming a mechanism added nothing except an incorrect claim in their permanent
+record, where my read was quoted verbatim.
+
+**The rule: when reviewing from outside a system, report the observation and stop.** A cold reader's
+value is precisely that they lack context, and the moment they supply a cause they are trading the
+thing they are good at for the thing they cannot do. The tell is the word "clearly" attached to a
+mechanism you have no access to.
+
+This is lesson 57's shape in a new place. There it was citing an action nobody could re-run; here it
+is asserting a cause nobody outside could check. Both are claims whose evidence exists only in my
+own head, and both feel MORE justified after doing careful work, not less: having noticed something
+real, it is tempting to finish the thought.
+
+Related and worth separating: I flagged one item as "unverifiable from the page" (whether a URL was
+stored or constructed) and then listed it among things I believed were wrong. It turned out to be
+stored. **Uncertainty stated in the same breath as a criticism reads as a criticism.** Keep the
+"I could not check this" items in their own section.
