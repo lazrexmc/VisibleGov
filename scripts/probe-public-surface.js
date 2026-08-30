@@ -14,6 +14,41 @@
 // convention as scripts/serve-site.js and every src/cli/*.js entry point — so importing this module
 // for its exports never touches the network, never reads env vars, and never calls process.exit.
 
+// lockVerdict — is a relation genuinely revoked for anon?
+//
+// Extracted from an inline expression in main() on 2026-08-30, after a review pointed out that 404
+// was added to the accept set at 12:35 and removed at 19:14 WITHOUT A TEST FAILING EITHER TIME. An
+// untested predicate is a decision nobody can defend later; the tests beside this file now pin all
+// three states.
+//
+// THREE states, deliberately, because collapsing them is how the earlier bugs happened:
+//
+//   'locked'      401 / 403 / a 42501 body — the privilege is genuinely gone. EXACTLY the set
+//                 verify-migrations.mjs anonRevoked() accepts; the two files must not drift again.
+//   'exposed'     200 of ANY shape. `200 []` is NOT locked: the grant is still live and only a
+//                 missing RLS policy is holding the door, which is the precise condition migrations
+//                 0036/0037 exist to remove.
+//   'unexplained' anything else — 404 (hidden from the schema cache), 400 (a malformed request that
+//                 never reached a privilege check), 5xx. NOT a pass, and NOT the same finding as an
+//                 exposed table: it means the probe could not determine the answer. Reporting it in
+//                 the same words as a leak sends an operator hunting for a grant that may not exist.
+export function lockVerdict(status, body) {
+  if (status === 401 || status === 403) return 'locked';
+  if (/42501/.test(JSON.stringify(body ?? ''))) return 'locked';
+  if (status === 200) return 'exposed';
+  return 'unexplained';
+}
+
+export function lockDetail(status, verdict) {
+  if (verdict === 'exposed') return 'status 200 — the GRANT is still live; an empty body is NOT "locked"';
+  if (verdict === 'unexplained') {
+    return `status ${status} — UNEXPLAINED, not a leak: the relation is not visible to anon at all `
+      + '(hidden from the schema cache, dropped, or a malformed request). Determine which before '
+      + 'treating this as either locked or exposed.';
+  }
+  return `status ${status}`;
+}
+
 function check(name, ok, extra, state) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? ` — ${extra}` : ''}`);
   if (!ok) state.failed = true;
@@ -198,21 +233,8 @@ export async function main() {
     // counted it as a leak — both wrong, because the probe was never testing permission.
     // `select=*` cannot miss: it is the same shape verify-migrations.mjs's anonRevoked() uses.
     const res = await rows(url, H, `${relation}?select=*&limit=1`);
-    check(
-      label,
-      // EXACTLY the set verify-migrations.mjs anonRevoked() accepts — 401 / 403 / a 42501 body.
-      // 404 is deliberately NOT here, though an earlier version of this line allowed it. The two
-      // probes disagreeing on 404 was the same class of defect as the `200 []` split they were just
-      // aligned on: a relation hidden from PostgREST's schema cache would pass this file and fail
-      // that one, and the operator would have no way to know which was telling the truth. A 404
-      // also does not mean "the grant was revoked" — it means the relation is not visible at all,
-      // which for a lock check is an unexplained state that deserves a red line, not a pass.
-      res.status === 401 || res.status === 403 || /42501/.test(JSON.stringify(res.body ?? '')),
-      res.status === 200
-        ? `status 200 — the GRANT is still live; an empty body is NOT "locked"`
-        : `status ${res.status}`,
-      state,
-    );
+    const verdict = lockVerdict(res.status, res.body);
+    check(label, verdict === 'locked', lockDetail(res.status, verdict), state);
   }
   for (const v of ['public_vote_feed', 'public_freshness', 'public_verification_notes', 'public_reconciliation_flags']) {
     // eslint-disable-next-line no-await-in-loop

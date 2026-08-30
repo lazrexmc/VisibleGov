@@ -23,7 +23,9 @@
     "refresh:aggregates": "node --env-file=.env scripts/refresh-aggregates.js",
     "review": "node --env-file=.env src/review/server.js",
     "schedule:ingest": "node --env-file=.env scripts/scheduled-ingest.js",
-    "verify:migrations": "node --env-file=.env scripts/verify-migrations.mjs"
+    "verify:migrations": "node --env-file=.env scripts/verify-migrations.mjs",
+    "close-stranded": "node --env-file=.env scripts/close-stranded-runs.mjs",
+    "check:ingest": "node --env-file=.env scripts/check-ingest-health.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

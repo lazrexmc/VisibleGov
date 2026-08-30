@@ -6390,3 +6390,40 @@ lesson 14).
   print, and deleting it — a detector that has never fired is a hope (lesson 50).
   Recorded as PLAYBOOK lesson 56: a patched CVE is not a fixed architecture, and a finding split
   across two notes is one neither note makes.
+- **2026-08-30 — round-two peer review; four more findings, one of them a defect actively firing.**
+  **CORRECTION TO THE 2026-08-29 ENTRY ABOVE, which states a wrong claim and must not be read
+  uncorrected:** that entry says "`scheduled-summaries.js` counts a stranded row as a FULL tick of
+  spend, so a crashed run quietly shrinks the weekly summary budget." **That is false as written.**
+  `selectRecentRunsReal` (scheduled-summaries.js) filters `source = 'scheduled-summaries'`, so a
+  stranded row from ANY OTHER source — including the `correct-data` row that prompted the whole
+  investigation — is never charged against the cap. Only a stranded SUMMARIES tick counts, and even
+  that rolls off with the ISO week rather than being permanent. I generalized from a plausible
+  mechanism without reading the filter. The code comments were corrected on 08-29; this line
+  corrects the decision trail, which is the record that actually gets read later.
+  **The active defect: the scheduled `ingest` workflow had been FAILING every hour since 20:54.**
+  I committed workflows with a `schedule:` trigger before the secrets existed, and wrote in
+  `docs/GITHUB_ACTIONS_MIGRATION.md` that "nothing runs until you add the secrets." Wrong — they run
+  and fail in ~18s, writing nothing, burning metered minutes and a notification every hour. A
+  pre-cutover guard now makes both workflows genuinely inert until `SUPABASE_URL` exists. Worth
+  noting the peer's headline was that the desktop task and BOTH workflows were writing
+  `ingestion_runs` concurrently — **that part was wrong**, and checking rather than accepting it is
+  what surfaced the real defect: with no secrets, Actions writes nothing at all.
+  **A threshold that no observation could have falsified.** legiscan's silence window was 30h. Its
+  interval is floored at 24h and due-ness is measured from the previous run's `started_at` (stamped
+  after checkout + npm ci), against a fixed daily cron — so a day whose drift is smaller than the
+  previous day's drift plus install time leaves it not-yet-due, writing no row, legitimately
+  SKIPPING A DAY. Its newest row then ages past 30h on a healthy feed, and because the hourly
+  workflow checked all five sources it would have reported legiscan SILENT every hour for ~18h.
+  Now 50h (two intervals plus drift), and `--only` scopes each workflow to the sources it owns.
+  **The rule: derive a silence window from the interval times the cycles you are willing to lose,
+  never from the bare interval.**
+  **Two untested predicates, both of which had already silently changed.** `lockVerdict` lived
+  inline in probe-public-surface.js, so 404 was added to the accept set at 12:35 and removed at
+  19:14 without a test failing either time; it is now extracted, exported, and pinned — including a
+  test asserting it agrees with `verify-migrations.mjs`'s `anonRevoked` on every status, so the two
+  cannot drift apart a third time. It also gained a third state: 404 is UNEXPLAINED, not a leak, and
+  no longer prints in the same words as an exposed table. `silenceThreshold` had zero coverage and
+  its first shipped value was wrong; now exported and tested.
+  **Also:** the operator hint printed a command that would exit 2 if pasted (no `--env-file`) — now
+  `npm run close-stranded`, with `npm run check:ingest` alongside it, because a tool no doc mentions
+  and no script exposes is one nobody will find at 3am.

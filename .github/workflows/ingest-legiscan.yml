@@ -35,16 +35,43 @@ jobs:
                            # sit burning metered minutes for the 6h GitHub default
 
     steps:
+      # PRE-CUTOVER GUARD. Added 2026-08-30 after this workflow failed every hour from 20:54.
+      #
+      # The schedule fires as soon as the file is on main, but the secrets are added by hand later
+      # (docs/GITHUB_ACTIONS_MIGRATION.md step 1). Between those two moments every tick ran, failed
+      # on all four sources in ~18s, wrote nothing, and burned metered minutes plus a notification.
+      # The migration doc claimed "nothing runs until you add the secrets" -- that was simply wrong,
+      # and hourly red ticks before cutover are exactly the alert fatigue the health check was
+      # designed to avoid.
+      #
+      # MASKING RISK, and why it is acceptable: once configured, a secret later REMOVED would skip
+      # silently rather than fail. That is covered -- check-ingest-health.mjs reports SILENT after a
+      # source goes 25h without an attempt, so a workflow quietly skipping shows up as a dead feed
+      # within a day. The guard hides a startup state, not a failure.
+      - name: Skip until cutover
+        id: guard
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Secrets not configured yet - workflow is inert until cutover (docs/GITHUB_ACTIONS_MIGRATION.md step 1). This is not a failure."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.guard.outputs.configured == 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.guard.outputs.configured == 'true'
         with:
           node-version: '24'
           cache: npm
 
       - run: npm ci
+        if: steps.guard.outputs.configured == 'true'
 
       - name: Ingest LegiScan
+        if: steps.guard.outputs.configured == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -58,8 +85,8 @@ jobs:
       # own durable signal. Omitting it here while having it on the hourly workflow left the exact
       # defect it exists to catch alive in the daily path for a day (caught in review, 2026-08-29).
       - name: Verify ingestion actually worked
-        if: always()
+        if: always() && steps.guard.outputs.configured == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/check-ingest-health.mjs
+        run: node scripts/check-ingest-health.mjs --only legiscan

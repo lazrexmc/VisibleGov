@@ -29,6 +29,8 @@
 //
 // Usage: node scripts/check-ingest-health.mjs        (reads SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
 //        node scripts/check-ingest-health.mjs --json
+//        node scripts/check-ingest-health.mjs --only legiscan
+//        node scripts/check-ingest-health.mjs --only mo-senate-web,us-senate
 
 // legiscan is IN this list. It was missing until 2026-08-29 and that was the same defect this file
 // exists to fix, still live in the daily workflow: ingest-legiscan.yml gated only on the scheduler's
@@ -44,13 +46,26 @@ const PERSISTENT_FAILURES = 3;
 // would be wrong for someone. The hourly sources are due-gated internally (mo-senate-web paces
 // itself, us-congress probes a window), so a quiet few hours is normal; a full day is not.
 //
-// legiscan gets 30h, not 25h: it is gated behind its own 24h interval AND its workflow is a daily
-// cron, and GitHub's scheduler is best-effort — a tick that drifts an hour late would trip a 25h
-// threshold and cry wolf on a perfectly healthy feed. A detector that fires on normal operation is
-// worse than none, because it is the one everybody learns to ignore.
+// legiscan gets 50h, and the derivation matters because the first value here (30h) was WRONG in a
+// way no amount of watching a healthy system would have revealed:
+//
+//   * its interval is floored at 24h (scheduled-ingest.js), and
+//   * due-ness is measured from the previous run's `started_at` — stamped AFTER checkout and
+//     npm ci — not from the cron's scheduled time, and
+//   * the cron is a fixed daily time while GitHub's scheduler is best-effort.
+//
+// So whenever a day's drift is smaller than the previous day's drift plus install time, legiscan is
+// not yet due when its workflow fires, the tick writes NO ROW, and the feed legitimately SKIPS A
+// DAY. Its newest row then ages past 30h while the source is perfectly healthy. 50h = two 24h
+// intervals plus ~2h of drift: one skipped cycle is tolerated, two consecutive misses still alarm.
+//
+// The general rule, which is the part worth carrying elsewhere: derive a silence window from the
+// interval TIMES THE NUMBER OF CYCLES YOU ARE WILLING TO LOSE, never from the bare interval. A
+// threshold set to the nominal interval alarms on every legitimate miss, and an alarm that fires on
+// normal operation is the one everybody learns to ignore.
 const SILENT_AFTER_HOURS_DEFAULT = 25;
-const SILENT_AFTER_HOURS = { legiscan: 30 };
-const silenceThreshold = (source) => SILENT_AFTER_HOURS[source] ?? SILENT_AFTER_HOURS_DEFAULT;
+const SILENT_AFTER_HOURS = { legiscan: 50 };
+export const silenceThreshold = (source) => SILENT_AFTER_HOURS[source] ?? SILENT_AFTER_HOURS_DEFAULT;
 
 // Credentials are read INSIDE main(), never at module scope. This file's pure classifier is
 // unit-tested, and this repo's established convention (serve-site.js, every src/cli/*.js) is that
@@ -106,12 +121,33 @@ export function classify(runs, { now = Date.now(), silentAfterHours = SILENT_AFT
   return { state: 'ok', detail: `last run ${newest.status}, ${Math.floor(ageHours)}h ago` };
 }
 
+// A workflow must only assert on the sources it is responsible for. Without this the HOURLY
+// workflow also checked legiscan, and would report a DAILY feed SILENT every hour during a
+// legitimate skipped day -- an alarm firing on normal operation is the kind everybody learns to
+// ignore, which is how a real one gets missed later.
+export function selectSources(argv, available = SOURCES) {
+  const i = argv.indexOf('--only');
+  if (i === -1) return available;
+  const raw = argv[i + 1];
+  if (!raw) throw new Error('--only requires a comma-separated source list');
+  const asked = raw.split(',').map((x) => x.trim()).filter(Boolean);
+  const unknown = asked.filter((x) => !available.includes(x));
+  // Fail loudly rather than silently checking nothing: a typo'd source name that quietly narrowed
+  // the check to an empty set would make this script pass by not looking, which is the exact
+  // failure mode the script exists to prevent.
+  if (unknown.length > 0) {
+    throw new Error(`--only: unknown source(s) ${unknown.join(', ')} (expected ${available.join(', ')})`);
+  }
+  return asked;
+}
+
 async function main() {
   const creds = credentials();
   const asJson = process.argv.includes('--json');
+  const selected = selectSources(process.argv.slice(2));
   const results = [];
-  for (const source of SOURCES) {
-    // eslint-disable-next-line no-await-in-loop -- four sequential reads; ordering keeps the log diffable
+  for (const source of selected) {
+    // eslint-disable-next-line no-await-in-loop -- a handful of sequential reads; ordering keeps the log diffable
     const runs = await recentRuns(creds, source, PERSISTENT_FAILURES + 2);
     results.push({ source, ...classify(runs, { silentAfterHours: silenceThreshold(source) }) });
   }

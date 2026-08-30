@@ -51,15 +51,41 @@ jobs:
     timeout-minutes: 30   # the four fast sources; anything longer means something is wedged
 
     steps:
+      # PRE-CUTOVER GUARD. Added 2026-08-30 after this workflow failed every hour from 20:54.
+      #
+      # The schedule fires as soon as the file is on main, but the secrets are added by hand later
+      # (docs/GITHUB_ACTIONS_MIGRATION.md step 1). Between those two moments every tick ran, failed
+      # on all four sources in ~18s, wrote nothing, and burned metered minutes plus a notification.
+      # The migration doc claimed "nothing runs until you add the secrets" -- that was simply wrong,
+      # and hourly red ticks before cutover are exactly the alert fatigue the health check was
+      # designed to avoid.
+      #
+      # MASKING RISK, and why it is acceptable: once configured, a secret later REMOVED would skip
+      # silently rather than fail. That is covered -- check-ingest-health.mjs reports SILENT after a
+      # source goes 25h without an attempt, so a workflow quietly skipping shows up as a dead feed
+      # within a day. The guard hides a startup state, not a failure.
+      - name: Skip until cutover
+        id: guard
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Secrets not configured yet - workflow is inert until cutover (docs/GITHUB_ACTIONS_MIGRATION.md step 1). This is not a failure."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.guard.outputs.configured == 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.guard.outputs.configured == 'true'
         with:
           node-version: '24'     # matches the version the suite is green on locally
           cache: npm             # keeps `npm ci` around 15s instead of ~60s — directly protects the
                                  # minute budget above, since install overhead is paid every job
 
       - run: npm ci
+        if: steps.guard.outputs.configured == 'true'
 
       # Each source runs independently: one source being down (a government site 500ing) must not
       # stop the other three.
@@ -74,6 +100,7 @@ jobs:
       # which reads ingestion_runs. Keep both: this catches a crashed process, that catches a broken
       # feed, and neither can see the other's failure.
       - name: Ingest fast sources
+        if: steps.guard.outputs.configured == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -106,9 +133,15 @@ jobs:
       # It also fires on SILENCE — a source that stopped being attempted at all has zero failures
       # and looks perfect to any failure-counting check. `if: always()` so a crash in the step above
       # does not skip the diagnosis that explains it.
+      # --only the four hourly sources. Checking legiscan here would alarm HOURLY about a DAILY
+      # feed: legiscan is due-gated at 24h and measured from the previous run's start, so a normal
+      # day-to-day drift can legitimately push its next run past a fixed daily cron, skipping a day.
+      # Its newest row then ages past any threshold tuned for hourly sources and this job would
+      # report SILENT every hour on a perfectly healthy feed. A workflow should only assert on the
+      # sources it is responsible for.
       - name: Verify ingestion actually worked
-        if: always()
+        if: always() && steps.guard.outputs.configured == 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/check-ingest-health.mjs
+        run: node scripts/check-ingest-health.mjs --only mo-senate-web,mo-house-xml,us-congress,us-senate

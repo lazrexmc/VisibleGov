@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  checkRequiredColumnsPresent, checkRowScoping, checkCitationsShape, checkNoSupersededVotes, main,
-} from '../scripts/probe-public-surface.js';
+  checkRequiredColumnsPresent, checkRowScoping, checkCitationsShape, checkNoSupersededVotes, main, lockVerdict, lockDetail } from '../scripts/probe-public-surface.js';
 
 // Completeness axis follow-up (2026-07-31): scripts/probe-public-surface.js used to assert
 // public_verification_notes' column set EXACTLY (4 named columns) — migration 0020 (draft-then-
@@ -225,4 +224,46 @@ test('main(): SUPABASE_URL/SUPABASE_ANON_KEY unset -> sets a non-zero exitCode a
     if (savedUrl !== undefined) process.env.SUPABASE_URL = savedUrl;
     if (savedAnon !== undefined) process.env.SUPABASE_ANON_KEY = savedAnon;
   }
+});
+
+// --- lockVerdict / lockDetail -------------------------------------------------------------------
+// Added 2026-08-30. This predicate lived inline in main() and was untested, so 404 was ADDED to the
+// accept set at 12:35 and REMOVED at 19:14 without a single test failing either time. A predicate
+// nobody can break is a predicate nobody can defend.
+test('lockVerdict: 401/403 and a 42501 body are the only "locked" states', () => {
+  assert.equal(lockVerdict(401, { code: '42501' }), 'locked');
+  assert.equal(lockVerdict(403, null), 'locked');
+  assert.equal(lockVerdict(200, { code: '42501' }), 'locked', 'an explicit 42501 body is decisive');
+});
+
+test('lockVerdict: `200 []` is EXPOSED — the grant is live, only a missing policy hides it', () => {
+  assert.equal(lockVerdict(200, []), 'exposed');
+  assert.equal(lockVerdict(200, [{ id: 1 }]), 'exposed');
+});
+
+test('lockVerdict: 404 is UNEXPLAINED — neither locked nor a leak', () => {
+  // 404 was briefly accepted as "locked", which would have let a relation hidden from PostgREST's
+  // schema cache pass here while verify-migrations.mjs reported the same relation as absent.
+  assert.equal(lockVerdict(404, null), 'unexplained');
+  assert.equal(lockVerdict(400, { code: '42703' }), 'unexplained', 'a column-name error never reached a privilege check');
+  assert.equal(lockVerdict(500, null), 'unexplained');
+});
+
+test('lockVerdict: matches verify-migrations anonRevoked exactly, so the two cannot drift', () => {
+  // anonRevoked(): 401 || 403 || /42501/ -> applied; everything else -> absent.
+  const anonRevokedSaysApplied = (status, body) => status === 401 || status === 403 || /42501/.test(JSON.stringify(body ?? ''));
+  for (const [status, body] of [[401, null], [403, null], [200, []], [404, null], [400, { code: '42703' }], [200, { code: '42501' }]]) {
+    assert.equal(
+      lockVerdict(status, body) === 'locked',
+      anonRevokedSaysApplied(status, body),
+      `disagreement on status ${status} — the two probes must not diverge again`,
+    );
+  }
+});
+
+test('lockDetail: an unexplained result does not read like a leak', () => {
+  const d = lockDetail(404, 'unexplained');
+  assert.match(d, /UNEXPLAINED/);
+  assert.doesNotMatch(d, /GRANT is still live/, 'must not send an operator hunting for a grant');
+  assert.match(lockDetail(200, 'exposed'), /GRANT is still live/);
 });

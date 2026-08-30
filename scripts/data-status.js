@@ -357,7 +357,7 @@ async function main() {
       console.log(`     ${String(r.source).padEnd(24)} running ${hours}h, since ${String(r.started_at).slice(0, 19)}`);
     }
     console.log('     A run that never closed is a CRASH, not activity. Close it with');
-    console.log('     `node scripts/close-stranded-runs.mjs` (dry-run, then --apply) rather than');
+    console.log('     `npm run close-stranded` (dry-run; add -- --apply to write) rather than');
     console.log('     deleting it -- the row is the evidence of what happened.');
     console.log("     NOTE: only a stranded 'scheduled-summaries' row costs budget (it counts as a");
     console.log('     full tick against the weekly cap); other sources are not charged.');
