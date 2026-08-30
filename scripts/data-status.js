@@ -12,6 +12,7 @@
 //   node --env-file=.env scripts/data-status.js
 //   node --env-file=.env scripts/data-status.js --json    (machine-readable)
 
+import { stateLabel, silenceIsMeaningful, sourceState } from '../src/lib/source-registry.js';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -344,10 +345,34 @@ async function main() {
   console.log(`  superseded (hidden, not deleted) ${n(voteDuplicates)}  <- vote_duplicates; public views exclude them`);
   console.log(`  retracted (deleted, tombstoned) . ${n(retractedVotes)}  <- retracted_votes; full cast list preserved`);
 
+  // Each row now says WHAT THE SOURCE IS, not only when it last ran. public_freshness is
+  // derived from ingestion_runs with no allowlist, which is the right shape -- a source cannot
+  // vanish from it by being forgotten. But a ledger-derived list never EXPIRES a label, so a
+  // deliberately retired source and one that silently died looked identical forever: `verify`
+  // (07-28) and `gloss` (07-29) read as month-dead feeds when they are on-demand CLIs nobody has
+  // needed to run. src/lib/source-registry.js is the declaration layer that separates them.
   console.log('\nINGESTION FRESHNESS');
   for (const f of freshness) {
     const q = f.quarantined_days > 0 ? `  (${f.quarantined_days} days quarantined)` : '';
-    console.log(`  ${String(f.source).padEnd(24)} ${String(f.status).padEnd(10)} last finished ${f.finished_at ? String(f.finished_at).slice(0, 19) : '(none)'}${q}`);
+    const when = f.finished_at ? String(f.finished_at).slice(0, 19) : '(none)';
+    console.log(`  ${String(f.source).padEnd(24)} ${String(f.status).padEnd(10)} last finished ${when}${q}`);
+    // A scheduled source needs no annotation -- its timestamp already means what a reader
+    // assumes. Everything else does, because otherwise the date invites a wrong conclusion.
+    if (sourceState(f.source).state !== 'scheduled') {
+      console.log(`  ${''.padEnd(24)} ${stateLabel(f.source)}`);
+    }
+  }
+
+  // "Overdue" is only a question worth asking about sources something is supposed to be
+  // running. Asking it of an on-demand CLI is how a freshness table trains an operator to
+  // ignore it. 36h: the slowest scheduled source is legiscan at a 24h interval, plus drift.
+  const overdue = freshness.filter((f) => silenceIsMeaningful(f.source) && f.finished_at
+    && (Date.now() - new Date(f.finished_at).getTime()) > 36 * 3600 * 1000);
+  if (overdue.length > 0) {
+    console.log(`\n  !! ${overdue.length} SCHEDULED source(s) silent >36h:`);
+    for (const f of overdue) {
+      console.log(`     ${String(f.source).padEnd(24)} last finished ${String(f.finished_at).slice(0, 19)}`);
+    }
   }
 
   if (stranded.length > 0) {
