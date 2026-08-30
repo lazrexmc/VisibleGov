@@ -55,8 +55,13 @@ it upserts, so a second run is a no-op. Why it exists: 31 parked bills live only
 JSON file on one machine, each one three exhausted BILLED attempts, so a rebuild silently re-spends
 on work already proven to fail.
 
-**3. Adopt Glizzness's `verify_deploy.py`?** Take commit `26da16b` or later; the three constants to
-change are `ORIGIN`, `MARKERS`, `HEADER_MARKERS`. It catches a failure that is invisible by
+**3. Adopt Glizzness's `verify_deploy.py`?** Take **sha `0ffcee70` or later** (supersedes the
+`26da16b` pointer this block used to carry, confirmed by its author 2026-08-30). Set `ORIGIN`;
+`HEADER_MARKERS` still applies; **`MARKERS` no longer exists** - markers are now derived from the
+publish tree, because a hand-maintained list covered 6 of that project's 43 files and would have
+passed a stale vendored library. That version also reverses Cloudflare's edge rewrites (analytics
+beacon, Email Address Obfuscation, Managed robots.txt), which otherwise read as drift on every HTML
+page you own. It catches a failure that is invisible by
 construction - a sibling project's Cloudflare Pages integration silently stopped deploying for six
 weeks with nothing reporting red.
 
@@ -353,8 +358,10 @@ check-run on the five most recent commits, via `gh api repos/lazrexmc/VisibleGov
 That check is the cheap half and can be run any time. What is missing is the standing version.
 
 **The instrument:** `Glizzness/tools/verify_deploy.py`, stdlib-only, ~100 lines, copyable with
-attribution. Take **commit 26da16b or later** - earlier versions trusted a `no-cache` request header,
-which is advisory; that version appends a unique query string to every marker fetch instead. That
+attribution. Take **sha `0ffcee70` or later** (this doc previously said `26da16b`; superseded, and
+the constants changed with it - see the RESUME block's item 3). Earlier versions trusted a
+`no-cache` request header, which is advisory; `bust()` appends a unique query string to every marker
+fetch instead. That
 change came from VisibleGov's own evidence: Pages serves this site's JS as
 `public, max-age=14400, must-revalidate` (HTML at `max-age=0`), and a browser check here once
 reported a WORKING fix as broken because the page ran a cached module while curl returned the new

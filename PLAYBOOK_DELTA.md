@@ -78,6 +78,10 @@ with offset/limit or jump by grep.
 | 53 | 08-26 | Writing the lesson does not mean obeying it; enumerate the discriminators BEFORE applying |
 | 54 | 08-26 | A provider's record id is not an identity; N ids can name one physical event |
 | 55 | 08-26 | A missing capability is a blocker to raise, not a fork to quietly take |
+| 56 | 08-29 | A patched CVE is not a fixed architecture; a finding split across two notes is made by neither |
+| 57 | 08-29 | An action nobody can re-run is a story, not evidence |
+| 58 | 08-30 | A cold read reports the confusion, not the diagnosis; the protocol is a floor, not a ceiling |
+| 59 | 08-30 | A fixture built by the code under test proves the round-trip, not the format |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1532,3 +1536,27 @@ Related and worth separating: I flagged one item as "unverifiable from the page"
 stored or constructed) and then listed it among things I believed were wrong. It turned out to be
 stored. **Uncertainty stated in the same breath as a criticism reads as a criticism.** Keep the
 "I could not check this" items in their own section.
+
+## Lesson 59 - a fixture built by the code under test proves the round-trip, not the format (2026-08-30)
+
+Not mine. A sibling project generates PowerPoint decks and had 36 tests green over five of them.
+**None of the five would open in PowerPoint.** The fixture builder had been shaped around that
+project's own extractor, so every test proved the writer and the reader agreed with each other -
+which they did, in a format PowerPoint rejects. A second defect in the same family: a theme part
+shared between two slide masters made PowerPoint call the whole package corrupt, and nothing in the
+suite could see it because nothing in the suite was PowerPoint.
+
+The general form, and the reason it is filed here rather than left in their repo: **when you both
+write and read an artifact, your tests measure self-consistency and report it as correctness.** The
+suite cannot fail for any reason the consumer would fail for, because the consumer is not in the
+loop. Green means the round-trip closed, and the round-trip closing is not the claim anyone cares
+about.
+
+Where this repo has the same exposure, none of it currently covered by a test that a real consumer
+would run: the public site's HTML and JSON are consumed by browsers, `_headers` and `_redirects` are
+consumed by Cloudflare Pages (which 308-canonicalises `.html`, already caught once on deploy night),
+and exported summaries are consumed by whatever reads them next. The fix is not more fixtures. It is
+one check per format performed by the actual consumer - which is exactly what makes Glizzness's
+`verify_deploy.py` (lesson list item, RESUME item 3) worth more than its ~100 lines suggest: it
+fetches what the edge actually serves, rather than what the build believed it wrote.
+
