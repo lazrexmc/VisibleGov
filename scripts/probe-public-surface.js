@@ -200,7 +200,14 @@ export async function main() {
     const res = await rows(url, H, `${relation}?select=*&limit=1`);
     check(
       label,
-      res.status === 401 || res.status === 403 || res.status === 404 || /42501/.test(JSON.stringify(res.body ?? '')),
+      // EXACTLY the set verify-migrations.mjs anonRevoked() accepts — 401 / 403 / a 42501 body.
+      // 404 is deliberately NOT here, though an earlier version of this line allowed it. The two
+      // probes disagreeing on 404 was the same class of defect as the `200 []` split they were just
+      // aligned on: a relation hidden from PostgREST's schema cache would pass this file and fail
+      // that one, and the operator would have no way to know which was telling the truth. A 404
+      // also does not mean "the grant was revoked" — it means the relation is not visible at all,
+      // which for a lock check is an unexplained state that deserves a red line, not a pass.
+      res.status === 401 || res.status === 403 || /42501/.test(JSON.stringify(res.body ?? '')),
       res.status === 200
         ? `status 200 — the GRANT is still live; an empty body is NOT "locked"`
         : `status ${res.status}`,

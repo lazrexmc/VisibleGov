@@ -160,6 +160,22 @@ async function main() {
   // (selectRecentRunsReal) — a 10-day window, not just "the last 20 rows" (a daily scheduler
   // produces ~1 row/day, so 20 rows already covers ~3 weeks; the window is the honest bound, the
   // limit is just a safety cap on top of it).
+  // Parked bills are read from disk UNCONDITIONALLY, outside the scheduler-liveness branch below.
+  // This used to live inside `if (schedulerRuns.length > 0)`, which meant the count disappeared from
+  // the report whenever the summary scheduler had not run in 10 days -- i.e. it went silent at
+  // exactly the moment a human most needed to know 31 bills were parked and nothing was working
+  // them. Never gate a detector's display on the liveness of the thing it monitors: the parked set
+  // is a fact on disk and does not stop being true because the scheduler stopped.
+  let parkedCount = 0;
+  if (existsSync(PARKED_PATH)) {
+    try {
+      parkedCount = Object.keys(JSON.parse(readFileSync(PARKED_PATH, 'utf8'))).length;
+    } catch {
+      // a corrupt parked.json must not take the whole status report down
+      parkedCount = null;
+    }
+  }
+
   const tenDaysAgoIso = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
   const schedulerRuns = await rows(`ingestion_runs?source=eq.scheduled-summaries&started_at=gte.${tenDaysAgoIso}&order=started_at.desc&limit=20`);
   let scheduler = { status: 'never_ran' };
@@ -174,15 +190,6 @@ async function main() {
     const { spentUsd: weeklySpentUsd } = summarizeWeekSpend(schedulerRuns, weekKey, perTickCapUsd);
     const thisWeekRuns = schedulerRuns.filter((r) => r.detail?.week_key === weekKey);
     const publishedThisWeek = thisWeekRuns.reduce((sum, r) => sum + (Number(r.detail?.published) || 0), 0);
-    let parkedCount = 0;
-    if (existsSync(PARKED_PATH)) {
-      try {
-        const parked = JSON.parse(readFileSync(PARKED_PATH, 'utf8'));
-        parkedCount = Object.keys(parked).length;
-      } catch {
-        // ignore corrupt parked.json
-      }
-    }
     scheduler = {
       status: 'running',
       lastTickStarted: lastRun.started_at,
@@ -191,9 +198,34 @@ async function main() {
       weeklySpentUsd: Number(weeklySpentUsd.toFixed(2)),
       weeklyCapUsd,
       publishedThisWeek,
-      parkedCount,
     };
   }
+
+  // ---- STRANDED RUNS (the other half of the dead-man's switch) ----------------------------
+  //
+  // scheduled-ingest.js already pings a heartbeat every tick, which answers "is the scheduler
+  // alive?". It cannot answer "did a run that STARTED ever finish?" -- and those are different
+  // failures with different causes. A `correct-data` row sat at status='running' for 25 DAYS while
+  // every heartbeat stayed green and every other source kept ticking, because nothing watched for
+  // the second shape. It was found by hand in the 2026-08-29 audit and written off as cosmetic.
+  // It was not cosmetic: it is precisely how a missing dead-man's switch presents.
+  //
+  // It is also not always harmless -- but the earlier version of this comment OVERSTATED that, and
+  // the correction matters more than the original point. It claimed any stranded row shrinks the
+  // summary budget. It does not: selectRecentRunsReal (scheduled-summaries.js:~574) filters
+  // `source = 'scheduled-summaries'`, so a stranded row from ANY OTHER source -- including the
+  // correct-data row that prompted all of this -- is never charged against the cap. Only a stranded
+  // SUMMARIES tick is counted as a full tick of spend, and even then it rolls off with the ISO week
+  // rather than being permanent. Verified in the source, after a peer review flagged the claim.
+  //
+  // Threshold 6h: the longest legitimate run here is the LegiScan child, documented at up to 75
+  // minutes, so 6h cannot fire on healthy work while still catching a crash the same day.
+  const STRANDED_AFTER_HOURS = 6;
+  const strandedCutoff = new Date(Date.now() - STRANDED_AFTER_HOURS * 3600 * 1000).toISOString();
+  const stranded = await rows(
+    'ingestion_runs?status=eq.running&started_at=lt.' + strandedCutoff
+    + '&select=source,started_at&order=started_at.asc',
+  );
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -238,6 +270,13 @@ async function main() {
     },
     freshness,
     scheduler,
+    // `stranded` and `parked` are in the JSON report DELIBERATELY, not only in the printed output.
+    // The stranded-run scan originally existed only in the human-readable branch, which meant no
+    // machine consumer -- a CI step, a monitor, another session -- could ever see the detector fire.
+    // A detector only a human can read is a detector nobody reads at 3am. `stranded` is always an
+    // array (empty means checked-and-clean, which is a different fact from absent).
+    stranded,
+    parked: { count: parkedCount, path: PARKED_PATH },
   };
 
   if (asJson) {
@@ -305,28 +344,6 @@ async function main() {
   console.log(`  superseded (hidden, not deleted) ${n(voteDuplicates)}  <- vote_duplicates; public views exclude them`);
   console.log(`  retracted (deleted, tombstoned) . ${n(retractedVotes)}  <- retracted_votes; full cast list preserved`);
 
-  // ---- STRANDED RUNS (the other half of the dead-man's switch) ----------------------------
-  //
-  // scheduled-ingest.js already pings a heartbeat every tick, which answers "is the scheduler
-  // alive?". It cannot answer "did a run that STARTED ever finish?" -- and those are different
-  // failures with different causes. A `correct-data` row sat at status='running' for 25 DAYS while
-  // every heartbeat stayed green and every other source kept ticking, because nothing watched for
-  // the second shape. It was found by hand in the 2026-08-29 audit and written off as cosmetic.
-  // It was not cosmetic: it is precisely how a missing dead-man's switch presents.
-  //
-  // It is also not harmless. scheduled-summaries.js counts a row stranded at status='running' as a
-  // FULL tick of spend against the weekly cap, so one crashed run quietly shrinks the summary
-  // budget every week until somebody notices.
-  //
-  // Threshold 6h: the longest legitimate run here is the LegiScan child, documented at up to 75
-  // minutes, so 6h cannot fire on healthy work while still catching a crash the same day.
-  const STRANDED_AFTER_HOURS = 6;
-  const strandedCutoff = new Date(Date.now() - STRANDED_AFTER_HOURS * 3600 * 1000).toISOString();
-  const stranded = await rows(
-    'ingestion_runs?status=eq.running&started_at=lt.' + strandedCutoff
-    + '&select=source,started_at&order=started_at.asc',
-  );
-
   console.log('\nINGESTION FRESHNESS');
   for (const f of freshness) {
     const q = f.quarantined_days > 0 ? `  (${f.quarantined_days} days quarantined)` : '';
@@ -339,9 +356,11 @@ async function main() {
       const hours = Math.floor((Date.now() - new Date(r.started_at).getTime()) / 3600000);
       console.log(`     ${String(r.source).padEnd(24)} running ${hours}h, since ${String(r.started_at).slice(0, 19)}`);
     }
-    console.log('     A run that never closed is a CRASH, not activity, and it counts as full spend');
-    console.log('     against the summary weekly cap. Close it (status=failed, finished_at=started_at,');
-    console.log('     reason recorded in detail) rather than deleting it -- the row is the evidence.');
+    console.log('     A run that never closed is a CRASH, not activity. Close it with');
+    console.log('     `node scripts/close-stranded-runs.mjs` (dry-run, then --apply) rather than');
+    console.log('     deleting it -- the row is the evidence of what happened.');
+    console.log("     NOTE: only a stranded 'scheduled-summaries' row costs budget (it counts as a");
+    console.log('     full tick against the weekly cap); other sources are not charged.');
   }
 
   console.log('\nSUMMARY SCHEDULER');
@@ -352,10 +371,11 @@ async function main() {
     console.log(`  last tick ........................ ${lastStarted} status=${scheduler.lastTickRunStatus}`);
     console.log(`  spent this week ................. $${scheduler.weeklySpentUsd.toFixed(2)} of $${scheduler.weeklyCapUsd.toFixed(2)}`);
     console.log(`  published this week ............ ${scheduler.publishedThisWeek}`);
-    if (scheduler.parkedCount > 0) {
-      console.log(`  parked (structural failures) .... ${scheduler.parkedCount}`);
-    }
   }
+  // Outside the block above on purpose -- see the note where parkedCount is computed. Printed even
+  // when zero: "0 parked" is information, while a missing line is indistinguishable from a line
+  // nobody wrote.
+  console.log(`  parked (structural failures) .... ${parkedCount === null ? '(parked.json unreadable)' : n(parkedCount)}`);
 
   console.log('\nStructure and meaning of these numbers: docs/DATA_INVENTORY.md');
 }

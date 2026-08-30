@@ -52,3 +52,14 @@ jobs:
           LEGISCAN_MONTHLY_QUERY_CAP: ${{ vars.LEGISCAN_MONTHLY_QUERY_CAP }}
           HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
         run: node scripts/scheduled-ingest.js --only legiscan
+
+      # Same reason as ingest.yml: the step above exits 0 on operational failure by design, so its
+      # status proves only that node did not crash. This step reads ingestion_runs, the scheduler's
+      # own durable signal. Omitting it here while having it on the hourly workflow left the exact
+      # defect it exists to catch alive in the daily path for a day (caught in review, 2026-08-29).
+      - name: Verify ingestion actually worked
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-ingest-health.mjs

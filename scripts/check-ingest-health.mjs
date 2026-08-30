@@ -30,15 +30,27 @@
 // Usage: node scripts/check-ingest-health.mjs        (reads SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
 //        node scripts/check-ingest-health.mjs --json
 
-const SOURCES = ['mo-senate-web', 'mo-house-xml', 'us-congress', 'us-senate'];
+// legiscan is IN this list. It was missing until 2026-08-29 and that was the same defect this file
+// exists to fix, still live in the daily workflow: ingest-legiscan.yml gated only on the scheduler's
+// deliberately-inert exit code, so a broken LegiScan feed would have stayed green indefinitely.
+// Fixing signal death for the hourly path and leaving it in the daily path is not fixing it.
+const SOURCES = ['mo-senate-web', 'mo-house-xml', 'us-congress', 'us-senate', 'legiscan'];
 
 // 3 consecutive failures: one is weather, two is suspicious, three is a broken feed. At hourly
 // cadence that is a ~3 hour detection window, which is proportionate for legislative data.
 const PERSISTENT_FAILURES = 3;
 
-// 25h, not 2h: sources are due-gated internally (mo-senate-web paces itself, us-congress probes a
-// window) so a quiet few hours is normal and expected. A full day with no attempt at all is not.
-const SILENT_AFTER_HOURS = 25;
+// Silence thresholds are PER SOURCE, because the sources do not share a cadence and a single number
+// would be wrong for someone. The hourly sources are due-gated internally (mo-senate-web paces
+// itself, us-congress probes a window), so a quiet few hours is normal; a full day is not.
+//
+// legiscan gets 30h, not 25h: it is gated behind its own 24h interval AND its workflow is a daily
+// cron, and GitHub's scheduler is best-effort — a tick that drifts an hour late would trip a 25h
+// threshold and cry wolf on a perfectly healthy feed. A detector that fires on normal operation is
+// worse than none, because it is the one everybody learns to ignore.
+const SILENT_AFTER_HOURS_DEFAULT = 25;
+const SILENT_AFTER_HOURS = { legiscan: 30 };
+const silenceThreshold = (source) => SILENT_AFTER_HOURS[source] ?? SILENT_AFTER_HOURS_DEFAULT;
 
 // Credentials are read INSIDE main(), never at module scope. This file's pure classifier is
 // unit-tested, and this repo's established convention (serve-site.js, every src/cli/*.js) is that
@@ -67,14 +79,14 @@ async function recentRuns({ url, key }, source, limit) {
   return r.json();
 }
 
-export function classify(runs, { now = Date.now() } = {}) {
+export function classify(runs, { now = Date.now(), silentAfterHours = SILENT_AFTER_HOURS_DEFAULT } = {}) {
   if (!Array.isArray(runs) || runs.length === 0) {
     return { state: 'NEVER_RAN', detail: 'no ingestion_runs rows at all' };
   }
   const newest = runs[0];
   const ageHours = (now - new Date(newest.started_at).getTime()) / 3600000;
-  if (ageHours > SILENT_AFTER_HOURS) {
-    return { state: 'SILENT', detail: `no run attempted for ${Math.floor(ageHours)}h` };
+  if (ageHours > silentAfterHours) {
+    return { state: 'SILENT', detail: `no run attempted for ${Math.floor(ageHours)}h (threshold ${silentAfterHours}h)` };
   }
   // Only terminal statuses count toward a failure streak. A row still at 'running' is this tick's
   // own in-flight work, not evidence either way -- counting it as a failure would make the check
@@ -101,7 +113,7 @@ async function main() {
   for (const source of SOURCES) {
     // eslint-disable-next-line no-await-in-loop -- four sequential reads; ordering keeps the log diffable
     const runs = await recentRuns(creds, source, PERSISTENT_FAILURES + 2);
-    results.push({ source, ...classify(runs) });
+    results.push({ source, ...classify(runs, { silentAfterHours: silenceThreshold(source) }) });
   }
 
   const bad = results.filter((r) => r.state === 'BROKEN' || r.state === 'SILENT' || r.state === 'NEVER_RAN');
