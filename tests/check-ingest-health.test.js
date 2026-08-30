@@ -77,7 +77,10 @@ test('silenceThreshold: every hourly source is exactly 25h, not merely "tight"',
 });
 
 test('silenceThreshold: an unknown source falls back to the tight default, never to permissive', () => {
-  assert.equal(silenceThreshold('brand-new-source'), silenceThreshold('us-senate'));
+  // Pinned to the literal 25, not to silenceThreshold('us-senate'): asserting equality between two
+  // values from the same table is transitive, so changing the default AND every hourly entry to one
+  // new number would have passed while silently widening every window.
+  assert.equal(silenceThreshold('brand-new-source'), 25);
 });
 
 test('classify: legiscan silent for 40h is NOT an alarm (one skipped daily cycle)', () => {

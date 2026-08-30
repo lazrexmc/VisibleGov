@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   anonLockState, isRevokedResponse, anonRpcState, isRpcDeniedResponse,
 } from '../src/lib/anon-lock.js';
@@ -64,18 +64,43 @@ test('isRevokedResponse: true only for locked', () => {
   assert.equal(isRevokedResponse(404, null), false, 'unexplained must never read as revoked');
 });
 
-// STRUCTURAL GUARD. The failure this whole module exists to prevent is a second implementation
-// appearing, so assert that neither consumer carries its own. A behavioural test cannot catch that
-// — a reintroduced copy would simply not be under test, which is exactly what happened before.
-test('neither consumer defines its own 42501 predicate — one definition, imported', () => {
+// STRUCTURAL GUARD. The failure this module exists to prevent is a second implementation
+// appearing, and a behavioural test cannot catch that — a reintroduced copy would simply not be
+// under test, which is exactly what happened before.
+//
+// BE HONEST ABOUT WHAT THIS CATCHES. It is a REGRESSION guard for predicate-shaped uses of 42501,
+// not a duplicate detector. An earlier version matched only the literal `/42501/.test(`, and
+// `b.includes('42501')`, `/42501/i.test(b)`, `new RegExp('42501').test(b)` and `b.match(/42501/)`
+// all walked straight past it. It now checks every file under scripts/ and src/ (not two named
+// ones) for a line that mentions 42501 AND calls a matching method — which covers all five forms —
+// but a determined rewrite (building the string from parts, say) still evades it. Treat a pass as
+// "the known shapes have not come back", never as "no duplicate exists anywhere".
+test('regression guard: no predicate-shaped 42501 match outside the shared module', () => {
+  const roots = ['scripts', 'src'];
+  const MATCHERS = /\b(test|includes|match|search|indexOf|RegExp)\s*\(/;
+  const offenders = [];
+  for (const root of roots) {
+    const dir = new URL(`../${root}/`, import.meta.url);
+    for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || !/\.(js|mjs)$/.test(entry.name)) continue;
+      const rel = `${entry.parentPath ?? entry.path}/${entry.name}`.replace(/\\/g, '/');
+      if (rel.endsWith('src/lib/anon-lock.js')) continue; // the one legitimate home
+      for (const line of readFileSync(rel, 'utf8').split(/\r?\n/)) {
+        const code = line.replace(/^\s*(\/\/|\*).*$/, ''); // ignore comment-only lines
+        if (code.includes('42501') && MATCHERS.test(code)) offenders.push(`${rel}: ${line.trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders, [],
+    `a 42501 predicate reappeared outside src/lib/anon-lock.js — the copies drifted twice before, on \`200 []\` and on 404. Import anonLockState/anonRpcState instead:\n${offenders.join('\n')}`,
+  );
+});
+
+test('both historical consumers still import the shared predicate', () => {
   for (const f of ['scripts/verify-migrations.mjs', 'scripts/probe-public-surface.js']) {
     const src = readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
     assert.match(src, /from '\.\.\/src\/lib\/anon-lock\.js'/, `${f} must import the shared predicate`);
-    assert.doesNotMatch(
-      src,
-      /\/42501\/\.test\(/,
-      `${f} has its own 42501 test again — the two copies drifted twice before; import anonLockState instead`,
-    );
   }
 });
 

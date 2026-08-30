@@ -71,11 +71,17 @@ jobs:
           # half-configured repo (URL set, service key missing) passed the guard and then went red
           # in the ingest step -- the exact failure the guard exists to prevent, just later and
           # with a worse error.
+          # Derived from what THIS job's sources actually read, not from the env: block below.
+          # OPENSTATES_API_KEY is deliberately NOT here: its only consumer is
+          # src/adapters/mo-legislature.js, which scheduled-ingest.js never invokes. Guarding on it
+          # would hold the workflow inert waiting for a key nothing on this path reads -- an
+          # over-guard blocks cutover just as effectively as a missing one lets it break.
+          # HEALTHCHECK_PING_URL is also absent on purpose: it is consumed, but unset is a verified
+          # no-op (scheduled-ingest.js skips the ping), so it is optional rather than required.
           missing=""
           [ -z "${{ secrets.SUPABASE_URL }}" ] && missing="$missing SUPABASE_URL"
           [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
           [ -z "${{ secrets.CONGRESS_API_KEY }}" ] && missing="$missing CONGRESS_API_KEY"
-          [ -z "${{ secrets.OPENSTATES_API_KEY }}" ] && missing="$missing OPENSTATES_API_KEY"
           if [ -n "$missing" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Not yet cut over - missing secret(s):$missing. This job is INERT, not working: every later step is skipped and the job is green because it did nothing. See docs/GITHUB_ACTIONS_MIGRATION.md step 1."

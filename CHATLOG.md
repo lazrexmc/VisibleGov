@@ -6429,3 +6429,54 @@ lesson 14).
   **Also:** the operator hint printed a command that would exit 2 if pasted (no `--env-file`) — now
   `npm run close-stranded`, with `npm run check:ingest` alongside it, because a tool no doc mentions
   and no script exposes is one nobody will find at 3am.
+- **2026-08-29 (late) — peer-review rounds three and four. The theme is evidence that only looked
+  like evidence.**
+  **My drift test was theatre, and that is the finding worth keeping.** I had added a test asserting
+  `probe-public-surface.js`'s lock predicate agreed with `verify-migrations.mjs`'s `anonRevoked`
+  "on every status." It asserted nothing of the kind: `verify-migrations.mjs` exports nothing, so
+  the test compared against a **hand-copied closure living in the test file**. The real predicate
+  could change silently and nothing would fail. The copy was not even faithful — the real one
+  matches `/42501/` against raw response TEXT, the copy against `JSON.stringify` of a PARSED body,
+  which differ for any non-string payload. And "every status" was six hand-picked pairs.
+  **The fix was to delete the second copy, not to test that copies agree.** `src/lib/anon-lock.js`
+  now holds one definition; both scripts import it. Two probes cannot drift when there is one
+  predicate. The peer proposed exporting the predicate from `verify-migrations.mjs` and importing
+  both into one test; that cannot work here — that file executes its whole probe at module scope
+  and ends in `process.exit()`, so importing it from a test runs the network probe and kills the
+  test process. **One definition beats a test that two copies agree.**
+  **A structural guard, because behavioural tests cannot catch a reintroduced copy** — a copy would
+  simply not be under test, which is precisely how this happened. It fired immediately on a
+  predicate I had missed, `anonRpcDenied` — and that turned out to be a LOAD-BEARING difference,
+  not drift: **for an RPC, 404 IS denial** (PostgREST hides a function the calling role cannot
+  execute), while for a table 404 is unexplained. Merging them would have been a real bug. Both now
+  live in the shared module with the divergence documented and pinned by a test asserting they
+  DISAGREE on 404. Consolidating duplicates is useful partly because it forces each difference to be
+  justified out loud.
+  **I also pasted "captured run output" that proved nothing** — hand-abbreviated lines, and an
+  all-401 result that was "locked" under every version of the predicate, so it never exercised the
+  branch that changed. Same family as the drift test. If output that exercises the change cannot be
+  captured, say so rather than paste something shaped like proof.
+  **Round four found the guard I had just written was narrower than I claimed.** It matched only the
+  literal `/42501/.test(`; `b.includes('42501')`, `/42501/i.test(b)`, `new RegExp('42501').test(b)`
+  and `b.match(/42501/)` all walked past, and it inspected two named files rather than the tree. Now
+  scans `scripts/` and `src/`, catches all five forms, and **its name says what it actually is** — a
+  regression guard for known shapes, not a duplicate detector. **Proved it fires** by writing a file
+  containing all five forms, watching each get named, and deleting it.
+  **An over-guard blocks a cutover as effectively as a missing one lets it break.** The workflow's
+  pre-cutover guard required `OPENSTATES_API_KEY`, which is read only by
+  `src/adapters/mo-legislature.js` — a path `scheduled-ingest.js` never invokes. Lance would have
+  sat waiting for a key nothing on that path reads. The guard is now derived from what the job's
+  steps actually read, not from its `env:` block.
+  **Where I disagree with the review, for the record:** it noted that the retractions in
+  `docs/GITHUB_ACTIONS_MIGRATION.md` and `ingest-legiscan.yml` still CONTAIN the retracted phrases
+  verbatim, so an automated "old text is gone" check would false-positive. True, and deliberate — a
+  retraction that does not quote what it retracts is not comprehensible to a human reader, and the
+  human is the audience. The right response is that such a checker must look for the retraction
+  marker, not the phrase.
+  **Also fixed:** tests pinned bounds rather than values (`> 48` passed for 49 and 500 alike; the
+  fallback test compared two entries of the same table, so changing both would have passed);
+  the guard keyed on one secret while four were required; a guard comment copy-pasted from
+  `ingest.yml` described "every hour from 20:54" and "all four sources" in a daily single-source
+  workflow — **a pasted comment describing another file's incident is worse than none, because it
+  is specific enough to be believed**; and dates labelled 2026-08-30 from a UTC timestamp when the
+  commits are 2026-08-29 local.
