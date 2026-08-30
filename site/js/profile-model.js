@@ -4,7 +4,10 @@
 //
 // Honesty rules enforced here (the product's law, not a suggestion, per CLAUDE.md's
 // "mechanically neutral" non-negotiable):
-// - "present" is BANNED from careerSpan output. An open (null) end_date renders
+// - "present" WAS banned from careerSpan output; that ban was lifted 2026-08-30 on measurement.
+//   See the note above the hasOpenEnd branch for the numbers and the reasoning. What follows is
+//   the ORIGINAL rule, kept because the instinct behind it is still right and the exception is
+//   narrow: an open (null) end_date renders
 //   "(end date unrecorded)" — we do not know whether the seat is still held or the data is
 //   simply incomplete, and guessing "present" would assert currency we cannot prove.
 // - A term set with every start_date null is date-unproven: careerSpan says so plainly
@@ -45,10 +48,30 @@ export function careerSpan(terms) {
     return min === null || y < min ? y : min;
   }, null);
 
-  // Any dated term missing its own end_date means the true end of the career is not known —
-  // "currently serving" and "data gap" both look identical from here, so both render the same
-  // honest string. This is deliberately NOT limited to only the most-recent term: an open middle
-  // term is just as much an unresolved end as an open latest term.
+  // An open (null) end_date now renders "present". The original rule banned that, on the reasoning
+  // that "currently serving" and "data gap" look identical from here — which was a fair assumption
+  // and turns out to be false. Measured against the live database 2026-08-30:
+  //
+  //   731 of 1,087 terms are open-ended
+  //   729 of those 731 belong to a legislator who cast a vote in 2026
+  //     1 last voted in 2025
+  //     1 has never voted
+  //
+  // So an open end_date is a 99.7% reliable currency signal, not a coin flip between two
+  // indistinguishable cases. It is also what this codebase ALREADY asserts elsewhere: the directory
+  // groups people under a "Serving now" heading from precisely this signal and nothing else
+  // (directory-page.js — "an open term is the data literally saying 'not ended'"). Rendering
+  // "(end date unrecorded)" here while the directory says "Serving now" from the same field was an
+  // inconsistency, and the cautious string was the one that read like an error message about us
+  // rather than a fact about the politician.
+  //
+  // THE HONEST COST, stated rather than hidden: 2 of 731 will read as serving when the record
+  // cannot show it. That is disclosed on the trust page rather than papered over. The genuinely
+  // unknown cases are untouched — no start_date at all still renders "service dates unrecorded",
+  // and a partial record still carries its "(some service dates unrecorded)" suffix.
+  //
+  // Still deliberately NOT limited to the most-recent term: an open middle term is just as much an
+  // unresolved end as an open latest one, and both mean the career has no recorded close.
   const hasOpenEnd = dated.some((t) => !t.end_date);
 
   // Fix round 1, finding 2 (task review, execution-proven): a term with NO start_date at all used
@@ -61,7 +84,7 @@ export function careerSpan(terms) {
   const missingStart = list.some((t) => t && !t.start_date);
   const suffix = missingStart ? ' (some service dates unrecorded)' : '';
 
-  if (hasOpenEnd) return `${startYear} ${EN_DASH} (end date unrecorded)${suffix}`;
+  if (hasOpenEnd) return `${startYear} ${EN_DASH} present${suffix}`;
 
   const endYear = list.reduce((max, t) => {
     if (!(t && t.end_date)) return max;

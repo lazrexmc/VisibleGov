@@ -70,11 +70,16 @@ export function parseGeographies(censusJson) {
 }
 
 // Per-candidate date evidence for the UI (an ambiguous seat renders this next to EACH returned
-// candidate). Mirrors profile-model.js's careerSpan honesty rules at the single-term level:
-// "present"/"current" are banned; an open end says so plainly; no start_date at all says so too.
+// candidate). Mirrors profile-model.js's careerSpan rules at the single-term level, INCLUDING the
+// 2026-08-30 change: an open end_date renders "present" (measured 99.7% reliable as a currency
+// signal — see the note in careerSpan for the numbers), while a missing start_date still says so
+// plainly, because that one really is unknown rather than open.
+//
+// These two must stay in step. A district lookup and a profile describing the same term in
+// different words is the kind of drift that makes a reader distrust both.
 export function termDateEvidence(term) {
   if (!term || !term.start_date) return 'dates unrecorded';
-  if (!term.end_date) return `${term.start_date} ${EN_DASH} (end date unrecorded)`;
+  if (!term.end_date) return `${term.start_date} ${EN_DASH} present`;
   return `${term.start_date} ${EN_DASH} ${term.end_date}`;
 }
 

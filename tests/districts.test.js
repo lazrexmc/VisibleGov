@@ -375,10 +375,18 @@ test('termDateEvidence: a term with both dates renders the range', () => {
   assert.equal(termDateEvidence({ start_date: '2021-01-06', end_date: '2025-01-08' }), '2021-01-06 – 2025-01-08');
 });
 
-test('termDateEvidence: an open end_date renders "(end date unrecorded)", never "present" or "current"', () => {
+// Changed 2026-08-30 alongside careerSpan. These two describe the same term in two different
+// places, and a district lookup wording it differently from the profile is exactly the drift that
+// makes a reader distrust both. The rule that survives is the narrower one: "present" is earned by
+// an OPEN END and never by an absent START, which is genuinely unknown rather than open.
+test('termDateEvidence: an open end_date renders "present", matching careerSpan', () => {
   const evidence = termDateEvidence({ start_date: '2021-01-06', end_date: null });
-  assert.match(evidence, /end date unrecorded/);
-  assert.doesNotMatch(evidence.toLowerCase(), /present|current/);
+  assert.match(evidence, /present$/);
+  assert.match(evidence, /^2021-01-06/, 'the start date is a fact we hold and must still be shown');
+
+  // A missing start is NOT an open end. It must never borrow "present".
+  const noStart = termDateEvidence({ start_date: null, end_date: null });
+  assert.doesNotMatch(noStart.toLowerCase(), /present|current/);
 });
 
 test('termDateEvidence: no start_date at all -> "dates unrecorded"', () => {

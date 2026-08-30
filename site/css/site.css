@@ -638,10 +638,12 @@ footer#site-footer {
   margin: 0 0 0.2rem;
 }
 
-/* The mockup's "lit mono tenure line" (`● serving — since 2023-01-04 (end date unrecorded)`).
+/* The mockup's "lit mono tenure line" (`● serving — since 2023-01-04`).
    The "●" is CSS-generated content (never a text-node change — profile-model.js's careerSpan
-   output, e.g. "2023 – (end date unrecorded)" or "2013 – 2018", stays byte-identical; the
-   examples in the mockup illustrate the visual TREATMENT, not a literal string this site emits). */
+   output, e.g. "2023 – present" or "2013 – 2018", stays byte-identical; the examples in the
+   mockup illustrate the visual TREATMENT, not a literal string this site emits).
+   Open-end wording changed from "(end date unrecorded)" to "present" on 2026-08-30; this comment
+   quotes careerSpan's output, so it moves with it. */
 .profile-career-span {
   font-family: Consolas, "Cascadia Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;

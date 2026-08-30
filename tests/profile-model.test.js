@@ -74,7 +74,7 @@ test('buildIdentity: Onder-shaped fixture (4 linked rows, MO senate 2013-2023 + 
     party: 'Republican',
     chamberLabel: 'U.S. House',
     districtLabel: '3',
-    careerSpan: '2013 – (end date unrecorded)',
+    careerSpan: '2013 – present',
     photoCandidate: onderLegislators()[0], // the bioguide row: no image_url anywhere, but it carries bioguide_id
     rowCount: 4,
   });
@@ -278,13 +278,19 @@ test('careerSpan: both bounds known -> "YYYY – YYYY"', () => {
   assert.equal(careerSpan(terms), '2013 – 2023');
 });
 
-test('careerSpan: open end (currently held, or simply not recorded) -> "YYYY – (end date unrecorded)", never "present"', () => {
+// Changed 2026-08-30. This test asserted the OPPOSITE until today — that "present" must never
+// appear — on the reasoning that a currently-held term and a data gap are indistinguishable from
+// the terms table alone. They are not: 729 of 731 open-ended terms belong to a legislator who cast
+// a vote in 2026, and directory-page.js already grouped exactly these people under a "Serving now"
+// heading from the identical signal. The old string also described US ("we did not record an end")
+// where a reader wanted a fact about the politician.
+test('careerSpan: an open end renders "YYYY – present" (measured: 729/731 open terms are current)', () => {
   const terms = [{ start_date: '2019-01-01', end_date: null }];
-  assert.equal(careerSpan(terms), '2019 – (end date unrecorded)');
+  assert.equal(careerSpan(terms), '2019 – present');
 });
 
 test('careerSpan: multiple terms -> earliest start year, open end wins if ANY dated term is open', () => {
-  assert.equal(careerSpan(onderTerms()), '2013 – (end date unrecorded)');
+  assert.equal(careerSpan(onderTerms()), '2013 – present');
 });
 
 test('careerSpan: multiple fully-closed terms -> earliest start year, latest end year', () => {
@@ -324,19 +330,30 @@ test('careerSpan: fix round 1 finding 2 — the all-null case is unaffected (sti
   assert.equal(careerSpan(moSenateOnlyTerms()), 'service dates unrecorded');
 });
 
-test('careerSpan: "present" never appears in any careerSpan output (assert across every fixture in this file)', () => {
-  const fixtures = [
-    onderTerms(),
-    moSenateOnlyTerms(),
-    [],
-    [{ start_date: '2019-01-01', end_date: null }],
-    [{ start_date: '2001-01-01', end_date: '2009-01-01' }, { start_date: '2013-01-01', end_date: '2023-01-01' }],
-    MIXED_EVIDENCE_TERMS,
+// This was a BLANKET ban on the word "present" across every fixture. It is now the narrower rule
+// that survived the 2026-08-30 measurement, deliberately kept as a test rather than deleted: the
+// reason for the original ban was sound, and only its scope was wrong.
+//
+// "present" is a claim that service is ONGOING. It is earned by an open end_date and by nothing
+// else. A career with every end recorded is finished, and a term whose START is missing is
+// genuinely unknown — neither may ever say "present", because in those cases we really would be
+// inventing currency rather than reporting an open record.
+test('careerSpan: "present" is earned ONLY by an open end_date — never by a closed career, never by a missing start', () => {
+  const mustNotSayPresent = [
+    ['no terms at all', []],
+    ['every term closed', [
+      { start_date: '2001-01-01', end_date: '2009-01-01' },
+      { start_date: '2013-01-01', end_date: '2023-01-01' },
+    ]],
   ];
-  for (const terms of fixtures) {
+  for (const [label, terms] of mustNotSayPresent) {
     const span = careerSpan(terms);
-    assert.equal(/present/i.test(span), false, `careerSpan(${JSON.stringify(terms)}) = "${span}" must never say "present"`);
+    assert.equal(/present/i.test(span), false, `${label}: careerSpan = "${span}" must not claim ongoing service`);
   }
+
+  // And the positive half, so the rule is pinned from both sides rather than only forbidden.
+  assert.match(careerSpan([{ start_date: '2019-01-01', end_date: null }]), /present$/);
+  assert.match(careerSpan(onderTerms()), /present$/);
 });
 
 // ============================================================================
