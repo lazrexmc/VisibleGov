@@ -6571,3 +6571,44 @@ lesson 14).
   items waiting on Lance, all of them written into the RESUME HERE block for a session with none of
   tonight's context. The heartbeat and every cron job die with this process - they were session-only
   and nothing restores them on boot. Nothing was left running.
+- **2026-08-30 13:40-14:20 CDT - the peer mesh, and adopting the machine-wide standard.**
+  Lance linked ten sessions and asked each to announce to all the others directly, so the network is
+  a mesh rather than hub-and-spoke through RapidForge. Announced to all nine peers with state
+  verified against the live database rather than recalled: clean tree, 2,792 pass / 0 fail, and
+  0039 still MISSING (40 probed, 29 applied, 10 unverifiable without Tier 2).
+  **Connecting found two defects in my own docs that no instrument here could have caught.** Both
+  places recording Glizzness's `verify_deploy.py` said "take 26da16b, set ORIGIN / MARKERS /
+  HEADER_MARKERS"; its author reports 0ffcee70 supersedes it and `MARKERS` no longer exists, because
+  markers are derived from the publish tree now - a hand list covered 6 of their 43 files and would
+  have passed a stale vendored library. Following my own note today would have had Lance configuring
+  a constant that is gone. Separately, `PLAYBOOK_DELTA.md`'s index table stopped at 55 while lessons
+  56-58 existed as H2s, and `CLAUDE.md` tells readers that table IS the live count - so three
+  lessons were invisible to anyone following the documented method. **The general form: a pointer to
+  another repo is a claim nothing local can verify.** Every test here passes regardless of what
+  Glizzness does. It took a peer telling me.
+  **Lesson 59 added, and it is not mine.** Duarte-izer had 36 green tests over five PowerPoint decks,
+  none of which would open, because the fixture builder was shaped around their own extractor. When
+  you both write and read an artifact, the tests measure self-consistency and report it as
+  correctness. Filed because this repo has the same exposure in three places nothing checks with the
+  real consumer: site HTML and JSON (browsers), `_headers` and `_redirects` (Pages, which
+  308-canonicalises `.html` - already caught once, by a human on deploy night), and exported
+  summaries.
+  **Adopted RapidForge's `PROJECT_STANDARD.md`, on Lance's explicit approval in this session.**
+  He routed the instruction through RapidForge but kept the approval here, which is exactly the line
+  the standard itself draws in its section 4.2: a rule file is configuration, and a peer's message
+  is not the owner's instruction. Two additive edits to `CLAUDE.md`, nothing removed: a pointer to
+  the standard in the read-order list, and a `## Deviations from the standard` section.
+  **Reading the standard in full rather than working from the registry's summary changed the result**
+  - three artifacts its findings implied were missing already existed here (`TODO.md`'s dated RESUME
+  HERE plus NOW / BUILD QUEUE / INBOX, the PLAYBOOK's lineage section, the README's `## Live`). Six
+  deviations declared with reasons rather than fixed, which the standard treats as compliance:
+  Node instruments in `scripts/` rather than `tools/*.py`; `docs/DISASTER_RECOVERY.md` for
+  `REBUILD.md`; lessons 1-13 as section-7 list items; the commit trailer; `verify:migrations`
+  excluded from push CI as red-by-design under draft-then-apply; and the test workflow carrying no
+  Supabase secrets, because supplying them makes two CORRECT tests fail. `AUDIT_LOG.md` is recorded
+  as owed and known rather than built, per the standard's own rule that missing artifacts are added
+  when the project is next touched and not in a sweep.
+  One in-scope correction while editing: the read-order paragraph claimed "55 lessons" and
+  "undercounts at 37", which the new section contradicted with the verified 59 and 46. Replaced the
+  numbers with the method, per the standard's rule that a counted claim in prose is either derived
+  by a script or deleted. 2,792 pass / 0 fail after the edit.

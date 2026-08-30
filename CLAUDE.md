@@ -171,9 +171,9 @@ within the hour.
 
 **If you are a fresh session, read these first, in order** (but the RESUME HERE block at the top of
 `TODO.md` outranks all of them — it is the only live-verified one): `PLAYBOOK_DELTA.md` (reusable traps —
-55 lessons as of 2026-08-26 — lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
-H2s, so `grep -c '^## Lesson'` undercounts at 37; the "Index of lessons" table at the top of the
-file is the live count — several
+lessons 1-13 are list items under §7 and only 14+ are `## Lesson N`
+H2s, so `grep -c '^## Lesson'` UNDERCOUNTS; the "Index of lessons" table at the top of the
+file is the live count, and no number is repeated here because one typed into prose rots — several
 earned the hard way in THIS repo; lessons 37-38 were the newest as of 2026-08-10 — diagnose a
 silently-dead background task from its on-disk artifacts and resume from journaled state, and park
 a failing structural CLASS with written reasons rather than paying per-instance retries — and
@@ -190,7 +190,9 @@ and `docs/SCHEDULED_SUMMARIES.md` (the two registered Windows tasks — pausing,
 ledger), `docs/RUNBOOK_SUMMARY_WAVES.md` (the $0 subagent summary lane; drain waves come from
 `node --env-file=.env scripts/build-drain-wave.mjs <WAVE> 6 --pointer` and are launched by
 `scriptPath`), and `docs/DISASTER_RECOVERY.md` (full rebuild from a bare clone when the Supabase
-project or the machine is gone).
+project or the machine is gone). Last, `F:\RapidForge\docs\PROJECT_STANDARD.md` - the
+machine-wide standard this project declares against; what VisibleGov does differently, and why, is
+the "Deviations from the standard" section at the end of THIS file.
 
 **Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not
 an open defect in the fix itself:** the cross-adapter vote-duplicate dedup (migration 0022) is
@@ -325,3 +327,46 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   both glossary terms and bill-summary bullets (bullet citations shipped 2026-08-03, migration
   0021: docs/superpowers/specs/2026-08-02-bullet-citation-exposure-design.md). Facts-only rule per
   the spec; nothing editorial, ever.
+
+## Deviations from the standard
+
+This project follows `F:\RapidForge\docs\PROJECT_STANDARD.md`, which lives there once and is never
+copied here (its rule 11: pointers, never copies). What follows is only where VisibleGov departs
+from it, and why. A deviation declared with its reason is compliance; an undeclared one is drift.
+Verified against the standard and against this repo on 2026-08-30 at 14:13 CDT.
+
+**1. Instruments live in `scripts/` and are Node, not `tools/*.py`.** The standard asks for a claim
+checker at `tools/verify_claims.py`. Here the equivalents are `npm run verify:migrations`
+(`scripts/verify-migrations.mjs`), `npm run check:ingest` and `npm run status`. The whole project is
+Node with a `node --test` suite, so a Python instrument would be the only Python on the path and
+could not share the adapters it needs to check. The standard's own section 1 already cites
+`scripts/verify-migrations.mjs` as an instrument exemplar.
+
+**2. `docs/DISASTER_RECOVERY.md` stands in for `REBUILD.md`.** The standard names these as synonyms
+and says pick one. This one is picked, and it is a full rebuild-from-bare-clone procedure.
+
+**3. `PLAYBOOK_DELTA.md` lessons 1 to 13 are list items under section 7; only 14 and up are
+`## Lesson N` H2 headings.** Permitted explicitly by the standard's conflict table. The consequence
+worth knowing: `grep -c '^## Lesson'` UNDERCOUNTS. The index table at the top of that file is the
+live count, and adding a lesson means adding its index row in the same commit.
+
+**4. Commit trailer, declared as the standard requires:**
+`Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
+
+**5. `verify:migrations` is deliberately excluded from push CI.** It is red by design under
+draft-then-apply: it probes the LIVE database and reports MISSING for any migration Lance has not
+yet applied, which is a correct report rather than a build failure. It runs by hand, and the
+exclusion is documented in the workflow itself. The standard names this exclusion as its model.
+
+**6. The test workflow deliberately carries NO Supabase secrets.** Supplying them makes two CORRECT
+tests fail, because those tests assert behaviour when no database client is configured. This is the
+mechanical form of the standing rule against `source .env` in a shell that then runs `node --test`.
+
+### Owed under the standard, not yet built
+
+**`AUDIT_LOG.md` does not exist here.** Three dated audit reports live under `docs/audits/`
+(2026-08-03 accuracy, 2026-08-03 senior engineering, 2026-08-26 system) with their findings fixed
+and verified live, but there is no append-only log carrying a per-finding verdict from Open /
+Mitigated / Fixed / Accepted Risk / Obsolete. Per the standard's adoption rule this is added when
+the project is next touched rather than in a sweep. Recorded here so it is a known gap rather than
+an oversight.
