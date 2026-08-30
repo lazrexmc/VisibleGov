@@ -6553,3 +6553,21 @@ lesson 14).
   have widened every window past 95h and blinded the detector. Both windows hold, and legiscan's 50h
   holds for its derived reason: a normal cycle is 24.2h, one skip lands at 48.4h inside, two at
   72.6h outside.
+- **2026-08-30 00:30-06:30 CDT - the quiet half of the night, and shutdown.**
+  After the registry audit the queue emptied. Five hourly heartbeat checks ran; every one found the
+  tree clean, all five sources healthy, no stranded runs, and nothing unblocked, and every one
+  stopped rather than finding something to do. **That was the point of the arming instruction** - it
+  said explicitly that "nothing left but operator input" is a valid end state. The alternative was
+  six hours of invented work while Lance slept.
+  One candidate was considered and rejected on an early tick: the health check prints
+  `ok us-senate last run running, 0h ago`, which reads awkwardly. On inspection the behaviour is
+  correct - an in-flight row is deliberately counted as evidence of a recent attempt, which is
+  exactly why this checker needs no grace period - so rewording it would have been work invented to
+  justify the tick.
+  **PLAYBOOK 58 gained its complement** (`8e3c026`): a cold read reports the confusion and not the
+  diagnosis, AND a protocol's shape must not suppress a finding that does not fit its slots. A
+  structured format is a floor on what gets reported, never a ceiling.
+  **Session ends clean and pushed.** 2,792 pass / 0 fail; 0039 the only outstanding migration; six
+  items waiting on Lance, all of them written into the RESUME HERE block for a session with none of
+  tonight's context. The heartbeat and every cron job die with this process - they were session-only
+  and nothing restores them on boot. Nothing was left running.
