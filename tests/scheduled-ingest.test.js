@@ -976,7 +976,10 @@ test('runChildCli: parses a faked child\'s stdout and passes through its exit st
     calls.push({ command, args, options });
     return { status: 0, stdout: JSON.stringify({ mode: 'live', status: 'succeeded', counts: { votes: 1 } }), stderr: '' };
   };
-  const result = runChildCli('src/cli/ingest-mo-senate.js', ['--year', '2026', '--limit', '1'], { cwd: '/repo', spawnFn });
+  // envFileExists pinned true: this test describes the LOCAL shape, where .env is present. It is
+  // explicit rather than inferred because cwd here is a fake path — leaving it to the filesystem
+  // would silently exercise the runner branch and make the assertion below a lie about local runs.
+  const result = runChildCli('src/cli/ingest-mo-senate.js', ['--year', '2026', '--limit', '1'], { cwd: '/repo', spawnFn, envFileExists: true });
   assert.equal(result.exitStatus, 0);
   assert.equal(result.parsed.status, 'succeeded');
   assert.equal(calls.length, 1);
@@ -1665,4 +1668,26 @@ test('pingHealthcheck: a rejected fetch is swallowed — never throws, never ret
 test('US_CONGRESS_CONGRESS/US_SENATE_SESSION match the repo-wide hardcoded-current convention', () => {
   assert.equal(US_CONGRESS_CONGRESS, 119);
   assert.equal(US_SENATE_SESSION, 2);
+});
+
+// ---- runChildCli: the --env-file cutover blocker (found in review 2026-08-29) -------------------
+// Node treats a MISSING --env-file as fatal — `node --env-file=missing.env -e 1` exits 9 without
+// running the script. There is no .env on a GitHub Actions runner (gitignored; no step writes one),
+// so the hardcoded flag would have killed every ingest child at spawn the moment the pre-cutover
+// guard opened, while the scheduler itself ran fine. Both branches are pinned because the danger is
+// asymmetric: dropping the flag locally silently stops loading credentials, and keeping it on the
+// runner stops ingestion entirely.
+test('runChildCli: passes --env-file when .env exists (local shape)', () => {
+  const calls = [];
+  const spawnFn = (command, args) => { calls.push(args); return { status: 0, stdout: '{}', stderr: '' }; };
+  runChildCli('src/cli/x.js', ['--a'], { cwd: '/repo', spawnFn, envFileExists: true });
+  assert.deepEqual(calls[0], ['--env-file=.env', 'src/cli/x.js', '--a']);
+});
+
+test('runChildCli: OMITS --env-file when .env is absent (CI shape) — node would exit 9 otherwise', () => {
+  const calls = [];
+  const spawnFn = (command, args) => { calls.push(args); return { status: 0, stdout: '{}', stderr: '' }; };
+  runChildCli('src/cli/x.js', ['--a'], { cwd: '/repo', spawnFn, envFileExists: false });
+  assert.deepEqual(calls[0], ['src/cli/x.js', '--a'], 'no --env-file, so the child starts and inherits process.env');
+  assert.ok(!calls[0].some((a) => String(a).startsWith('--env-file')), 'a missing env file must never be passed');
 });

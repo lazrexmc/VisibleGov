@@ -56,7 +56,8 @@ jobs:
       # The schedule fires as soon as the file is on main, but the secrets are added by hand later
       # (docs/GITHUB_ACTIONS_MIGRATION.md step 1). Between those two moments every tick ran, failed
       # on all four sources in ~18s, wrote nothing, and burned metered minutes plus a notification.
-      # The migration doc claimed "nothing runs until you add the secrets" -- that was simply wrong,
+      # The migration doc claimed the workflows "will NOT run until you add the secrets below" (its
+      # exact words, 66aa877) -- simply wrong,
       # and hourly red ticks before cutover are exactly the alert fatigue the health check was
       # designed to avoid.
       #

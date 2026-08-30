@@ -77,7 +77,10 @@ test('isRevokedResponse: true only for locked', () => {
 // "the known shapes have not come back", never as "no duplicate exists anywhere".
 test('regression guard: no predicate-shaped 42501 match outside the shared module', () => {
   const roots = ['scripts', 'src'];
-  const MATCHERS = /\b(test|includes|match|search|indexOf|RegExp)\s*\(/;
+  // Method-shaped AND equality-shaped. `body.code === '42501'`, `startsWith('42501')` and
+  // `case '42501':` are realistic duplicate forms that a method-call-only pattern cannot see —
+  // a predicate does not have to call a matcher to be a predicate.
+  const MATCHERS = /\b(test|includes|match|search|indexOf|RegExp|startsWith|endsWith)\s*\(|===|!==|\bcase\s/;
   const offenders = [];
   for (const root of roots) {
     const dir = new URL(`../${root}/`, import.meta.url);
@@ -93,7 +96,15 @@ test('regression guard: no predicate-shaped 42501 match outside the shared modul
   }
   assert.deepEqual(
     offenders, [],
-    `a 42501 predicate reappeared outside src/lib/anon-lock.js — the copies drifted twice before, on \`200 []\` and on 404. Import anonLockState/anonRpcState instead:\n${offenders.join('\n')}`,
+    `a 42501 predicate reappeared outside src/lib/anon-lock.js — the copies drifted twice before, `
+    + `on \`200 []\` and on 404. Import anonLockState/anonRpcState instead.\n`
+    // The limits belong HERE, in the message a failing engineer actually reads, not only in the
+    // comment above the test where nobody looks once it is red.
+    + `NOTE: this guard is shape-based, not semantic. It has no string-literal awareness, skips only `
+    + `LINE-PREFIX comments (so a trailing // comment can false-positive), covers .js/.mjs under `
+    + `scripts/ and src/ only, and a predicate assembled from string parts still evades it. A pass `
+    + `means the known shapes have not returned — never that no duplicate exists.\n`
+    + `${offenders.join('\n')}`,
   );
 });
 

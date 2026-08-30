@@ -6404,7 +6404,9 @@ lesson 14).
   corrects the decision trail, which is the record that actually gets read later.
   **The active defect: the scheduled `ingest` workflow had been FAILING every hour since 20:54.**
   I committed workflows with a `schedule:` trigger before the secrets existed, and wrote in
-  `docs/GITHUB_ACTIONS_MIGRATION.md` that "nothing runs until you add the secrets." Wrong — they run
+  `docs/GITHUB_ACTIONS_MIGRATION.md` that the workflows "will NOT run until you add the secrets
+  below" (its exact words as committed in 66aa877; earlier notes of mine paraphrased that line
+  INSIDE quotation marks, which is the drift the retraction discipline exists to prevent). Wrong — they run
   and fail in ~18s, writing nothing, burning metered minutes and a notification every hour. A
   pre-cutover guard now makes both workflows genuinely inert until `SUPABASE_URL` exists. Worth
   noting the peer's headline was that the desktop task and BOTH workflows were writing

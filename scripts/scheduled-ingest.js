@@ -763,10 +763,32 @@ function defaultSpawn(command, args, options) {
 // timeoutMs (round 2): per-call, defaulting to CHILD_TIMEOUT_MS — the caller (runChosenSource)
 // passes the CHOSEN SOURCE's own registry.timeoutMs, so legiscan's 75-minute budget is honored
 // without loosening the 8-minute default every other source uses.
+// `--env-file=.env` is passed ONLY when that file actually exists, and the reason is a cutover
+// blocker found in review 2026-08-29 before it could bite.
+//
+// Node treats a missing --env-file as fatal: `node --env-file=missing.env -e 1` prints
+// "missing.env: not found" and EXITS 9 — it never runs the script. On a GitHub Actions runner there
+// is no .env: it is gitignored and no workflow step writes one. So once the pre-cutover guard
+// opened, the scheduler itself would have started fine (it reads process.env directly) while EVERY
+// child CLI — the part that actually reads CONGRESS_API_KEY and writes ingestion_runs — died at
+// spawn. The health check would have reported every source BROKEN after three ticks, which is
+// honest, but the cutover's "one real run wrote to the DB" could never have been reached.
+//
+// Dropping the flag when the file is absent is the smallest fix and the only one that does not make
+// things worse: a child spawned WITHOUT an `env` option inherits process.env (verified), so on the
+// runner the secrets already reach it through the environment. The alternative of having the
+// workflow write a .env from secrets would materialise the service-role key to disk on the runner —
+// the exact thing this migration exists to stop doing.
+//
+// envFileExists is injectable so tests can pin BOTH branches without depending on the filesystem.
 export function runChildCli(scriptPath, cliArgs, {
   cwd = REPO_ROOT, spawnFn = defaultSpawn, timeoutMs = CHILD_TIMEOUT_MS,
+  envFileExists = existsSync(path.join(cwd, '.env')),
 } = {}) {
-  const result = spawnFn(process.execPath, ['--env-file=.env', scriptPath, ...cliArgs], {
+  const args = envFileExists
+    ? ['--env-file=.env', scriptPath, ...cliArgs]
+    : [scriptPath, ...cliArgs];
+  const result = spawnFn(process.execPath, args, {
     cwd, timeout: timeoutMs, maxBuffer: CHILD_MAX_BUFFER,
   });
   if (result.error) {
