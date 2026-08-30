@@ -1,0 +1,31 @@
+{
+  // Repo-local, so it applies however VisibleGov is opened — folder or workspace.
+  //
+  // The equivalent excludes previously lived in F:\VisibleGov.code-workspace, which covered 13
+  // folders across several drives. That workspace was trimmed to VisibleGov alone on 2026-08-29,
+  // and settings in a .code-workspace file do not apply when the folder is opened directly — so
+  // these moved here rather than being lost with it.
+  //
+  // What this is NOT for: the Pylance "large number of source files" warning is gone on its own.
+  // It was caused by ~36,000 .py files in the OTHER workspace folders (mostly four virtualenvs);
+  // VisibleGov itself contains exactly one Python file, a scratch script under .superpowers.
+  //
+  // What it IS for: 1.1 GB of cached source payloads under .superpowers/artifacts plus 139 MB of
+  // node_modules. Those are re-fetchable and gitignored, and having the editor watch and index
+  // them costs real responsiveness for no benefit — see docs/ARTIFACTS.md for what they are and
+  // what re-fetching them would cost.
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.superpowers/artifacts/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.superpowers/artifacts": true
+  },
+  // Deliberately NOT excluded from search: supabase/migrations, tests/fixtures, and the .md
+  // ledgers. Those are exactly what someone greps for when tracing why a decision was made, and
+  // this project's own rule is that the record is the point.
+  "files.exclude": {}
+}
