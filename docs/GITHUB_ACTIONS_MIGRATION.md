@@ -5,7 +5,7 @@ has changed on your machine: the Windows tasks are still the live scheduler unti
 in step 4.
 
 > **An earlier version of this line said the workflows "will NOT run until you add the secrets
-> below." (its exact words, committed in 66aa877) That was wrong, and it cost something.**
+> below." (its exact words, committed in 66aa877) — that was wrong, and it cost something.**
 > A scheduled workflow starts firing the moment it is on
 > `main`. Between the commit and the secrets existing, every hourly tick ran, failed in ~18s on
 > missing env, wrote nothing, and burned metered minutes plus a notification — 20:54 and 23:15 on

@@ -1440,3 +1440,45 @@ And check what a remedy drags with it: going public would have made minutes free
 was genuinely clean, but publishing exposes ALL history — here an unshipped commercial roadmap,
 client names, and a personal email. Cleaning that up means rewriting the history that is the
 project's own record of why. The cheap-looking option was the expensive one.
+
+## Lesson 57 — an action nobody can re-run is a story, not evidence (2026-08-29)
+
+Three times in one night I offered proof that could not be checked, and a reviewer had to catch each
+one. The failures look different and are the same:
+
+1. **Hand-abbreviated command output**, pasted into a commit message as a captured run. The lines
+   had been reformatted, and the result (all 401) would have been identical under *every* version of
+   the predicate being changed — so it did not exercise the branch it was cited for.
+2. **"I proved the guard fires"** — by writing a file containing each evasion form, watching the
+   guard name them, and deleting it. True, and unverifiable: nothing in the repo records it.
+3. **"Reintroduced the bug, watched the test fail, restored cleanly"** — a working-tree excursion
+   with no commit, stash or reflog entry. "It left no trace" was trivially true *because* it left no
+   trace, which is the opposite of evidence.
+
+Each was honest. None was checkable, and a claim a reader cannot check is worth what an unchecked
+claim is worth, however true it happens to be.
+
+**What actually constitutes evidence here, in ascending order of strength:**
+
+- A **committed test** that fails when the defect is reintroduced. Durable, re-runnable by anyone,
+  and it keeps working after everyone involved has forgotten the incident.
+- A **reviewer's independent reproduction**. The reason the `/42501/` narrowness finding stood was
+  not my selftest file; it was a peer running `node -e` and enumerating forms I had not thought of.
+- A **tree hash or diff against a known commit** — `git diff --stat scripts/` proving a restore, not
+  a sentence saying the restore happened.
+
+**The discipline:** keep doing the ephemeral checks — they genuinely catch things, and two of the
+three above found real defects. Just stop *citing* them as proof. Either convert the check into a
+committed test, or say plainly "I ran X and saw Y; nothing in the repo records it."
+
+**Why this is worth a lesson rather than a note:** the pull is strongest exactly when you have just
+been careful. Having done the work, it feels dishonest *not* to mention it — so the temptation is to
+write it up as evidence rather than as narrative. The tell is asking: *could a stranger re-run this
+from the repo alone?* If not, it is a story.
+
+**Related, from the same night:** a restore that misfired because `cp A || cp B` short-circuited —
+the first `cp` succeeded to a Git Bash `/tmp` path (which Windows processes cannot open) so the
+fallback never ran, and the buggy file survived a full test run. A fallback chain only fires on
+failure, and "succeeded somewhere useless" is not failure. There was a durable copy the whole time —
+the commit — and reaching for an ad-hoc backup instead of `git checkout` is the same instinct as
+citing an ephemeral run: preferring the artifact you just made to the one that already exists.
