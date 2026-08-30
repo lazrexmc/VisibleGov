@@ -63,6 +63,34 @@ const PERSISTENT_FAILURES = 3;
 // interval TIMES THE NUMBER OF CYCLES YOU ARE WILLING TO LOSE, never from the bare interval. A
 // threshold set to the nominal interval alarms on every legitimate miss, and an alarm that fires on
 // normal operation is the one everybody learns to ignore.
+// MEASURED AGAINST THE REAL POPULATION 2026-08-30 00:09 CDT, after league's 6.15 withdrew a window
+// computed over the wrong one. The right measure is not the longest RUN, it is the longest GAP
+// BETWEEN successful runs, which is what a silence window actually bounds.
+//
+// Gaps > 20h over 60 days, and what they turned out to be. All timestamps below are UTC, as
+// stored in ingestion_runs; the prose dates in this comment are CDT. Mixing the two silently is
+// exactly the confusion Lance flagged, so both are labelled:
+//
+//   us-congress    94.3h   2026-07-28 -> 08-01 UTC
+//   us-senate      92.7h   2026-07-28 -> 08-01 UTC
+//   legiscan       37.8h   2026-07-29 -> 07-31 UTC
+//   mo-house-xml   26.8h   2026-07-31 -> 08-01 UTC
+//
+// EVERY ONE ENDS ON 08-01 UTC, the day scheduled-ingest.js was registered as a Windows task. They are
+// the startup pass, not steady state. Taking max-gap at face value would have widened every window
+// past 95h and blinded the detector for four days at a stretch - the exact error league made and
+// withdrew. The population that matters begins 2026-08-01.
+//
+// Steady state since then:
+//   hourly sources   no gap above 20h at all; p99 is 1.5-3.2h
+//   legiscan         24.1-24.3h every cycle, with ONE excursion to 28.3h (08-12 -> 08-13 UTC)
+//
+// So both windows hold, and legiscan's holds for the reason it was derived rather than by luck:
+// a normal cycle is 24.2h, so ONE skipped cycle lands at ~48.4h, just inside 50h, and two land at
+// ~72.6h, well outside. The skip-a-day mechanism reasoned about when this was set is real and the
+// number was sized correctly for it. 25h for the hourly sources has roughly 8x margin on p99.
+//
+// Re-run the measurement before changing either number, and exclude anything before 2026-08-01 UTC.
 const SILENT_AFTER_HOURS_DEFAULT = 25;
 const SILENT_AFTER_HOURS = { legiscan: 50 };
 export const silenceThreshold = (source) => SILENT_AFTER_HOURS[source] ?? SILENT_AFTER_HOURS_DEFAULT;
