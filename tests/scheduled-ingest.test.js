@@ -1691,3 +1691,34 @@ test('runChildCli: OMITS --env-file when .env is absent (CI shape) — node woul
   assert.deepEqual(calls[0], ['src/cli/x.js', '--a'], 'no --env-file, so the child starts and inherits process.env');
   assert.ok(!calls[0].some((a) => String(a).startsWith('--env-file')), 'a missing env file must never be passed');
 });
+
+// ---- the DEFAULT detector, both directions, through the real filesystem ------------------------
+// The two tests above pin the BRANCHING by injecting envFileExists. That proves runChildCli honours
+// the flag; it proves nothing about the detector that computes it. And the case that matters on a
+// GitHub runner is the one nothing exercised: .env ABSENT, flag resolved by default rather than
+// passed. A detector proven only in the direction that already worked is the same mistake as
+// proving a guard against the forms you thought of.
+test('runChildCli: DEFAULT detector omits --env-file when .env is genuinely absent (the runner case)', () => {
+  withTmpDir((dir) => {
+    assert.equal(existsSync(path.join(dir, '.env')), false, 'precondition: the temp dir has no .env');
+    const calls = [];
+    const spawnFn = (command, args) => { calls.push(args); return { status: 0, stdout: '{}', stderr: '' }; };
+    // envFileExists deliberately NOT passed — this exercises the existsSync default.
+    runChildCli('fake-cli.js', ['--a'], { cwd: dir, spawnFn });
+    assert.deepEqual(calls[0], ['fake-cli.js', '--a']);
+    assert.ok(
+      !calls[0].some((a) => String(a).startsWith('--env-file')),
+      'node exits 9 on a missing --env-file, so the default MUST omit it when the file is not there',
+    );
+  });
+});
+
+test('runChildCli: DEFAULT detector passes --env-file when .env really is present (the local case)', () => {
+  withTmpDir((dir) => {
+    writeFileSync(path.join(dir, '.env'), 'X=1\n');
+    const calls = [];
+    const spawnFn = (command, args) => { calls.push(args); return { status: 0, stdout: '{}', stderr: '' }; };
+    runChildCli('fake-cli.js', ['--a'], { cwd: dir, spawnFn });
+    assert.deepEqual(calls[0], ['--env-file=.env', 'fake-cli.js', '--a'], 'local runs must keep loading credentials from .env');
+  });
+});
