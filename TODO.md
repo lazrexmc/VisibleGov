@@ -275,6 +275,33 @@ cutover is in flight — so it is deliberately not started. Against that: the fa
 invisible by construction, and VisibleGov would be its third consumer, which is what promotes it
 from a script to a maintained module.
 
+### ▶ LANCE — migration 0039 drafted, and the ORDER matters (2026-08-29 overnight)
+
+`npm run verify:migrations` reports **1 MISSING: 0039_parked_bills.sql**. Applying it alone is
+safe and changes nothing — it creates an empty table no code reads yet.
+
+**What it fixes.** The 31 parked bills live in
+`.superpowers/artifacts/scheduled-summaries/parked.json`, which `.gitignore` excludes. So they
+exist on one machine, are in no backup, and `docs/DISASTER_RECOVERY.md` did not mention them at all.
+Each entry is **three exhausted BILLED attempts** — a rebuild from a bare clone comes up with an
+empty parked set and the daily scheduler starts re-spending on bills already proven to fail. Nothing
+errors; it just quietly costs money again.
+
+**An urgency correction, because it reached me overstated.** This was routed to me as a cutover
+blocker. It is not: `scheduled-summaries.js` is NOT part of the Actions migration (verified — it
+appears in no workflow file) and stays on Task Scheduler, where parked.json remains readable. This
+is a disaster-recovery gap, and a blocker only for a migration that has not happened yet. **It does
+not need to jump ahead of your secrets cutover.**
+
+**Steps, in this order — reversing 2 and 4 is the failure it exists to prevent:**
+1. Apply `supabase/migrations/0039_parked_bills.sql`
+2. `node --env-file=.env scripts/migrate-parked-to-ledger.mjs` (dry run — prints the plan)
+3. `node --env-file=.env scripts/migrate-parked-to-ledger.mjs --apply` (copies the 31 rows)
+4. Only then does `scheduled-summaries.js` switch to reading the table (not written yet, deliberately)
+
+The script refuses with exit 2 if 0039 has not been applied, so step 2 cannot run early by accident.
+It is idempotent (upsert on the primary key), so re-running is a no-op.
+
 ### OPEN — pick up here
 
 ~~**▶ LANCE — one migration drafted and awaiting you: `0036`.**~~ **DONE — 0036 AND 0037 applied

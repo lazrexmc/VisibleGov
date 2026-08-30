@@ -886,3 +886,22 @@ each live number means and how the tables relate to each other), `docs/SCHEDULED
 `docs/RUNBOOK_SUMMARY_WAVES.md` (the $0 summary path from Section 6.8), and `CLAUDE.md` (this
 project's own working rules, including the current, possibly-changed status of the
 API-spend-approval policy referenced in Section 2).
+
+## Operational state that is NOT in the database (read before trusting a rebuild)
+
+**The parked-bill set.** `.superpowers/artifacts/scheduled-summaries/parked.json` holds 31 bills the
+summary chain has stopped retrying for structural reasons. It is **gitignored**, so a rebuild from a
+bare clone does not have it — and this document did not mention it at all until 2026-08-29, which is
+exactly how that kind of gap survives.
+
+Why it matters in money rather than tidiness: each entry represents **three exhausted billed
+attempts**. Rebuilding without it means the daily scheduler re-attempts all 31 and pays again for
+work already proven to fail, and nothing errors while it happens.
+
+**Migration `0039_parked_bills.sql` moves this into the database** so it is backed up with
+everything else. Until it is applied and `scripts/migrate-parked-to-ledger.mjs --apply` has run,
+**copy `parked.json` off the machine as part of any backup**, or accept re-spending on rebuild.
+
+If you are rebuilding and the file is gone: the set is recoverable in principle by re-deriving which
+bills have three failed attempts in `summaries`, but the *reasons* — the evidence for why a fourth
+attempt is pointless — are not recoverable at any price.
