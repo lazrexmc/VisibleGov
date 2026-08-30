@@ -1511,6 +1511,23 @@ is asserting a cause nobody outside could check. Both are claims whose evidence 
 own head, and both feel MORE justified after doing careful work, not less: having noticed something
 real, it is tempting to finish the thought.
 
+**The complement, found by using this rule the next night (2026-08-30).** A cold read of a peer's
+public marketplace turned up something no reader would ever report as confusion: the owner's
+personal email address, published in plain text as a live `mailto:` on the public pages. A stranger
+does not experience that as confusing. It is not a number they cannot trace, and it is not false.
+Answering only the four protocol questions would have swallowed it entirely.
+
+I put it in a separate paragraph above the four rather than forcing it into one, and that turned out
+to be the right shape: the owning session then verified it was on FOUR pages rather than the one I
+saw, from a single template pass, which made it a decision somebody had to take rather than a line
+to tidy.
+
+**So the rule has two halves, and the second is easy to lose while obeying the first: report the
+confusion and not the cause, AND do not let the protocol's shape suppress a finding that does not
+fit it.** A structured review format is a floor on what gets reported, never a ceiling. When
+something would matter to the owner but no reader would trip over it, it goes beside the answers,
+clearly marked as outside them.
+
 Related and worth separating: I flagged one item as "unverifiable from the page" (whether a URL was
 stored or constructed) and then listed it among things I believed were wrong. It turned out to be
 stored. **Uncertainty stated in the same breath as a criticism reads as a criticism.** Keep the
