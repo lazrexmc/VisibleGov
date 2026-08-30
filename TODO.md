@@ -4,7 +4,62 @@
 
 ---
 
-## RESUME HERE - verified live 2026-08-27, read this block first
+## RESUME HERE - verified live 2026-08-30 00:11 CDT, read this block first
+
+**Everything below was measured against the live database and the tree at that time, not recalled.**
+Times carry their zone because this project keeps confusing UTC with Central; database timestamps
+are UTC, prose times are CDT.
+
+| | |
+|---|---|
+| tree / suite | `2446946`, clean, **2,792 pass / 0 fail** |
+| migrations | 40 probed, 29 applied, **1 MISSING (0039, awaiting Lance)** |
+| `vote_casts` | 1,389,894 |
+| published summaries | 1,228 (40 awaiting review) |
+| published glossary | 1,850 of 8,438 (427 flagged for Lance; 531 need a gloss run, not a human) |
+| superseded / retracted | 213 hidden / 714 deleted-with-tombstone |
+| parked bills | 31 |
+| site | https://visiblegov.us, apex 200, `Cloudflare Pages=success` on HEAD |
+
+### WAITING ON LANCE. Nothing else is blocking; this list is the whole of it.
+
+1. **Actions cutover.** Add four secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+   `CONGRESS_API_KEY`, and `LEGISCAN_API_KEY` for the daily workflow). **Not**
+   `OPENSTATES_API_KEY` - nothing on that path reads it, and guarding on it would hold the
+   workflow inert. Then: manual run, confirm `npm run status` shows the freshness timestamp MOVED,
+   both paths parallel a day, **then** disable the Windows task. Disabling first stops ingestion
+   rather than handing it over. `docs/GITHUB_ACTIONS_MIGRATION.md` has the ladder.
+2. **Apply `0039_parked_bills.sql`**, then `scripts/migrate-parked-to-ledger.mjs` dry-run, then
+   `--apply`. Safe alone: it creates an empty table nothing reads. The script refuses with exit 2
+   if 0039 has not been applied, so the order cannot be got wrong by accident.
+3. **Adopt Glizzness's `verify_deploy.py`?** Recorded with the version pointer and the three
+   constants at the top of the OPEN section below.
+4. **Adopt RapidForge's `PROJECT_STANDARD.md`?** Touches CLAUDE.md, so it waits for him.
+5. **Three punctuation questions:** the CLAUDE.md sweep (config, untouched), the CHATLOG sweep
+   (history, quotes him verbatim, untouched), and the EN DASH in user-visible site output
+   (`2019 - present` renders with one today).
+6. **Timers:** does he want a session working on a timer while away, or only resuming what was
+   already in flight? An hourly heartbeat is armed for the current standing instruction and dies
+   with this session.
+
+### What changed overnight 2026-08-29 into 08-30 (all pushed)
+
+- **`0039_parked_bills.sql` drafted.** 31 parked bills live in a gitignored JSON file on one
+  machine, in no backup, unmentioned by DISASTER_RECOVERY. Each is three exhausted BILLED attempts,
+  so a rebuild silently re-spends on work already proven to fail. **Not a cutover blocker** - that
+  was reported to me and checked: `scheduled-summaries.js` is not in the Actions migration.
+- **`src/lib/source-registry.js`.** Declares what each ingestion source IS. `verify` and `gloss`
+  stopped reading as month-dead feeds; retired backfills now state their reason; an UNDECLARED
+  source stays visible rather than being filtered out. Shape credited to league-73.
+- **Three checkers reported HEALTHY on a response they could not read.** Every PostgREST list read
+  fed a `.length` comparison without checking it got a list. Worst case counted an unreadable
+  response as a successful repair. `expectArray` throws with exit 2.
+- **Silence windows measured against the right population.** Every gap above 20h predates
+  2026-08-01 UTC, when the scheduler was registered; those are the startup pass. Both windows hold.
+- **ASCII punctuation sweep**, 2,842 replacements across 14 live docs, per Lance's ruling.
+- **PLAYBOOK 57 and 58**: an action nobody can re-run is a story, not evidence; and a cold read
+  reports the confusion, not the diagnosis.
+
 
 **Lance is AFK for an extended break. This block is written so a cold session can resume without
 reading anything else first.** Everything below was measured against the live database at the end

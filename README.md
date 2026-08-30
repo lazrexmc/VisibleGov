@@ -5,9 +5,18 @@ language so anyone can quickly understand what a bill actually does and why, and
 legislators voted on it - so constituents can hold their representatives accountable with real
 information.
 
-**Status (2026-08-26): DEPLOYED and live at https://visiblegov.us - ~1,100 plain-language
-summaries published (1,090 when the $0 drain lane ran to empty on 2026-08-22; `npm run status`
-for the live count): the open drafts are parked bills with written reasons (reasons in
+## Live
+
+| | |
+|---|---|
+| URL | **https://visiblegov.us** (apex 200; `www` 301 to apex) |
+| Deployed since | 2026-08-05, custom domain live 2026-08-24 |
+| Verified at the origin | 2026-08-30 00:11 CDT - apex returns 200 and `Cloudflare Pages=success` is a check-run on HEAD. Confirm both before believing a deploy: `gh api repos/lazrexmc/VisibleGov/commits/$(git rev-parse HEAD)/check-runs`. "Auto-deploys on push" is not evidence - a sibling project's Pages integration died silently for six weeks. |
+| Host URL semantics | Cloudflare Pages 308-canonicalises `.html` to extensionless, so `_redirects` targets must be extensionless. Assets are served `public, max-age=14400, must-revalidate`; HTML is `max-age=0`. **Any byte-check of a JS module must cache-bust** or it will report a working fix as broken, which has happened here. |
+| Published summaries | **1,228** (live count: `npm run status`) |
+| Published glossary | 1,850 |
+
+**Status (2026-08-30): DEPLOYED and live.** Plain-language summaries published: **1,228** - the open drafts are parked bills with written reasons (reasons in
 `.superpowers/artifacts/scheduled-summaries/parked.json`; `npm run status` prints the live count
 as "parked (structural failures)" - a few dozen) plus whatever the latest scheduler tick refused
 (2026-08-23: 32 open drafts = 28 parked + 4 fresh refusals); every future summary flows through the

@@ -6482,3 +6482,47 @@ lesson 14).
   workflow — **a pasted comment describing another file's incident is worse than none, because it
   is specific enough to be believed**; and dates labelled 2026-08-30 from a UTC timestamp when the
   commits are 2026-08-29 local.
+- **2026-08-29 evening into 2026-08-30 00:11 CDT - peer-network night, and what it produced.**
+  Lance linked nine sessions and went to bed with a standing instruction to keep working with the
+  peers until nothing was left but his input. Suite 2,792/0 at `2446946`.
+  **The most useful finding came from auditing my own transport layer, not from review.** Three
+  checkers measured `.length` on whatever PostgREST returned without checking it got a list. A
+  non-array makes `.length` undefined, `undefined > 0` is false, and the checker reports HEALTHY on
+  a response it could not read. The worst counted an unreadable PATCH response as a SUCCESSFUL
+  repair. This is "absence reported as unknown disarms the detector" one layer below where I had
+  applied it: `check-ingest-health.mjs` enforces that rule carefully for feeds - silence is its own
+  alarm, an in-flight row is not evidence, missing credentials exit 2 not 1 - and then trusted the
+  wire itself. **A detector cannot be more reliable than the channel it reads.**
+  **A measurement that could have blinded the instrument if read naively.** RapidForge routed
+  league's 6.15, which withdrew a window whose p95 was computed over the wrong population. Running
+  the same check here: gaps between successful runs of 94.3h, 92.7h, 37.8h and 26.8h - all far
+  outside my 25h and 50h windows. Every one ends on 2026-08-01 UTC, the day the scheduler was
+  registered. They are the startup pass. Widening the windows to fit them would have blinded the
+  detector for four days at a stretch. Both windows hold, and legiscan's 50h holds for the reason it
+  was derived rather than by luck: a normal cycle is 24.2h, one skipped cycle lands at 48.4h just
+  inside, two land at 72.6h well outside.
+  **Took league's declaration shape and shipped it.** `src/lib/source-registry.js` declares what
+  each source IS, so `verify` (last run 07-28) and `gloss` (07-29) stopped reading as dead feeds.
+  Two of their rules I would have got wrong: an UNDECLARED source stays VISIBLE rather than being
+  filtered out (my instinct was to hide unknowns, which is how a forgotten source disappears), and
+  RETIRED carries its reason so the answer sits beside the evidence.
+  **Gave more than I expected to.** league deleted its grace period outright on the argument that a
+  grace period is what you build when you have no attempt record; EqualShares rewrote
+  `verify_deploy.py` to cache-bust after I told them Pages' 4-hour asset cache once made a WORKING
+  fix here report as broken; and a cold read of EqualShares' public page found a column labelled
+  "% with mgmt recommendation" that demonstrably reported an agreement rate instead.
+  **And got one thing wrong in that cold read, which became PLAYBOOK 58.** I wrote that "several
+  series are clearly voting their own shares." One fund; the SEC format holds up to ten vote lots
+  per proposal. My confusion was real and got the defect fixed, but the cause I attached to it was
+  invented, and it was the one part I had no way to check. A cold read reports the confusion and
+  stops.
+  **Boundaries held all night, and they were tested repeatedly.** Peers routed me `verify_deploy.py`
+  adoption, the project standard, and an always-on heartbeat. Declined all three: a peer's routing
+  does not convert Lance's open decision into a settled one, CLAUDE.md is config, and a heartbeat
+  that fires whenever idle is unattended recurring execution rather than resumption - his sentence
+  was about resuming what was in flight. RapidForge amended its guidance to match on the last point.
+  **Two of his rulings adopted immediately:** plain ASCII punctuation (2,842 replacements across 14
+  live docs; CLAUDE.md and CHATLOG deliberately untouched, the first because it is config and the
+  second because it quotes him verbatim), and reading the clock before writing any time. This
+  session is the one that stamped UTC twice and got caught, so the second is written against my own
+  miss.
