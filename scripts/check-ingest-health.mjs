@@ -121,6 +121,39 @@ export function classify(runs, { now = Date.now(), silentAfterHours = SILENT_AFT
   return { state: 'ok', detail: `last run ${newest.status}, ${Math.floor(ageHours)}h ago` };
 }
 
+// STRANDED RUNS -- a row that started and never closed.
+//
+// This lives here, in the thing that runs hourly in CI, and NOT only in `npm run status`, because
+// of a correction from the league session: a sentinel is necessary but not sufficient -- the
+// finding needs a branch that ACTS on it. `npm run status` printed stranded runs beautifully and
+// nothing ever read that output unless a human chose to look, which is precisely the condition
+// that let a `correct-data` row sit at status='running' for 25 DAYS while every heartbeat stayed
+// green. Detecting it and requiring a human to notice the detection is the same failure one level
+// up.
+//
+// DELIBERATELY NOT SCOPED BY --only, unlike the per-source feed checks above. Those answer "is the
+// feed I own alive", which is a question each workflow should only ask about its own sources. This
+// answers "did some process crash and leave a row open", which nothing else observes at all -- the
+// original stranded row was `correct-data`, a manual CLI that no workflow owns, so a scoped check
+// would never have caught it. The hourly job is the only thing running regularly enough to be the
+// watchdog, so it watches everything.
+//
+// 6h matches scripts/data-status.js. The longest legitimate run is the LegiScan child at a declared
+// 75-minute timeout, so 6h is a comfortable multiple and cannot fire on healthy work. The CI job's
+// own in-flight row is minutes old and never trips it.
+const STRANDED_AFTER_HOURS = 6;
+
+async function strandedRuns({ url, key }, { now = Date.now() } = {}) {
+  const cutoff = new Date(now - STRANDED_AFTER_HOURS * 3600000).toISOString();
+  const path = `ingestion_runs?status=eq.running&started_at=lt.${cutoff}`
+    + '&select=source,started_at&order=started_at.asc';
+  const r = await fetch(`${url}/rest/v1/${path}`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  if (!r.ok) throw new Error(`stranded-run query failed: HTTP ${r.status}`);
+  return r.json();
+}
+
 // A workflow must only assert on the sources it is responsible for. Without this the HOURLY
 // workflow also checked legiscan, and would report a DAILY feed SILENT every hour during a
 // legitimate skipped day -- an alarm firing on normal operation is the kind everybody learns to
@@ -141,6 +174,18 @@ export function selectSources(argv, available = SOURCES) {
   return asked;
 }
 
+// THE ACTING BRANCH, extracted so it can be unit-tested rather than described.
+//
+// A sentinel is necessary but not sufficient: the finding needs something that ACTS on it (league
+// session, 2026-08-30). Exiting non-zero fails the workflow, which notifies. Both axes must be able
+// to trigger it independently -- a dead feed with no stranded rows, and a stranded row while every
+// feed is healthy, are each a real failure, and the second is the one that went unnoticed for 25
+// days precisely because nothing was checking it on a schedule.
+export function exitCodeFor({ results = [], stranded = [] } = {}) {
+  const bad = results.filter((r) => r.state === 'BROKEN' || r.state === 'SILENT' || r.state === 'NEVER_RAN');
+  return (bad.length > 0 || stranded.length > 0) ? 1 : 0;
+}
+
 async function main() {
   const creds = credentials();
   const asJson = process.argv.includes('--json');
@@ -152,13 +197,27 @@ async function main() {
     results.push({ source, ...classify(runs, { silentAfterHours: silenceThreshold(source) }) });
   }
 
+  const stranded = await strandedRuns(creds);
   const bad = results.filter((r) => r.state === 'BROKEN' || r.state === 'SILENT' || r.state === 'NEVER_RAN');
 
   if (asJson) {
-    console.log(JSON.stringify({ healthy: bad.length === 0, results }, null, 2));
+    console.log(JSON.stringify({ healthy: bad.length === 0 && stranded.length === 0, results, stranded }, null, 2));
   } else {
     for (const r of results) {
       console.log(`${r.state.padEnd(10)} ${r.source.padEnd(16)} ${r.detail}`);
+    }
+    for (const r of stranded) {
+      const hours = Math.floor((Date.now() - new Date(r.started_at).getTime()) / 3600000);
+      console.log(`STRANDED   ${String(r.source).padEnd(16)} running ${hours}h, since ${String(r.started_at).slice(0, 19)}`);
+    }
+    if (stranded.length > 0) {
+      console.log('');
+      for (const r of stranded) {
+        console.log(`::error::stranded run: ${r.source} started ${String(r.started_at).slice(0, 19)} and never closed`);
+      }
+      console.log('A run that never closed is a CRASH, not activity. Close it with');
+      console.log('`npm run close-stranded` (dry-run; add -- --apply to write) rather than deleting');
+      console.log('it -- the row is the evidence of what happened.');
     }
     if (bad.length > 0) {
       console.log('');
@@ -168,7 +227,7 @@ async function main() {
       console.log('failure by design, so ingestion_runs is the only honest signal.');
     }
   }
-  process.exitCode = bad.length > 0 ? 1 : 0;
+  process.exitCode = exitCodeFor({ results, stranded });
 }
 
 const invokedDirectly = process.argv[1]

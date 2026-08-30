@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, silenceThreshold, selectSources } from '../scripts/check-ingest-health.mjs';
+import {
+  classify, silenceThreshold, selectSources, exitCodeFor,
+} from '../scripts/check-ingest-health.mjs';
 
 // The whole point of this check is that it must fire on real breakage and stay quiet on weather.
 // Both halves are pinned: a detector nobody has watched fail is a hope (PLAYBOOK lesson 50), and a
@@ -108,4 +110,36 @@ test('selectSources: a typo THROWS rather than silently checking nothing', () =>
   // The dangerous failure is not a crash, it is a script that passes by not looking.
   assert.throws(() => selectSources(['--only', 'legiscanx'], ['a', 'legiscan']), /unknown source/);
   assert.throws(() => selectSources(['--only'], ['a']), /requires a comma-separated/);
+});
+
+// --- the acting branch ---------------------------------------------------------------------------
+// A sentinel that only prints is not a detector. These pin that BOTH axes fail the job
+// independently — a dead feed, and a stranded row while every feed is healthy. The second is the
+// case that went unnoticed for 25 days, because `npm run status` reported it perfectly and nothing
+// ran `npm run status`.
+test('exitCodeFor: all healthy and nothing stranded exits 0', () => {
+  assert.equal(exitCodeFor({ results: [{ state: 'ok' }, { state: 'transient' }], stranded: [] }), 0);
+});
+
+test('exitCodeFor: a transient failure alone does NOT fail the job', () => {
+  assert.equal(exitCodeFor({ results: [{ state: 'transient' }], stranded: [] }), 0, 'weather must not redden an hourly job');
+});
+
+test('exitCodeFor: a broken/silent/never-ran feed fails the job', () => {
+  for (const state of ['BROKEN', 'SILENT', 'NEVER_RAN']) {
+    assert.equal(exitCodeFor({ results: [{ state }], stranded: [] }), 1, `${state} must act`);
+  }
+});
+
+test('exitCodeFor: a STRANDED run fails the job even when every feed is healthy', () => {
+  assert.equal(
+    exitCodeFor({ results: [{ state: 'ok' }, { state: 'ok' }], stranded: [{ source: 'correct-data' }] }),
+    1,
+    'this is the 25-day case: feeds fine, a crashed run open, nobody looking',
+  );
+});
+
+test('exitCodeFor: defaults are safe — no args does not silently pass by having nothing to check', () => {
+  assert.equal(exitCodeFor(), 0);
+  assert.equal(exitCodeFor({ stranded: [{ source: 'x' }] }), 1);
 });
