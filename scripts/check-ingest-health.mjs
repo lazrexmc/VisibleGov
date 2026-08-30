@@ -84,6 +84,25 @@ function credentials() {
   return { url, key };
 }
 
+// A PostgREST list endpoint returns an array. When it does not, every caller here measures
+// `.length` on undefined, which is falsy, and the check reports HEALTHY on a response it could not
+// read. That is "absence reported as unknown disarms the detector" at the transport layer: this
+// file enforces the rule for feeds and then trusted the wire itself.
+//
+// Throwing reaches main()'s catch and exits 2, which is the honest code. 1 would say "checked, and
+// something is broken"; 2 says "could not check", and those must never collapse into each other.
+//
+// Exported so the tests can drive it directly rather than staging a malformed HTTP response.
+export function expectArray(body, context) {
+  if (!Array.isArray(body)) {
+    throw Object.assign(
+      new Error(`${context}: expected an array from PostgREST, got ${body === null ? 'null' : typeof body}`),
+      { exitCode: 2 },
+    );
+  }
+  return body;
+}
+
 async function recentRuns({ url, key }, source, limit) {
   const path = `ingestion_runs?source=eq.${encodeURIComponent(source)}`
     + `&select=status,started_at,finished_at&order=started_at.desc&limit=${limit}`;
@@ -91,7 +110,7 @@ async function recentRuns({ url, key }, source, limit) {
     headers: { apikey: key, Authorization: `Bearer ${key}` },
   });
   if (!r.ok) throw new Error(`ingestion_runs query failed for ${source}: HTTP ${r.status}`);
-  return r.json();
+  return expectArray(await r.json(), 'recentRuns');
 }
 
 export function classify(runs, { now = Date.now(), silentAfterHours = SILENT_AFTER_HOURS_DEFAULT } = {}) {
@@ -151,7 +170,7 @@ async function strandedRuns({ url, key }, { now = Date.now() } = {}) {
     headers: { apikey: key, Authorization: `Bearer ${key}` },
   });
   if (!r.ok) throw new Error(`stranded-run query failed: HTTP ${r.status}`);
-  return r.json();
+  return expectArray(await r.json(), 'strandedRuns');
 }
 
 // A workflow must only assert on the sources it is responsible for. Without this the HOURLY

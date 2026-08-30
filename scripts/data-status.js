@@ -48,7 +48,12 @@ async function count(path) {
 async function rows(path) {
   const r = await fetch(`${url}/rest/v1/${path}`, { headers: H });
   if (!r.ok) throw new Error(`query failed for ${path}: HTTP ${r.status}`);
-  return r.json();
+  // Every caller treats this as a list. A non-array would make the stranded-run scan measure
+  // `.length` on undefined and silently report zero stranded runs -- a detector disarmed by the
+  // shape of a response rather than by the state of the system.
+  const body = await r.json();
+  if (!Array.isArray(body)) throw new Error(`query for ${path} returned ${typeof body}, expected an array`);
+  return body;
 }
 
 // Paginated fetch — required for any list we actually enumerate rather than count.

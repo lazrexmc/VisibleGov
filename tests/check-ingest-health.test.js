@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classify, silenceThreshold, selectSources, exitCodeFor,
+  classify, silenceThreshold, selectSources, exitCodeFor, expectArray,
 } from '../scripts/check-ingest-health.mjs';
 
 // The whole point of this check is that it must fire on real breakage and stay quiet on weather.
@@ -142,4 +142,32 @@ test('exitCodeFor: a STRANDED run fails the job even when every feed is healthy'
 test('exitCodeFor: defaults are safe — no args does not silently pass by having nothing to check', () => {
   assert.equal(exitCodeFor(), 0);
   assert.equal(exitCodeFor({ stranded: [{ source: 'x' }] }), 1);
+});
+
+// --- the transport contract ---------------------------------------------------------------------
+// Three places measured `.length` on whatever PostgREST returned. A non-array makes `.length`
+// undefined, `undefined > 0` is false, and the checker reports HEALTHY on a response it could not
+// read. This file enforces "absence reported as unknown disarms the detector" for feeds, then
+// trusted the wire itself. The worst of the three was close-stranded-runs' PATCH result, where the
+// same shape would have counted an unreadable response as a SUCCESSFUL repair.
+test('expectArray: passes an array through untouched', () => {
+  const a = [{ x: 1 }];
+  assert.equal(expectArray(a, 'ctx'), a);
+  assert.deepEqual(expectArray([], 'ctx'), []);
+});
+
+test('expectArray: throws with exit code 2 on anything else - could not check, not clean', () => {
+  for (const bad of [null, undefined, {}, 'text', 42, { message: 'error' }]) {
+    let caught;
+    try { expectArray(bad, 'strandedRuns'); } catch (e) { caught = e; }
+    assert.ok(caught, `${JSON.stringify(bad)} must throw rather than flow on`);
+    assert.equal(caught.exitCode, 2, '2 means could-not-check; 1 would claim we checked and found a fault');
+    assert.match(caught.message, /strandedRuns/, 'the message must name which call failed');
+  }
+});
+
+test('expectArray: a PostgREST error object does not read as an empty result set', () => {
+  // The realistic failure: a 200 carrying {"message":"..."} instead of rows. Under the old code
+  // this became "0 stranded runs" and the job stayed green.
+  assert.throws(() => expectArray({ message: 'unexpected' }, 'close-stranded PATCH result'), /expected an array/);
 });

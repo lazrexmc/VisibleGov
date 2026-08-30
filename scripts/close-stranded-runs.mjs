@@ -26,6 +26,8 @@
 // 6h matches scripts/data-status.js's detector. The longest legitimate run in this project is the
 // LegiScan child, whose declared timeout is 75 minutes (set from observed runs plus headroom), so
 // 6h is a comfortable multiple of the declared per-source ceiling and cannot fire on healthy work.
+import { expectArray } from './check-ingest-health.mjs';
+
 const DEFAULT_HOURS = 6;
 
 function parseArgs(argv) {
@@ -90,7 +92,7 @@ export async function closeStranded({
     { headers: H },
   );
   if (!listRes.ok) throw new Error(`ingestion_runs query failed: HTTP ${listRes.status}`);
-  const stranded = await listRes.json();
+  const stranded = expectArray(await listRes.json(), 'close-stranded list');
 
   if (stranded.length === 0) {
     log(`no stranded runs older than ${hours}h — nothing to close`);
@@ -123,7 +125,10 @@ export async function closeStranded({
       body: JSON.stringify(c),
     });
     if (!res.ok) throw new Error(`failed to close ${run.id}: HTTP ${res.status} ${await res.text()}`);
-    const rows = await res.json();
+    // return=representation gives the rows actually written. A non-array here would make
+    // `rows.length === 0` false and count an unreadable response as a SUCCESSFUL close, which is
+    // the worst of the three fail-open cases: it reports a repair that may not have happened.
+    const rows = expectArray(await res.json(), 'close-stranded PATCH result');
     if (rows.length === 0) {
       skipped += 1;
       log(`  SKIPPED ${run.source} — it closed itself between the read and the write`);
