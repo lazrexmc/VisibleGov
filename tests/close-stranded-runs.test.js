@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { closureFor } from '../scripts/close-stranded-runs.mjs';
+import { closureFor, closeStranded } from '../scripts/close-stranded-runs.mjs';
 
 const NOW = new Date('2026-08-29T18:00:00Z');
 const run = (startedAt, detail) => ({ id: 'r1', source: 'correct-data', started_at: startedAt, detail });
@@ -38,4 +38,83 @@ test('closureFor: a non-object detail does not crash or leak into the closure', 
     assert.equal(typeof c.detail, 'object');
     assert.equal(c.detail.closed_by, 'scripts/close-stranded-runs.mjs');
   }
+});
+
+// ---- the two things most likely to regress silently -------------------------------------------
+// Listed as untested for two review rounds because they needed fetch injection the script did not
+// take. A dry run that quietly issued a PATCH would look IDENTICAL in the console to a correct one,
+// and the id+status guard only matters in a race impractical to stage against a live database.
+// Neither is observable from the outside, which is exactly why they need a test rather than a
+// careful reading.
+
+const okJson = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+const stranded1 = { id: 'r1', source: 'correct-data', started_at: '2026-08-03T22:35:11Z', detail: { keep: 'me' } };
+
+function recordingFetch(patchBody = [stranded1]) {
+  const calls = [];
+  const fn = async (url, opts = {}) => {
+    calls.push({ url, method: opts.method ?? 'GET', body: opts.body, headers: opts.headers });
+    return opts.method === 'PATCH' ? okJson(patchBody) : okJson([stranded1]);
+  };
+  return { calls, fn };
+}
+
+test('closeStranded: a DRY RUN issues no PATCH at all — not one write', async () => {
+  const { calls, fn } = recordingFetch();
+  const r = await closeStranded({ url: 'https://x', key: 'k', fetchFn: fn, log: () => {} });
+  assert.equal(calls.filter((c) => c.method !== 'GET').length, 0, 'a dry run must not write');
+  assert.equal(r.wrote, false);
+  assert.equal(r.found, 1);
+  assert.equal(r.closed, 0);
+});
+
+test('closeStranded: --apply guards the write by id AND status, never id alone', async () => {
+  const { calls, fn } = recordingFetch();
+  const r = await closeStranded({ url: 'https://x', key: 'k', apply: true, fetchFn: fn, log: () => {} });
+  const patch = calls.find((c) => c.method === 'PATCH');
+  assert.ok(patch, 'apply must issue a PATCH');
+  assert.match(patch.url, /id=eq\.r1/, 'must target the exact row');
+  assert.match(
+    patch.url, /status=eq\.running/,
+    'without the status filter a row that finished between read and write would be overwritten with a fabricated failure',
+  );
+  assert.equal(r.closed, 1);
+  assert.equal(r.wrote, true);
+});
+
+test('closeStranded: --apply writes failed/started_at and preserves existing detail', async () => {
+  const { calls, fn } = recordingFetch();
+  await closeStranded({ url: 'https://x', key: 'k', apply: true, fetchFn: fn, log: () => {} });
+  const body = JSON.parse(calls.find((c) => c.method === 'PATCH').body);
+  assert.equal(body.status, 'failed', 'never succeeded — it did not finish');
+  assert.equal(body.finished_at, stranded1.started_at, 'the true end is unknowable; a zero-length run is visibly wrong');
+  assert.equal(body.detail.keep, 'me', 'existing detail is evidence and must survive');
+  assert.equal(body.detail.closed_by, 'scripts/close-stranded-runs.mjs');
+});
+
+test('closeStranded: an empty PATCH result is SKIPPED, not counted as closed (the race)', async () => {
+  // PostgREST returns [] when the id+status filter matches nothing — i.e. the run closed itself
+  // between our read and our write. That is the guard working, and it must not read as success.
+  const { fn } = recordingFetch([]);
+  const r = await closeStranded({ url: 'https://x', key: 'k', apply: true, fetchFn: fn, log: () => {} });
+  assert.equal(r.closed, 0);
+  assert.equal(r.skipped, 1);
+});
+
+test('closeStranded: nothing stranded does not write and does not claim to have closed anything', async () => {
+  const calls = [];
+  const fn = async (url, opts = {}) => { calls.push(opts.method ?? 'GET'); return okJson([]); };
+  const r = await closeStranded({ url: 'https://x', key: 'k', apply: true, fetchFn: fn, log: () => {} });
+  assert.deepEqual(r, { found: 0, closed: 0, skipped: 0, wrote: false });
+  assert.equal(calls.filter((m) => m !== 'GET').length, 0);
+});
+
+test('closeStranded: a failed PATCH throws rather than reporting a false success', async () => {
+  const fn = async (url, opts = {}) => (opts.method === 'PATCH'
+    ? { ok: false, status: 409, json: async () => ({}), text: async () => 'conflict' }
+    : okJson([stranded1]));
+  await assert.rejects(
+    () => closeStranded({ url: 'https://x', key: 'k', apply: true, fetchFn: fn, log: () => {} }),
+    /failed to close r1: HTTP 409/,
+  );
 });

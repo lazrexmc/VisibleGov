@@ -67,10 +67,24 @@ async function main() {
     err.exitCode = 2;
     throw err;
   }
-  const H = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
-  const cutoff = new Date(Date.now() - args.hours * 3600000).toISOString();
+  return closeStranded({ url, key, hours: args.hours, apply: args.apply });
+}
 
-  const listRes = await fetch(
+// Extracted from main() and given an injectable fetch, 2026-08-29, so the two things most likely to
+// regress silently can actually be tested: that a dry run writes NOTHING, and that the write is
+// guarded by id AND status.
+//
+// Neither is provable from the outside. A dry run that quietly issued a PATCH would look identical
+// to a correct one in the console, and the status filter only matters in a race that is impractical
+// to stage against a live database. Both were listed as untested for two review rounds; this is
+// what closes them.
+export async function closeStranded({
+  url, key, hours = DEFAULT_HOURS, apply = false, fetchFn = fetch, log = console.log,
+} = {}) {
+  const H = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  const cutoff = new Date(Date.now() - hours * 3600000).toISOString();
+
+  const listRes = await fetchFn(
     `${url}/rest/v1/ingestion_runs?status=eq.running&started_at=lt.${cutoff}`
     + '&select=id,source,started_at,detail&order=started_at.asc',
     { headers: H },
@@ -79,30 +93,31 @@ async function main() {
   const stranded = await listRes.json();
 
   if (stranded.length === 0) {
-    console.log(`no stranded runs older than ${args.hours}h — nothing to close`);
-    return;
+    log(`no stranded runs older than ${hours}h — nothing to close`);
+    return { found: 0, closed: 0, skipped: 0, wrote: false };
   }
 
-  console.log(`${stranded.length} stranded run(s) older than ${args.hours}h:\n`);
+  log(`${stranded.length} stranded run(s) older than ${hours}h:\n`);
   for (const run of stranded) {
     const c = closureFor(run);
-    console.log(`  ${run.source}  started ${String(run.started_at).slice(0, 19)}`);
-    console.log(`    -> status=${c.status}, finished_at=${String(c.finished_at).slice(0, 19)}`);
+    log(`  ${run.source}  started ${String(run.started_at).slice(0, 19)}`);
+    log(`    -> status=${c.status}, finished_at=${String(c.finished_at).slice(0, 19)}`);
   }
 
-  if (!args.apply) {
-    console.log('\nDRY RUN — nothing written. Re-run with --apply to close these.');
-    return;
+  if (!apply) {
+    log('\nDRY RUN — nothing written. Re-run with --apply to close these.');
+    return { found: stranded.length, closed: 0, skipped: 0, wrote: false };
   }
 
   let closed = 0;
+  let skipped = 0;
   for (const run of stranded) {
     const c = closureFor(run);
     // Guarded by id AND status: if the row closed itself between the read above and this write
     // (a slow run that finally finished), the status filter makes this a no-op rather than
     // overwriting a real, successful outcome with a fabricated failure.
     // eslint-disable-next-line no-await-in-loop -- sequential; the list is tiny and order aids the log
-    const res = await fetch(`${url}/rest/v1/ingestion_runs?id=eq.${run.id}&status=eq.running`, {
+    const res = await fetchFn(`${url}/rest/v1/ingestion_runs?id=eq.${run.id}&status=eq.running`, {
       method: 'PATCH',
       headers: { ...H, Prefer: 'return=representation' },
       body: JSON.stringify(c),
@@ -110,12 +125,14 @@ async function main() {
     if (!res.ok) throw new Error(`failed to close ${run.id}: HTTP ${res.status} ${await res.text()}`);
     const rows = await res.json();
     if (rows.length === 0) {
-      console.log(`  SKIPPED ${run.source} — it closed itself between the read and the write`);
+      skipped += 1;
+      log(`  SKIPPED ${run.source} — it closed itself between the read and the write`);
     } else {
       closed += 1;
     }
   }
-  console.log(`\nclosed ${closed} of ${stranded.length}`);
+  log(`\nclosed ${closed} of ${stranded.length}`);
+  return { found: stranded.length, closed, skipped, wrote: true };
 }
 
 const invokedDirectly = process.argv[1]
