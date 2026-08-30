@@ -249,6 +249,32 @@ internal tables) is deny-all plus a revoked grant, which is the intended belt-an
 `materialized_view_in_api` (WARN, 3) are the aggregate matviews the site reads. Chasing them would
 break the site.
 
+### ▶ LANCE'S CALL — adopt Glizzness's deploy verifier? (offered 2026-08-30, not started)
+
+**Why it is worth deciding rather than filing:** Glizzness's Cloudflare Pages integration **silently
+stopped deploying for six weeks** when its GitHub connection dropped (two Cloudflare accounts on
+this machine). Nothing failed; the site just quietly served old bytes. VisibleGov makes the same
+"auto-deploys on push" assumption everywhere.
+
+**Checked here 2026-08-30 and VisibleGov is currently CLEAN** — `Cloudflare Pages=success` as a
+check-run on the five most recent commits, via `gh api repos/lazrexmc/VisibleGov/commits/<sha>/check-runs`.
+That check is the cheap half and can be run any time. What is missing is the standing version.
+
+**The instrument:** `Glizzness/tools/verify_deploy.py`, stdlib-only, ~100 lines, copyable with
+attribution. Take **commit 26da16b or later** — earlier versions trusted a `no-cache` request header,
+which is advisory; that version appends a unique query string to every marker fetch instead. That
+change came from VisibleGov's own evidence: Pages serves this site's JS as
+`public, max-age=14400, must-revalidate` (HTML at `max-age=0`), and a browser check here once
+reported a WORKING fix as broken because the page ran a cached module while curl returned the new
+one. **A byte check without cache-busting is confidently wrong in both directions.**
+
+**Three constants to change:** `ORIGIN`, `MARKERS`, `HEADER_MARKERS`.
+
+**Cost/benefit as I see it:** it is a new instrument, not a fix to something broken, and the Actions
+cutover is in flight — so it is deliberately not started. Against that: the failure it catches is
+invisible by construction, and VisibleGov would be its third consumer, which is what promotes it
+from a script to a maintained module.
+
 ### OPEN — pick up here
 
 ~~**▶ LANCE — one migration drafted and awaiting you: `0036`.**~~ **DONE — 0036 AND 0037 applied
