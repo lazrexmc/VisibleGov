@@ -6526,3 +6526,30 @@ lesson 14).
   second because it quotes him verbatim), and reading the clock before writing any time. This
   session is the one that stamped UTC twice and got caught, so the second is written against my own
   miss.
+- **2026-08-30 00:20 CDT - audited RapidForge's registry against this tree, and found my own error in it.**
+  Nobody had ever checked whether the registry's ~67 descriptions of VisibleGov are TRUE; its pointer
+  checker only proves the paths exist. Wrote a checker for the mechanical half: all 61 cited paths
+  exist, and every backticked entry point exists in the file it is attributed to. That layer is clean.
+  **Three description defects, and the one that is flatly wrong was mine before it was theirs.** The
+  registry says "185 roll calls printed `0000-00-00`". The source printed the sentinel on **275**;
+  185 were dated and stored and **90 stay refused**. As written it reads as a complete recovery when
+  the honest version is that a third could not be dated, and the refusal is the more interesting half.
+  **This repo says it correctly in four places** - `docs/DATA_INVENTORY.md:407` ("185 of 275 stored,
+  90 stay absent"), `TODO.md:640`, `site/js/receipts.js:65`, and PLAYBOOK 1157. The error existed
+  only in the MESSAGE I sent them, because I typed the figure from memory instead of reading my own
+  file. That is the third time tonight the same shape has cost something: a paraphrase inside
+  quotation marks in a retraction, a date stamped from a UTC timestamp, and now a number transmitted
+  from recall while the accurate version sat two directories away. **Having good documentation does
+  nothing if the habit is to speak without opening it.** The rule already exists - copy quotes out of
+  the file, never retype - and I wrote it.
+  Two further defects, both misleading rather than wrong: the registry describes the health
+  classifier as filtering in-flight `running` rows OUT, which loses the half that matters (a running
+  row still counts as a recent ATTEMPT, which is exactly why this checker needs no grace period and
+  what league adopted); and it lists the migration verifier's states without `unverifiable` or
+  `policy-only`, which are the two the tool exists for.
+  Also tonight: measured the silence windows against the right population after league's 6.15
+  withdrew one computed over the wrong one. Every gap above 20h predates 2026-08-01 UTC, the day the
+  scheduler was registered - the startup pass, not steady state. Reading max-gap at face value would
+  have widened every window past 95h and blinded the detector. Both windows hold, and legiscan's 50h
+  holds for its derived reason: a normal cycle is 24.2h, one skip lands at 48.4h inside, two at
+  72.6h outside.
