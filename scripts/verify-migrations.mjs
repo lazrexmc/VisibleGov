@@ -40,6 +40,7 @@
 // Exit code: 0 when every probeable migration is APPLIED; 1 when any is ABSENT or unprobed.
 // `unverifiable` alone does not fail the run — it is reported and counted.
 
+import { isRevokedResponse, isRpcDeniedResponse } from '../src/lib/anon-lock.js';
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -116,7 +117,10 @@ async function anonAccess(relation, expect) {
 // revoke migration is to move the protection from the policy layer to the privilege layer.
 async function anonRevoked(relation) {
   const { status, body } = await rest(`${relation}?select=*&limit=1`, ANON);
-  if (status === 401 || status === 403 || /42501/.test(body)) return 'applied';
+  // Shared with scripts/probe-public-surface.js via src/lib/anon-lock.js. These two files
+  // disagreed twice in one day (on `200 []`, and on 404) while each looked correct in isolation;
+  // there is now one predicate rather than two that a test hopes are equivalent.
+  if (isRevokedResponse(status, body)) return 'applied';
   // `200 []` here is ABSENT, not `policy-only`. For a revoke migration the empty result IS the
   // symptom: the grant is still there and the migration has not been applied. Reporting it as the
   // softer `policy-only` would let an unapplied migration exit 0 — which is precisely the question
@@ -142,7 +146,11 @@ async function anonRpcDenied(fn) {
     body: '{}',
   });
   const body = await res.text();
-  if (res.status === 404 || res.status === 401 || res.status === 403 || /42501/.test(body)) return 'applied';
+  // src/lib/anon-lock.js's anonRpcState — deliberately NOT the same predicate as the table one
+  // beside it: for an RPC, 404 IS denial (PostgREST hides a function the role cannot execute),
+  // while for a table 404 is unexplained. The two live together there so that difference is
+  // documented rather than looking like drift.
+  if (isRpcDeniedResponse(res.status, body)) return 'applied';
   return 'absent';
 }
 

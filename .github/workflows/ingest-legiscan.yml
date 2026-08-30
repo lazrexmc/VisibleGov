@@ -35,14 +35,16 @@ jobs:
                            # sit burning metered minutes for the 6h GitHub default
 
     steps:
-      # PRE-CUTOVER GUARD. Added 2026-08-30 after this workflow failed every hour from 20:54.
+      # PRE-CUTOVER GUARD. Added 2026-08-29, same reasoning as ingest.yml but this workflow is
+      # DAILY and single-source, so it had not yet fired a failing tick when the guard went in --
+      # it would have failed on its first 09:23 run. (An earlier version of this comment was
+      # copy-pasted from ingest.yml and wrongly described "every hour from 20:54" and "all four
+      # sources"; a pasted comment that describes another file's incident is worse than none,
+      # because it is specific enough to be believed.)
       #
-      # The schedule fires as soon as the file is on main, but the secrets are added by hand later
-      # (docs/GITHUB_ACTIONS_MIGRATION.md step 1). Between those two moments every tick ran, failed
-      # on all four sources in ~18s, wrote nothing, and burned metered minutes plus a notification.
-      # The migration doc claimed "nothing runs until you add the secrets" -- that was simply wrong,
-      # and hourly red ticks before cutover are exactly the alert fatigue the health check was
-      # designed to avoid.
+      # The schedule fires as soon as the file is on main, but secrets are added by hand later
+      # (docs/GITHUB_ACTIONS_MIGRATION.md step 1). Between those two moments a tick would run, fail
+      # in ~18s, write nothing, and burn metered minutes plus a notification.
       #
       # MASKING RISK, and why it is acceptable: once configured, a secret later REMOVED would skip
       # silently rather than fail. That is covered -- check-ingest-health.mjs reports SILENT after a
@@ -51,9 +53,17 @@ jobs:
       - name: Skip until cutover
         id: guard
         run: |
-          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+          # Every REQUIRED secret, not just one. Keying the guard on SUPABASE_URL alone meant a
+          # half-configured repo (URL set, service key missing) passed the guard and then went red
+          # in the ingest step -- the exact failure the guard exists to prevent, just later and
+          # with a worse error.
+          missing=""
+          [ -z "${{ secrets.SUPABASE_URL }}" ] && missing="$missing SUPABASE_URL"
+          [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -z "${{ secrets.LEGISCAN_API_KEY }}" ] && missing="$missing LEGISCAN_API_KEY"
+          if [ -n "$missing" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Secrets not configured yet - workflow is inert until cutover (docs/GITHUB_ACTIONS_MIGRATION.md step 1). This is not a failure."
+            echo "::notice::Not yet cut over - missing secret(s):$missing. This job is INERT, not working: every later step is skipped and the job is green because it did nothing. See docs/GITHUB_ACTIONS_MIGRATION.md step 1."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi

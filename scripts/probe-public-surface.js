@@ -1,3 +1,4 @@
+import { anonLockState } from '../src/lib/anon-lock.js';
 // scripts/probe-public-surface.js — anon-key verification of the public read surface
 // (migration 0016, extended for migration 0019, extended again for migration 0020's completeness
 // axis). Run after Lance applies a migration.
@@ -16,7 +17,7 @@
 
 // lockVerdict — is a relation genuinely revoked for anon?
 //
-// Extracted from an inline expression in main() on 2026-08-30, after a review pointed out that 404
+// Extracted from an inline expression in main() on 2026-08-29, after a review pointed out that 404
 // was added to the accept set at 12:35 and removed at 19:14 WITHOUT A TEST FAILING EITHER TIME. An
 // untested predicate is a decision nobody can defend later; the tests beside this file now pin all
 // three states.
@@ -32,12 +33,10 @@
 //                 never reached a privilege check), 5xx. NOT a pass, and NOT the same finding as an
 //                 exposed table: it means the probe could not determine the answer. Reporting it in
 //                 the same words as a leak sends an operator hunting for a grant that may not exist.
-export function lockVerdict(status, body) {
-  if (status === 401 || status === 403) return 'locked';
-  if (/42501/.test(JSON.stringify(body ?? ''))) return 'locked';
-  if (status === 200) return 'exposed';
-  return 'unexplained';
-}
+// Delegates to the single shared definition. Re-exported under the old name so existing callers
+// and tests keep working, but the LOGIC now lives in exactly one place -- see src/lib/anon-lock.js
+// for why a test asserting two copies agree was not good enough.
+export const lockVerdict = anonLockState;
 
 export function lockDetail(status, verdict) {
   if (verdict === 'exposed') return 'status 200 — the GRANT is still live; an empty body is NOT "locked"';

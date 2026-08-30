@@ -63,13 +63,16 @@ test('classify: a running row does not mask a real failure streak underneath it'
 // that. The rule the tests pin is the general one: derive the window from interval x cycles you are
 // willing to lose, never from the bare interval.
 
-test('silenceThreshold: legiscan tolerates one legitimately skipped daily cycle', () => {
-  assert.ok(silenceThreshold('legiscan') > 48, `must exceed two 24h intervals, got ${silenceThreshold('legiscan')}`);
+test('silenceThreshold: legiscan is exactly 50h — two 24h cycles plus ~2h drift', () => {
+  // Pinned to the VALUE, not a bound. `> 48` passed for 49 and for 500 alike, so it would not have
+  // caught a drift in either direction; the number is derived (2 x 24h interval + drift), so a
+  // change to it should have to be justified rather than slipping under a range check.
+  assert.equal(silenceThreshold('legiscan'), 50);
 });
 
-test('silenceThreshold: an hourly source is NOT given the daily allowance', () => {
+test('silenceThreshold: every hourly source is exactly 25h, not merely "tight"', () => {
   for (const s of ['mo-senate-web', 'mo-house-xml', 'us-congress', 'us-senate']) {
-    assert.ok(silenceThreshold(s) <= 25, `${s} must keep the tight window, got ${silenceThreshold(s)}`);
+    assert.equal(silenceThreshold(s), 25, `${s} must keep the hourly window`);
   }
 });
 

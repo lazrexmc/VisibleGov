@@ -227,7 +227,7 @@ test('main(): SUPABASE_URL/SUPABASE_ANON_KEY unset -> sets a non-zero exitCode a
 });
 
 // --- lockVerdict / lockDetail -------------------------------------------------------------------
-// Added 2026-08-30. This predicate lived inline in main() and was untested, so 404 was ADDED to the
+// Added 2026-08-29. This predicate lived inline in main() and was untested, so 404 was ADDED to the
 // accept set at 12:35 and REMOVED at 19:14 without a single test failing either time. A predicate
 // nobody can break is a predicate nobody can defend.
 test('lockVerdict: 401/403 and a 42501 body are the only "locked" states', () => {
@@ -249,18 +249,12 @@ test('lockVerdict: 404 is UNEXPLAINED — neither locked nor a leak', () => {
   assert.equal(lockVerdict(500, null), 'unexplained');
 });
 
-test('lockVerdict: matches verify-migrations anonRevoked exactly, so the two cannot drift', () => {
-  // anonRevoked(): 401 || 403 || /42501/ -> applied; everything else -> absent.
-  const anonRevokedSaysApplied = (status, body) => status === 401 || status === 403 || /42501/.test(JSON.stringify(body ?? ''));
-  for (const [status, body] of [[401, null], [403, null], [200, []], [404, null], [400, { code: '42703' }], [200, { code: '42501' }]]) {
-    assert.equal(
-      lockVerdict(status, body) === 'locked',
-      anonRevokedSaysApplied(status, body),
-      `disagreement on status ${status} — the two probes must not diverge again`,
-    );
-  }
-});
-
+// The former 'matches anonRevoked exactly' test lived here and was removed 2026-08-29: it compared
+// lockVerdict against a hand-copied closure in this file, so verify-migrations.mjs could change
+// without failing anything, and the copy was not even faithful (raw text vs JSON.stringify of a
+// parsed body). Both callers now import src/lib/anon-lock.js, and tests/anon-lock.test.js carries a
+// structural guard that neither file reintroduces its own predicate. Eliminating the second copy
+// beats testing that two copies agree.
 test('lockDetail: an unexplained result does not read like a leak', () => {
   const d = lockDetail(404, 'unexplained');
   assert.match(d, /UNEXPLAINED/);

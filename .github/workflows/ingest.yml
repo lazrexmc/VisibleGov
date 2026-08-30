@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 30   # the four fast sources; anything longer means something is wedged
 
     steps:
-      # PRE-CUTOVER GUARD. Added 2026-08-30 after this workflow failed every hour from 20:54.
+      # PRE-CUTOVER GUARD. Added 2026-08-29 after this workflow failed every hour from 20:54.
       #
       # The schedule fires as soon as the file is on main, but the secrets are added by hand later
       # (docs/GITHUB_ACTIONS_MIGRATION.md step 1). Between those two moments every tick ran, failed
@@ -67,9 +67,18 @@ jobs:
       - name: Skip until cutover
         id: guard
         run: |
-          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+          # Every REQUIRED secret, not just one. Keying the guard on SUPABASE_URL alone meant a
+          # half-configured repo (URL set, service key missing) passed the guard and then went red
+          # in the ingest step -- the exact failure the guard exists to prevent, just later and
+          # with a worse error.
+          missing=""
+          [ -z "${{ secrets.SUPABASE_URL }}" ] && missing="$missing SUPABASE_URL"
+          [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -z "${{ secrets.CONGRESS_API_KEY }}" ] && missing="$missing CONGRESS_API_KEY"
+          [ -z "${{ secrets.OPENSTATES_API_KEY }}" ] && missing="$missing OPENSTATES_API_KEY"
+          if [ -n "$missing" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Secrets not configured yet - workflow is inert until cutover (docs/GITHUB_ACTIONS_MIGRATION.md step 1). This is not a failure."
+            echo "::notice::Not yet cut over - missing secret(s):$missing. This job is INERT, not working: every later step is skipped and the job is green because it did nothing. See docs/GITHUB_ACTIONS_MIGRATION.md step 1."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi

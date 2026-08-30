@@ -1,9 +1,28 @@
 # Moving ingestion off the desktop, onto GitHub Actions
 
-**Status: workflows are committed and will NOT run until you add the secrets below.** A scheduled
-workflow in a private repo still needs its secrets to exist; without them the first tick fails fast
-rather than doing anything half-right. Nothing has changed on your machine yet — the Windows tasks
-are still the live scheduler until you turn them off in step 4.
+**Status: the workflows are committed, scheduled, and running right now — doing nothing.** Nothing
+has changed on your machine: the Windows tasks are still the live scheduler until you turn them off
+in step 4.
+
+> **An earlier version of this line said the workflows "will NOT run until you add the secrets."
+> That was wrong, and it cost something.** A scheduled workflow starts firing the moment it is on
+> `main`. Between the commit and the secrets existing, every hourly tick ran, failed in ~18s on
+> missing env, wrote nothing, and burned metered minutes plus a notification — 20:54 and 23:15 on
+> 2026-08-29 before it was caught.
+>
+> **Both workflows now carry a pre-cutover guard**, so a tick with any required secret missing skips
+> every remaining step and exits cleanly. Read that state carefully, because it is the one thing
+> here that can mislead you:
+>
+> | What you see | What it means |
+> |---|---|
+> | Green job, steps after "Skip until cutover" marked skipped | **Inert.** It did nothing. This is the pre-cutover state. |
+> | Green job, all steps ran | Ingestion actually worked. |
+> | Red job | Something genuinely failed — read the health-check step. |
+>
+> A green tick is not evidence of ingestion until step 2 below has passed at least once. The guard
+> also names the missing secrets in a `::notice::` on every skipped run, so the Actions log tells you
+> which state you are in rather than leaving you to infer it.
 
 ## Why this migration exists
 
@@ -66,13 +85,18 @@ Optional **variable** (Settings → Variables, not Secrets — it is not sensiti
 Run each workflow by hand first. **Actions → ingest → Run workflow**, then the same for
 `ingest-legiscan`. Both are `workflow_dispatch`-enabled precisely so you can do this.
 
-A good first run:
-- exits green;
-- the log shows each source either ingesting or reporting it is not due;
-- `npm run status` afterwards shows the source's `last finished` timestamp has moved.
+A good first run, in this order — each check rules out a way the previous one can lie:
 
-**That last check is the real one.** A green job only proves the process exited 0; the freshness
-timestamp proves it actually wrote to the database.
+1. **The "Skip until cutover" step did NOT skip the rest.** If the later steps show as skipped, a
+   secret is missing; the `::notice::` on that step names which. The job is green and did nothing.
+2. **The log shows each source either ingesting or reporting it is not due.**
+3. **The "Verify ingestion actually worked" step ran and passed.** It reads `ingestion_runs`, not an
+   exit code — `scheduled-ingest.js` exits 0 on operational failure by design, so this step is the
+   only one whose green means the feed is alive.
+4. **`npm run status` shows the source's `last finished` timestamp has moved.**
+
+**Check 4 is the one that cannot be faked.** Check 1 rules out an inert run, check 3 rules out a
+crashed feed reported as success — but only a moved timestamp proves this job wrote to the database.
 
 ## Step 3 — let both run in parallel for a day
 

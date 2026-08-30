@@ -6384,13 +6384,15 @@ lesson 14).
   updated it. A permission probe must never name a column.
   **(3) No stuck-run detection.** The heartbeat proves the scheduler is ALIVE; it cannot prove a run
   that STARTED ever finished. That is why `correct-data` sat stranded 25 days while every tick
-  stayed green. Not cosmetic — `scheduled-summaries.js` counts a stranded row as a FULL tick of
-  spend, so a crashed run quietly shrinks the weekly summary budget. `npm run status` now flags any
+  stayed green. Not cosmetic — ~~`scheduled-summaries.js` counts a stranded row as a FULL tick of
+  spend, so a crashed run quietly shrinks the weekly summary budget.~~ **← THIS CLAIM IS FALSE; see
+  the 2026-08-29 round-two entry at the end of this file for the correction.** (`selectRecentRunsReal`
+  filters `source='scheduled-summaries'`, so a stranded row from any other source is never charged.) `npm run status` now flags any
   run >6h, and I **proved the detector fires** by inserting a synthetic stranded row, watching it
   print, and deleting it — a detector that has never fired is a hope (lesson 50).
   Recorded as PLAYBOOK lesson 56: a patched CVE is not a fixed architecture, and a finding split
   across two notes is one neither note makes.
-- **2026-08-30 — round-two peer review; four more findings, one of them a defect actively firing.**
+- **2026-08-29 — round-two peer review; four more findings, one of them a defect actively firing.**
   **CORRECTION TO THE 2026-08-29 ENTRY ABOVE, which states a wrong claim and must not be read
   uncorrected:** that entry says "`scheduled-summaries.js` counts a stranded row as a FULL tick of
   spend, so a crashed run quietly shrinks the weekly summary budget." **That is false as written.**
