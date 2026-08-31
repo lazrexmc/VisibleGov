@@ -117,12 +117,27 @@ async function main() {
   // Enumerated, not counted, because it needs set intersection.
   const [textRows, summaryRows, voteRows] = await Promise.all([
     allRows('bill_texts?select=bill_id'),
-    allRows('summaries?select=bill_id,status'),
+    allRows('summaries?select=bill_id,status,published_at'),
     allRows('votes?select=bill_id,question'),
   ]);
   const withText = new Set(textRows.map((t) => t.bill_id));
   const summarized = new Set(summaryRows.map((s) => s.bill_id));
   const publishedSet = new Set(summaryRows.filter((s) => s.status === 'published').map((s) => s.bill_id));
+
+  // Days since the last summary was published, from the rows themselves. This exists because the
+  // lane that does most of the work has NO process boundary to hang a guard on: the $0 subagent
+  // wave lane is Claude sessions, not a scheduled script, so when it simply stops running nothing
+  // errors, no exit code is non-zero, no cron entry goes red, and no freshness row moves — the
+  // ingestion sources above stay green because ingestion is a different lane entirely. It went
+  // four days publishing nothing (2026-08-28..31) and the only reason anyone noticed was a human
+  // asking. A silent stall in the highest-output path deserves a number, not an inference.
+  const publishDates = summaryRows
+    .filter((s) => s.status === 'published' && s.published_at)
+    .map((s) => new Date(s.published_at).getTime())
+    .filter((t) => Number.isFinite(t));
+  const lastPublishMs = publishDates.length ? Math.max(...publishDates) : null;
+  const daysSincePublish = lastPublishMs === null
+    ? null : Math.floor((Date.now() - lastPublishMs) / 86400000);
   const withAnyVote = new Set(voteRows.filter((v) => v.bill_id).map((v) => v.bill_id));
   // Passage-priority regex mirrors src/cli/summary-queue.js — keep in sync if that changes.
   const withPassageVote = new Set(
@@ -256,6 +271,8 @@ async function main() {
       passageVoteAndPublishedSummary: passagePublished,
       readyToSummarize,
       summariesPublished: sumPublished,
+      daysSinceLastPublish: daysSincePublish,
+      completionRatePct: passageWithText > 0 ? Number(((passagePublished / passageWithText) * 100).toFixed(1)) : null,
       summariesAwaitingReview: sumDraft + sumStale,
       summariesDraft: sumDraft,
       summariesStale: sumStale,
@@ -317,9 +334,22 @@ async function main() {
   console.log(`  ...of those, text on hand ............ ${n(passageWithText)}`);
   console.log(`  ...of those, published summary ....... ${n(passagePublished)}`);
   console.log(`  READY to summarize (text, no summary)  ${n(readyToSummarize)}`);
+  // The completion rate the product actually claims. Against all 38,256 bills it reads ~2%, but
+  // ~34,000 of those have no recorded vote at all and are not a summary backlog — quoting that
+  // denominator understates the work by an order of magnitude. The defended denominator is the
+  // accountability set WITH TEXT, since a bill whose text we do not hold cannot be summarized.
+  const pctComplete = passageWithText > 0
+    ? ((passagePublished / passageWithText) * 100).toFixed(1) : '—';
+  console.log(`  ...COMPLETION RATE (of the set with text)  ${pctComplete}%`);
   console.log(`  summaries published .................. ${n(sumPublished)}`);
   console.log(`  summaries awaiting review ............ ${n(sumDraft + sumStale)}  <- held back by the trust gate${sumStale > 0 ? ` (of which stale: ${n(sumStale)})` : ''}`);
   console.log(`  summaries retired (superseded) ....... ${n(sumRejected)}  <- replaced by later attempts, audit trail`);
+  if (daysSincePublish !== null) {
+    const stalled = daysSincePublish >= 2;
+    const when = new Date(lastPublishMs).toISOString().slice(0, 10);
+    console.log(`  last summary published .............. ${when}  (${daysSincePublish}d ago)`
+      + (stalled ? '  <- LANE IDLE: the $0 wave lane needs a session to run it; nothing errors when it stops' : ''));
+  }
 
   console.log('\nCOVERAGE');
   for (const [j, v] of Object.entries(coverage)) {
