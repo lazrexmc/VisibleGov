@@ -42,7 +42,7 @@ import {
 } from '../src/lib/db.js';
 import { acquireLock, releaseLock, runChildCli } from './scheduled-ingest.js';
 import {
-  runBillChain, createCostTracker, classifyBillingError,
+  runBillChain, createCostTracker, classifyBillingError, assertPricesFresh,
 } from '../src/lib/billed-summary-chain.js';
 import { loadDraftObjections } from '../src/lib/draft-objections.js';
 import { MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
@@ -336,6 +336,24 @@ async function runTickLocked(deps) {
   // ---- live path: openRun right after the allowance check passes, right before the first
   // possible paid call — a crash anywhere from here on leaves an honest 'running' row the next
   // tick's ledger read counts conservatively (as full per-tick spend). ----
+  // Price-table freshness is checked HERE, before openRun, not inside the try below. createCostTracker
+  // also asserts it (defence in depth), but by then a run row exists, and a throw would strand a
+  // 'running' row that the next tick's ledger read counts as a FULL per-tick spend — so an expired
+  // table would quietly eat the weekly cap and trip the stranded-run detector every morning. A
+  // stale price is a reason to do nothing, which costs nothing and says so.
+  try {
+    assertPricesFresh();
+  } catch (err) {
+    return {
+      outcome: 'skipped-prices-unverified',
+      detail: err.message,
+      allowance,
+      weekKey,
+      weeklySpent: weeklySpentUsd,
+      lanes: [],
+    };
+  }
+
   const runId = await deps.openRunFn();
   const tracker = createCostTracker();
 

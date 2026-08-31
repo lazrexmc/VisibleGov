@@ -21,9 +21,21 @@ export { VERIFIER_MODEL };
 // pricing — priceOf throws rather than spend unpriced).
 export const PRICES = {
   'claude-haiku-4-5': { in: 1.0, out: 5.0 },
-  'claude-sonnet-5': { in: 2.0, out: 10.0 }, // intro pricing through 2026-08-31
+  'claude-sonnet-5': { in: 2.0, out: 10.0 }, // intro pricing — see PRICES_VERIFIED_THROUGH
   'claude-opus-5': { in: 5.0, out: 25.0 },
 };
+
+// The date through which the table above was last checked against published pricing. This used to
+// be a comment reading "intro pricing through 2026-08-31", which is a declared expiry condition
+// with nothing enforcing it — and a stale price fails in the EXPENSIVE direction: the entry still
+// exists, so priceOf returns happily, the cost tracker under-counts real spend, and the $5.00
+// weekly cap silently stops being the cap. A budget guard computing from a stale table reports a
+// safety it is not providing.
+//
+// To clear an expiry: re-check every model above against Anthropic's published prices, correct any
+// that moved, and move this date forward. Do NOT move the date alone — that is the one edit that
+// makes this worse than the comment it replaced.
+export const PRICES_VERIFIED_THROUGH = '2026-08-31';
 
 export function priceOf(model) {
   const p = PRICES[model];
@@ -31,9 +43,28 @@ export function priceOf(model) {
   return p;
 }
 
+// Deliberately NOT folded into priceOf. scripts/gloss-batch-mo.js probes model aliases with
+// `try { priceOf(id) } catch { /* try the alias */ }`, so an expiry thrown from there would be
+// swallowed and misread as "unknown model" — one exception carrying two unrelated meanings.
+// This is called where money starts (createCostTracker), so a billed run refuses to begin on a
+// stale table rather than running and under-counting.
+export function assertPricesFresh(today = new Date()) {
+  const iso = today.toISOString().slice(0, 10);
+  if (iso > PRICES_VERIFIED_THROUGH) {
+    throw new Error(
+      `price table unverified since ${PRICES_VERIFIED_THROUGH} (today ${iso}) — re-check every `
+      + 'model in PRICES against published pricing and move PRICES_VERIFIED_THROUGH. Refusing to '
+      + 'spend against prices that may have changed.',
+    );
+  }
+}
+
 // createCostTracker — real-usage accounting shared by every call this chain makes. spentUsd()
 // is the number budget guards trust; callLog is the per-call audit trail for run detail/logs.
-export function createCostTracker() {
+export function createCostTracker({ now } = {}) {
+  // Where money starts. A run refuses to begin on an unverified price table rather than running
+  // and under-counting against the weekly cap — the failure lands in the safe direction.
+  assertPricesFresh(now ?? new Date());
   let spent = 0;
   const callLog = [];
   return {
