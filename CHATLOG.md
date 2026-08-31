@@ -6612,3 +6612,41 @@ lesson 14).
   "undercounts at 37", which the new section contradicted with the verified 59 and 46. Replaced the
   numbers with the method, per the standard's rule that a counted claim in prose is either derived
   by a script or deleted. 2,792 pass / 0 fail after the edit.
+- **2026-08-31 17:10-18:00 CDT - the drain restarted, and what measuring it found.**
+  Lance: *"VisibleGov needs to drain summaries with efficiency... continue sweeping bills and
+  increasing our completion rate."* Then, decisively: *"Only claude has made restrictions regarding
+  the sonnet pricing, I'm trying to avoid that and just run it through my subscription rates."*
+  **The completion rate was being quoted against the wrong denominator, and it is not a rounding
+  difference.** 38,256 bills is every bill ingested; ~34,000 have no recorded vote at all and are
+  not a summary backlog. The defended set is the 3,226 with a passage or third-reading vote, 3,108
+  of which have text. 873 of those have a summary: **28.1%, not the ~2% the raw ratio suggests.** A
+  peer built a throughput plan on the raw number and concluded 95 years. `npm run status` now prints
+  the rate so nobody has to derive it.
+  **The real constraint is structural and nothing could see it.** Publish rate by day: 204, 184,
+  116, 98, 94 on days the $0 subagent wave lane ran, against 1 to 4 on days only the billed
+  scheduler ran - and **zero on 08-28 through 08-31.** The free lane has no scheduler and cannot
+  have one of the current kind, because it IS a Claude session. When it stops, nothing errors: no
+  exit code, no cron entry, no freshness row, because ingestion is a different lane and stays green.
+  The general form, deposited to the fleet: **instrumentation accretes on the path that CAN be
+  instrumented, not the path that carries the value.** The billed lane has caps, a weekly ledger and
+  crashed-tick accounting for 1-4 a day; the lane doing 204 has none of it. The question that finds
+  this class: *what here would produce NO error if it simply stopped happening?*
+  **The price table expired the same day it was noticed.** `// intro pricing through 2026-08-31`,
+  and it was 2026-08-31. Deliberately did NOT edit the price - the new number is unknown here and
+  inventing one is worse than the staleness. Instead the expiry became machine-readable and
+  `assertPricesFresh` refuses to spend past it. Kept OUT of `priceOf` on purpose: `gloss-batch-mo.js`
+  probes model aliases with `try { priceOf(id) } catch {}`, so an expiry thrown there would be
+  swallowed and misread as "unknown model" - one exception carrying two meanings. Placed before
+  `openRun` rather than inside the chain, because a throw after the run row exists would strand a
+  'running' row the ledger counts as a full tick's spend.
+  **Wave results, and one experiment settled.** 12 bills, 50 agents, 4.57M subagent tokens, 49
+  minutes: **2 published, 10 flagged drafts, 0 rejects, 0 failures.** The flags are mostly the
+  completeness gate naming a specific omitted provision, which is the gate working rather than
+  failing, and every flagged draft feeds the re-author lane. **HB 1847 (83,410 chars) produced a
+  valid envelope** - the billed chain had failed it on `max_tokens` three days running, so that
+  ceiling was an API-context limit the subscription path does not share. **No size cap needed**, and
+  the cap was not built, because the wave in flight was already the experiment.
+  **Killed rather than queued:** recalibrating the billed estimator, which over-predicts 3.3x
+  ($0.665 assumed against $0.2035 actual per published bill). It is a real win on a lane its owner
+  has decided not to use, and leaving it in a backlog would have read as owed to the next session.
+  Wave 2 launched immediately after recording wave 1.
