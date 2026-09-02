@@ -82,6 +82,8 @@ with offset/limit or jump by grep.
 | 57 | 08-29 | An action nobody can re-run is a story, not evidence |
 | 58 | 08-30 | A cold read reports the confusion, not the diagnosis; the protocol is a floor, not a ceiling |
 | 59 | 08-30 | A fixture built by the code under test proves the round-trip, not the format |
+| 60 | 09-02 | Making a function clock-sensitive obliges EVERY caller; documenting a hazard is not finding its instances |
+| 61 | 09-02 | With several agents in one repo the newest visible change is the cheapest suspect and usually wrong |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1559,4 +1561,69 @@ and exported summaries are consumed by whatever reads them next. The fix is not 
 one check per format performed by the actual consumer - which is exactly what makes Glizzness's
 `verify_deploy.py` (lesson list item, RESUME item 3) worth more than its ~100 lines suggest: it
 fetches what the edge actually serves, rather than what the build believed it wrote.
+
+## Lesson 60 - making a function clock-sensitive creates an obligation for every caller, and understanding a hazard is not the same as having found its instances (2026-09-02)
+
+Commit `7e614ea` gave the price table's declared expiry an instrument: `assertPricesFresh` refuses
+to spend past a verified-through date, and `createCostTracker` asserts it too. The commit message
+explained, at length, that every test tracker had to be pinned to a fixed in-window date **because
+otherwise the whole suite would go red the day the table lapsed, burying the one deliberate failure
+among thousands.** It then pinned exactly one test file.
+
+On 2026-09-02 ten `runTick` tests were red. Not one of them is about pricing. The guard had been
+wired into `scheduled-summaries.js` as `assertPricesFresh()` and `createCostTracker()` - no
+arguments, so both read `new Date()` - inside a function whose entire design is dependency-injected
+and whose tests **already** pass `now: () => new Date('2026-08-15T12:00:00Z')`. The guard reached
+around the injection to the wall clock.
+
+**Two rules, and the second is the one that is hard to catch.**
+
+**Making a function clock-sensitive is a change to the contract of every call site, not just the
+one being edited.** `createCostTracker()` had been safe to call bare for its whole life. One commit
+made that call a dated assertion, and every existing bare call inherited a calendar dependency
+nobody chose. The mechanical form: when adding an implicit environmental read (clock, locale,
+network, filesystem, env var) to a shared function, enumerate its callers in the same commit -
+`grep` for the name - and decide for each one, rather than fixing the caller you happen to be
+looking at.
+
+**And: understanding a hazard well enough to write it down is not evidence of having found every
+instance of it.** This is worse than not knowing, because the comment reads as coverage. Anyone
+reviewing that commit - including me, twice - saw a paragraph explaining the exact failure mode and
+inferred it had been handled. The documentation was accurate about the danger and silent about its
+own incompleteness.
+
+The fix pins the INJECTION rather than an outcome on a date: one test asserts an injected expired
+clock returns `skipped-prices-unverified` and opens no run row, another that an injected in-window
+clock does not trip the guard. Both stay meaningful whatever day they run, which the original tests
+could not.
+
+**A peer arrived at the same lesson from the other end, about an hour apart and before either
+message landed.** RapidForge had verified this instrument on its first day by inducing the failure
+rather than reading the code - correct practice - and reported it sound. It had induced
+`assertPricesFresh` DIRECTLY. **Inducing a function is not inducing the system that calls it:** the
+predicate was correct and the installation bypassed the caller's injected clock, and from outside,
+a guard verified in isolation but wired in wrong is indistinguishable from one never verified.
+Both halves failed at different layers and each of us found the other's.
+
+## Lesson 61 - with more than one agent writing to one repo, the newest visible change is the cheapest suspect and usually the wrong one (2026-09-02)
+
+The ten red tests above surfaced on a morning when an uncommitted feature from a different agent
+(Codex - a directory summary strip, chamber filters and paging, five files, 359 lines) was sitting
+in the working tree. `git status` showed those five files and nothing else. The suite was red. The
+obvious inference was available, cheap, and wrong: **the feature was innocent and would have been
+reverted.**
+
+The actual cause was a guard committed three days earlier that fired on the CALENDAR rather than on
+any commit - it went red the morning after a hardcoded expiry date passed, with no diff to point
+at. It was found only because Lance asked for a folder review rather than a fix.
+
+**The rule: date a red suite against when the SUSPECT landed before blaming it.** A failure that
+appears the same day as a change is not thereby caused by it, and a time-bomb guard - anything with
+a hardcoded expiry, a certificate, a token, a price table - produces exactly this signature: a
+break with no corresponding commit. Ask what changed in the WORLD, not only what changed in the
+tree.
+
+The corollary for a shared repo: **the cost of a wrong attribution is not just lost time, it is
+reverting someone else's correct work** and, worse, teaching the next session that their code was
+the problem.
 
