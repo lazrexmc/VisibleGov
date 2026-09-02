@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
-import { wireAddressForm, renderPrivacyContract } from '../site/js/directory-page.js';
+import { bootstrapDirectoryPage, wireAddressForm, renderPrivacyContract } from '../site/js/directory-page.js';
 import { _setFetch, _setConfig } from '../site/js/rest.js';
 import { PRIVACY_CONTRACT_TEXT } from '../site/js/copy.js';
 
@@ -456,4 +456,81 @@ test('renderPrivacyContract: clears any prior content before rendering (idempote
   container.textContent = 'stale';
   renderPrivacyContract(container);
   assert.equal(container.textContent, PRIVACY_CONTRACT_TEXT);
+});
+
+function responseForRows(rows) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => rows,
+    headers: { get: (name) => (name.toLowerCase() === 'content-range' ? `0-${Math.max(0, rows.length - 1)}/${rows.length}` : null) },
+  };
+}
+
+function directoryShell() {
+  document.body.innerHTML = `
+    <main>
+      <p id="privacy-contract"></p>
+      <form id="address-form"><input id="address-input" /></form>
+      <div id="address-results"></div>
+      <button id="directory-view-serving" type="button" aria-pressed="true">Serving now</button>
+      <button id="directory-view-past" type="button" aria-pressed="false">Past members</button>
+      <div id="directory-summary"></div>
+      <div id="directory-chambers"></div>
+      <input id="directory-filter" />
+      <p id="directory-count"></p>
+      <div id="directory-list"></div>
+    </main>
+    <footer id="site-footer"></footer>
+  `;
+}
+
+test('bootstrapDirectoryPage: summarizes the directory, pages the long roster, and filters by chamber', async () => {
+  directoryShell();
+  const legislators = Array.from({ length: 30 }, (_, i) => ({
+    id: `L${i}`,
+    full_name: `Member ${String(i).padStart(2, '0')} Surname${String(i).padStart(2, '0')}`,
+    surname: `Surname${String(i).padStart(2, '0')}`,
+    party: i % 2 === 0 ? 'Democratic' : 'Republican',
+    person_id: null,
+  }));
+  const terms = legislators.map((legislator, i) => ({
+    legislator_id: legislator.id,
+    jurisdiction_id: i < 5 ? 'us-congress' : 'mo-legislature',
+    chamber: i < 5 ? 'senate' : 'house',
+    district: i < 5 ? 'MO' : String(i),
+    state: 'MO',
+    party: legislator.party,
+    start_date: '2025-01-03',
+    end_date: null,
+  }));
+
+  _setConfig({ url: 'https://example.supabase.co', anonKey: 'test-anon-key' });
+  _setFetch(async (url) => {
+    if (url.includes('/legislators?')) return responseForRows(legislators);
+    if (url.includes('/persons?')) return responseForRows([]);
+    if (url.includes('/terms?')) return responseForRows(terms);
+    throw new Error(`unexpected URL ${url}`);
+  });
+
+  try {
+    await bootstrapDirectoryPage();
+    assert.match(document.getElementById('directory-summary').textContent, /Total/);
+    assert.match(document.getElementById('directory-summary').textContent, /30/);
+    assert.equal(document.querySelectorAll('#directory-list .directory-row').length, 24);
+    assert.match(document.getElementById('directory-count').textContent, /Showing 24 of 30/);
+
+    document.querySelector('#directory-list .directory-show-more').click();
+    assert.equal(document.querySelectorAll('#directory-list .directory-row').length, 30);
+    assert.match(document.getElementById('directory-count').textContent, /Showing 30 of 30/);
+
+    const senateButton = [...document.querySelectorAll('#directory-chambers button')]
+      .find((button) => button.textContent === 'U.S. Senate');
+    senateButton.click();
+    assert.equal(document.querySelectorAll('#directory-list .directory-row').length, 5);
+    assert.match(document.getElementById('directory-count').textContent, /Showing 5 of 5 U\.S\. Senate/);
+    assert.equal(document.querySelector('#directory-list .directory-show-more'), null);
+  } finally {
+    _setFetch(null);
+  }
 });

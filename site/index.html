@@ -67,10 +67,13 @@
         <button id="directory-view-past" type="button" aria-pressed="false">Past members</button>
       </div>
       <p class="directory-footnote">ⓘ no recorded end date — the honest signal a term is still open</p>
+      <div id="directory-summary" class="directory-summary" aria-live="polite"></div>
+      <div id="directory-chambers" class="directory-chambers" role="group" aria-label="Browse by chamber"></div>
       <label for="directory-filter">Filter by name, chamber, or party</label>
       <div class="directory-search">
         <input id="directory-filter" type="text" name="filter" />
       </div>
+      <p id="directory-count" class="directory-count" aria-live="polite"></p>
       <div id="directory-list" aria-live="polite"></div>
     </section>
   </main>

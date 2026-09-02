@@ -455,6 +455,62 @@ footer#site-footer {
    glyph is off the table too). A wrapper is genuinely required here: ::before does not render
    inside a replaced <input> element, so the "⌕" has to live on a positioned sibling wrapper
    (task-2-brief.md's explicit "index.html only if a wrapper class is needed" case). */
+.directory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.55rem;
+  margin: 0.75rem 0 0.85rem;
+}
+
+.directory-summary-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  min-width: 0;
+}
+
+.directory-summary-value {
+  display: block;
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.directory-summary-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.25;
+  margin-top: 0.25rem;
+}
+
+.directory-chambers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 0.9rem;
+}
+
+.directory-chamber-button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.32rem 0.75rem;
+  font-size: 12.5px;
+}
+
+.directory-chamber-button[aria-pressed="true"] {
+  background: var(--surface);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.directory-chamber-button:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
 .directory-search {
   position: relative;
   max-width: 28rem;
@@ -473,6 +529,12 @@ footer#site-footer {
 
 .directory-search input {
   padding-left: 1.9rem;
+}
+
+.directory-count {
+  color: var(--faint);
+  font-size: 12px;
+  margin: 0.55rem 0 0.35rem;
 }
 
 .directory-list {
@@ -533,6 +595,22 @@ footer#site-footer {
 .directory-since::before {
   content: "●";
   font-size: 0.75em;
+}
+
+.directory-show-more {
+  display: block;
+  width: 100%;
+  margin-top: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.55rem 0.75rem;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.directory-show-more:hover {
+  border-color: var(--accent);
 }
 
 .reps-as-of {

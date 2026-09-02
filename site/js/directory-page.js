@@ -171,6 +171,45 @@ export function filterDirectory(entries, queryText) {
 // Splits the already-sorted entry list into the two directory views (2026-08-06 spec §2). Pure,
 // order-preserving; an entry that cannot prove service (servingNow falsy/absent) is never
 // promoted into "Serving now." Never throws on malformed input.
+const DIRECTORY_CHAMBERS = ['U.S. Senate', 'U.S. House', 'MO Senate', 'MO House'];
+const DIRECTORY_INITIAL_LIMIT = 24;
+const DIRECTORY_LIMIT_STEP = 24;
+
+export function summarizeDirectory(entries) {
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  const summary = {
+    total: list.length,
+    servingNow: 0,
+    past: 0,
+    chambers: Object.fromEntries(DIRECTORY_CHAMBERS.map((label) => [label, 0])),
+  };
+  for (const entry of list) {
+    if (entry.servingNow) summary.servingNow += 1;
+    else summary.past += 1;
+    if (entry.chamber && Object.hasOwn(summary.chambers, entry.chamber)) {
+      summary.chambers[entry.chamber] += 1;
+    }
+  }
+  return summary;
+}
+
+export function filterDirectoryByChamber(entries, chamber) {
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  if (!chamber || chamber === 'all') return list;
+  return list.filter((entry) => entry.chamber === chamber);
+}
+
+export function pageDirectory(entries, limit = DIRECTORY_INITIAL_LIMIT) {
+  const list = Array.isArray(entries) ? entries : [];
+  const count = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DIRECTORY_INITIAL_LIMIT);
+  return {
+    visible: list.slice(0, count),
+    total: list.length,
+    showing: Math.min(count, list.length),
+    hasMore: list.length > count,
+  };
+}
+
 export function partitionDirectory(entries) {
   const servingNow = [];
   const past = [];
@@ -235,6 +274,54 @@ function renderDirectoryList(container, entries) {
     ul.appendChild(li);
   }
   container.appendChild(ul);
+}
+
+function renderDirectorySummary(container, summary) {
+  if (!container) return;
+  clearChildren(container);
+  const items = [
+    ['Total', summary.total],
+    ['Serving now', summary.servingNow],
+    ['Past members', summary.past],
+    ...DIRECTORY_CHAMBERS.map((label) => [label, summary.chambers[label] || 0]),
+  ];
+  for (const [label, value] of items) {
+    const item = el('div', { class: 'directory-summary-item' });
+    item.appendChild(el('span', { class: 'directory-summary-value mono' }, value));
+    item.appendChild(el('span', { class: 'directory-summary-label' }, label));
+    container.appendChild(item);
+  }
+}
+
+function renderDirectoryChamberControls(container, activeChamber, onSelect) {
+  if (!container) return;
+  clearChildren(container);
+  const buttons = [['all', 'All chambers'], ...DIRECTORY_CHAMBERS.map((label) => [label, label])];
+  for (const [value, label] of buttons) {
+    const button = el('button', { class: 'directory-chamber-button' }, label);
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(value === activeChamber));
+    button.addEventListener('click', () => onSelect(value));
+    container.appendChild(button);
+  }
+}
+
+function renderDirectoryCount(container, {
+  showing, total, activeChamber, query,
+}) {
+  if (!container) return;
+  const parts = [];
+  if (activeChamber && activeChamber !== 'all') parts.push(activeChamber);
+  if (query) parts.push(`matching "${query}"`);
+  const qualifier = parts.length > 0 ? ` ${parts.join(', ')},` : '';
+  container.textContent = `Showing ${showing} of ${total}${qualifier} sorted by name.`;
+}
+
+function renderShowMoreButton(container, onClick) {
+  const button = el('button', { class: 'directory-show-more' }, 'Show more');
+  button.type = 'button';
+  button.addEventListener('click', onClick);
+  container.appendChild(button);
 }
 
 const SEAT_LABELS = {
@@ -517,10 +604,13 @@ const VIEW_EMPTY_MESSAGE = {
 };
 
 function wireDirectoryView({
-  servingButton, pastButton, filterInput, container, partitions,
+  servingButton, pastButton, filterInput, container, summaryContainer, chamberContainer,
+  countContainer, entries, partitions,
 }) {
   if (!container) return;
-  const state = { activeView: 'serving' };
+  const state = { activeView: 'serving', activeChamber: 'all', limit: DIRECTORY_INITIAL_LIMIT };
+
+  renderDirectorySummary(summaryContainer, summarizeDirectory(entries));
 
   if (servingButton) servingButton.textContent = `Serving now (${partitions.servingNow.length})`;
   if (pastButton) pastButton.textContent = `Past members (${partitions.past.length})`;
@@ -528,19 +618,49 @@ function wireDirectoryView({
   const render = () => {
     if (servingButton) servingButton.setAttribute('aria-pressed', String(state.activeView === 'serving'));
     if (pastButton) pastButton.setAttribute('aria-pressed', String(state.activeView === 'past'));
+    renderDirectoryChamberControls(chamberContainer, state.activeChamber, (value) => {
+      state.activeChamber = value;
+      state.limit = DIRECTORY_INITIAL_LIMIT;
+      render();
+    });
+    const query = filterInput ? filterInput.value : '';
     const activeEntries = state.activeView === 'serving' ? partitions.servingNow : partitions.past;
-    const filtered = filterDirectory(activeEntries, filterInput ? filterInput.value : '');
-    if (filtered.length === 0) {
+    const filtered = filterDirectory(filterDirectoryByChamber(activeEntries, state.activeChamber), query);
+    const page = pageDirectory(filtered, state.limit);
+    renderDirectoryCount(countContainer, {
+      showing: page.showing,
+      total: page.total,
+      activeChamber: state.activeChamber,
+      query: String(query || '').trim(),
+    });
+    if (page.total === 0) {
       sectionState(container, { state: 'empty', message: VIEW_EMPTY_MESSAGE[state.activeView] });
     } else {
       sectionState(container, { state: 'ready' });
-      renderDirectoryList(container, filtered);
+      renderDirectoryList(container, page.visible);
+      if (page.hasMore) {
+        renderShowMoreButton(container, () => {
+          state.limit += DIRECTORY_LIMIT_STEP;
+          render();
+        });
+      }
     }
   };
 
-  if (servingButton) servingButton.addEventListener('click', () => { state.activeView = 'serving'; render(); });
-  if (pastButton) pastButton.addEventListener('click', () => { state.activeView = 'past'; render(); });
-  if (filterInput) filterInput.addEventListener('input', render);
+  if (servingButton) servingButton.addEventListener('click', () => {
+    state.activeView = 'serving';
+    state.limit = DIRECTORY_INITIAL_LIMIT;
+    render();
+  });
+  if (pastButton) pastButton.addEventListener('click', () => {
+    state.activeView = 'past';
+    state.limit = DIRECTORY_INITIAL_LIMIT;
+    render();
+  });
+  if (filterInput) filterInput.addEventListener('input', () => {
+    state.limit = DIRECTORY_INITIAL_LIMIT;
+    render();
+  });
   render();
 }
 
@@ -549,7 +669,8 @@ function wireDirectoryView({
 // address form's next submit too) without ever re-running bootstrapDirectoryPage as a whole
 // (which would re-attach a second submit listener to the same, already-wired form element).
 async function loadAndRenderDirectory(dataState, {
-  directoryListContainer, filterInput, servingButton, pastButton,
+  directoryListContainer, filterInput, servingButton, pastButton, summaryContainer,
+  chamberContainer, countContainer,
 }) {
   sectionState(directoryListContainer, { state: 'loading' });
   let entries;
@@ -562,7 +683,8 @@ async function loadAndRenderDirectory(dataState, {
       onRetry: () => {
         dataState.promise = loadDirectoryData();
         loadAndRenderDirectory(dataState, {
-          directoryListContainer, filterInput, servingButton, pastButton,
+          directoryListContainer, filterInput, servingButton, pastButton, summaryContainer,
+          chamberContainer, countContainer,
         }).catch(() => {});
       },
     });
@@ -574,7 +696,15 @@ async function loadAndRenderDirectory(dataState, {
     return;
   }
   wireDirectoryView({
-    servingButton, pastButton, filterInput, container: directoryListContainer, partitions: partitionDirectory(entries),
+    servingButton,
+    pastButton,
+    filterInput,
+    container: directoryListContainer,
+    summaryContainer,
+    chamberContainer,
+    countContainer,
+    entries,
+    partitions: partitionDirectory(entries),
   });
 }
 
@@ -595,6 +725,9 @@ export async function bootstrapDirectoryPage() {
   const filterInput = document.getElementById('directory-filter');
   const servingButton = document.getElementById('directory-view-serving');
   const pastButton = document.getElementById('directory-view-past');
+  const summaryContainer = document.getElementById('directory-summary');
+  const chamberContainer = document.getElementById('directory-chambers');
+  const countContainer = document.getElementById('directory-count');
   const addressForm = document.getElementById('address-form');
   const addressInput = document.getElementById('address-input');
   const addressResults = document.getElementById('address-results');
@@ -610,6 +743,12 @@ export async function bootstrapDirectoryPage() {
   });
 
   await loadAndRenderDirectory(dataState, {
-    directoryListContainer, filterInput, servingButton, pastButton,
+    directoryListContainer,
+    filterInput,
+    servingButton,
+    pastButton,
+    summaryContainer,
+    chamberContainer,
+    countContainer,
   });
 }

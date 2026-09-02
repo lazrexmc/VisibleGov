@@ -7,7 +7,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDirectoryEntries, filterDirectory, partitionDirectory } from '../site/js/directory-page.js';
+import {
+  buildDirectoryEntries,
+  filterDirectory,
+  filterDirectoryByChamber,
+  pageDirectory,
+  partitionDirectory,
+  summarizeDirectory,
+} from '../site/js/directory-page.js';
 
 // ============================================================================
 // buildDirectoryEntries — fetchAllRows over legislators+persons+terms, grouped by person_id
@@ -269,6 +276,47 @@ test('filterDirectory: no matches -> empty array, never throws', () => {
 test('filterDirectory: never throws on malformed entries/queryText', () => {
   assert.doesNotThrow(() => filterDirectory(null, 'x'));
   assert.doesNotThrow(() => filterDirectory([{ }], 'x'));
+});
+
+test('summarizeDirectory: totals the directory and chamber buckets without dropping unknown rows', () => {
+  const summary = summarizeDirectory([
+    { chamber: 'U.S. Senate', servingNow: true },
+    { chamber: 'U.S. House', servingNow: true },
+    { chamber: 'MO House', servingNow: false },
+    { chamber: null, servingNow: false },
+  ]);
+  assert.equal(summary.total, 4);
+  assert.equal(summary.servingNow, 2);
+  assert.equal(summary.past, 2);
+  assert.equal(summary.chambers['U.S. Senate'], 1);
+  assert.equal(summary.chambers['U.S. House'], 1);
+  assert.equal(summary.chambers['MO Senate'], 0);
+  assert.equal(summary.chambers['MO House'], 1);
+});
+
+test('filterDirectoryByChamber: narrows to the chosen chamber, while all/empty returns every row', () => {
+  const entries = [
+    { key: 'sen', chamber: 'U.S. Senate' },
+    { key: 'house', chamber: 'MO House' },
+    { key: 'none', chamber: null },
+  ];
+  assert.deepEqual(filterDirectoryByChamber(entries, 'MO House').map((e) => e.key), ['house']);
+  assert.deepEqual(filterDirectoryByChamber(entries, 'all').map((e) => e.key), ['sen', 'house', 'none']);
+  assert.deepEqual(filterDirectoryByChamber(entries, null).map((e) => e.key), ['sen', 'house', 'none']);
+});
+
+test('pageDirectory: returns a bounded slice plus an honest hasMore flag', () => {
+  const entries = Array.from({ length: 30 }, (_, i) => ({ key: String(i) }));
+  const firstPage = pageDirectory(entries, 24);
+  assert.equal(firstPage.visible.length, 24);
+  assert.equal(firstPage.showing, 24);
+  assert.equal(firstPage.total, 30);
+  assert.equal(firstPage.hasMore, true);
+
+  const fullPage = pageDirectory(entries, 48);
+  assert.equal(fullPage.visible.length, 30);
+  assert.equal(fullPage.showing, 30);
+  assert.equal(fullPage.hasMore, false);
 });
 
 // ---- servingNow / sinceYear (Serving now / Past members split, 2026-08-06 spec) ----
