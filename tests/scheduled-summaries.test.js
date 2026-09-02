@@ -5,6 +5,7 @@ import {
   currentWeekKey, summarizeWeekSpend, tickAllowance, sortQueueRecencyFirst, computeDraftOnly,
   assembleTick, estimateBillCostUsd, runTick,
 } from '../scripts/scheduled-summaries.js';
+import { PRICES_VERIFIED_THROUGH } from '../src/lib/billed-summary-chain.js';
 
 test('caps: constants match the spec', () => {
   assert.equal(WEEKLY_CAP_USD, 5.00);
@@ -469,4 +470,32 @@ test('runTick: lock not acquired exits quietly without touching anything', async
   const report = await runTick(deps);
   assert.equal(report.outcome, 'already-running');
   assert.equal(calls.closed.length, 0);
+});
+
+// Regression, 2026-09-02. The price-expiry guard (7e614ea) read `new Date()` inside a function
+// whose whole design is clock-injectable, so on 2026-09-01 ten runTick tests went red for a reason
+// none of them was about. A guard that reaches around dependency injection to the wall clock makes
+// every test of the code it guards depend on the day it is run. These two pin the injection itself,
+// not the outcome on any particular date.
+test('runTick: the price-expiry guard reads the INJECTED clock, not the wall clock', async () => {
+  const expired = new Date(`${PRICES_VERIFIED_THROUGH}T00:00:00Z`);
+  expired.setUTCDate(expired.getUTCDate() + 1);
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'b1', identifier: 'HB 1', bill_text_hash: 'h1' }],
+    texts: { b1: { bill_id: 'b1', content: 'text', content_hash: 'h1' } },
+    deps: { now: () => expired },
+  });
+  const report = await runTick(deps);
+  assert.equal(report.outcome, 'skipped-prices-unverified');
+  assert.match(report.detail, /price table unverified/);
+  // The whole point of skipping BEFORE openRun: no run row to strand, nothing spent.
+  assert.equal(calls.closed.length, 0);
+  assert.equal(calls.records.length, 0);
+});
+
+test('runTick: an in-window injected clock does not trip the price guard', async () => {
+  const inWindow = new Date(`${PRICES_VERIFIED_THROUGH}T00:00:00Z`);
+  const { deps } = fakeDeps({ deps: { now: () => inWindow } });
+  const report = await runTick(deps);
+  assert.notEqual(report.outcome, 'skipped-prices-unverified');
 });

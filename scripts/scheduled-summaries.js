@@ -341,8 +341,13 @@ async function runTickLocked(deps) {
   // 'running' row that the next tick's ledger read counts as a FULL per-tick spend — so an expired
   // table would quietly eat the weekly cap and trip the stranded-run detector every morning. A
   // stale price is a reason to do nothing, which costs nothing and says so.
+  // `now` is the tick's injected clock (deps.now(), read at :255). Using it rather than a fresh
+  // `new Date()` is the whole point: this function is clock-injectable by design, and a guard that
+  // reaches around that to the real clock makes every test of it depend on the day it is run —
+  // which is exactly what happened, ten runTick tests going red on 2026-09-01 for a reason that
+  // had nothing to do with what they assert.
   try {
-    assertPricesFresh();
+    assertPricesFresh(now);
   } catch (err) {
     return {
       outcome: 'skipped-prices-unverified',
@@ -355,7 +360,9 @@ async function runTickLocked(deps) {
   }
 
   const runId = await deps.openRunFn();
-  const tracker = createCostTracker();
+  // Same injected clock as the guard above, for the same reason: createCostTracker asserts price
+  // freshness too, and left to `new Date()` it makes every test that spends depend on the calendar.
+  const tracker = createCostTracker({ now });
 
   const freshResults = [];
   const conversionResults = [];
