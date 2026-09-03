@@ -84,6 +84,8 @@ with offset/limit or jump by grep.
 | 59 | 08-30 | A fixture built by the code under test proves the round-trip, not the format |
 | 60 | 09-02 | Making a function clock-sensitive obliges EVERY caller; documenting a hazard is not finding its instances |
 | 61 | 09-02 | With several agents in one repo the newest visible change is the cheapest suspect and usually wrong |
+| 62 | 09-03 | Repeated identical failure is evidence about the sampler, not the subject; park the deterministic, retry the stochastic |
+| 63 | 09-03 | A string that looks like a fact is not a measurement; a claim about the future can only be probed |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1626,4 +1628,53 @@ tree.
 The corollary for a shared repo: **the cost of a wrong attribution is not just lost time, it is
 reverting someone else's correct work** and, worse, teaching the next session that their code was
 the problem.
+
+## Lesson 62 - repeated identical failure is evidence about the sampler, not about the subject (2026-09-03)
+
+`HB 903` was rejected four consecutive times with a byte-identical message: the completeness
+checker's two blind runs disagreed about what was in the bill, so the gate refused to publish on a
+verdict it could not trust. Four identical failures reads as a structural property of the bill, and
+that is what I concluded. **I recommended parking it, drafted the SQL, and put it to Lance.** On the
+fifth attempt it published. Same bill, same text, same gates.
+
+Withdrawn, and then the discriminator was tested properly. On 2026-09-03 a re-author wave ran six
+drafts, **four of which had already failed two passes each** - the closest thing this project had to
+genuinely stuck work. **All six published.** Under the auto-park rule I had proposed, all six would
+have been written off as structurally stuck.
+
+**The rule: park what fails for a reason that cannot change between runs; retry what fails because
+two independent samplers disagreed.** The 31 legitimately parked bills fail deterministically - an
+emergency clause with no operative text, a short-title-only bill - and a fourth attempt genuinely
+is waste because nothing varies. A blind-run disagreement is a coin that landed the same way several
+times, and the count of repeats says nothing about the next flip.
+
+**The trap is that both look identical from the outside: an error string repeated N times.** The
+question that separates them is not "how many times has this failed" but **"is there anything in
+this pipeline that could return a different answer on the next run" -** and where two independently
+sampled model runs must agree, the answer is always yes. Retry counts are the wrong instrument for
+stochastic gates, and a three-strike rule aimed at one class silently destroys the other.
+
+## Lesson 63 - a string that looks like a fact is not a measurement (2026-09-03)
+
+A wave died with `You've hit your weekly limit · resets Sep 4, 12pm (America/Chicago)`. That
+sentence went into `TODO.md`'s RESUME block, into `docs/EXPECTED_FAILURES.md`, and into three
+messages to peer sessions, as fact, without ever being tested. **It was wrong by about 29 hours.**
+The limit had already reset; a 6-bill probe ran 26 agents with zero errors and published 6 of 6.
+The lane sat idle for two days on the strength of a sentence nobody probed.
+
+**Why it beat every instrument here, which is the part worth keeping: it was a DATE FORMATTED LIKE
+DATA.** The claim checkers in this repo verify counts, paths and symbols against the filesystem and
+the live database. A provider's assertion about its own future state has no filesystem to check
+against, so it passes through every gate untouched and arrives in a document looking exactly like a
+measured figure.
+
+**A claim about the future cannot be verified in source. It can only be probed.** So the question is
+never "where is this written" but **"what would it cost to try it once, and why have I not?"** Here:
+eight minutes against two days.
+
+**And it propagates further than the document it lands in.** RapidForge repeated it to Lance twice
+as fact - a second-hand copy of an unprobed claim - and its keepalive cron was written with a rule
+to SUPPRESS stall reports until that date, so a false premise had quietly rigged a monitoring
+instrument to hide a real signal for another 28 hours. The instrument was correct; its premise was
+imported.
 

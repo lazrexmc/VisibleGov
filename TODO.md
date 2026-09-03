@@ -19,13 +19,28 @@
 | parked (structural) | 31 |
 | last summary published | 2026-09-01 |
 
-### THE ONE THING BLOCKING THE DRAIN
+### THE DRAIN IS RUNNING AGAIN (resumed 2026-09-03 07:32 CDT)
 
-**The subscription weekly limit is exhausted. It resets 2026-09-04 at 12:00 CDT.** The final wave
-of 2026-09-01 died with "You've hit your weekly limit": 20 of 34 agents errored, then ten pipeline
-stages died downstream on `null is not an object (evaluating 'prov.key_provisions')` - the same
-rate-limit failure wearing a different mask, because the provisions agent returned nothing and the
-pipeline read the null. **Relaunching before the reset cannot work.** Nothing is running.
+**Nothing is blocking it.** The subscription weekly limit that stopped the lane on 2026-09-01 has
+reset. It was NOT blocked until 2026-09-04 as this block previously claimed - see the retraction
+below.
+
+**~~The subscription weekly limit is exhausted. It resets 2026-09-04 at 12:00 CDT.~~ RETRACTED
+2026-09-03 07:32 CDT, quoted verbatim above so the record shows what was claimed.** That date came
+from a rate-limit error string and was never probed. It was wrong by roughly 29 hours, and in the
+meantime it was copied into `docs/EXPECTED_FAILURES.md`, into three messages to peer sessions, and
+- via RapidForge repeating it to Lance as fact - into that session's keepalive cron, which was
+consequently rigged to SUPPRESS stall reports until a moment that did not matter. **A string that
+looks like a fact is not a measurement, and a claim about the future cannot be verified in source,
+only probed.** The right question was never "where is this written" but "what would it cost to try
+it once" - eight minutes, against two days of the lane sitting idle.
+
+**How the wave died on 09-01, which remains accurate:** 20 of 34 agents errored with
+`You've hit your weekly limit`, then ten pipeline stages died downstream on
+`null is not an object (evaluating 'prov.key_provisions')` - the same rate-limit failure wearing a
+different mask, because the provisions agent returned nothing and the pipeline read the null.
+
+**If a wave fails this way again: probe with a small wave before believing any stated reset time.**
 
 ### WHAT THE OVERNIGHT DRAIN OF 2026-08-31/09-01 ESTABLISHED
 
