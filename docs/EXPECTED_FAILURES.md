@@ -55,7 +55,35 @@ any message other than `skipped-prices-unverified`, it is NOT this entry.
 
 ---
 
-## 2. Not a failure, but it will look like one: the $0 wave lane going idle
+## 2. CURRENTLY PAUSED BY DECISION: the $0 summary wave lane
+
+**Status: PAUSED. Decided by Lance. Effective 2026-09-03 08:06 CDT.** Reason: other projects on
+this machine should get the token budget for now. **Nothing is broken.** The lane ran successfully
+the same morning - 6 of 6 published at 07:32 - and stopped because it was told to.
+
+**This entry exists because a pause that is a DECISION and a pause that is a FAULT are
+indistinguishable from the outside, and only one of them should be undone on initiative.** A
+session finding an idle lane cannot tell them apart; restarting a deliberate pause spends budget
+the operator deliberately redirected, and mistaking a real stall for a pause means the work stops
+silently. The decider and the DATE are both recorded above on purpose - a pause with a decider and
+no date is present-but-not-true, since a three-week-old pause and a three-hour-old one are
+different facts that look identical.
+
+**A peer session's monitoring instrument reads THIS FILE and `TODO.md`'s RESUME block to decide
+whether VisibleGov's silence is expected, and stays quiet if either says paused.** So this entry is
+load-bearing outside the repo: while the pause lasts it must stay here. If the drain resumes, this
+section goes back to being the generic note below.
+
+**To resume:** the numbered procedure is in `TODO.md`'s RESUME block. Step 1 there is "confirm
+Lance wants it resumed," because this is his decision and not a technical state to undo.
+
+**While paused, `npm run status` will print `LANE IDLE: the $0 wave lane needs a session to run it`
+once the last publish is more than two days old. That warning is CORRECT about the fact and WRONG
+about the implication - it reads as a fault and this is a decision.** The warning is not suppressed
+deliberately: silencing it would mean a genuine stall after the pause ends looks identical to the
+pause, which is the same trap one layer down. Read it against this entry.
+
+## The generic note, which applies whenever the lane is idle for any reason
 
 `npm run status` prints `last summary published ... (Nd ago)` and warns `LANE IDLE` past two days.
 **That warning is not an error and nothing is broken when it appears.**
