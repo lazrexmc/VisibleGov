@@ -6650,3 +6650,34 @@ lesson 14).
   ($0.665 assumed against $0.2035 actual per published bill). It is a real win on a lane its owner
   has decided not to use, and leaving it in a backlog would have read as owed to the next session.
   Wave 2 launched immediately after recording wave 1.
+- **2026-09-02 16:30-22:00 CDT - a red suite blamed on the wrong change, and two lessons.**
+  Lance asked for a folder review because Codex might have left work uncommitted. It had: a
+  directory summary strip, chamber filter buttons, a count line and paging at 24 - five files, 359
+  lines, with 129 lines of its own tests. **The suite was red, 10 failures, and the obvious
+  inference was available, cheap and wrong.** `git status` showed only Codex's five files. Every
+  failure was in `runTick`, which Codex never touched.
+  **The cause was my own price-expiry guard from `7e614ea`, firing on the calendar three days after
+  it was committed.** It called `assertPricesFresh()` and `createCostTracker()` with no arguments,
+  so both read the wall clock - inside a function whose entire design is dependency-injected and
+  whose tests already pass `now: () => new Date('2026-08-15T12:00:00Z')`. The table expired 08-31;
+  on 09-02 every test that spends began returning `skipped-prices-unverified`. **That commit's own
+  message explained at length why the suite must not go red the day the table lapses, and then
+  pinned one of the two test files that exercise the guard.** Fixed at `3ead8b0`: both call sites
+  use the injected clock, plus two regression tests that pin the INJECTION rather than an outcome
+  on a date, so they stay meaningful whatever day they run.
+  Codex's feature was reviewed and committed separately at `286229c`. Its four hardcoded chamber
+  labels match CHAMBER_LABELS exactly, so the filters address real values rather than silently
+  matching nothing, and an unrecognised jurisdiction still appears under "All chambers" and in the
+  total - it simply gets no button.
+  **PLAYBOOK 60 and 61** (`f713634`): making a function clock-sensitive changes the contract of
+  every caller, and documenting a hazard is not evidence of having found its instances - the comment
+  reads as coverage. And: with several agents writing to one repo the newest visible change is the
+  cheapest suspect and usually the wrong one, so date a red suite against when the suspect landed,
+  because a time-bomb guard breaks with no diff to point at. **RapidForge reached the first lesson
+  independently within the hour, from the other side** - it had verified that guard on its first day
+  by inducing the failure, which is correct practice, but induced the FUNCTION rather than the
+  system calling it.
+  **Also verified and put to Lance: assets carry Cache-Control max-age=14400.** Four hours, from
+  Cloudflare Pages' default rather than from `site/_headers`, with no content-hashed filenames. He
+  hit it the same day and believed a shipped feature had not shipped. Not fixed - the honest fix is
+  two parts, because `scripts/serve-site.js` parses `_headers` and applies only the `/*` block.
