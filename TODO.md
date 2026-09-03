@@ -19,28 +19,46 @@
 | parked (structural) | 31 |
 | last summary published | 2026-09-01 |
 
-### THE DRAIN IS RUNNING AGAIN (resumed 2026-09-03 07:32 CDT)
+### THE DRAIN IS PAUSED (2026-09-03 08:06 CDT) - DELIBERATE, NOT BROKEN
 
-**Nothing is blocking it.** The subscription weekly limit that stopped the lane on 2026-09-01 has
-reset. It was NOT blocked until 2026-09-04 as this block previously claimed - see the retraction
-below.
+**Lance paused it so other projects on this machine get the token budget.** Relayed through
+duarte-izer-96, 2026-09-03: *"pause visiblegov's draining runs for now, let's have the other
+projects get token usage instead."* Nothing is wrong with the lane. It ran successfully this
+morning and stopped because it was told to.
 
-**~~The subscription weekly limit is exhausted. It resets 2026-09-04 at 12:00 CDT.~~ RETRACTED
-2026-09-03 07:32 CDT, quoted verbatim above so the record shows what was claimed.** That date came
-from a rate-limit error string and was never probed. It was wrong by roughly 29 hours, and in the
-meantime it was copied into `docs/EXPECTED_FAILURES.md`, into three messages to peer sessions, and
-- via RapidForge repeating it to Lance as fact - into that session's keepalive cron, which was
-consequently rigged to SUPPRESS stall reports until a moment that did not matter. **A string that
-looks like a fact is not a measurement, and a claim about the future cannot be verified in source,
-only probed.** The right question was never "where is this written" but "what would it cost to try
-it once" - eight minutes, against two days of the lane sitting idle.
+**What "paused" means here, precisely: no new summary waves are being launched.** There is no
+scheduler, no cron and no timer to switch off for this lane - it has never had one. The $0 subagent
+wave lane IS a Claude session, so it runs only when a session runs it, and it stops by a session
+choosing not to launch the next wave. **Nothing needs to be disabled and nothing was.**
 
-**How the wave died on 09-01, which remains accurate:** 20 of 34 agents errored with
-`You've hit your weekly limit`, then ten pipeline stages died downstream on
-`null is not an object (evaluating 'prov.key_provisions')` - the same rate-limit failure wearing a
-different mask, because the provisions agent returned nothing and the pipeline read the null.
+**HOW TO RESUME - the whole procedure, for a session that does not have this exchange:**
 
-**If a wave fails this way again: probe with a small wave before believing any stated reset time.**
+1. Confirm Lance wants it resumed. This pause is his, not a technical state.
+2. Build a wave. Prefer whichever lane is converting better on current evidence:
+   - re-author (usually better): `node --env-file=.env scripts/build-drain-wave.mjs W<N> 12 --pointer`
+     writes `.superpowers/artifacts/wave3/wave-W<N>-args.json`
+   - fresh: `node --env-file=.env scripts/export-summary-wave.mjs 12`
+     writes `.superpowers/artifacts/wave3/manifest.json`
+3. Launch: `Workflow({scriptPath: 'F:\VisibleGov\.claude\workflows\summary-wave.js',
+   args: {manifest_file: '<the file step 2 wrote>'}})`. Launch by scriptPath, never by name
+   (PLAYBOOK 47).
+4. When it completes, record from `.superpowers/artifacts/wave3/records-wave.json`:
+   `node --env-file=.env src/cli/summary-queue.js record --file <that> --dry-run`, inspect the
+   counts, then re-run without `--dry-run`. **Add `--replace-drafts` for a re-author wave** or the
+   same-hash draft classifies as `alreadySummarized` and nothing is written.
+5. Repeat. `docs/RUNBOOK_SUMMARY_WAVES.md` has the full detail.
+
+**Last wave before the pause:** W26, 12 re-author drafts, was still finishing when the pause
+landed. It was allowed to complete rather than killed - 50 of its 51 agents were already done, so
+stopping it would have discarded roughly 4M tokens of finished authoring and verification for no
+output. **If `records-wave.json` is newer than the last recorded wave, step 4 above still needs
+running for it.**
+
+**Not paused, because they are neither this lane nor token-spending:** the Windows task
+`VisibleGov Scheduled Ingestion` (every 15 min, no LLM calls) keeps running, and
+`VisibleGov Scheduled Summaries` keeps failing daily at 06:00 with `skipped-prices-unverified`,
+which is declared in `docs/EXPECTED_FAILURES.md`. **Both are Windows Scheduled Tasks and therefore
+Lance's hands - an agent never runs schtasks.**
 
 ### WHAT THE OVERNIGHT DRAIN OF 2026-08-31/09-01 ESTABLISHED
 
