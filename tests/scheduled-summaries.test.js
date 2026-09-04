@@ -491,6 +491,11 @@ test('runTick: the price-expiry guard reads the INJECTED clock, not the wall clo
   // The whole point of skipping BEFORE openRun: no run row to strand, nothing spent.
   assert.equal(calls.closed.length, 0);
   assert.equal(calls.records.length, 0);
+  // ...but it MUST still leave a trace. Skipping before openRun writes no run row, so without a
+  // log line the tick is indistinguishable from a tick that never ran at all - which is exactly
+  // what happened between 2026-08-31 and 09-04, while the docs asserted a daily skip that no
+  // artifact could confirm. An expected absence with no evidence disarms the check for a real one.
+  assert.equal(calls.logs.filter((l) => /prices unverified/.test(l)).length, 1);
 });
 
 test('runTick: an in-window injected clock does not trip the price guard', async () => {

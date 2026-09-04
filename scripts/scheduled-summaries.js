@@ -349,6 +349,14 @@ async function runTickLocked(deps) {
   try {
     assertPricesFresh(now);
   } catch (err) {
+    // LOG IT. Skipping before openRun means no run row, which was deliberate - but without a log
+    // line the tick leaves NO trace anywhere, and then "the task ran and skipped cleanly" is
+    // indistinguishable from "the task did not run at all". That is not hypothetical: this guard
+    // shipped 2026-08-31 and by 09-04 `ingestion_runs` and this scheduler's own log directory both
+    // stopped at 08-31, while docs/EXPECTED_FAILURES.md asserted a daily skip that nothing could
+    // confirm. An expected absence that produces no evidence disarms the check meant to tell it
+    // from a real one.
+    deps.appendLog(`prices unverified - skipping this tick without opening a run row: ${err.message}`);
     return {
       outcome: 'skipped-prices-unverified',
       detail: err.message,

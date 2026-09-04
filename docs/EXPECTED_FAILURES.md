@@ -48,10 +48,24 @@ published pricing, correct any that moved, then move `PRICES_VERIFIED_THROUGH` f
 date alone is the one edit that makes this worse than the comment it replaced**, because it
 re-arms the guard while leaving the prices wrong.
 
-**How to tell this from a real failure.** This one reports `skipped-prices-unverified` and spends
-$0. A genuine failure looks different: an exhausted credit balance surfaces as a billing error from
-the API, and anything else leaves a run row with a different detail string. If the task fails with
-any message other than `skipped-prices-unverified`, it is NOT this entry.
+**How to tell this from a real failure.** The tick appends a line containing `prices unverified`
+to that day's file under `.superpowers/artifacts/summary-scheduler-logs/`. **Check there, NOT
+`ingestion_runs`** - the skip happens before `openRun`, deliberately, so it writes no run row at
+all.
+
+**CORRECTED 2026-09-04.** This section previously said to tell the two apart by the run row's
+detail string. **That was impossible: the declared failure produces no run row.** Between 08-31 and
+09-04 the summary scheduler left no trace of any kind - no run row and no log line - while this
+document asserted a daily skip that no artifact could confirm. A tick that ran and skipped was
+indistinguishable from a task that had been disabled, crashed at startup, or never fired. **An
+expected absence that produces no evidence disarms the very check meant to tell it from a real
+one.** The skip path now logs, and a test asserts it. **Before 2026-09-04 there is no evidence
+either way and none should be inferred.**
+
+A genuine failure still looks different: an exhausted credit balance surfaces as a billing error
+from the API, and anything else leaves a run row, which this entry never does. **A day with no
+`prices unverified` line and no run row means the task did not run - that is a real finding, not
+this entry.**
 
 ---
 
