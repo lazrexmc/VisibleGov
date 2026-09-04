@@ -59,10 +59,18 @@ file on disk was the PREVIOUS wave's - six envelopes, hours old - so an existenc
 confirmed the lie. Caught by reading timestamp and contents against what that run should have
 produced. Recovered with `resumeFromRunId`, which re-attempted only the failed write. PLAYBOOK 64.
 
-**Cost correction, recorded because it was stated wrongly to Lance at the time:** the recovery was
-described as spending no new agent tokens on the basis that completed agents replay from cache.
-**The run reported 2,859,409 subagent tokens**, which is not consistent with a pure replay. Treat
-`resumeFromRunId` as potentially re-spending until someone measures it properly.
+**Cost correction, stated wrongly to Lance at the time and then MEASURED (2026-09-03 22:0x CDT).**
+The recovery was described as spending no new agent tokens because completed agents replay from
+cache. It reported 2,859,409 subagent tokens. Measured from agent transcript mtimes in the run's
+own directory: **51 transcripts from the original run, 38 NEW ones written during the resume, so 38
+of 51 agents re-ran live and only 13 replayed.** Two independent figures agree - 38/51 = 74.5% of
+agents, 2.86M/3.83M = 74.7% of the original cost.
+
+**So `resumeFromRunId` does NOT reliably replay from cache, and the prior datapoint at
+`PLAYBOOK_DELTA.md:908` (45 of 48 replayed, 3 ran live) is real but not general.** The difference
+between the two cases is unexplained and worth knowing before relying on either: that one resumed a
+job whose agents had merely stalled, this one resumed a job whose final step had ERRORED. **Budget a
+resume as a partial re-run until the discriminator is understood.**
 
 **Not paused, because they are neither this lane nor token-spending:** the Windows task
 `VisibleGov Scheduled Ingestion` (every 15 min, no LLM calls) keeps running, and
