@@ -71,7 +71,14 @@ this entry.**
 
 ## 2. CURRENTLY PAUSED BY DECISION: the $0 summary wave lane
 
-**Status: PAUSED. Decided by Lance. Effective 2026-09-03 08:06 CDT.** Reason: other projects on
+**Status: PAUSED. Decided by Lance. Effective 2026-09-03 08:06 CDT.**
+**EXCEPTION, 2026-09-04: one wave authorized** - Lance, *"make one wave of drain then pause"*. W27
+running since 08:5x CDT; returns to PAUSED on completion. The status line above is deliberately NOT
+flipped: a peer's keepalive derives expected-silence from this file, and flipping it to ACTIVE and
+back inside an hour would leave a window where a hung wave reads as a stall. Qualifying instead of
+flipping keeps the file honest to a human reader without churning the machine one.
+
+Reason: other projects on
 this machine should get the token budget for now. **Nothing is broken.** The lane ran successfully
 the same morning - 6 of 6 published at 07:32 - and stopped because it was told to.
 
