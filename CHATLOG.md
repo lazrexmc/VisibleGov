@@ -6681,3 +6681,37 @@ lesson 14).
   Cloudflare Pages' default rather than from `site/_headers`, with no content-hashed filenames. He
   hit it the same day and believed a shipped feature had not shipped. Not fixed - the honest fix is
   two parts, because `scripts/serve-site.js` parses `_headers` and applies only the `/*` block.
+- **2026-09-03 07:25-22:00 CDT - the quota that had already reset, the pause, and a success line that lied.**
+  **Three claims about system state were wrong today and all three were mine.**
+  **One: the drain was not blocked.** Two days of "nothing can run until 2026-09-04 12:00 CDT" came
+  from a rate-limit error string that was never probed. Lance said resume; a 6-bill probe ran 26
+  agents with zero errors and published **6 of 6** - and four of those six had already failed two
+  re-author passes each, which is the strongest confirmation yet of the park-versus-retry
+  discriminator. Under the auto-park rule proposed and withdrawn a day earlier, all six would have
+  been written off as structurally stuck. **Repeated identical failure is evidence about the
+  sampler, not the subject** (PLAYBOOK 62). The false date had propagated into three peer messages
+  and into RapidForge's keepalive rules, where it had quietly instructed that instrument to
+  SUPPRESS stall reports until a moment that did not matter (PLAYBOOK 63). duarte-izer-96 grepped
+  its own tree and found zero hits, which bounded the blast radius to two places by measurement
+  rather than by anyone's recollection.
+  **Two: Lance paused the drain** so other projects get the token budget, relayed through
+  duarte-izer-96 and confirmed directly - *"we should pause after the wave finishes, not mid run"*,
+  which was the call already made. W26 was mid-flight with 50 of 51 agents done; killing it would
+  have discarded ~3.8M tokens of finished work for zero output. The pause is declared in
+  `docs/EXPECTED_FAILURES.md` with **decider and date**, because a pause that is a DECISION and one
+  that is a FAULT are indistinguishable to whoever finds them and only one should be undone on
+  initiative. `LANE IDLE` was deliberately NOT suppressed: silencing it would make a real stall
+  after the pause indistinguishable from the pause itself. RapidForge rewrote its keepalive to
+  DERIVE that state from those two files each tick rather than store a belief about it.
+  **Three: W26's workflow reported success for a step that failed.** `{"wrote": ...,
+  "envelope_count": 12, "failed": 0}` in the same notification as `[write-records] failed: API
+  Error: 529 Overloaded`. Twelve bills sat unrecorded behind a green result line. **The file
+  existed** - it was the previous wave's, six envelopes, hours old - so the obvious fix, an
+  existence check, would have confirmed the lie. Caught by comparing timestamp and contents against
+  what that run should have produced. Recovered and recorded: 6 published, 6 flagged, **33.3%,
+  1,035 of 3,108**. PLAYBOOK 64, deposited with the stale-artifact detail because without it the
+  fix inherits the defect.
+  **And a fourth, owned rather than buried:** the recovery was described to Lance as spending no
+  new agent tokens, on the strength of the harness's description of `resumeFromRunId` rather than a
+  measurement. It reported 2,859,409 subagent tokens. **Stated as fact during a pause called
+  specifically to conserve budget** - the same failure as the quota date, twelve hours apart.

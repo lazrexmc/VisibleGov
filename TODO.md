@@ -48,11 +48,21 @@ choosing not to launch the next wave. **Nothing needs to be disabled and nothing
    same-hash draft classifies as `alreadySummarized` and nothing is written.
 5. Repeat. `docs/RUNBOOK_SUMMARY_WAVES.md` has the full detail.
 
-**Last wave before the pause:** W26, 12 re-author drafts, was still finishing when the pause
-landed. It was allowed to complete rather than killed - 50 of its 51 agents were already done, so
-stopping it would have discarded roughly 4M tokens of finished authoring and verification for no
-output. **If `records-wave.json` is newer than the last recorded wave, step 4 above still needs
-running for it.**
+**Last wave before the pause: W26, RECOVERED AND RECORDED 2026-09-03 21:52 CDT.** 6 published,
+6 flagged. Completion 33.1% -> 33.3%, 1,035 of 3,108. **Nothing is left unrecorded; there is no
+pending records file to chase.**
+
+It nearly was lost, and the reason is worth carrying. W26's completion notification reported
+`{"wrote": "...records-wave.json", "envelope_count": 12, "failed": 0}` while its own failures list
+carried `[write-records] failed: API Error: 529 Overloaded`. **The success line was false.** The
+file on disk was the PREVIOUS wave's - six envelopes, hours old - so an existence check would have
+confirmed the lie. Caught by reading timestamp and contents against what that run should have
+produced. Recovered with `resumeFromRunId`, which re-attempted only the failed write. PLAYBOOK 64.
+
+**Cost correction, recorded because it was stated wrongly to Lance at the time:** the recovery was
+described as spending no new agent tokens on the basis that completed agents replay from cache.
+**The run reported 2,859,409 subagent tokens**, which is not consistent with a pure replay. Treat
+`resumeFromRunId` as potentially re-spending until someone measures it properly.
 
 **Not paused, because they are neither this lane nor token-spending:** the Windows task
 `VisibleGov Scheduled Ingestion` (every 15 min, no LLM calls) keeps running, and
