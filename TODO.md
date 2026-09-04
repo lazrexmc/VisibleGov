@@ -48,7 +48,11 @@ choosing not to launch the next wave. **Nothing needs to be disabled and nothing
    same-hash draft classifies as `alreadySummarized` and nothing is written.
 5. Repeat. `docs/RUNBOOK_SUMMARY_WAVES.md` has the full detail.
 
-**Last wave before the pause: W26, RECOVERED AND RECORDED 2026-09-03 21:52 CDT.** 6 published,
+**Last wave: W27, 2026-09-04 09:23 CDT - one wave authorized by Lance, then paused again.** 11 of
+12 published, **33.7%, 1,046 of 3,108**, review backlog 40 -> 29. It emptied the re-author pool. The
+records file was verified by timestamp and contents before recording, per PLAYBOOK 64.
+
+**Before that: W26, RECOVERED AND RECORDED 2026-09-03 21:52 CDT.** 6 published,
 6 flagged. Completion 33.1% -> 33.3%, 1,035 of 3,108. **Nothing is left unrecorded; there is no
 pending records file to chase.**
 
