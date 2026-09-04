@@ -86,6 +86,7 @@ with offset/limit or jump by grep.
 | 61 | 09-02 | With several agents in one repo the newest visible change is the cheapest suspect and usually wrong |
 | 62 | 09-03 | Repeated identical failure is evidence about the sampler, not the subject; park the deterministic, retry the stochastic |
 | 63 | 09-03 | A string that looks like a fact is not a measurement; a claim about the future can only be probed |
+| 64 | 09-03 | A step's own report of its outcome is weakest evidence exactly when it is positive; check the artifact, and check it is THIS run's |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1677,4 +1678,42 @@ as fact - a second-hand copy of an unprobed claim - and its keepalive cron was w
 to SUPPRESS stall reports until that date, so a false premise had quietly rigged a monitoring
 instrument to hide a real signal for another 28 hours. The instrument was correct; its premise was
 imported.
+
+## Lesson 64 - a step's own report of its outcome is the weakest available evidence, and it is weakest precisely when it is positive (2026-09-03)
+
+Wave W26 finished and its completion notification carried both of these, in the same message:
+
+    result:   {"wrote": ".superpowers/artifacts/wave3/records-wave.json",
+               "envelope_count": 12, "failed": 0}
+    failures: [write-records] failed: API Error: 529 Overloaded
+
+**The summary asserted a successful write of 12 envelopes. The write had not happened.** Twelve
+bills - roughly 3.8M subagent tokens of completed authoring and adversarial verification - were
+sitting unrecorded behind a result line that read as clean. Nothing in the summary was hedged.
+
+**THE PART THAT DEFEATS THE OBVIOUS FIX, and the reason this entry is longer than the rule.**
+Anyone reading the above reaches for "verify the file exists." **The file existed.** It was the
+PREVIOUS wave's output - six envelopes, timestamped 07:39, containing bills published hours
+earlier. An existence check would have confirmed the lie and returned green. A stale artifact from
+a prior run is the likeliest thing an existence check cannot see, because the happy path and the
+failure path leave the same directory listing.
+
+**What actually caught it: reading the artifact's timestamp and contents against what THIS run
+should have produced.** Twelve envelopes expected, six found; today's wave expected, this morning's
+identifiers found. Both cheap, and neither is `ls`.
+
+**The general form, which is one altitude up from lesson 51's "a status word that never varies
+carries zero bits":** an adjacent-question check does not look broken, it looks like a check. `did
+the step return?` stands in for `did it write?`; `does the path exist?` stands in for `is the
+content real?`. **And the wrong answer is always the reassuring one**, which is why the class
+survives review - nobody investigates a green.
+
+RapidForge measured the same defect at a different altitude the same day: `verify_standard.py`
+decided required artifacts existed with `Path.exists()`, so **five zero-byte files satisfied five
+of the eight required artifacts** and a fleet-wide "artifacts missing" figure rested on presence
+alone. Fixed there with a third state - `stub` is neither `missing` nor `ok`. Two projects, two
+altitudes, one question substituted for its neighbour.
+
+**Rule: never accept a step's self-report of a WRITE. Read the artifact, and read it against what
+this run should have produced - identity and recency, not existence.**
 
