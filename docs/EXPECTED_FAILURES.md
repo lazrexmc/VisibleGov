@@ -43,7 +43,14 @@ running rather than disable it, and to revisit later. He is also routing summary
 Claude subscription rather than API credits, so the billed lane produces little either way - it
 published 1 to 4 a day against the free lane's peak of 204. Nothing is lost while this sits red.
 
-**Expiry condition - what clears it.** Re-check every model in `PRICES` against Anthropic's
+**NOT AN OPEN ITEM - dormant until funding returns (Lance, 2026-09-05).** *"Claude set the hard
+rule on pricing, we can disregard that for now until I get back to api credits."* Correct on both
+counts: the guard was Claude'''s own addition, not a policy of his, and with no API balance nothing
+can spend anyway, so a daily skip costs nothing. **Do not raise this at him as pending work.** It
+fails SAFE - refusing to spend rather than spending at prices that may have moved - and it re-arms
+by itself at the moment funding makes it matter again.
+
+**Expiry condition - what clears it, WHEN he is funded and not before.** Re-check every model in `PRICES` against Anthropic's
 published pricing, correct any that moved, then move `PRICES_VERIFIED_THROUGH` forward. **Moving the
 date alone is the one edit that makes this worse than the comment it replaced**, because it
 re-arms the guard while leaving the prices wrong.

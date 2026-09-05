@@ -115,7 +115,7 @@ Findings that should shape the next run:
 2. **GitHub Actions cutover** - four secrets, then a manual run, confirm the freshness timestamp
    MOVED, run both paths in parallel a day, then disable the Windows task. **Not**
    OPENSTATES_API_KEY. See `docs/GITHUB_ACTIONS_MIGRATION.md`. An agent never runs schtasks.
-3. **The billed scheduler fails daily at 06:00** with `skipped-prices-unverified`, by design and by
+3. **DORMANT, not open (Lance, 2026-09-05: "we can disregard that for now until I get back to api credits"). The billed scheduler fails daily at 06:00** with `skipped-prices-unverified`, by design and by
    Lance's choice to leave the task registered. See `docs/EXPECTED_FAILURES.md`. **Anything else red
    is real.** Clearing it means re-checking published prices and moving PRICES_VERIFIED_THROUGH;
    moving the date alone is the one edit that makes it worse than the comment it replaced.
