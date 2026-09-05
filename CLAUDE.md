@@ -351,11 +351,14 @@ exclusion is documented in the workflow itself. The standard names this exclusio
 tests fail, because those tests assert behaviour when no database client is configured. This is the
 mechanical form of the standing rule against `source .env` in a shell that then runs `node --test`.
 
-### Owed under the standard, not yet built
+### Owed under the standard - CLOSED 2026-09-05
 
-**`AUDIT_LOG.md` does not exist here.** Three dated audit reports live under `docs/audits/`
-(2026-08-03 accuracy, 2026-08-03 senior engineering, 2026-08-26 system) with their findings fixed
-and verified live, but there is no append-only log carrying a per-finding verdict from Open /
-Mitigated / Fixed / Accepted Risk / Obsolete. Per the standard's adoption rule this is added when
-the project is next touched rather than in a sweep. Recorded here so it is a known gap rather than
-an oversight.
+**`AUDIT_LOG.md` now exists** at the repo root: append-only, newest last, with a How-This-File-Works
+preamble, an entry template, and a per-finding verdict from Open / Mitigated / Fixed / Accepted Risk
+/ Obsolete. It ledgers the three dated reports under `docs/audits/` (2026-08-03 accuracy, 2026-08-03
+senior engineering, 2026-08-26 system).
+
+**It also records its own evidence class rather than presenting a uniform column of green:** 35
+findings from the two 2026-08-03 audits are logged as *Fixed (reported)* because this log did not
+re-run them, 3 were re-verified live on 2026-09-05, and 3 remain Open. A verdict that states how it
+was established is the difference between a ledger and a decoration.

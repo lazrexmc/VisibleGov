@@ -6715,3 +6715,22 @@ lesson 14).
   new agent tokens, on the strength of the harness's description of `resumeFromRunId` rather than a
   measurement. It reported 2,859,409 subagent tokens. **Stated as fact during a pause called
   specifically to conserve budget** - the same failure as the quota date, twelve hours apart.
+- **2026-09-05 - AUDIT_LOG.md, the cheapest of the no-API items.**
+  Lance is waiting on an OpenCollective decision for API funding and asked for the free work first,
+  cheapest first. **A correction to the premise went with it:** the summary waves never used API
+  credits - they run on his Claude subscription, which is why they are the "$0 lane" - so funding
+  would buy the billed scheduler's 1-4/day and the gloss runner, but NOT the fast summary lane that
+  peaked at 204/day. He may have been waiting for the wrong thing.
+  `AUDIT_LOG.md` created, closing the gap `CLAUDE.md` declared under "Owed under the standard".
+  Three reports ledgered with per-finding verdicts. **The design decision worth keeping: every
+  verdict states its EVIDENCE CLASS.** 35 findings from the two 2026-08-03 audits are recorded as
+  *Fixed (reported)* because this log did not re-run them; 3 were re-verified live today (D5 summary
+  coverage 23% -> 33.7%, D6 the derived-date receipt behind migration 0035, and the migration state
+  itself); 3 stay Open (D3 reconciliation flags, D4 phantom legislator, D8 console error). A uniform
+  column of "Fixed" that nobody re-checked is the shape of every stale document this project has had
+  to correct.
+  Also recorded from earlier in the session: a re-author wave was launched over a pool holding
+  exactly one candidate - the 352k-char HB 3000 that had already failed once - and it published
+  nothing for 608k tokens. **Both facts were known before launch.** The right move was one sentence
+  to Lance about the pool being down to a single hard monster; "go" was not a reason to skip telling
+  him what the wave actually contained.
