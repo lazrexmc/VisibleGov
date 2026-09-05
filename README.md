@@ -12,7 +12,7 @@ information.
 | URL | **https://visiblegov.us** (apex 200; `www` 301 to apex) |
 | Deployed since | 2026-08-05, custom domain live 2026-08-24 |
 | Verified at the origin | 2026-08-30 00:11 CDT - apex returns 200 and `Cloudflare Pages=success` is a check-run on HEAD. Confirm both before believing a deploy: `gh api repos/lazrexmc/VisibleGov/commits/$(git rev-parse HEAD)/check-runs`. "Auto-deploys on push" is not evidence - a sibling project's Pages integration died silently for six weeks. |
-| Host URL semantics | Cloudflare Pages 308-canonicalises `.html` to extensionless, so `_redirects` targets must be extensionless. Assets are served `public, max-age=14400, must-revalidate`; HTML is `max-age=0`. **Any byte-check of a JS module must cache-bust** or it will report a working fix as broken, which has happened here. |
+| Host URL semantics | Cloudflare Pages 308-canonicalises `.html` to extensionless, so `_redirects` targets must be extensionless. Assets WERE served `public, max-age=14400, must-revalidate` - four hours - which is Pages default, not a repo setting; `site/_headers` now sets `max-age=0, must-revalidate` on `/js/*` and `/css/*` (2026-09-05) because filenames are not content-hashed, so a deploy could not invalidate what a browser held. HTML was already `max-age=0`. **Visitors who cached assets before that deploy keep them for up to four more hours.** **Any byte-check of a JS module must cache-bust** or it will report a working fix as broken, which has happened here. |
 | Published summaries | **1,401** as of 2026-09-05 (live count: `npm run status` - this row rots) |
 | Published glossary | 1,850 of 9,521 as of 2026-09-05 |
 

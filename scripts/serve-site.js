@@ -66,11 +66,41 @@ export function parseHeadersFile(text) {
   return rules;
 }
 
-// The headers that apply to every path (`/*`). Read fresh per call — this is a dev server, and a
-// stale cached copy after editing _headers would be its own small drift.
-export function loadSiteHeaders(siteRoot = SITE_ROOT) {
+// Does a Cloudflare `_headers` rule path match a request path? Only the two shapes this file
+// actually uses: an exact path, and a trailing `/*` prefix glob. Anything else Cloudflare supports
+// (placeholders, splats mid-path) must extend this rather than be silently treated as no-match.
+export function ruleMatchesPath(rulePath, urlPath) {
+  const rule = String(rulePath || '');
+  const target = String(urlPath || '/');
+  if (rule === '/*') return true;
+  if (rule.endsWith('/*')) return target.startsWith(rule.slice(0, -1));
+  return rule === target;
+}
+
+// The headers that apply to ONE path: the `/*` base, then every more specific rule that matches,
+// in file order, later winning on a repeated header name (Cloudflare's own precedence).
+//
+// This used to return `['/*']` and nothing else, which meant a path-specific rule would apply in
+// PRODUCTION and be silently ignored HERE — the exact dev/prod drift this file's whole design
+// exists to prevent, since it parses the real `_headers` rather than carrying a hand-copied second
+// set of values. Added 2026-09-05 alongside the /js/* and /css/* Cache-Control rules, which would
+// otherwise have been invisible in dev.
+//
+// Read fresh per call — this is a dev server, and a stale cached copy after editing _headers would
+// be its own small drift.
+export function loadSiteHeaders(siteRoot = SITE_ROOT, urlPath = '/') {
   try {
-    return parseHeadersFile(readFileSync(path.join(siteRoot, '_headers'), 'utf8'))['/*'] || {};
+    const rules = parseHeadersFile(readFileSync(path.join(siteRoot, '_headers'), 'utf8'));
+    const merged = {};
+    for (const [rulePath, headers] of Object.entries(rules)) {
+      if (rulePath !== '/*' || !ruleMatchesPath(rulePath, urlPath)) continue;
+      Object.assign(merged, headers);
+    }
+    for (const [rulePath, headers] of Object.entries(rules)) {
+      if (rulePath === '/*' || !ruleMatchesPath(rulePath, urlPath)) continue;
+      Object.assign(merged, headers);
+    }
+    return merged;
   } catch {
     // A missing _headers is a dev-only convenience gap, not a reason to refuse to serve the site;
     // production reads the file from the deployed output, where its absence would be visible as a
@@ -208,8 +238,8 @@ export function createSiteServer(siteRoot = SITE_ROOT) {
     // headers Cloudflare Pages applies in production. An error page is still a page a browser
     // renders, so leaving them off the non-200 paths would mean the CSP is absent on exactly the
     // responses an attacker is most likely to be able to provoke.
-    const securityHeaders = loadSiteHeaders(siteRoot);
     const urlPath = String(req.url || '').split('?')[0];
+    const securityHeaders = loadSiteHeaders(siteRoot, urlPath);
     if (urlPath === '/geocode' && req.method === 'POST') {
       await handleGeocodeRequest(req, res, securityHeaders);
       return;

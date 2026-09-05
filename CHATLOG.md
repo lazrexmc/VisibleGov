@@ -6734,3 +6734,21 @@ lesson 14).
   nothing for 608k tokens. **Both facts were known before launch.** The right move was one sentence
   to Lance about the pool being down to a single hard monster; "go" was not a reason to skip telling
   him what the wave actually contained.
+- **2026-09-05 - the four-hour asset cache, second of the no-API items.**
+  Assets were served `public, max-age=14400, must-revalidate` - four hours - and `must-revalidate`
+  does not help, because it only applies once an entry is already stale. **`site/_headers` set no
+  Cache-Control at all**, so nothing in the repo looked wrong; the four hours were Cloudflare Pages'
+  own default for static assets. Filenames are not content-hashed, so a deploy could not invalidate
+  what a browser already held. **Lance hit this on 09-02** - looked at the site after a directory
+  feature shipped, saw the old page, concluded it had not deployed. It had.
+  **The fix had to be two parts, which is why it was not done when first found.** Adding a `/js/*`
+  block to `_headers` is trivial, but `scripts/serve-site.js` PARSES that same file and
+  `loadSiteHeaders` returned only the `/*` rule - so a path-specific rule would have applied in
+  production and been silently ignored in dev. **That is the exact dev/prod drift the module was
+  written to prevent**, since it reads the real `_headers` rather than carrying a hand-copied second
+  set of values. Shipping half of it would have been worse than leaving it.
+  Now: `ruleMatchesPath` handles the two shapes the file uses (`/*` and a trailing prefix glob),
+  `loadSiteHeaders(siteRoot, urlPath)` merges the `/*` base with matching specific rules in file
+  order, and the server passes the request path. Three tests pin the WIRING rather than the values,
+  including that a specific rule ADDS to the base and never replaces it - **an asset served without
+  the CSP would be a security regression dressed as a caching fix.** 2,805 pass / 0 fail.

@@ -16,7 +16,7 @@ import {
 } from '../site/js/receipts.js';
 import {
   resolveSitePath, applyRewrites, canonicalizeHtmlPath, createSiteServer, contentTypeFor, SITE_ROOT, PathTraversalError,
-  _setGeocodeFetch, parseHeadersFile, loadSiteHeaders,
+  _setGeocodeFetch, parseHeadersFile, loadSiteHeaders, ruleMatchesPath,
 } from '../scripts/serve-site.js';
 import { buildUpstreamUrl, onRequestPost } from '../site/functions/geocode.js';
 import { METRIC_DEFINITIONS } from '../site/js/vote-charts.js';
@@ -1579,4 +1579,33 @@ test('createSiteServer: extensionless paths serve their .html file, and deep lin
   } finally {
     server.close();
   }
+});
+
+// Added 2026-09-05 with the /js/* and /css/* Cache-Control rules. These pin the WIRING, not the
+// values: before this, loadSiteHeaders returned only the `/*` rule, so a path-specific rule would
+// have applied in production and been silently ignored by this dev server — the dev/prod drift
+// this module exists to prevent, since it parses the real _headers rather than a copied set.
+test('ruleMatchesPath: /* matches all, a /prefix/* glob matches only under it, exact matches once', () => {
+  assert.equal(ruleMatchesPath('/*', '/anything/at/all'), true);
+  assert.equal(ruleMatchesPath('/js/*', '/js/boot-directory.js'), true);
+  assert.equal(ruleMatchesPath('/js/*', '/css/site.css'), false);
+  assert.equal(ruleMatchesPath('/js/*', '/'), false);
+  assert.equal(ruleMatchesPath('/favicon.svg', '/favicon.svg'), true);
+  assert.equal(ruleMatchesPath('/favicon.svg', '/favicon.svg.map'), false);
+});
+
+test('loadSiteHeaders: a JS path gets the revalidate Cache-Control AND still gets the /* CSP', () => {
+  const js = loadSiteHeaders(SITE_ROOT, '/js/directory-page.js');
+  assert.match(js['Cache-Control'], /max-age=0/);
+  assert.match(js['Cache-Control'], /must-revalidate/);
+  // The specific rule must ADD to the /* base, never replace it: an asset served without the CSP
+  // would be a security regression dressed as a caching fix.
+  assert.ok(js['Content-Security-Policy'], 'CSP must still apply to /js/*');
+  assert.ok(js['X-Content-Type-Options'], 'nosniff must still apply to /js/*');
+});
+
+test('loadSiteHeaders: an HTML path gets the /* rule and NOT the asset Cache-Control', () => {
+  const html = loadSiteHeaders(SITE_ROOT, '/');
+  assert.ok(html['Content-Security-Policy'], 'CSP applies at the root');
+  assert.equal(html['Cache-Control'], undefined, 'the /js/* rule must not leak onto HTML');
 });

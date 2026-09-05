@@ -45,6 +45,24 @@
 #                         both HTTPS. `preload` is deliberately NOT set — submitting to the
 #                         browser preload list is effectively irreversible on a human timescale
 #                         and is Lance's call to make separately, not a side effect of an audit.
+# Cache-Control, added 2026-09-05. Cloudflare Pages' DEFAULT for static assets is
+# `public, max-age=14400, must-revalidate` - four hours - and `must-revalidate` does NOT help,
+# because it only applies once an entry is already stale; inside the four hours the browser serves
+# from cache without asking. This file previously set no Cache-Control at all, so nothing in the
+# repo looked wrong. Filenames here are NOT content-hashed - every page loads /js/<name>.js by that
+# exact name - so a deploy cannot invalidate what a browser already holds.
+#
+# Lance hit this on 2026-09-02: he looked at the site after a directory feature shipped, saw the old
+# page, and concluded it had not deployed. It had. For a site whose entire product is being current
+# about what legislators just did, four hours of silently stale JS is the wrong default.
+#
+# max-age=0 + must-revalidate means one conditional request per asset per visit; unchanged assets
+# answer 304 with no body, which is cheap. HTML already behaves this way under Pages' own default.
+/js/*
+  Cache-Control: public, max-age=0, must-revalidate
+/css/*
+  Cache-Control: public, max-age=0, must-revalidate
+
 /*
   Content-Security-Policy: default-src 'self'; connect-src 'self' https://bplxjbhlyyeucuwfqcbp.supabase.co; img-src 'self' https:; script-src 'self'; style-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
