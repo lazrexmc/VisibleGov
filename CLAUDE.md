@@ -267,6 +267,23 @@ See `PLAYBOOK_DELTA.md` §2. This only works if it's mechanically neutral - same
 regardless of party, everything traceable to the actual bill text and the actual recorded vote, no
 editorializing in a summary. Check every design decision against this before it ships.
 
+**Applied 2026-09-05 to the glossary, and it settled 4,461 rows.** Lance:
+*"I don't think we can gloss something that doesn't have a traceable source, otherwise it's me
+inserting info or having an LLM do so without actually history."* Terms of kind
+`agency` / `program` / `act` / `public_law` have no statute section to cite and no text to quote -
+"National Historic Preservation Act", "DWI docket or court". **They are ungroundable by policy and
+are never to be glossed**, not deferred, not "curation backlog". `npm run status` reports them on
+their own line and excludes them from the glossable denominator, because a number that implies
+future work invites a future session to do it.
+
+**The companion ruling, same date, on the ~1,800 that ARE groundable:** where a term cites a RANGE
+or a CHAPTER ("sections 302.302 to 302.309", "chapter 303"), Lance's instruction is that the
+granularity is Claude's call - *"the ranges should be determined by Claude so that they are the most
+useful to users when they encounter them on the site."* So a range may gloss as one unit or expand
+per section, whichever serves a reader who met that citation on a bill page. **The source rule is
+unchanged and still binds: whatever unit is chosen must carry its own verbatim quote from the actual
+text.** Judgment governs the SHAPE of the gloss, never whether it is grounded.
+
 ## Where to look for deeper reference (don't duplicate these into this repo - read in place)
 
 - `C:\Users\lance\OneDrive\Desktop\MidMoConsultant\LinkedUmp\` - closest sibling in shape (public

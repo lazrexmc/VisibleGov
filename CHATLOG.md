@@ -6773,3 +6773,23 @@ lesson 14).
   extractor fix would have been building on a guess the data does not support** - and it is the
   exact shape of PLAYBOOK 64, a label answering a question adjacent to the one that mattered.
   2,805 pass / 0 fail.
+- **2026-09-05 - Lance's two glossary rulings, and a headline number that was wrong by half.**
+  On the 4,461 ungroundable terms: *"I don't think we can gloss something that doesn't have a
+  traceable source, otherwise it's me inserting info or having an LLM do so without actually
+  history."* **That is the non-negotiable applied, not a new rule** - acts, agencies and programs
+  have no statute section to cite and no text to quote, so they can never be glossed and are not a
+  backlog. On the ~1,800 that ARE groundable: *"the ranges should be determined by Claude so that
+  they are the most useful to users when they encounter them on the site"* - granularity is
+  judgment, grounding is not. A range may gloss as one unit or per section, but whatever unit is
+  chosen still carries its own verbatim quote.
+  **The consequence nobody had noticed: the glossary denominator was wrong.** `npm run status` read
+  "1,850 of 9,521", which counts 4,461 rows that will never be glossed by policy. Real coverage is
+  **1,850 of 5,060 glossable - 36.6%, not 19.4%.** The status output now prints the glossable
+  denominator, the ungroundable count on its own line marked EXCLUDED BY POLICY, and the raw total
+  labelled "do not quote this as the denominator".
+  **Why the line matters more than the arithmetic:** a number that implies future work invites a
+  future session to do it. Left as "6,261 curation backlog", the next session to look for cheap
+  wins would have tried to gloss them - and the only way to gloss an agency with no citable text is
+  to invent the history, which is the one thing this project exists not to do. Both rulings are now
+  in `CLAUDE.md` under the non-negotiable, where a design decision gets checked against them.
+  2,805 pass / 0 fail.

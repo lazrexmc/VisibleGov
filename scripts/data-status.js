@@ -97,6 +97,19 @@ async function main() {
   // a curation backlog, NOT failures, and reporting only "116 published" hid 704 of them for weeks.
   const glossNeedsMapping = await count('glossary_terms?needs_mapping=is.true&select=id');
 
+  // UNGROUNDABLE BY POLICY, not a backlog. Lance's ruling 2026-09-05: "I don't think we can gloss
+  // something that doesn't have a traceable source, otherwise it's me inserting info or having an
+  // LLM do so without actually history." Terms of kind agency/program/act/public_law have no
+  // statute section to cite and no text to quote, so the one non-negotiable - every claim traceable
+  // to the actual source - excludes them permanently. They are NOT pending work and must not sit in
+  // a denominator implying they are.
+  const glossUngroundable = await count(
+    'glossary_terms?needs_mapping=is.true&kind=in.(agency,program,act,public_law)&select=id',
+  );
+  // What is actually glossable: everything except those. This is the honest denominator for
+  // "how much of the glossary can ever exist", and it is materially different from the raw total.
+  const glossGlossable = glossTotal - glossUngroundable;
+
   // COUNT this, never derive it. It used to be `glossTotal - glossPublished - glossNeedsMapping`,
   // which silently swept in every status that is neither draft nor published — 47 REJECTED terms
   // were being reported to the operator as work awaiting his review (2026-08-27).
@@ -270,6 +283,8 @@ async function main() {
       passageVoteAndText: passageWithText,
       passageVoteAndPublishedSummary: passagePublished,
       readyToSummarize,
+      glossUngroundable,
+      glossGlossable,
       summariesPublished: sumPublished,
       daysSinceLastPublish: daysSincePublish,
       completionRatePct: passageWithText > 0 ? Number(((passagePublished / passageWithText) * 100).toFixed(1)) : null,
@@ -316,7 +331,10 @@ async function main() {
   console.log(`  bill texts stored ....... ${n(billTexts)}`);
   console.log(`  sponsorships ............ ${n(billSponsors)}`);
   console.log(`  terms (seats held) ...... ${n(terms)}`);
-  console.log(`  glossary published ...... ${n(glossPublished)} of ${n(glossTotal)}`);
+  const glossPct = glossGlossable > 0 ? ((glossPublished / glossGlossable) * 100).toFixed(1) : '-';
+  console.log(`  glossary published ...... ${n(glossPublished)} of ${n(glossGlossable)} glossable  (${glossPct}%)`);
+  console.log(`    ...ungroundable ....... ${n(glossUngroundable)}  <- acts/agencies/programs with no citable source. EXCLUDED BY POLICY (Lance, 2026-09-05), never a backlog`);
+  console.log(`    ...raw row total ...... ${n(glossTotal)}  <- includes the ungroundable; do not quote this as the denominator`);
   // MEASURED 2026-09-05, replacing "extractor couldn't resolve a citation (curation backlog)".
   // That label was wrong about 71% of these rows and made the whole set read as one fixable parser
   // bug. Of 6,261: 4,461 are kind agency/program/act/public_law - concepts with NO statute section
