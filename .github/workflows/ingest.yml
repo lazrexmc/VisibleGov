@@ -66,6 +66,10 @@ jobs:
       # within a day. The guard hides a startup state, not a failure.
       - name: Skip until cutover
         id: guard
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
         run: |
           # Every REQUIRED secret, not just one. Keying the guard on SUPABASE_URL alone meant a
           # half-configured repo (URL set, service key missing) passed the guard and then went red
@@ -79,9 +83,17 @@ jobs:
           # HEALTHCHECK_PING_URL is also absent on purpose: it is consumed, but unset is a verified
           # no-op (scheduled-ingest.js skips the ping), so it is optional rather than required.
           missing=""
-          [ -z "${{ secrets.SUPABASE_URL }}" ] && missing="$missing SUPABASE_URL"
-          [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
-          [ -z "${{ secrets.CONGRESS_API_KEY }}" ] && missing="$missing CONGRESS_API_KEY"
+          # SECRETS ARE PASSED VIA env: AND READ AS SHELL VARIABLES, never interpolated into
+          # this script with ${{ }}. Interpolation splices the secret's TEXT into the program
+          # before bash parses it, so a value containing $(...) or backticks is EXECUTED on the
+          # runner. That is not hypothetical here: on 2026-09-05 the secrets were set from cmd.exe,
+          # where $(...) is not command substitution, so each one stored the literal string
+          # "$(grep -oP '^NAME=\K.*' .env)". The old guard spliced that in, bash ran the grep on a
+          # runner with no .env, got empty, and reported the secret MISSING while the log showed a
+          # masked *** that looked set. A wrong value and an unset value produced the same message.
+          [ -z "${SUPABASE_URL}" ] && missing="$missing SUPABASE_URL"
+          [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -z "${CONGRESS_API_KEY}" ] && missing="$missing CONGRESS_API_KEY"
           if [ -n "$missing" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Not yet cut over - missing secret(s):$missing. This job is INERT, not working: every later step is skipped and the job is green because it did nothing. See docs/GITHUB_ACTIONS_MIGRATION.md step 1."
