@@ -192,7 +192,11 @@ ledger), `docs/RUNBOOK_SUMMARY_WAVES.md` (the $0 subagent summary lane; drain wa
 `scriptPath`), and `docs/DISASTER_RECOVERY.md` (full rebuild from a bare clone when the Supabase
 project or the machine is gone). Last, `F:\RapidForge\docs\PROJECT_STANDARD.md` - the
 machine-wide standard this project declares against; what VisibleGov does differently, and why, is
-the "Deviations from the standard" section at the end of THIS file.
+the "Deviations from the standard" section at the end of THIS file. And `docs/JOINT_CHANGE_PROTOCOL.md` -
+what VisibleGov and RapidForge agree before changing each other's shared surfaces, and the six
+confident wrong claims this repo made in two days that are the argument for it. **RapidForge holds
+its own copy; that is a deliberate exception to pointers-never-copies, because a pointer into a
+repo the reading session cannot open is a dead end.**
 
 **Known, disclosed, RESOLVED limitation (2026-08-05) — narrower than earlier framing suggested, not
 an open defect in the fix itself:** the cross-adapter vote-duplicate dedup (migration 0022) is
@@ -285,33 +289,18 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
 `~/.claude/CLAUDE.md` and apply here too. This file only holds what's specific to VisibleGov.
 
 **Standing policies (Lance, 2026-07-27, non-negotiable unless marked otherwise below):**
-- **No live Claude/LLM API call runs without Lance's explicit per-run approval**, with call
-  count + dollar estimate stated up front. Mechanical enforcement exists where possible (e.g.
-  the golden-check `GOLDEN_CHECK_APPROVED` gate) - extend that pattern to new model-calling
-  tools.
-  **TEMPORARILY SUSPENDED (Lance, 2026-08-03): "temporarily remove the usage and credit usage
-  restrictions from the rules and settings until I reinstate them."** Per-run approval + cost
-  statement is NOT required for live API calls while this is in effect. This is a suspension, not
-  a repeal — the rule text above stays in place so reinstating it is a one-line revert of this
-  note, not a rewrite. ~~Treat this as still in effect until Lance says otherwise; do not assume it
-  has lapsed just because time has passed or the session has changed.~~ **ENDED in practice
-  (marked 2026-08-23): depletion on 2026-08-09 overtook the suspension, and Lance's 2026-08-21
-  reload ("I loaded $7 more") was a balance update, not a go — so the original rule above
-  (per-run approval with a cost stated) governs every billed call except the scheduler's ledger
-  carve-out in the next bullet. No new ruling from Lance re-suspended it; if he does, that is a
-  new dated note here.**
-  **SUPERSEDED IN PRACTICE by depletion (2026-08-09): the API balance is SPENT.** Lance's final
-  authorization ("I have a $1 or $2 left... use the dollars... Once depleted, pause waves as I do
-  not auto reload credits") was executed the same day — $1.98 across three budget-capped
-  `scripts/summary-probe-api.mjs` runs, zero credit errors, then full stop. **All summary lanes
-  (billed AND subagent) are paused; any new billed call now requires Lance to add funds AND give
-  an explicit go.** See the memory file `no-api-spend-hold.md` and CHATLOG 2026-08-09.
-  *(Superseded 2026-08-21/22: Lance loaded $7 on 2026-08-21 evening; the billed scheduler ticks
-  daily under its $1/tick + $5/ISO-week ledger — the next bullet; the $0 subagent drain lane ran
-  to empty on 2026-08-22 and resumes only when `node --env-file=.env
-  scripts/build-drain-wave.mjs <WAVE> 6 --pointer` reports candidates; every OTHER billed call
-  still needs funds on the balance AND Lance's explicit go with a cost stated — never assume a
-  further reload.)*
+- **No live Claude/LLM API call runs without Lance's explicit per-run approval**, with call count
+  and dollar estimate stated up front. Mechanical enforcement where possible (the golden-check
+  `GOLDEN_CHECK_APPROVED` gate) - extend that pattern to new model-calling tools. **The single
+  exception is the scheduler's ledger carve-out in the next bullet.** Never assume a reload; never
+  read a balance top-up as a go.
+  *Rewritten 2026-09-05 on Lance's instruction. This bullet had accumulated FOUR stacked notes - a
+  2026-08-03 suspension, an 08-09 depletion, an 08-21 reload, an 08-23 "ended in practice" - each
+  true when written, none removed. A careful reader resolved them to the rule above; a hurried one
+  could read the top note and conclude no approval was needed. **A policy that requires
+  chronological reasoning to apply is a policy that will be misapplied.** The narrative is in
+  `CHATLOG.md` (2026-08-03 through 08-23) and is not restated here; if Lance suspends the rule
+  again, that is a NEW dated note replacing this parenthetical, not another layer on top of it.*
 - **Scheduled summaries — `scripts/scheduled-summaries.js` exception:** `scripts/scheduled-summaries.js`
   runs billed calls unattended under a code-enforced $5.00/ISO-week cap plus a $1.00/tick cap (Lance,
   2026-08-10; built 2026-08-15; registered as the Windows task `VisibleGov Scheduled Summaries`,
