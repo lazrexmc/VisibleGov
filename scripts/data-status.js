@@ -317,7 +317,17 @@ async function main() {
   console.log(`  sponsorships ............ ${n(billSponsors)}`);
   console.log(`  terms (seats held) ...... ${n(terms)}`);
   console.log(`  glossary published ...... ${n(glossPublished)} of ${n(glossTotal)}`);
-  console.log(`    ...needs_mapping ...... ${n(glossNeedsMapping)}  <- extractor couldn't resolve a citation (curation backlog)`);
+  // MEASURED 2026-09-05, replacing "extractor couldn't resolve a citation (curation backlog)".
+  // That label was wrong about 71% of these rows and made the whole set read as one fixable parser
+  // bug. Of 6,261: 4,461 are kind agency/program/act/public_law - concepts with NO statute section
+  // by nature ("National Historic Preservation Act", "DWI docket or court") - which the gloss
+  // design cannot ground, because it requires a section plus a verbatim quote from it. Only 1,800
+  // are kind=statute, and even there a 1,000-row sample was 247 ranges, 241 chapter-level, and
+  // only 105 plain single sections. Neither half is an extractor defect: the first needs a design
+  // decision about whether non-statutory concepts get glossed at all, the second a granularity
+  // decision about ranges and chapters. See src/adapters/mo-statutes.js:263 - "needs_mapping until
+  // a design grounds them honestly".
+  console.log(`    ...needs_mapping ...... ${n(glossNeedsMapping)}  <- no resolvable citation: ~71% are acts/agencies/programs with no statute section at all`);
   console.log(`    ...flagged, awaiting Lance ${n(glossFlagged)}  <- authored + verified, verifier raised an objection`);
   console.log(`    ...not yet authored ... ${n(glossUnauthored)}  <- citation resolved, no gloss written yet (needs a gloss run)`);
 
@@ -367,7 +377,7 @@ async function main() {
   console.log(`  summaries awaiting review ..... ${sumDraft + sumStale}${sumStale > 0 ? ` (draft: ${sumDraft}, stale: ${sumStale})` : ''}`);
   console.log(`  summaries retired ............ ${sumRejected}`);
   console.log(`  glossary awaiting review ...... ${n(glossFlagged)}  (flagged only; ${n(glossUnauthored)} more need a gloss run, not a human)`);
-  console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (curation backlog, not errors)`);
+  console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (NOT one extractor bug - ~71% have no statute section; the rest are mostly ranges and chapter refs)`);
 
   // REPAIR LEDGER (added 2026-08-26). `votes` alone stopped telling the whole truth the day rows
   // began being hidden and removed: 714 vote rows were RETRACTED as misattributed (attached to

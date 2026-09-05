@@ -6752,3 +6752,24 @@ lesson 14).
   order, and the server passes the request path. Three tests pin the WIRING rather than the values,
   including that a specific rule ADDS to the base and never replaces it - **an asset served without
   the CSP would be a security regression dressed as a caching fix.** 2,805 pass / 0 fail.
+- **2026-09-05 - the needs_mapping backlog is not what its label said, and the measurement stopped a build.**
+  Third of the no-API items, and the plan was to fix the citation extractor - 6,261 unresolved
+  citations, the largest number in the glossary funnel. **Sampled first instead of coding, and the
+  sample killed the plan.** All 6,261 have `citation` NULL, and by `kind`: statute 1,800, agency
+  1,702, program 1,627, act 959, public_law 173. **4,461 of them - 71% - are concepts with no
+  statute section BY NATURE:** "National Historic Preservation Act", "DWI docket or court". The
+  gloss design requires a section plus a verbatim quote from it, so there is nothing to resolve and
+  the extractor is not failing on them. `src/adapters/mo-statutes.js:263` already said so -
+  "needs_mapping until a design grounds them honestly" - and nobody had counted how much of the
+  backlog that comment covered.
+  **Even the resolvable 1,800 are mostly not single sections.** A 1,000-row sample: 247 ranges
+  ("sections 302.302 to 302.309"), 241 chapter-level ("chapter 303"), 105 plain single sections, 64
+  multi ("X and Y"), 43 title/USC-level. Ranges and chapters are a GRANULARITY question, not a
+  parser bug - does a range gloss as one thing or expand to eight?
+  **So the free, correct action was to fix the label, not the parser.** `npm run status` had called
+  this "extractor couldn't resolve a citation (curation backlog)", which is wrong about 71% of the
+  rows and made a design decision look like a maintenance task. Both status lines now carry the
+  measured split, and the code comment records the numbers so nobody re-derives them. **Writing an
+  extractor fix would have been building on a guess the data does not support** - and it is the
+  exact shape of PLAYBOOK 64, a label answering a question adjacent to the one that mattered.
+  2,805 pass / 0 fail.
