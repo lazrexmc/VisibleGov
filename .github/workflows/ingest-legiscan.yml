@@ -63,7 +63,7 @@ jobs:
           # with a worse error.
           missing=""
           # SECRETS ARE PASSED VIA env: AND READ AS SHELL VARIABLES, never interpolated into
-          # this script with ${{ }}. Interpolation splices the secret's TEXT into the program
+          # this script with GitHub expression syntax. Interpolation splices the secret's TEXT into the program
           # before bash parses it, so a value containing $(...) or backticks is EXECUTED on the
           # runner. That is not hypothetical here: on 2026-09-05 the secrets were set from cmd.exe,
           # where $(...) is not command substitution, so each one stored the literal string
