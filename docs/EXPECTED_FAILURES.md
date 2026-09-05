@@ -13,13 +13,13 @@ empty, say so plainly, because "no known failures" is itself information.
 
 ---
 
-## Currently green - verified 2026-08-31 17:5x CDT
+## Currently green - re-verified 2026-09-05 08:1x CDT
 
 | Instrument | Exit | Note |
 |---|---|---|
 | `npm run verify:migrations` | **0** | 40 probed, 30 applied, **0 MISSING**. 10 report `unverifiable` because Tier 2 (`SUPABASE_DB_URL`) is off - that is a reported non-result, not a failure, and it does not affect the exit code. |
 | `npm run check:ingest` | **0** | all five scheduled sources inside their silence windows, no stranded runs |
-| `node --test` | **0** | 2,796 pass / 0 fail |
+| `node --test` | **0** | 2,802 pass / 0 fail |
 
 `verify:migrations` was red for weeks on `0039_parked_bills`. **Lance applied it 2026-08-31 and that
 entry is closed** - the first time this repo has had a clean migration board.
@@ -78,8 +78,7 @@ this entry.**
 again unqualified.** The status line was never flipped to ACTIVE during it, so nothing downstream
 needed to change back.
 
-Reason: other projects on
-this machine should get the token budget for now. **Nothing is broken.** The lane ran successfully
+**Reason for the pause:** other projects on this machine should get the token budget for now. **Nothing is broken.** The lane ran successfully
 the same morning - 6 of 6 published at 07:32 - and stopped because it was told to.
 
 **This entry exists because a pause that is a DECISION and a pause that is a FAULT are

@@ -13,10 +13,13 @@ information.
 | Deployed since | 2026-08-05, custom domain live 2026-08-24 |
 | Verified at the origin | 2026-08-30 00:11 CDT - apex returns 200 and `Cloudflare Pages=success` is a check-run on HEAD. Confirm both before believing a deploy: `gh api repos/lazrexmc/VisibleGov/commits/$(git rev-parse HEAD)/check-runs`. "Auto-deploys on push" is not evidence - a sibling project's Pages integration died silently for six weeks. |
 | Host URL semantics | Cloudflare Pages 308-canonicalises `.html` to extensionless, so `_redirects` targets must be extensionless. Assets are served `public, max-age=14400, must-revalidate`; HTML is `max-age=0`. **Any byte-check of a JS module must cache-bust** or it will report a working fix as broken, which has happened here. |
-| Published summaries | **1,228** (live count: `npm run status`) |
-| Published glossary | 1,850 |
+| Published summaries | **1,401** as of 2026-09-05 (live count: `npm run status` - this row rots) |
+| Published glossary | 1,850 of 9,521 as of 2026-09-05 |
 
-**Status (2026-08-30): DEPLOYED and live.** Plain-language summaries published: **1,228** - the open drafts are parked bills with written reasons (reasons in
+**Status (2026-09-05): DEPLOYED and live. The summary drain is PAUSED by Lance's decision
+(2026-09-03) so other projects get the token budget - see `docs/EXPECTED_FAILURES.md` section 2;
+nothing is broken.** Plain-language summaries published: **1,401**, of which 1,046 cover the 3,108
+accountability bills that have text (33.7%). The open drafts are parked bills with written reasons (reasons in
 `.superpowers/artifacts/scheduled-summaries/parked.json`; `npm run status` prints the live count
 as "parked (structural failures)" - a few dozen) plus whatever the latest scheduler tick refused
 (2026-08-23: 32 open drafts = 28 parked + 4 fresh refusals); every future summary flows through the

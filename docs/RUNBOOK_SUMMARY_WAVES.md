@@ -1,12 +1,19 @@
 # Runbook - summary waves ($0 subagent path)
 
-> **LANE STATE (2026-08-24) - read this before running anything below. THE FRESH-AUTHORING LANE
-> IS OPEN AGAIN.** Lance reopened it 2026-08-24 ("run $0 subagent summary waves over the ready
-> bills, recency-first") and asked for it to run continuously - each wave recorded, the next
-> exported and launched, until he signals a pause. Rationale: coverage is the product's
-> bottleneck - 793 of 3,438 accountability bills (23%) have a published summary while 2,498 are
-> READY (text on hand, no summary), and the daily scheduler's 4-6/tick would take ~450 days to
-> work that down. This lane costs $0 and built most of the existing corpus.
+> **LANE STATE: PAUSED (2026-09-03 08:06 CDT) - read this before running anything below.**
+> Lance paused the drain so other projects on this machine get the token budget:
+> *"pause visiblegov's draining runs for now, let's have the other projects get token usage
+> instead."* **Nothing below should be run until he says otherwise.** The declaration of record,
+> with decider and date, is `docs/EXPECTED_FAILURES.md` section 2; `TODO.md`'s RESUME block carries
+> the numbered resume procedure, whose step 1 is "confirm Lance wants it resumed" - **a pause that
+> is a DECISION and a pause that is a FAULT look identical to whoever finds them, and only one
+> should be undone on initiative.**
+>
+> *~~LANE STATE (2026-08-24): THE FRESH-AUTHORING LANE IS OPEN AGAIN ... run continuously until he
+> signals a pause.~~ Superseded 2026-09-03 - he signalled it. Struck rather than deleted so the
+> record shows what this file instructed.* The rationale numbers it carried (793 of 3,438
+> accountability bills, 2,498 READY) are also stale by construction; **run `npm run status`** -
+> at the pause it read 1,046 of 3,108 with text (33.7%) and 2,036 READY.
 >
 > The billed scheduler keeps running alongside it - `scripts/scheduled-summaries.js`, built
 > 2026-08-15, registered by Lance 2026-08-17, daily 6 AM, code-enforced $1.00/tick +
