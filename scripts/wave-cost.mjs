@@ -14,6 +14,23 @@
 // on each assistant message; this reads them. The point is that the next person deciding whether a
 // stage is expensive gets a number instead of an intuition.
 //
+// FIRST REAL FINDING (2026-09-05, wave wf_c40e57e6-e71, 12 bills). The most expensive single
+// agent in a wave is not a reasoning stage. It is 'write-records' - one agent whose whole job is
+// to write the accumulated envelopes to disk - at 3,055,416 weighted, roughly a fifth of the wave,
+// against 250k for a typical opus AUTHOR agent. Its output is only 5,114 tokens; the cost is the
+// 417KB records JSON sitting in an opus context so it can be written out. read-manifest, the same
+// pattern in the other direction, is trivial at 67,183.
+//
+// NOT FIXABLE BY REMOVING IT. Workflow scripts have no filesystem or Node API access (confirmed in
+// the workflow-authoring reference), so agent() is the only I/O primitive the script has. These
+// agents are the mechanism, not waste.
+//
+// AND NOT OBVIOUSLY FIXABLE BY MODEL EITHER, which is why nothing was changed. Running it on haiku
+// would cut cost per token but NOT token count, and whether that helps depends on how the
+// subscription meters usage - raw or cost-weighted - which is unknown here. It also puts a weaker
+// model on a 417KB verbatim reproduction, which is precisely where degradation shows and where a
+// subtly altered field would still parse as valid JSON. Measure before believing either way.
+//
 //   npm run wave:cost            # every wave found, newest last
 //   npm run wave:cost -- --json  # machine-readable
 //   npm run wave:cost -- wf_c40   # only waves whose id starts with this
