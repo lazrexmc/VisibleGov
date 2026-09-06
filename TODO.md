@@ -4,20 +4,21 @@
 
 ---
 
-## RESUME HERE - verified live 2026-09-02 22:00 CDT, read this block first
+## RESUME HERE - verified live 2026-09-05 22:29 CDT, read this block first
 
 **Every number here was produced by running the thing, not by reading a previous claim.**
 
 | | |
 |---|---|
-| tree | `f713634`, clean, in sync with origin |
-| suite | **2,802 pass / 0 fail** |
+| tree | `5663a96`, clean, in sync with origin |
+| suite | **2,811 pass / 0 fail** |
 | migrations | 40 probed, **30 applied, 0 MISSING**, 10 unverifiable (Tier 2 off) |
-| completion | **32.9%** - 1,023 of 3,108 accountability bills with text |
-| READY to summarize | 2,036 |
-| awaiting trust-gate review | 52 |
-| parked (structural) | 31 |
-| last summary published | 2026-09-01 |
+| completion | **34.0%** - 1,411 published, 1,046+ of 3,108 accountability bills with text |
+| READY to summarize | 2,025 |
+| awaiting trust-gate review | 30 |
+| glossary | 1,850 of **5,060 glossable** (36.6%); 4,461 ungroundable BY POLICY, never a backlog |
+| GitHub Actions | **CUT OVER 2026-09-05** - secrets set, verified by a moved freshness timestamp; parallel-run phase |
+| Windows tasks | both still Ready; disabling the ingestion task is Lance's step and only after the parallel day |
 
 ### THE DRAIN IS PAUSED (2026-09-03 08:06 CDT) - DELIBERATE, NOT BROKEN
 

@@ -6793,3 +6793,43 @@ lesson 14).
   to invent the history, which is the one thing this project exists not to do. Both rulings are now
   in `CLAUDE.md` under the non-negotiable, where a design decision gets checked against them.
   2,805 pass / 0 fail.
+- **2026-09-05 - the Actions cutover, and three wave optimizations that were all wrong.**
+  **The cutover completed.** Secrets were absent, yet `ingest` and `ingest-legiscan` had been firing
+  hourly and reporting SUCCESS in 5-9 seconds - the pre-cutover guard exiting cleanly, with an
+  explicit `::notice::` saying "this job is INERT, not working". Honest if you opened the run, and
+  invisible in `gh run list`, which shows only `success`.
+  **Setting the secrets took three attempts and each failure taught something.** cmd.exe does not do
+  `$(...)` substitution, so the first pass stored the literal string `$(grep -oP ... .env)` as each
+  secret's VALUE. GitHub masked it as `***` in the log, so it looked correctly set - and the guard,
+  which spliced `${{ secrets.X }}` straight into a bash script, EXECUTED that grep on a runner with
+  no `.env`, got empty, and reported the secret missing. **A wrong value and an unset value produced
+  the identical message.** The second attempt pasted a bash loop into PowerShell, which has no
+  `grep`; it failed cleanly and overwrote nothing. The third ran in Git Bash and worked.
+  **Both workflows now pass secrets through `env:` and test `"$VAR"`** rather than interpolating -
+  splicing a secret's text into a script means a value containing `$(...)` runs. **And the hardening
+  commit itself broke the YAML**: its explanatory comment contained literal GitHub expression
+  syntax, which GitHub evaluates anywhere in the file including inside a `#` comment, so both
+  workflows stopped parsing for about ten minutes. Shipped while writing a comment about being
+  careful with that exact syntax. The Windows task carried ingestion throughout, which is the only
+  reason it cost nothing.
+  **Verified the way the doc demands:** `mo-senate-web` moved 15:45:06 -> 16:17:50, and 16:17:50 is
+  the timestamp inside the GitHub run's own log. A green job proves the process exited; a moved
+  freshness timestamp proves it wrote.
+  **Then `npm run wave:cost` was built, and its value was stopping changes rather than making one.**
+  Three optimizations were proposed to the wave chain today and the transcripts refuted all three.
+  Per-agent re-reads of `verifier.js` were going to be ~8%: no - 77% of input is CACHE READS at
+  ~0.1x, so re-reading a shared file is nearly free. Batching bills per agent was going to be 50%:
+  no - agent count is not the expensive axis. Deleting the two file-I/O agents: impossible -
+  workflow scripts have **no filesystem or Node API access**, so `agent()` is the script's only I/O
+  primitive. **The first hypothesis came from one line** - "78k cache creation, 0 cache reads" - read
+  off the FIRST message of ONE agent, before any cache existed, and generalized into a system
+  property.
+  **What measurement did find, and nobody would have guessed:** the most expensive single agent in a
+  wave is `write-records`, at 3,055,416 weighted - about a fifth of the wave, against ~250k for a
+  typical opus author. Its OUTPUT is 5,114 tokens; the cost is a 417KB records JSON sitting in an
+  opus context so it can be written to disk. Left unchanged: haiku would cut cost per token but not
+  token COUNT, and whether that helps depends on how the subscription meters usage, which is
+  unknown - and it puts a weaker model on a 417KB verbatim reproduction, where a subtly altered
+  field would still parse as valid JSON.
+  **One wave ran at Lance's instruction: 10 of 12 published**, 33.7% -> **34.0%**, 1,411 summaries,
+  2,025 READY. Drain paused again after it. 2,811 pass / 0 fail.
