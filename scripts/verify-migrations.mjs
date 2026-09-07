@@ -73,21 +73,38 @@ async function rest(path, key) {
 // Does a relation (table, view or matview) exist? Probed with the SERVICE key so that "no grant"
 // cannot be mistaken for "does not exist" — with anon those are both non-200 and the answer would
 // be ambiguous.
+// A 200 is NOT the answer on its own — the body has to parse as the array PostgREST promises.
+//
+// WHY (peer report via `league-ed`, 2026-09-06): equalshares found four of eight published receipts
+// returning HTTP 200 whose body was "XML input exceeds maximum allowed size" followed by a 404 page.
+// Every status-code check called them healthy for a week. This repo has its own instance of the same
+// class, found live in July and documented in `src/adapters/uscode.js`: uscode.house.gov
+// 302-redirects a missing citation to a normal 200 "Document not Found" page, so `!res.ok` never
+// fires. **A status code is a claim about transport, not about content.** The parse is the gate.
 async function relationExists(relation) {
-  const { status } = await rest(`${relation}?select=*&limit=0`, SERVICE);
-  if (status === 200) return 'applied';
+  const { status, body } = await rest(`${relation}?select=*&limit=0`, SERVICE);
   if (status === 404) return 'absent';
-  return 'absent';
+  if (status !== 200) return 'absent';
+  try {
+    return Array.isArray(JSON.parse(body)) ? 'applied' : 'absent';
+  } catch {
+    return 'absent';
+  }
 }
 
 // Does a relation expose a column? PostgREST answers 400/42703 for an unknown column, which is a
 // clean signal. Service key again, for the same disambiguation reason.
 async function columnExists(relation, column) {
   const { status, body } = await rest(`${relation}?select=${column}&limit=0`, SERVICE);
-  if (status === 200) return 'applied';
   if (status === 400 && /42703|does not exist|column/i.test(body)) return 'absent';
   if (status === 404) return 'absent';
-  return 'absent';
+  if (status !== 200) return 'absent';
+  // Same rule as relationExists: parse, do not trust the code.
+  try {
+    return Array.isArray(JSON.parse(body)) ? 'applied' : 'absent';
+  } catch {
+    return 'absent';
+  }
 }
 
 // Can ANON read this relation? Used for the lock-down migrations, where the artifact is a REFUSAL
@@ -159,8 +176,13 @@ async function anonRpcDenied(fn) {
 // `select=bill_id` returns 200. Probing with `*` there reports a false MISSING — the 401 is
 // evidence the migration WORKED, not that it is absent. (Caught on this script's first run.)
 async function anonColumnReadable(relation, column) {
-  const { status } = await rest(`${relation}?select=${column}&limit=1`, ANON);
-  return status === 200 ? 'applied' : 'absent';
+  const { status, body } = await rest(`${relation}?select=${column}&limit=1`, ANON);
+  if (status !== 200) return 'absent';
+  try {
+    return Array.isArray(JSON.parse(body)) ? 'applied' : 'absent';
+  } catch {
+    return 'absent';
+  }
 }
 
 // Does a table hold rows? For seed migrations, whose artifact is data rather than structure.
