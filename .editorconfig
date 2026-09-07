@@ -1,0 +1,40 @@
+# EditorConfig — what the EDITOR writes. https://editorconfig.org
+#
+# Scope note: this file does NOT touch git. The `LF will be replaced by CRLF` warnings on commit
+# come from `core.autocrlf = true`, and they are cosmetic — git stores LF either way. Adding
+# `* text=auto eol=lf` to .gitattributes would silence them at the cost of renormalising every
+# file in the repo, which is a large diff for no functional gain. Deliberately not done.
+#
+# Values below were MEASURED from the existing source (2026-09-06), not imposed: JS is 2-space,
+# Python is 4-space, and there are no tabs anywhere.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+
+[*.md]
+# Two trailing spaces is a hard line break in Markdown — trimming them silently reflows the
+# document. These docs ARE the product here, so this exception is load-bearing.
+trim_trailing_whitespace = false
+
+[*.{ps1,bat,cmd}]
+# PowerShell 5.1 on Windows reads .ps1 as cp1252 and expects CRLF. The playbook already carries
+# the matching trap: a .ps1 must be pure ASCII, because a UTF-8 em-dash becomes a curly quote
+# that PowerShell treats as a string terminator, and it detonates far from the cause.
+end_of_line = crlf
+charset = latin1
+
+[Makefile]
+indent_style = tab
+
+[*.{json,jsonc}]
+insert_final_newline = true
