@@ -112,26 +112,36 @@ export class RollCallNotYetPublishedError extends SourceFetchError {
 // tree with no roll_call_vote key at all, which used to surface downstream as
 // `TypeError: Cannot read properties of undefined (reading 'congress')` the moment root.congress
 // was read - a crash, not a classified miss, on every hourly scheduler probe during a recess.
+//
+// CHANGED about 2026-09-18 (verified live 2026-09-26 on vote numbers 245-250 and 999): the same
+// request now gets a 301 to /legislative/roll-call-vote-not-available.htm, and fetch follows it to
+// a full site page with the same <title> and <h1> (tests/fixtures/us-senate/
+// roll-call-not-available-2026-09.html). fast-xml-parser THROWS on that page (`TypeError: Cannot
+// read properties of undefined (reading 'tagName')`), so "never throws" above held for the old page
+// only, and a marker check placed after the parse never ran: every hourly tail probe crashed the
+// run before openRun, 2026-09-18 to 2026-09-26 (PLAYBOOK_DELTA lesson 65). The marker is now
+// checked on the raw text, before the parse.
 const ROLL_CALL_UNAVAILABLE_MARKER = 'Roll Call Vote Unavailable';
 
 export function parseSenateRollCall(xmlString) {
-  const doc = xmlParser.parse(xmlString);
+  // Distinguish the known "not yet published" stub (expected miss - honestly counted, run stays
+  // healthy-partial) from any other reason a roll call might be missing (truncated transfer,
+  // senate.gov template change, genuine corruption on what should be a real, existing vote) - the
+  // latter must still fail loudly, never silently reclassified as a routine miss. Only the
+  // recognized stub shape gets the typed SourceFetchError-style error. It is recognized on the RAW
+  // text, before the parse (the current stub page makes the parser throw - see the marker's comment
+  // above), and only in a body that is not a roll call.
+  const text = String(xmlString);
+  if (!text.includes('<roll_call_vote') && text.includes(ROLL_CALL_UNAVAILABLE_MARKER)) {
+    throw new RollCallNotYetPublishedError(
+      'senate.gov has no roll call at this vote number yet (LIS serves an HTML "Roll Call Vote '
+      + 'Unavailable" page, not a 404, for a not-yet-cast vote) - expected miss, not a parse bug',
+      { source: SOURCE },
+    );
+  }
+  const doc = xmlParser.parse(text);
   const root = doc.roll_call_vote;
   if (!root) {
-    // Distinguish the known "not yet published" stub (expected miss - honestly counted, run
-    // stays healthy-partial) from any other reason the root might be missing (truncated
-    // transfer, senate.gov template change, genuine corruption on what should be a real,
-    // existing vote) - the latter must still fail loudly, never silently reclassified as a
-    // routine miss. Only the recognized stub shape gets the typed SourceFetchError-style error;
-    // anything else falls through to a plain thrown Error below.
-    if (String(xmlString).includes(ROLL_CALL_UNAVAILABLE_MARKER)) {
-      throw new RollCallNotYetPublishedError(
-        'senate.gov has no roll call at this vote number yet (LIS returns HTTP 200 with an HTML '
-        + '"Roll Call Vote Unavailable" stub, not a 404, for a not-yet-cast vote) - expected miss, '
-        + 'not a parse bug',
-        { source: SOURCE },
-      );
-    }
     throw new Error(
       'parseSenateRollCall: response has no <roll_call_vote> root and does not match the known '
       + '"Roll Call Vote Unavailable" not-yet-published stub either - genuine parse failure, not '

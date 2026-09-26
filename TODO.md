@@ -20,6 +20,15 @@
 | GitHub Actions | **CUT OVER 2026-09-05** - secrets set, verified by a moved freshness timestamp; parallel-run phase |
 | Windows tasks | both still Ready; disabling the ingestion task is Lance's step and only after the parallel day |
 
+### us-senate ingest: DOWN 2026-09-18 to 2026-09-26, FIXED 2026-09-26 - read before trusting Senate vote data
+
+senate.gov began 301-redirecting a not-yet-published vote to a full page that fast-xml-parser throws
+on; the adapter's marker check ran after the parse, so every hourly tail probe crashed the run before
+`openRun` (43 failed `ingest.yml` runs; votes 239-244 not ingested). Fixed by checking the marker on
+the raw text first (`src/adapters/us-senate.js`, PLAYBOOK_DELTA 65, CHATLOG 2026-09-26). **Confirm:**
+the first `ingest.yml` run after the fix is green, us-senate's next run succeeds, and
+`BROKEN us-senate` is gone from `check-ingest-health`.
+
 ### THE DRAIN IS PAUSED (2026-09-03 08:06 CDT) - DELIBERATE, NOT BROKEN
 
 **Lance paused it so other projects on this machine get the token budget.** Relayed through
@@ -1900,6 +1909,10 @@ session's own direct work, not assumed.**
 
 ## INBOX (raw idea capture, 2026-07-27, Lance's own words)
 
+- **(2026-09-26) Put the ingest child's stderr tail in the Actions log, not only in `ingestion_runs`.**
+  In 43 runs of the us-senate outage the log showed only `"parseError": "Unexpected end of JSON
+  input"`; the real error (`TypeError ... 'tagName'`) sat in `ingestion_runs.stderr_tail`, which
+  needs the database to read. Check first that the tail cannot carry a secret. Idea, not built.
 - **(2026-08-26) TOPIC TAGS on bills - idea, not a commitment.** Prompted by Lance finding
   keepinglawsimple.org/states/missouri, which does plain-English Missouri bill summaries
   (3,143 bills for 2026, sourced from MO House + Senate) and - unlike VisibleGov - appears to

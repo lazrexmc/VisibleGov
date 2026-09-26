@@ -14,6 +14,10 @@ const rollXml = readFileSync('tests/fixtures/us-senate/roll-call.xml', 'utf8');
 // byte-identical across all three, confirming it's a fixed template, not per-vote content): the
 // HTML "Roll Call Vote Unavailable" stub LIS serves with HTTP 200 for a vote number not yet cast.
 const notYetPublishedHtml = readFileSync('tests/fixtures/us-senate/roll-call-unavailable.html', 'utf8');
+// Live-captured 2026-09-26: since about 2026-09-18 senate.gov answers a not-yet-published vote
+// number with a 301 to /legislative/roll-call-vote-not-available.htm; fetch follows it and gets
+// this full site page, which fast-xml-parser throws on (the us-senate outage, 09-18 to 09-26).
+const notAvailablePage = readFileSync('tests/fixtures/us-senate/roll-call-not-available-2026-09.html', 'utf8');
 
 const POSITIONS = new Set(['yea', 'nay', 'present', 'not_voting', 'other']);
 
@@ -129,6 +133,28 @@ test('parseSenateRollCall lets a raw XML syntax error (e.g. mid-stream truncatio
       return true;
     },
   );
+});
+
+// ---- defect fix (2026-09-26, the 43-run us-senate outage of 2026-09-18 to 09-26): the stub moved
+// behind a 301 to a full site page that fast-xml-parser throws on, and the marker check ran only
+// after the parse, so it never ran. The check now reads the raw text first (PLAYBOOK_DELTA 65). ----
+
+test('parseSenateRollCall classifies the 2026-09 not-available page (the 301 target) as not yet published, not a parser TypeError', () => {
+  assert.throws(
+    () => parseSenateRollCall(notAvailablePage),
+    (err) => {
+      assert.ok(err instanceof RollCallNotYetPublishedError, `expected RollCallNotYetPublishedError, got ${err.constructor.name}: ${err.message}`);
+      assert.ok(err instanceof SourceFetchError, 'must be a SourceFetchError so collectUsSenate records an absence, not a crash');
+      return true;
+    },
+  );
+});
+
+test('parseSenateRollCall never lets the marker text override a real roll call', () => {
+  const withMarker = rollXml.replace('</roll_call_vote>', '<!-- Roll Call Vote Unavailable --></roll_call_vote>');
+  assert.notEqual(withMarker, rollXml);
+  const { vote } = parseSenateRollCall(withMarker);
+  assert.equal(vote.bill_identifier, 'HR 5371');
 });
 
 // Senior engineering audit (2026-08-03, finding 8): parseSenateVoteMenu had the SAME unguarded

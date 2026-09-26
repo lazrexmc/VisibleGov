@@ -6833,3 +6833,30 @@ lesson 14).
   field would still parse as valid JSON.
   **One wave ran at Lance's instruction: 10 of 12 published**, 33.7% -> **34.0%**, 1,411 summaries,
   2,025 READY. Drain paused again after it. 2,811 pass / 0 fail.
+
+- **2026-09-26 - us-senate ingest down since 09-18: senate.gov moved its "not published yet" page, and the parser crashed on the new one.**
+  Lance pasted the Actions failure (`BROKEN us-senate 5 consecutive failed runs`) into RapidForge's
+  session. VisibleGov's session was offline, so RapidForge diagnosed it read-only, then applied the
+  fix here at Lance's word: *"Finish, commit and push VisibleGov solutions."*
+  **Cause:** 43 consecutive failed `ingest.yml` runs since the last success at 2026-09-18T18:21:49Z,
+  and no commit since 09-06. The run that attempted us-senate (09-25 13:40Z) exited 1 with no JSON
+  and `selfRecordedFailure: true`, so the child died before `openRun`. senate.gov now
+  301-redirects a not-yet-published vote (tested: 999 and 245-250) to
+  `/legislative/roll-call-vote-not-available.htm`, a 16,984-byte full site page. fast-xml-parser
+  4.5.7 (the lockfile's, so CI's) throws a `TypeError` on it at `us-senate.js:118`, before the marker
+  check could run, and `collectUsSenate` rethrows it. The window `[maxKnown, maxKnown+10]` advances
+  only on success, so every tick crashed at vote 245.
+  **Fix:** `parseSenateRollCall` checks the marker on the raw text first, only in a body with no
+  `<roll_call_vote` tag. A raw parser exception still propagates unmodified, and a rootless non-stub
+  body still fails loudly (both already pinned by existing tests). New fixture
+  `tests/fixtures/us-senate/roll-call-not-available-2026-09.html` (captured 2026-09-26) and two
+  tests: the page classifies as `RollCallNotYetPublishedError`, and the marker inside a real roll
+  call never overrides it. Red on the old adapter (10 pass / 1 fail), green on the fix; full suite
+  **2,813 pass / 0 fail** in a clean shell. Replaying the stuck window with the fixed adapter: 238-244
+  parse and 245-248 are absences, so the run closes `succeeded` and the window moves.
+  **Not verified yet:** the first scheduled run after the push (cron :07). That is the check that
+  matters, and its result belongs here when it lands. PLAYBOOK_DELTA lesson 65.
+  **Trailer:** this commit names the model that made it (Claude Opus 5.5), not the `Claude Opus 5`
+  string that CLAUDE.md's deviation 4 pins. A trailer is an authorship claim; RapidForge corrected the
+  same pin in its own repo on 2026-08-30. Whether to re-pin deviation 4 to the role is Lance's call.
+

@@ -87,6 +87,7 @@ with offset/limit or jump by grep.
 | 62 | 09-03 | Repeated identical failure is evidence about the sampler, not the subject; park the deterministic, retry the stochastic |
 | 63 | 09-03 | A string that looks like a fact is not a measurement; a claim about the future can only be probed |
 | 64 | 09-03 | A step's own report of its outcome is weakest evidence exactly when it is positive; check the artifact, and check it is THIS run's |
+| 65 | 09-26 | A recogniser for a known non-answer runs on the raw bytes, before any parser that can throw; a window that advances only on success turns a tail crash into a permanent stall |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1717,3 +1718,33 @@ altitudes, one question substituted for its neighbour.
 **Rule: never accept a step's self-report of a WRITE. Read the artifact, and read it against what
 this run should have produced - identity and recency, not existence.**
 
+## Lesson 65 - a recogniser for a known non-answer runs on the raw bytes, before any parser that can throw (2026-09-26)
+
+**us-senate ingest was down from 2026-09-18 to 2026-09-26: 43 consecutive failed `ingest.yml` runs,
+and votes 239-244 never ingested, with no code change since 09-06.** senate.gov answers a vote number
+that is not yet published with a "Roll Call Vote Unavailable" page, never a 404, and the 2026-08-01
+fix (`31dc3b3`) recognised that page by its marker text - AFTER `xmlParser.parse()` had run and found
+no root. Around 09-18 senate.gov began answering with a 301 to
+`/legislative/roll-call-vote-not-available.htm`, a full site page with the same title. `fetch`
+follows the redirect, fast-xml-parser throws on the new page (`TypeError: Cannot read properties of
+undefined (reading 'tagName')`), and the recogniser never ran. `collectUsSenate` rethrows anything
+that is not a `SourceFetchError`, so the child died before `openRun`, printed no JSON, and the
+scheduler self-recorded the failure.
+
+**Why one changed page stopped everything:** the vote window starts at the last stored vote and
+advances only on a successful run, so every hourly tick probed the same numbers and died at the first
+one past the edge. A tail probe that can kill its own run turns a routine upstream change into a
+permanent stall.
+
+**How it was found:** the child's stderr lives only in `ingestion_runs.stderr_tail`, and the Actions
+log showed only `"parseError": "Unexpected end of JSON input"`. The Supabase MCP was not authorized in
+the diagnosing session (raised to Lance); the crash was reproduced instead, by replaying the
+adapter's own functions against live senate.gov from a scratch script (public XML, no credentials):
+votes 226-244 parse, and every number from 245 up throws.
+
+**The 2026-08-01 comment said fast-xml-parser "never throws with this module's parser config". That
+was a measurement of one page, recorded as a property of the parser.**
+
+**Rule: recognise a known non-answer from the raw bytes before any parser sees them, scoped to bodies
+that are not a real record. A parser's tolerance of today's error page is not part of the upstream's
+interface.**
