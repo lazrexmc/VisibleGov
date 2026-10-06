@@ -27,5 +27,29 @@
   // Deliberately NOT excluded from search: supabase/migrations, tests/fixtures, and the .md
   // ledgers. Those are exactly what someone greps for when tracing why a decision was made, and
   // this project's own rule is that the record is the point.
-  "files.exclude": {}
+  "files.exclude": {},
+
+  // ---- Python interpreter (added 2026-10-06) ----
+  //
+  // VS Code reported "An invalid Python interpreter is selected". The selected one was
+  // C:\Users\lance\AppData\Local\Python\bin\python.exe, which is NOT an interpreter: it is a
+  // 605KB launcher SHIM, hardlinked to python3.exe / python3.14.exe / python3-64.exe in the same
+  // directory, that re-execs the real binary. The extension cannot introspect a shim (no sys.prefix,
+  // no stdlib path of its own), so it correctly refuses it. `python -c "import sys;
+  // print(sys.executable)"` from a shell reports the REAL path, which is why the shim works fine
+  // for command-line use and only the editor complains.
+  //
+  // Pinned to the real interpreter, verified to introspect: prefix and stdlib both resolve under
+  // pythoncore-3.14-64, Python 3.14.3.
+  "python.defaultInterpreterPath": "C:\\Users\\lance\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+
+  // VisibleGov is a Node project and contains NO Python source. The single .py in the tree is a
+  // scratch script under .superpowers/artifacts/wave3/, which is gitignored re-fetchable payload -
+  // excluding it keeps the Python extension from treating a throwaway as this project's codebase.
+  // (Scripts Claude writes for one-off doc surgery live in the session scratchpad, outside the repo,
+  // so they never reach the analyzer at all.)
+  "python.analysis.exclude": [
+    "**/.superpowers/**",
+    "**/node_modules/**"
+  ]
 }
