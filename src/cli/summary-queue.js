@@ -455,25 +455,90 @@ export function checkStatedPurposeGrounding(statedPurpose, billTextContent) {
 // a real shape) there is no honest empty case - a verdict with no quote is a verdict with no
 // evidence. Reports EVERY offending bullet, not just the first, because a reviewer needs the shape
 // of the failure: one bad quote is a slip, four is a verifier that was not reading the text.
+// WHAT THIS GATE HAD TO LEARN, in two corrections on the day it was written (2026-10-06). Both
+// came from running it against the real corpus, and the first version would have been a disaster:
+// it flagged 80% of already-published summaries, which is not a corpus of forgeries but an
+// instrument that was wrong.
+//
+// 1. ELIDED QUOTES ARE LEGITIMATE. Verifiers write quotes joining non-contiguous fragments with an
+//    ellipsis - "the Tenth Amendment ... affirms that any powers not delegated ... are reserved to
+//    the states" - which is ordinary quoting practice. A plain includes() failed every one. Each
+//    fragment must therefore appear verbatim AND IN ORDER; order matters because stitching real
+//    phrases from opposite ends of a bill into a claim it never makes is the same harm as inventing
+//    text. A fragment under MIN_FRAGMENT_CHARS is refused: "a ... the ... of" would match any
+//    English text while carrying no evidence.
+//
+// 2. THE STORED BILL TEXT IS NOT CLEAN PROSE. It carries PDF line numbers interleaved mid-sentence
+//    - the real stored bytes read `recognizes that "All 2 political power is vested"` - plus curly
+//    quote glyphs. A human-accurate quote cannot match that haystack. So the comparison runs TWICE:
+//    exact first, and only on failure again with line numbers dropped and quote glyphs unified.
+//
+// THE LIMITATION THAT FALLBACK BUYS, recorded rather than hidden: dropping standalone 1-3 digit
+// runs applies to both sides, so a quote reading "300 percent" and a text reading "200 percent" both
+// become " percent" and would match. Numbers inside an elided-or-noisy quote are therefore only
+// weakly checked. The exact pass is tried first precisely so a clean quote never relies on this, and
+// the alternative - no gate at all - is what let four invented quotes publish in wave W30.
+const ELLIPSIS = /\s*(?:\.\s*\.\s*\.+|…)\s*/;
+const MIN_FRAGMENT_CHARS = 12;
+
+// Artifacts the SOURCE injected, not normalization of the author's words. No case folding and no
+// punctuation smoothing: "facts only" still means the characters are the bill's own.
+function stripSourceArtifacts(value) {
+  return collapseWhitespace(
+    String(value)
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/(?<=\s)\d{1,3}(?=\s)/g, ' '),
+  );
+}
+
+function fragmentsOf(quote) {
+  return String(quote).split(ELLIPSIS).map((f) => collapseWhitespace(f)).filter((f) => f !== '');
+}
+
+function allFragmentsInOrder(fragments, haystack, transform) {
+  let cursor = 0;
+  for (const frag of fragments) {
+    const needle = transform ? transform(frag) : frag;
+    if (needle === '') continue;
+    const at = haystack.indexOf(needle, cursor);
+    if (at === -1) return false;
+    cursor = at + needle.length;
+  }
+  return true;
+}
+
+export function quoteIsGroundedIn(quote, haystackCollapsed, haystackStripped) {
+  const fragments = fragmentsOf(quote);
+  if (fragments.length === 0) return 'empty';
+  if (fragments.length > 1) {
+    const tooShort = fragments.find((f) => f.length < MIN_FRAGMENT_CHARS);
+    if (tooShort) return `elided fragment too short to be evidence ("${tooShort}")`;
+  }
+  if (allFragmentsInOrder(fragments, haystackCollapsed)) return null;
+  if (allFragmentsInOrder(fragments, haystackStripped, stripSourceArtifacts)) return null;
+  return fragments.length > 1 ? 'fragment not verbatim, or out of order' : 'not verbatim';
+}
+
 export function checkEvidenceQuoteGrounding(verdicts, billTextContent) {
   if (!Array.isArray(verdicts) || verdicts.length === 0) return null;
   if (typeof billTextContent !== 'string' || billTextContent === '') {
     return 'verdicts carry evidence quotes but the stored bill text has no content to ground them against — refusing to publish unverifiable receipts';
   }
-  const haystack = collapseWhitespace(billTextContent);
+  const collapsed = collapseWhitespace(billTextContent);
+  const stripped = stripSourceArtifacts(billTextContent);
   const bad = [];
   for (const v of verdicts) {
-    const quote = collapseWhitespace(v?.evidence_quote ?? '');
-    if (quote === '') {
+    const raw = String(v?.evidence_quote ?? '');
+    if (collapseWhitespace(raw) === '') {
       bad.push(`bullet ${v?.bullet_index}: empty evidence_quote`);
       continue;
     }
-    if (!haystack.includes(quote)) {
-      bad.push(`bullet ${v?.bullet_index}: "${quote.slice(0, 80)}"`);
-    }
+    const why = quoteIsGroundedIn(raw, collapsed, stripped);
+    if (why) bad.push(`bullet ${v?.bullet_index}: ${why} — "${collapseWhitespace(raw).slice(0, 70)}"`);
   }
   if (bad.length === 0) return null;
-  return `${bad.length} of ${verdicts.length} verdict evidence_quote(s) are not verbatim in the hash-pinned stored bill text — these are the per-bullet citations migration 0021 publishes to readers, so an ungrounded quote is never published: ${bad.slice(0, 6).join('; ')}${bad.length > 6 ? `; +${bad.length - 6} more` : ''}`;
+  return `${bad.length} of ${verdicts.length} verdict evidence_quote(s) are not grounded in the hash-pinned stored bill text — these are the per-bullet citations migration 0021 publishes to readers, so an ungrounded quote is never published: ${bad.slice(0, 6).join('; ')}${bad.length > 6 ? `; +${bad.length - 6} more` : ''}`;
 }
 
 // checkCitationsPresent: schema-shape validation alone lets section:'' through (JSON schema type

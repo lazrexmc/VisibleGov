@@ -1698,3 +1698,41 @@ test('checkEvidenceQuoteGrounding: no case folding or punctuation smoothing', ()
   const wrongCase = [{ bullet_index: 0, evidence_quote: 'the department shall establish a grant program.' }];
   assert.match(checkEvidenceQuoteGrounding(wrongCase, BILL), /not verbatim/);
 });
+
+// Added with the gate's two same-day corrections (2026-10-06). The first version flagged 80% of
+// already-published summaries, which was the instrument being wrong, not a corpus of forgeries.
+test('checkEvidenceQuoteGrounding: an ELIDED quote joining real fragments is grounded', () => {
+  const text = 'WHEREAS, the Tenth Amendment reserves powers to the states; and WHEREAS, elections must be free from foreign influence.';
+  const q = 'the Tenth Amendment reserves powers to the states ... elections must be free from foreign influence';
+  assert.equal(checkEvidenceQuoteGrounding([{ bullet_index: 0, evidence_quote: q }], text), null);
+});
+
+test('checkEvidenceQuoteGrounding: elided fragments OUT OF ORDER are refused', () => {
+  // Stitching real phrases from opposite ends into a claim the bill never makes is the same harm
+  // as inventing text outright.
+  const text = 'First the Department shall report annually. Later the Director may waive the fee.';
+  const q = 'the Director may waive the fee ... the Department shall report annually';
+  assert.match(checkEvidenceQuoteGrounding([{ bullet_index: 0, evidence_quote: q }], text), /out of order/);
+});
+
+test('checkEvidenceQuoteGrounding: a quote tolerates PDF line numbers injected mid-sentence', () => {
+  // The stored text really looks like this - line numbers interleaved by the source PDF. A
+  // human-accurate quote cannot match it exactly, and treating that as fabrication is what made
+  // the first version of this gate useless.
+  const text = 'terms mean:\n2 (a) "Disabled veteran", an individual who:\n3 a. Is a resident of this state;\n4 b. Has been separated';
+  const q = '"Disabled veteran", an individual who: a. Is a resident of this state;';
+  assert.equal(checkEvidenceQuoteGrounding([{ bullet_index: 0, evidence_quote: q }], text), null);
+});
+
+test('checkEvidenceQuoteGrounding: line-number tolerance does NOT excuse invented prose', () => {
+  // The HB 14 shape: a short contiguous phrase whose continuation is simply not in the bill.
+  const text = 'Appropriations are made\n3 to support overdose prevention education.';
+  const q = 'to support job training and workforce placement';
+  assert.match(checkEvidenceQuoteGrounding([{ bullet_index: 0, evidence_quote: q }], text), /not verbatim/);
+});
+
+test('checkEvidenceQuoteGrounding: a trivially short elided fragment is not evidence', () => {
+  const text = 'The Department of Revenue shall collect the surcharge annually.';
+  const q = 'The Department ... the ... annually';
+  assert.match(checkEvidenceQuoteGrounding([{ bullet_index: 0, evidence_quote: q }], text), /too short to be evidence/);
+});
