@@ -24,18 +24,36 @@ export class RateLimitedError extends SourceFetchError {
 //
 // ABSENT (a real, informative negative answer - the source is healthy and told us something):
 //   - HTTP 404: clerk.house.gov affirmatively has no such roll call.
-//   - RollCallNotYetPublishedError: senate.gov's "Roll Call Vote Unavailable" stub, which is the
-//     same statement dressed as an HTTP 200 (see us-senate.js). Matched by NAME, not instanceof,
-//     because that class lives in an adapter that imports this module - an instanceof check here
-//     would be an import cycle.
+//   - RollCallNotYetPublishedError: a chamber serving "this vote number does not exist yet" as an
+//     HTTP 200 body instead of a 404. senate.gov does it with a "Roll Call Vote Unavailable" page;
+//     clerk.house.gov does it with `<xml>Error sanitizing file "rollNNN.xml". Please try again.</xml>`
+//     (found 2026-10-06 - rolls 313/314 were real XML, 315/316/317 all served that stub).
+//     MOVED HERE 2026-10-06 from us-senate.js, which is why this check is now `instanceof` rather
+//     than a name comparison. It had to be matched by NAME while it lived in an adapter that
+//     imports this module, and the SECOND chamber needing it could not import it either:
+//     us-senate.js imports normalizeBillIdentifier FROM us-congress.js, so an adapter-to-adapter
+//     import would have been a cycle. Declaring it twice with the same `name` would have satisfied
+//     the old string check and been exactly the drift InvalidFlagValueError's comment below warns
+//     about. One definition, in the module both adapters already import.
 //
 // FAILURE (everything else): 5xx, 429/RateLimitedError, a network error (status undefined), a
 // body-read failure, a parse error. Note that absence is only *expected* at the tail of a probe
 // window; a 404 on a record we already hold is a regression, and catching that is the caller's job
 // (scheduled-ingest.js's findRegressedAbsences) because only the caller knows where the edge is.
+export class RollCallNotYetPublishedError extends SourceFetchError {
+  constructor(message, meta = {}) {
+    super(message, meta);
+    this.name = 'RollCallNotYetPublishedError';
+  }
+}
+
 export function isAbsentRecordError(err) {
   if (!(err instanceof SourceFetchError)) return false;
-  return err.status === 404 || err.name === 'RollCallNotYetPublishedError';
+  // The name check is kept alongside instanceof deliberately: an error constructed before this
+  // class moved here, or deserialized from a stored run detail, still carries only the name.
+  return err.status === 404
+    || err instanceof RollCallNotYetPublishedError
+    || err.name === 'RollCallNotYetPublishedError';
 }
 
 // InvalidFlagValueError — FINAL WHOLE-BRANCH REVIEW, finding 6 (.superpowers/sdd/

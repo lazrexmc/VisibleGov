@@ -1,3 +1,4 @@
+import { RollCallNotYetPublishedError } from '../lib/errors.js';
 import { XMLParser } from 'fast-xml-parser';
 import { fetchWithLimit } from '../lib/http.js';
 import { createLimiter } from '../lib/rate-limiter.js';
@@ -79,7 +80,36 @@ function parseClerkDate(s) {
   return `${m[3]}-${months[m[2]]}-${m[1].padStart(2, '0')}`;
 }
 
+// clerk.house.gov's "this roll call does not exist yet" response. Verified live 2026-10-06:
+// rolls 313 and 314 returned real `<rollcall-vote>` XML while 315, 316 and 317 ALL returned
+// `<xml>Error sanitizing file "rollNNN.xml". Please try again.</xml>` - so this is the tail of the
+// probe window, not one corrupt file, despite the wording inviting a retry. The House does the same
+// thing senate.gov does: answer "no such vote yet" with an HTTP 200 body instead of a 404.
+//
+// WHY THIS COST FIVE DAYS OF INGESTION. Without it, every hourly tick probed roll 315, got this
+// body, and the loud guard below threw - which is correct for an UNRECOGNISED 200 body and wrong
+// for this one. The run died before reaching 316+, so the window never advanced and the source sat
+// BROKEN with 5 consecutive failed runs from 2026-10-05 20:15 onward while the other four sources
+// stayed green.
+const HOUSE_ROLL_UNAVAILABLE_MARKER = 'Error sanitizing file';
+
 export function parseHouseRollCall(xmlString, { year }) {
+  // Recognised on the RAW text, before the parse, and only in a body that is NOT a roll call -
+  // the same shape as parseSenateRollCall. Narrow on purpose: this marker in a body that DOES
+  // contain <rollcall-vote> would mean something else entirely and must still reach the loud guard.
+  //
+  // Safe against the one thing the wording suggests - a transient failure on a vote that really
+  // exists - because absence is only *expected* at the tail. scheduled-ingest.js's
+  // findRegressedAbsences flags an absent answer for a record already held, so a genuine blip on a
+  // stored vote surfaces as a regression rather than being quietly accepted as "not published".
+  const text = String(xmlString);
+  if (!text.includes('<rollcall-vote') && text.includes(HOUSE_ROLL_UNAVAILABLE_MARKER)) {
+    throw new RollCallNotYetPublishedError(
+      'clerk.house.gov has no roll call at this number yet (it serves an "Error sanitizing file" '
+      + 'stub, not a 404, for a vote that does not exist) - expected miss, not a parse bug',
+      { source: SOURCE },
+    );
+  }
   const doc = xml.parse(xmlString);
   const root = doc['rollcall-vote'];
   // Senior engineering audit (2026-08-03, finding 8): clerk.house.gov can return HTTP 200 with a

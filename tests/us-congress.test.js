@@ -219,3 +219,59 @@ test('fetchMemberPage: a congress argument routes to /member/congress/{congress}
   assert.equal(seenUrls.length, 1);
   assert.match(seenUrls[0], /^https:\/\/api\.congress\.gov\/v3\/member\/congress\/119\?limit=250&offset=250$/);
 });
+
+// ---- clerk.house.gov's not-yet-published stub (2026-10-06) ----
+// Found live: rolls 313 and 314 returned real <rollcall-vote> XML while 315, 316 and 317 ALL
+// returned `<xml>Error sanitizing file "rollNNN.xml". Please try again.</xml>`. That is the tail of
+// the probe window answered as an HTTP 200 instead of a 404 - the same thing senate.gov does. Every
+// hourly tick probed 315, the loud guard threw, the run died before reaching 316, and us-congress
+// sat BROKEN with 5 consecutive failed runs for five days while the other four sources stayed green.
+import { RollCallNotYetPublishedError as HouseNotYetPublished } from '../src/lib/errors.js';
+import { isAbsentRecordError as houseIsAbsent, SourceFetchError as HouseSourceFetchError } from '../src/lib/errors.js';
+
+const HOUSE_STUB = '<xml>Error sanitizing file "roll315.xml". Please try again.</xml>';
+
+test('parseHouseRollCall: the real clerk.house.gov stub is a not-yet-published miss, not a parse bug', () => {
+  assert.throws(
+    () => parseHouseRollCall(HOUSE_STUB, { year: 2026 }),
+    (err) => {
+      assert.ok(err instanceof HouseNotYetPublished, `expected RollCallNotYetPublishedError, got ${err.constructor.name}`);
+      // Must extend SourceFetchError or collectUsCongress's per-vote catch rethrows it and the
+      // whole run dies again - which is the entire bug this fixes.
+      assert.ok(err instanceof HouseSourceFetchError, 'must be a SourceFetchError to be caught per-vote');
+      return true;
+    },
+  );
+});
+
+test('the House stub counts as ABSENT, so the run stays healthy-partial instead of failed', () => {
+  let caught;
+  try { parseHouseRollCall(HOUSE_STUB, { year: 2026 }); } catch (err) { caught = err; }
+  assert.ok(houseIsAbsent(caught), 'an unpublished tail roll must be absent, not a failure');
+});
+
+test('parseHouseRollCall: an UNRECOGNISED 200 body still throws loudly — the original guard survives', () => {
+  // The whole point of the 2026-08-03 audit guard: a template change or an error page must NOT be
+  // silently reclassified as a routine miss. Narrowing it to a known marker must not erode that.
+  assert.throws(
+    () => parseHouseRollCall('<html><body>Service Unavailable</body></html>', { year: 2026 }),
+    (err) => {
+      assert.ok(!(err instanceof HouseSourceFetchError), 'an unknown 200 body must NOT be an expected miss');
+      assert.match(err.message, /no <rollcall-vote> root/);
+      return true;
+    },
+  );
+});
+
+test('parseHouseRollCall: the marker inside a REAL roll call does not make it a miss', () => {
+  // Narrowness check. If clerk.house.gov ever emits that phrase inside a genuine vote document,
+  // treating it as unpublished would silently drop a real roll call.
+  const real = '<?xml version="1.0"?><rollcall-vote><vote-metadata>'
+    + '<rollcall-num>315</rollcall-num><legis-num>HR 1</legis-num>'
+    + '<vote-result>Passed</vote-result><action-date>1-Oct-2026</action-date>'
+    + '<vote-desc>Error sanitizing file was mentioned in debate</vote-desc>'
+    + '</vote-metadata><vote-data></vote-data></rollcall-vote>';
+  let err = null;
+  try { parseHouseRollCall(real, { year: 2026 }); } catch (e) { err = e; }
+  assert.ok(!(err instanceof HouseNotYetPublished), 'a real roll call must never be read as unpublished');
+});

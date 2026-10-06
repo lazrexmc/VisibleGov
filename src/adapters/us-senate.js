@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { fetchWithLimit } from '../lib/http.js';
 import { createLimiter } from '../lib/rate-limiter.js';
-import { SourceFetchError } from '../lib/errors.js';
+import { SourceFetchError, RollCallNotYetPublishedError } from '../lib/errors.js';
 import { normalizeBillIdentifier } from './us-congress.js';
 
 export const SOURCE = 'us-senate';
@@ -93,12 +93,13 @@ export function parseSenateVoteMenu(xmlString) {
 // bare Error, unlike uscode.js's UscSectionNotFoundError) so it flows through collectUsSenate's
 // existing `if (!(err instanceof SourceFetchError)) throw err;` per-vote catch unchanged - same
 // expected-miss handling us-congress already gets for a real HTTP 404 on a tail roll number.
-export class RollCallNotYetPublishedError extends SourceFetchError {
-  constructor(message, meta = {}) {
-    super(message, meta);
-    this.name = 'RollCallNotYetPublishedError';
-  }
-}
+//
+// DEFINITION MOVED to src/lib/errors.js (2026-10-06) because clerk.house.gov turned out to do the
+// same thing - serve "no such vote yet" as an HTTP 200 stub - and us-congress.js could not import
+// it from here: this file imports normalizeBillIdentifier from us-congress.js, so that would be a
+// cycle. Re-exported rather than relocated silently, so every existing `import { ... } from
+// './us-senate.js'` keeps working.
+export { RollCallNotYetPublishedError };
 
 // Verified live 2026-08-01 against real senate.gov (session 119-2, vote numbers 220/250/999 -
 // all three byte-identical: one generic template, not per-vote content; see tests/fixtures/
