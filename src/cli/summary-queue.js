@@ -455,69 +455,99 @@ export function checkStatedPurposeGrounding(statedPurpose, billTextContent) {
 // a real shape) there is no honest empty case - a verdict with no quote is a verdict with no
 // evidence. Reports EVERY offending bullet, not just the first, because a reviewer needs the shape
 // of the failure: one bad quote is a slip, four is a verifier that was not reading the text.
-// WHAT THIS GATE HAD TO LEARN, in two corrections on the day it was written (2026-10-06). Both
-// came from running it against the real corpus, and the first version would have been a disaster:
-// it flagged 80% of already-published summaries, which is not a corpus of forgeries but an
-// instrument that was wrong.
+// WHAT THIS GATE HAD TO LEARN — three rounds on 2026-10-06, every correction driven by running it
+// against the real corpus or by RapidForge reproducing a failure in it. Recorded because the first
+// two versions were confidently wrong in opposite directions.
 //
-// 1. ELIDED QUOTES ARE LEGITIMATE. Verifiers write quotes joining non-contiguous fragments with an
-//    ellipsis - "the Tenth Amendment ... affirms that any powers not delegated ... are reserved to
-//    the states" - which is ordinary quoting practice. A plain includes() failed every one. Each
-//    fragment must therefore appear verbatim AND IN ORDER; order matters because stitching real
-//    phrases from opposite ends of a bill into a claim it never makes is the same harm as inventing
-//    text. A fragment under MIN_FRAGMENT_CHARS is refused: "a ... the ... of" would match any
-//    English text while carrying no evidence.
+// WHY IT EXISTS. Wave W30's verifier for HB 14 returned 63 verdicts, all supported:true, bullet
+// indices complete. Structurally flawless, so validateVerdictBinding passed and the record gate
+// said published. Four of those 63 evidence quotes are not in the bill — bullet 30 matched 11 of its
+// 60 characters, bullet 34 nine of 70. evidence_quote was called verbatim in VERIFY_SCHEMA and in
+// the verifier prompt and checked by nothing. Migration 0021 publishes these as per-bullet
+// citations, so an invented quote is an invented receipt. This is checkStatedPurposeGrounding's
+// defect one field over; that function's comment records the same hole being found and not
+// generalised.
 //
-// 2. THE STORED BILL TEXT IS NOT CLEAN PROSE. It carries PDF line numbers interleaved mid-sentence
-//    - the real stored bytes read `recognizes that "All 2 political power is vested"` - plus curly
-//    quote glyphs. A human-accurate quote cannot match that haystack. So the comparison runs TWICE:
-//    exact first, and only on failure again with line numbers dropped and quote glyphs unified.
+// v1 used includes() and flagged 80% of the published corpus — an instrument wrong, not a corpus
+// forged. Two causes: elided quotes joining fragments with an ellipsis are ordinary practice, and
+// THE STORED BILL TEXT IS NOT CLEAN PROSE — PDF line numbers interleave mid-sentence, the real bytes
+// read `recognizes that "All 2 political power is vested"`.
 //
-// THE LIMITATION THAT FALLBACK BUYS, recorded rather than hidden: dropping standalone 1-3 digit
-// runs applies to both sides, so a quote reading "300 percent" and a text reading "200 percent" both
-// become " percent" and would match. Numbers inside an elided-or-noisy quote are therefore only
-// weakly checked. The exact pass is tried first precisely so a clean quote never relies on this, and
-// the alternative - no gate at all - is what let four invented quotes publish in wave W30.
+// v2 stripped bare 1-3 digit runs from BOTH sides to survive that. RapidForge reproduced two
+// failures in it: a quote reading "300 percent" passed against text reading "200 percent" (numbers
+// stripped from both sides match each other), and — worse — a quote ENDING in a digit was FALSELY
+// flagged, because the strip regex needed whitespace on both sides, so the text lost its line number
+// while the quote kept its trailing "section 2". That false-flag class is probably most of the 48%
+// the audit reported.
+//
+// v3, below, never strips the QUOTE. It walks the text's tokens matching the quote's tokens in
+// order, allowed to SKIP a text token only when that token is a bare 1-3 digit number — a line
+// number. So "payments made under section 2" matches "payments 3 made under section 2", while
+// "300 percent" cannot match "200 percent": skipping 200 leaves 300 unmatched. The quote's own
+// numbers must appear as the quote wrote them.
 const ELLIPSIS = /\s*(?:\.\s*\.\s*\.+|…)\s*/;
-const MIN_FRAGMENT_CHARS = 12;
+const MIN_QUOTE_CHARS = 12;
+// Fragments in order can still be 10,000 characters apart, which is stitching, not quoting.
+// RapidForge's stronger bound — require the quote inside the span of the section its bullet cites —
+// needs section offsets this function does not have; this is the cheap bound that closes the hole
+// the v2 comment wrongly claimed ordering already closed.
+const MAX_FRAGMENT_GAP_TOKENS = 120;
 
-// Artifacts the SOURCE injected, not normalization of the author's words. No case folding and no
-// punctuation smoothing: "facts only" still means the characters are the bill's own.
-function stripSourceArtifacts(value) {
-  return collapseWhitespace(
-    String(value)
-      .replace(/[\u2018\u2019]/g, "'")
-      .replace(/[\u201C\u201D]/g, '"')
-      .replace(/(?<=\s)\d{1,3}(?=\s)/g, ' '),
-  );
+function unifyGlyphs(value) {
+  return String(value).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
 }
 
-function fragmentsOf(quote) {
-  return String(quote).split(ELLIPSIS).map((f) => collapseWhitespace(f)).filter((f) => f !== '');
+function tokenize(value) {
+  return collapseWhitespace(unifyGlyphs(value)).split(' ').filter((t) => t !== '');
 }
 
-function allFragmentsInOrder(fragments, haystack, transform) {
-  let cursor = 0;
-  for (const frag of fragments) {
-    const needle = transform ? transform(frag) : frag;
-    if (needle === '') continue;
-    const at = haystack.indexOf(needle, cursor);
-    if (at === -1) return false;
-    cursor = at + needle.length;
+const isLineNumber = (token) => /^\d{1,3}$/.test(token);
+
+// Tokens compare punctuation-tolerantly at their edges: the stored text writes "states;" where a
+// quote writes "states", and v3's first cut flagged an honest elided quote for exactly that. Only
+// LEADING and TRAILING non-alphanumerics are ignored - never anything inside a word, and never case.
+// The cost, stated rather than hidden: a quote's edge punctuation is not verified. That is a smaller
+// loss than the false-flag class it removes, and the words themselves still have to be the bill's.
+const edge = (token) => token.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+const tokensMatch = (textToken, fragToken) => textToken === fragToken || edge(textToken) === edge(fragToken);
+
+// Match `frag` tokens against `text` tokens starting at or after `from`. A text token may be skipped
+// ONLY if it is a bare line number. Returns the index just past the match, or -1.
+function matchFrom(fragTokens, textTokens, from) {
+  for (let start = from; start <= textTokens.length - fragTokens.length; start += 1) {
+    let t = start;
+    let f = 0;
+    while (f < fragTokens.length && t < textTokens.length) {
+      if (tokensMatch(textTokens[t], fragTokens[f])) { t += 1; f += 1; continue; }
+      if (isLineNumber(textTokens[t])) { t += 1; continue; }
+      break;
+    }
+    if (f === fragTokens.length) return t;
   }
-  return true;
+  return -1;
 }
 
-export function quoteIsGroundedIn(quote, haystackCollapsed, haystackStripped) {
-  const fragments = fragmentsOf(quote);
+export function quoteIsGroundedIn(quote, textTokens) {
+  const fragments = String(quote).split(ELLIPSIS).map((f) => collapseWhitespace(f)).filter((f) => f !== '');
   if (fragments.length === 0) return 'empty';
-  if (fragments.length > 1) {
-    const tooShort = fragments.find((f) => f.length < MIN_FRAGMENT_CHARS);
-    if (tooShort) return `elided fragment too short to be evidence ("${tooShort}")`;
+  // Applies to a single quote too, not only elided ones: "the" is not evidence, and v2 let it pass.
+  const tooShort = fragments.find((f) => f.length < MIN_QUOTE_CHARS);
+  if (tooShort) return `fragment too short to be evidence ("${tooShort}")`;
+
+  let cursor = 0;
+  let previousEnd = -1;
+  for (const frag of fragments) {
+    const fragTokens = tokenize(frag);
+    const end = matchFrom(fragTokens, textTokens, cursor);
+    if (end === -1) return fragments.length > 1 ? 'fragment not verbatim, or out of order' : 'not verbatim';
+    const startOfMatch = end - fragTokens.length;
+    if (previousEnd >= 0 && startOfMatch - previousEnd > MAX_FRAGMENT_GAP_TOKENS) {
+      return `elided fragments are ${startOfMatch - previousEnd} tokens apart — too far to be one quote`;
+    }
+    previousEnd = end;
+    cursor = end;
   }
-  if (allFragmentsInOrder(fragments, haystackCollapsed)) return null;
-  if (allFragmentsInOrder(fragments, haystackStripped, stripSourceArtifacts)) return null;
-  return fragments.length > 1 ? 'fragment not verbatim, or out of order' : 'not verbatim';
+  return null;
 }
 
 export function checkEvidenceQuoteGrounding(verdicts, billTextContent) {
@@ -525,8 +555,7 @@ export function checkEvidenceQuoteGrounding(verdicts, billTextContent) {
   if (typeof billTextContent !== 'string' || billTextContent === '') {
     return 'verdicts carry evidence quotes but the stored bill text has no content to ground them against — refusing to publish unverifiable receipts';
   }
-  const collapsed = collapseWhitespace(billTextContent);
-  const stripped = stripSourceArtifacts(billTextContent);
+  const textTokens = tokenize(billTextContent);
   const bad = [];
   for (const v of verdicts) {
     const raw = String(v?.evidence_quote ?? '');
@@ -534,7 +563,7 @@ export function checkEvidenceQuoteGrounding(verdicts, billTextContent) {
       bad.push(`bullet ${v?.bullet_index}: empty evidence_quote`);
       continue;
     }
-    const why = quoteIsGroundedIn(raw, collapsed, stripped);
+    const why = quoteIsGroundedIn(raw, textTokens);
     if (why) bad.push(`bullet ${v?.bullet_index}: ${why} — "${collapseWhitespace(raw).slice(0, 70)}"`);
   }
   if (bad.length === 0) return null;
@@ -704,9 +733,28 @@ export async function classifyRecordItem(client, item, options = {}) {
   // verification failure, not a shape failure: flagDraft, overall 'flagged' (never the re-derived
   // 'clean', which is precisely the claim being refused), with the reason carried through to the
   // operator's report rather than dropped.
+  // checkEvidenceQuoteGrounding is deliberately NOT in this chain. It was, for part of
+  // 2026-10-06, and removing it is an evidence-led retreat rather than a loss of nerve.
+  //
+  // RapidForge labelled 1,233 quotes across 35 published summaries BLIND - its own matcher, its own
+  // SELECT-only sample, never running this gate: **0 fabricated**, 3 wording drift, and the rest
+  // genuine quotes broken by text artifacts. Rule-of-three puts the 95% upper bound near 0.4% per
+  // quote. So the defect this gate was built for does not measurably exist in the published corpus,
+  // and my own 48% was artifacts throughout.
+  //
+  // Meanwhile the gate over-flags badly on real text: on HB 14 it went from 4 of 63 to 53 of 63 once
+  // matching got strict enough to fix the false-flag class. The artifact classes it still lacks are
+  // the ones RapidForge had to handle by hand - bracketed deletions the quote correctly omits
+  // ("[six] three months"), page headers mid-sentence, line-break hyphenation, and digits glued to
+  // words ("2section", "3191.1720"). Blocking publishes on it would stop the drain to prevent a
+  // problem measured at zero.
+  //
+  // It stays EXPORTED and is used by scripts/audit-evidence-quotes.mjs as a diagnostic, which is
+  // what its precision supports. HB 14's four invented quotes were real and were caught - but by
+  // this bill being flagged on other grounds, never published. If fabrication ever shows up in the
+  // published corpus, this is the hook to re-arm, and the artifact list above is what it needs first.
   const gateReason = validateVerdictBinding(item.verdicts, summary.what_it_does)
-    ?? checkStatedPurposeGrounding(summary.stated_purpose, currentText.content)
-    ?? checkEvidenceQuoteGrounding(item.verdicts, currentText.content);
+    ?? checkStatedPurposeGrounding(summary.stated_purpose, currentText.content);
   if (gateReason) {
     return {
       action: 'flagDraft', ...base, verdicts: item.verdicts, overall: 'flagged', gateReason,
