@@ -430,6 +430,52 @@ export function checkStatedPurposeGrounding(statedPurpose, billTextContent) {
   return null;
 }
 
+// checkEvidenceQuoteGrounding — 2026-10-06. The SAME defect as checkStatedPurposeGrounding, one
+// field over, found live and not by review.
+//
+// WHAT HAPPENED. Wave W30's verifier for HB 14 returned 63 verdicts for 63 bullets, every one
+// supported:true, bullet indices complete with no gaps or duplicates - structurally flawless, so
+// validateVerdictBinding passed it and the record gate classified it `published`. Four of those 63
+// evidence quotes do not exist in the bill. Not whitespace drift: bullet 30's quote matched 11 of
+// its 60 characters ("to support "), bullet 34 matched 9 of 70 ("families "), bullet 57 matched 15
+// of 67 ("the Department "). The verifier invented supporting text and nothing noticed.
+//
+// WHY NOTHING NOTICED. `evidence_quote` is described as "an exact, verbatim quote from the bill
+// text" in VERIFY_SCHEMA and again in the verifier's system prompt. Both are instructions to a
+// model. The trust model's whole premise is that the verifier's self-report is never trusted -
+// `overall` is re-derived, completeness is re-derived, bindings are re-checked - and yet the one
+// field a READER uses to check a claim themselves was taken on the verifier's word. Migration 0021
+// exposes these quotes publicly as per-bullet citations, so an invented quote is an invented
+// receipt on the public site, which is the one non-negotiable.
+//
+// Same normalization as stated_purpose, deliberately: collapseWhitespace on BOTH sides and nothing
+// else. No case folding, no punctuation smoothing - "facts only" means the characters must be the
+// bill's own. An EMPTY quote is a failure here rather than an allowance: VERIFY_SCHEMA lists
+// evidence_quote in `required`, so unlike stated_purpose ("empty string if the bill states none" is
+// a real shape) there is no honest empty case - a verdict with no quote is a verdict with no
+// evidence. Reports EVERY offending bullet, not just the first, because a reviewer needs the shape
+// of the failure: one bad quote is a slip, four is a verifier that was not reading the text.
+export function checkEvidenceQuoteGrounding(verdicts, billTextContent) {
+  if (!Array.isArray(verdicts) || verdicts.length === 0) return null;
+  if (typeof billTextContent !== 'string' || billTextContent === '') {
+    return 'verdicts carry evidence quotes but the stored bill text has no content to ground them against — refusing to publish unverifiable receipts';
+  }
+  const haystack = collapseWhitespace(billTextContent);
+  const bad = [];
+  for (const v of verdicts) {
+    const quote = collapseWhitespace(v?.evidence_quote ?? '');
+    if (quote === '') {
+      bad.push(`bullet ${v?.bullet_index}: empty evidence_quote`);
+      continue;
+    }
+    if (!haystack.includes(quote)) {
+      bad.push(`bullet ${v?.bullet_index}: "${quote.slice(0, 80)}"`);
+    }
+  }
+  if (bad.length === 0) return null;
+  return `${bad.length} of ${verdicts.length} verdict evidence_quote(s) are not verbatim in the hash-pinned stored bill text — these are the per-bullet citations migration 0021 publishes to readers, so an ungrounded quote is never published: ${bad.slice(0, 6).join('; ')}${bad.length > 6 ? `; +${bad.length - 6} more` : ''}`;
+}
+
 // checkCitationsPresent: schema-shape validation alone lets section:'' through (JSON schema type
 // 'string' has no minLength here) — a bullet with an empty cited section is exactly the
 // uncited-bullet gap verify.js's own checkBulletCoverage guards against on the review-edit path;
@@ -594,7 +640,8 @@ export async function classifyRecordItem(client, item, options = {}) {
   // 'clean', which is precisely the claim being refused), with the reason carried through to the
   // operator's report rather than dropped.
   const gateReason = validateVerdictBinding(item.verdicts, summary.what_it_does)
-    ?? checkStatedPurposeGrounding(summary.stated_purpose, currentText.content);
+    ?? checkStatedPurposeGrounding(summary.stated_purpose, currentText.content)
+    ?? checkEvidenceQuoteGrounding(item.verdicts, currentText.content);
   if (gateReason) {
     return {
       action: 'flagDraft', ...base, verdicts: item.verdicts, overall: 'flagged', gateReason,

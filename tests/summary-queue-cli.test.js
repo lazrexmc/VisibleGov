@@ -341,10 +341,18 @@ const goodSummary = () => ({
   referenced_terms: [{ term: 'Some Act', kind: 'act', citation_raw: '' }],
 });
 
+// evidence_quote values were the placeholders 'q1'/'q2' until 2026-10-06. They could be
+// placeholders because NOTHING checked them - the same reason HB 14 published four invented quotes
+// in wave W30. checkEvidenceQuoteGrounding now requires each quote to be verbatim (whitespace
+// collapsed) in the stored bill text, so these are real fragments. 'To do X' and 'and Y.' are
+// chosen because both appear in BOTH bill-text fixtures in this file after collapsing - the
+// the 'SEC. 1. Does X. ... PURPOSE.-To do X and Y.' one, and the indented one whose text wraps
+// so a test that swaps fixtures does not silently start failing on the quote rather than on what it
+// is actually asserting.
 function goodVerdicts(overrides = []) {
   const base = [
-    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   return overrides.length ? overrides : base;
 }
@@ -487,8 +495,8 @@ test('classifyRecordItem: complete verdicts, one unsupported -> action flagDraft
     summaries: { data: [], error: null },
   });
   const verdicts = [
-    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'not supported', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'not supported', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts }));
   assert.equal(decision.action, 'flagDraft');
@@ -778,15 +786,22 @@ test('classifyRecordItem: sub-floor completeness WITH mechanical corroboration -
   const corroboration = { key_provisions: [{ section: 'Resolved,', provision: 'Designates the week.' }] };
   // stated_purpose blanked out: THIN_TEXT is a different bill body than BILL_TEXT_CONTENT, and
   // goodSummary()'s default stated_purpose would fail checkStatedPurposeGrounding against it —
-  // an unrelated gate this test has no business exercising. what_it_does/verdicts stay the
-  // defaults (goodSummary/goodVerdicts bind to each other, not to bill text).
+  // an unrelated gate this test has no business exercising.
+  //
+  // 2026-10-06: the verdict quotes now need the same treatment, and the note above that
+  // "verdicts stay the defaults (they bind to each other, not to bill text)" is no longer true.
+  // checkEvidenceQuoteGrounding requires each evidence_quote to be verbatim in the STORED text, so
+  // against THIN_TEXT the defaults ('To do X' / 'and Y.') would flag this on quote grounding -
+  // again a gate this test has no business exercising. Re-pointed at a fragment THIN_TEXT actually
+  // contains, for the same reason stated_purpose was blanked.
   const summary = { ...goodSummary(), stated_purpose: '' };
+  const thinVerdicts = goodVerdicts().map((v) => ({ ...v, evidence_quote: 'Does X.' }));
 
   const corroboratedClient = fakeClient({
     bill_texts: { data: [thinTextRow()], error: null },
     summaries: { data: [], error: null },
   });
-  const corroboratedItem = baseItem({ summary, completeness: thinCompleteness, completeness_corroboration: corroboration });
+  const corroboratedItem = baseItem({ summary, verdicts: thinVerdicts, completeness: thinCompleteness, completeness_corroboration: corroboration });
   const decision = await classifyRecordItem(corroboratedClient, corroboratedItem);
   assert.equal(decision.action, 'publish');
   assert.equal(decision.completenessCorroboratedThin, true);
@@ -796,7 +811,7 @@ test('classifyRecordItem: sub-floor completeness WITH mechanical corroboration -
     bill_texts: { data: [thinTextRow()], error: null },
     summaries: { data: [], error: null },
   });
-  const uncorroboratedItem = baseItem({ summary, completeness: thinCompleteness });
+  const uncorroboratedItem = baseItem({ summary, verdicts: thinVerdicts, completeness: thinCompleteness });
   await assert.rejects(
     () => classifyRecordItem(uncorroboratedClient, uncorroboratedItem),
     (err) => { assert.ok(err instanceof MalformedSummaryError); assert.match(err.message, /without a well-formed corroboration run/); return true; },
@@ -1100,8 +1115,8 @@ test('classifyRecordItem: FINAL REVIEW FINDING 4 — a verdict set whose section
     summaries: { data: [], error: null },
   });
   const crossBillVerdicts = [
-    { bullet_index: 0, section: 'Sec. 402', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 403', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'Sec. 402', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 403', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: crossBillVerdicts }));
   assert.equal(decision.action, 'flagDraft', 'a verification that never looked at this summary is a verification FAILURE, handled exactly like an unsupported verdict');
@@ -1124,8 +1139,8 @@ test('classifyRecordItem: a verdict section wrapped in parentheses — "(Sec. 1)
     summaries: { data: [], error: null },
   });
   const parenVerdicts = [
-    { bullet_index: 0, section: '(Sec. 1)', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: '(Sec. 2)', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: '(Sec. 1)', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: '(Sec. 2)', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: parenVerdicts }));
   assert.equal(decision.action, 'publish', 'surrounding parens are verifier formatting, not a binding failure');
@@ -1149,8 +1164,8 @@ test('classifyRecordItem: parens never excuse a REAL section mismatch — "(Sec.
     summaries: { data: [], error: null },
   });
   const crossVerdicts = [
-    { bullet_index: 0, section: '(Sec. 402)', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: '(Sec. 402)', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: crossVerdicts }));
   assert.equal(decision.action, 'flagDraft');
@@ -1163,8 +1178,8 @@ test('classifyRecordItem: an UNBALANCED paren — "(Sec. 1" — is not normalize
     summaries: { data: [], error: null },
   });
   const lopsided = [
-    { bullet_index: 0, section: '(Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: '(Sec. 1', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: lopsided }));
   assert.equal(decision.action, 'flagDraft', 'only a complete surrounding pair is formatting; anything else is a real discrepancy');
@@ -1192,8 +1207,8 @@ test('classifyRecordItem: the section-word normalization is symmetric — a verd
     summaries: { data: [], error: null },
   });
   const prefixed = [
-    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Section Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Section Sec. 2', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: prefixed }));
   assert.equal(decision.action, 'publish');
@@ -1205,8 +1220,8 @@ test('classifyRecordItem: the section word never excuses a REAL mismatch — "se
     summaries: { data: [], error: null },
   });
   const crossVerdicts = [
-    { bullet_index: 0, section: 'section Sec. 402', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'section Sec. 402', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: crossVerdicts }));
   assert.equal(decision.action, 'flagDraft');
@@ -1219,8 +1234,8 @@ test('classifyRecordItem: "section" embedded mid-string is NOT normalized — "s
     summaries: { data: [], error: null },
   });
   const midWord = [
-    { bullet_index: 0, section: 'subsection Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'subsection Sec. 1', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: true, reason: 'ok', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts: midWord }));
   assert.equal(decision.action, 'flagDraft', 'only the exact leading word is formatting; "subsection" changes the reference');
@@ -1419,8 +1434,8 @@ test('classifyRecordItem: completeness COMPLETE but support verdicts flagged -> 
     summaries: { data: [], error: null },
   });
   const verdicts = [
-    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'q1' },
-    { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'not supported', evidence_quote: 'q2' },
+    { bullet_index: 0, section: 'Sec. 1', supported: true, reason: 'ok', evidence_quote: 'To do X' },
+    { bullet_index: 1, section: 'Sec. 2', supported: false, reason: 'not supported', evidence_quote: 'and Y.' },
   ];
   const decision = await classifyRecordItem(client, baseItem({ verdicts }));
   assert.equal(decision.action, 'flagDraft');
@@ -1613,4 +1628,73 @@ test('applyRecordDecision: flagDraft with supersedes also retires the old draft 
   assert.equal(result.outcome, 'flaggedDraft');
   const rejectedUpdate = calls.find((c) => c.table === 'summaries' && c.method === 'update' && c.args[0].status === 'rejected');
   assert.ok(rejectedUpdate, 'flagDraft must also retire the superseded draft');
+});
+
+// ---- checkEvidenceQuoteGrounding (2026-10-06) ----
+// Added after wave W30's verifier for HB 14 returned 63 verdicts, all supported:true, bullet
+// indices complete with no gaps or duplicates - structurally flawless, so validateVerdictBinding
+// passed and the record gate classified it `published`. Four of those 63 evidence quotes did not
+// exist in the bill: bullet 30 matched 11 of 60 characters ("to support "), bullet 34 matched 9 of
+// 70 ("families "), bullet 57 matched 15 of 67 ("the Department "). evidence_quote was described as
+// verbatim in VERIFY_SCHEMA and in the verifier prompt, and nothing checked it - the same defect
+// checkStatedPurposeGrounding was written for, one field over.
+import { checkEvidenceQuoteGrounding } from '../src/cli/summary-queue.js';
+
+const BILL = 'Sec. 1. The Department shall establish a grant program.\n  Sec. 2. Appropriations are\n  made to support overdose prevention.';
+
+test('checkEvidenceQuoteGrounding: a verbatim quote passes, wrapping and indentation tolerated', () => {
+  // The stored bill text wraps and indents; a quote pulled out of it will not carry the same line
+  // breaks. Whitespace collapses on both sides - and nothing else does.
+  const ok = [{ bullet_index: 0, evidence_quote: 'Appropriations are made to support overdose prevention.' }];
+  assert.equal(checkEvidenceQuoteGrounding(ok, BILL), null);
+});
+
+test('checkEvidenceQuoteGrounding: an invented quote is refused, and the bullet is named', () => {
+  const bad = [{ bullet_index: 7, evidence_quote: 'to support job training and workforce placement' }];
+  const reason = checkEvidenceQuoteGrounding(bad, BILL);
+  assert.match(reason, /not verbatim/);
+  assert.match(reason, /bullet 7/, 'the reviewer needs to know WHICH bullet');
+});
+
+test('checkEvidenceQuoteGrounding: reports every offender, because count is the diagnosis', () => {
+  // One bad quote is a slip; four is a verifier that was not reading the text. Reporting only the
+  // first would hide that distinction from whoever reviews the flag.
+  const bad = [
+    { bullet_index: 0, evidence_quote: 'The Department shall establish a grant program.' },
+    { bullet_index: 1, evidence_quote: 'families with an annual income of more than 300 percent' },
+    { bullet_index: 2, evidence_quote: 'the Department shall provide a quarterly accounting' },
+  ];
+  const reason = checkEvidenceQuoteGrounding(bad, BILL);
+  assert.match(reason, /^2 of 3 verdict/, `expected 2 of 3, got: ${reason}`);
+  assert.match(reason, /bullet 1/);
+  assert.match(reason, /bullet 2/);
+});
+
+test('checkEvidenceQuoteGrounding: an EMPTY quote is a failure, unlike an empty stated_purpose', () => {
+  // VERIFY_SCHEMA lists evidence_quote in `required`, so there is no honest empty case here -
+  // a verdict with no quote is a verdict with no evidence. stated_purpose differs: its own schema
+  // says "empty string if the bill states none", which is a real shape.
+  assert.match(checkEvidenceQuoteGrounding([{ bullet_index: 3, evidence_quote: '' }], BILL), /empty evidence_quote/);
+});
+
+test('checkEvidenceQuoteGrounding: refuses rather than passes when there is no text to check against', () => {
+  // The dangerous default. "No text to compare" must never read as "nothing wrong" - that is the
+  // absence-reported-as-healthy failure this repo has hit repeatedly.
+  const v = [{ bullet_index: 0, evidence_quote: 'anything at all' }];
+  assert.match(checkEvidenceQuoteGrounding(v, ''), /no content to ground them against/);
+  assert.match(checkEvidenceQuoteGrounding(v, null), /no content to ground them against/);
+});
+
+test('checkEvidenceQuoteGrounding: no verdicts is not a quote failure', () => {
+  // An incomplete verdict set is already handled upstream as leaveUnverified; this gate must not
+  // reclassify that as a fabrication.
+  assert.equal(checkEvidenceQuoteGrounding([], BILL), null);
+  assert.equal(checkEvidenceQuoteGrounding(undefined, BILL), null);
+});
+
+test('checkEvidenceQuoteGrounding: no case folding or punctuation smoothing', () => {
+  // Facts-only means the characters must be the bill's own. A quote that differs in case is not
+  // the bill's words, and letting it through would reopen the hole by degrees.
+  const wrongCase = [{ bullet_index: 0, evidence_quote: 'the department shall establish a grant program.' }];
+  assert.match(checkEvidenceQuoteGrounding(wrongCase, BILL), /not verbatim/);
 });
