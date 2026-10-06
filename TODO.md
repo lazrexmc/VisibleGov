@@ -29,62 +29,49 @@ the raw text first (`src/adapters/us-senate.js`, PLAYBOOK_DELTA 65, CHATLOG 2026
 the first `ingest.yml` run after the fix is green, us-senate's next run succeeds, and
 `BROKEN us-senate` is gone from `check-ingest-health`.
 
-### THE DRAIN IS PAUSED (2026-09-03 08:06 CDT) - DELIBERATE, NOT BROKEN
+### THE DRAIN IS RUNNING AGAIN (resumed 2026-10-06 09:5x CDT)
 
-**Lance paused it so other projects on this machine get the token budget.** Relayed through
-duarte-izer-96, 2026-09-03: *"pause visiblegov's draining runs for now, let's have the other
-projects get token usage instead."* Nothing is wrong with the lane. It ran successfully this
-morning and stopped because it was told to.
+**Lance, 2026-10-06:** *"Start draining using subscription, I have no credits for API."* The pause
+he set on 2026-09-03 - so other projects got the token budget - is lifted.
 
-**What "paused" means here, precisely: no new summary waves are being launched.** There is no
-scheduler, no cron and no timer to switch off for this lane - it has never had one. The $0 subagent
-wave lane IS a Claude session, so it runs only when a session runs it, and it stops by a session
-choosing not to launch the next wave. **Nothing needs to be disabled and nothing was.**
+**~~THE DRAIN IS PAUSED (2026-09-03 08:06 CDT)~~** struck rather than deleted: the pause was a
+decision, and a decision that vanishes from the record is indistinguishable from one nobody kept.
 
-**HOW TO RESUME - the whole procedure, for a session that does not have this exchange:**
+**THE DISTINCTION THAT MATTERS, because getting it backwards stops free work:** the $0 subagent wave
+lane does NOT consume API credits and never has. It runs on Lance's Claude subscription via session
+subagents. **"No API credits" does not block this lane.** API credits buy the BILLED scheduler
+(`scripts/scheduled-summaries.js`, currently dormant on the price guard) and the gloss runner.
+Neither is this. A session reading "no credits" as "no summaries" will stop work that costs nothing.
 
-1. Confirm Lance wants it resumed. This pause is his, not a technical state.
+**The real constraint on this lane is subscription tokens and session hours**, roughly 4M tokens per
+12-bill wave producing 9-11 published on the current 2025 backlog. `npm run wave:cost` measures it
+from transcripts already on disk, and its header records the three optimizations that were proposed
+and refuted - read it before trying a fourth.
+
+**HOW TO RUN IT - the whole procedure, for a session without this exchange:**
+
+1. Confirm Lance wants it running. This lane has no scheduler and cannot have one of the current
+   kind: it IS a Claude session, so it runs only when a session runs it, and it stops by a session
+   choosing not to launch the next wave. Nothing to enable, nothing to disable.
 2. Build a wave. Prefer whichever lane is converting better on current evidence:
-   - re-author (usually better): `node --env-file=.env scripts/build-drain-wave.mjs W<N> 12 --pointer`
+   - re-author: `node --env-file=.env scripts/build-drain-wave.mjs W<N> 12 --pointer`
      writes `.superpowers/artifacts/wave3/wave-W<N>-args.json`
    - fresh: `node --env-file=.env scripts/export-summary-wave.mjs 12`
      writes `.superpowers/artifacts/wave3/manifest.json`
-3. Launch: `Workflow({scriptPath: 'F:\VisibleGov\.claude\workflows\summary-wave.js',
-   args: {manifest_file: '<the file step 2 wrote>'}})`. Launch by scriptPath, never by name
-   (PLAYBOOK 47).
-4. When it completes, record from `.superpowers/artifacts/wave3/records-wave.json`:
-   `node --env-file=.env src/cli/summary-queue.js record --file <that> --dry-run`, inspect the
-   counts, then re-run without `--dry-run`. **Add `--replace-drafts` for a re-author wave** or the
-   same-hash draft classifies as `alreadySummarized` and nothing is written.
+3. Launch: `Workflow({scriptPath: 'F:\\VisibleGov\\.claude\\workflows\\summary-wave.js',
+   args: {manifest_file: '<the file step 2 wrote>'}})`. By scriptPath, never by name (PLAYBOOK 47).
+4. Record from `.superpowers/artifacts/wave3/records-wave.json`:
+   `node --env-file=.env src/cli/summary-queue.js record --file <that> --dry-run`, inspect, then
+   re-run without `--dry-run`. **Add `--replace-drafts` for a re-author wave** or the same-hash
+   draft classifies as `alreadySummarized` and nothing is written.
+   **VERIFY THE RECORDS FILE BY TIMESTAMP AND CONTENTS FIRST** - PLAYBOOK 64: a wave once reported
+   `{"wrote": ..., "envelope_count": 12, "failed": 0}` while its write step had failed on a 529, and
+   the stale file from the previous wave would have satisfied an existence check.
 5. Repeat. `docs/RUNBOOK_SUMMARY_WAVES.md` has the full detail.
 
-**Last wave: W27, 2026-09-04 09:23 CDT - one wave authorized by Lance, then paused again.** 11 of
-12 published, **33.7%, 1,046 of 3,108**, review backlog 40 -> 29. It emptied the re-author pool. The
-records file was verified by timestamp and contents before recording, per PLAYBOOK 64.
-
-**Before that: W26, RECOVERED AND RECORDED 2026-09-03 21:52 CDT.** 6 published,
-6 flagged. Completion 33.1% -> 33.3%, 1,035 of 3,108. **Nothing is left unrecorded; there is no
-pending records file to chase.**
-
-It nearly was lost, and the reason is worth carrying. W26's completion notification reported
-`{"wrote": "...records-wave.json", "envelope_count": 12, "failed": 0}` while its own failures list
-carried `[write-records] failed: API Error: 529 Overloaded`. **The success line was false.** The
-file on disk was the PREVIOUS wave's - six envelopes, hours old - so an existence check would have
-confirmed the lie. Caught by reading timestamp and contents against what that run should have
-produced. Recovered with `resumeFromRunId`, which re-attempted only the failed write. PLAYBOOK 64.
-
-**Cost correction, stated wrongly to Lance at the time and then MEASURED (2026-09-03 22:0x CDT).**
-The recovery was described as spending no new agent tokens because completed agents replay from
-cache. It reported 2,859,409 subagent tokens. Measured from agent transcript mtimes in the run's
-own directory: **51 transcripts from the original run, 38 NEW ones written during the resume, so 38
-of 51 agents re-ran live and only 13 replayed.** Two independent figures agree - 38/51 = 74.5% of
-agents, 2.86M/3.83M = 74.7% of the original cost.
-
-**So `resumeFromRunId` does NOT reliably replay from cache, and the prior datapoint at
-`PLAYBOOK_DELTA.md:908` (45 of 48 replayed, 3 ran live) is real but not general.** The difference
-between the two cases is unexplained and worth knowing before relying on either: that one resumed a
-job whose agents had merely stalled, this one resumed a job whose final step had ERRORED. **Budget a
-resume as a partial re-run until the discriminator is understood.**
+**State at resume: 34.0%, 1,411 published, 2,025 READY, re-author pool down to 2** (one of them the
+352k-char HB 3000, which has failed two passes). First wave back is fresh authoring, 12 bills from
+the 2025-01-08 session.
 
 **Not paused, because they are neither this lane nor token-spending:** the Windows task
 `VisibleGov Scheduled Ingestion` (every 15 min, no LLM calls) keeps running, and

@@ -76,39 +76,30 @@ this entry.**
 
 ---
 
-## 2. CURRENTLY PAUSED BY DECISION: the $0 summary wave lane
+## 2. ~~CURRENTLY PAUSED BY DECISION~~ RESUMED 2026-10-06 09:5x CDT: the $0 summary wave lane
 
-**Status: PAUSED. Decided by Lance. Effective 2026-09-03 08:06 CDT.**
-**~~EXCEPTION, 2026-09-04: one wave authorized~~ CLOSED 09:23 CDT.** Lance authorized one wave -
-*"make one wave of drain then pause"*. W27 ran and was recorded: **11 of 12 published**, completion
-33.3% -> 33.7%, 1,046 of 3,108, review backlog 40 -> 29. **The exception is spent and the pause is
-again unqualified.** The status line was never flipped to ACTIVE during it, so nothing downstream
-needed to change back.
+**Status: RUNNING.** Lance resumed it 2026-10-06: *"Start draining using subscription, I have no
+credits for API."* The pause he set on 2026-09-03 is lifted. **Struck through rather than deleted so
+the record shows the pause existed, who set it, and that it was ended deliberately rather than
+forgotten** - a pause that quietly disappears is indistinguishable from one nobody ever honoured.
 
-**Reason for the pause:** other projects on this machine should get the token budget for now. **Nothing is broken.** The lane ran successfully
-the same morning - 6 of 6 published at 07:32 - and stopped because it was told to.
+**The distinction his instruction turns on, and it is the one most likely to be got wrong by a
+session reading this cold:** the $0 wave lane does NOT use API credits and never has. It runs on his
+Claude subscription through session subagents. Having no API balance does not block it. What API
+credits buy is the BILLED scheduler (entry 1 above, dormant) and the gloss runner - neither of which
+is this lane. A session that reads "no credits" as "no summaries" will stop work that costs nothing.
 
-**This entry exists because a pause that is a DECISION and a pause that is a FAULT are
-indistinguishable from the outside, and only one of them should be undone on initiative.** A
-session finding an idle lane cannot tell them apart; restarting a deliberate pause spends budget
-the operator deliberately redirected, and mistaking a real stall for a pause means the work stops
-silently. The decider and the DATE are both recorded above on purpose - a pause with a decider and
-no date is present-but-not-true, since a three-week-old pause and a three-hour-old one are
-different facts that look identical.
+**What the pause cost while it lasted: nothing was lost.** 2026-09-05 ended at 34.0% - 1,411
+published, 2,025 READY - and the lane picked up from exactly there.
+
+**While idle for ANY reason, `npm run status` prints `LANE IDLE: the $0 wave lane needs a session to
+run it` once the last publish is more than two days old.** That warning was never suppressed during
+the pause, deliberately: silencing it would have made a genuine stall after the pause ended look
+identical to the pause itself, which is the same trap one layer down. See the generic note below.
 
 **A peer session's monitoring instrument reads THIS FILE and `TODO.md`'s RESUME block to decide
-whether VisibleGov's silence is expected, and stays quiet if either says paused.** So this entry is
-load-bearing outside the repo: while the pause lasts it must stay here. If the drain resumes, this
-section goes back to being the generic note below.
-
-**To resume:** the numbered procedure is in `TODO.md`'s RESUME block. Step 1 there is "confirm
-Lance wants it resumed," because this is his decision and not a technical state to undo.
-
-**While paused, `npm run status` will print `LANE IDLE: the $0 wave lane needs a session to run it`
-once the last publish is more than two days old. That warning is CORRECT about the fact and WRONG
-about the implication - it reads as a fault and this is a decision.** The warning is not suppressed
-deliberately: silencing it would mean a genuine stall after the pause ends looks identical to the
-pause, which is the same trap one layer down. Read it against this entry.
+whether VisibleGov's silence is expected.** With the pause lifted, silence is NO LONGER expected - a
+multi-day gap from here is a real finding and should be reported rather than absorbed.
 
 ## The generic note, which applies whenever the lane is idle for any reason
 
