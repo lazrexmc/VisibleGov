@@ -396,13 +396,47 @@ const TAIL_FAILURE_STEP_RE = {
   'us-senate': /^vote (\d+)$/,
 };
 
-export function isExpectedTailProbeOutcome(sourceKey, failures, windowMaxKnown) {
+// highestPresentInWindow — the run's OWN achieved edge, not the one it inherited.
+//
+// WHY THIS EXISTS (RapidForge review, 2026-10-06). Both judgements below compared a roll number
+// against windowMaxKnown, the max BEFORE this run. Take a run probing 313-317 where 315 comes back
+// absent and 316 comes back present: 315 > windowMaxKnown(314), so findRegressedAbsences did not
+// flag it and isExpectedTailProbeOutcome called it an expected tail. The next window then starts
+// past 316, so **315 is never probed again — a real roll call skipped forever, silently.** That is
+// not hypothetical for us-congress: clerk.house.gov serves an HTTP 200 "Error sanitizing file" stub
+// that says "Please try again", so the same number can be absent on one tick and present on the
+// next.
+//
+// The discriminator is simple and needs no new data: anything missing BELOW a number that came back
+// PRESENT in the same run is a hole, never a tail. Scans the probed window downward for the first
+// number that is neither absent nor failed. Returns null when nothing in the window was present, in
+// which case the inherited edge is all there is to judge against.
+//
+// Checked when written: 314 House rolls stored for 2026, highest 314, zero missing below it — so the
+// hole was reachable but had not yet opened.
+export function highestPresentInWindow(sourceKey, { absent, failures, lo, hi }) {
+  const re = TAIL_FAILURE_STEP_RE[sourceKey];
+  if (!re || !Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  const missing = new Set();
+  for (const entry of [...(absent ?? []), ...(failures ?? [])]) {
+    const m = re.exec(entry?.step ?? '');
+    if (m) missing.add(Number(m[1]));
+  }
+  for (let n = hi; n >= lo; n -= 1) if (!missing.has(n)) return n;
+  return null;
+}
+
+export function isExpectedTailProbeOutcome(sourceKey, failures, windowMaxKnown, presentMax = null) {
   const re = TAIL_FAILURE_STEP_RE[sourceKey];
   if (!re || windowMaxKnown === undefined || windowMaxKnown === null) return false;
   if (!failures || failures.length === 0) return false;
   return failures.every((f) => {
     const m = re.exec(f?.step ?? '');
-    return m !== null && Number(m[1]) > windowMaxKnown;
+    if (m === null) return false;
+    const n = Number(m[1]);
+    // A failure below something this run actually fetched is a hole, whatever the inherited edge says.
+    if (presentMax !== null && n < presentMax) return false;
+    return n > windowMaxKnown;
   });
 }
 
@@ -417,12 +451,16 @@ export function isExpectedTailProbeOutcome(sourceKey, failures, windowMaxKnown) 
 // has vanished from the source. That is never routine - it is the shape a URL-structure change, a
 // silently retired endpoint, or an auth change makes - so it forces the tick unhealthy even though
 // the child process exited 0 and its run row says `succeeded`.
-export function findRegressedAbsences(sourceKey, absent, windowMaxKnown) {
+export function findRegressedAbsences(sourceKey, absent, windowMaxKnown, presentMax = null) {
   const re = TAIL_FAILURE_STEP_RE[sourceKey];
   if (!re || windowMaxKnown === undefined || windowMaxKnown === null) return [];
   return (absent ?? []).filter((a) => {
     const m = re.exec(a?.step ?? '');
-    return m !== null && Number(m[1]) <= windowMaxKnown;
+    if (m === null) return false;
+    const n = Number(m[1]);
+    // Below the inherited edge: a record we already hold went missing. Below this run's own achieved
+    // edge: a gap under something just fetched. Either is a regression; only the tail is expected.
+    return n <= windowMaxKnown || (presentMax !== null && n < presentMax);
   });
 }
 
@@ -709,6 +747,8 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
         : [],
       timeoutMs: CHILD_TIMEOUT_MS,
       windowMaxKnown: rollWindow.value != null ? rollWindow.value.maxKnown : undefined,
+      windowLo: rollWindow.value != null ? rollWindow.value.lo : undefined,
+      windowHi: rollWindow.value != null ? rollWindow.value.hi : undefined,
       wroteSomething: usCongressWroteSomething,
     },
     {
@@ -723,6 +763,8 @@ export async function buildRegistry(client, { now = Date.now(), year = new Date(
         : [],
       timeoutMs: CHILD_TIMEOUT_MS,
       windowMaxKnown: voteWindow.value != null ? voteWindow.value.maxKnown : undefined,
+      windowLo: voteWindow.value != null ? voteWindow.value.lo : undefined,
+      windowHi: voteWindow.value != null ? voteWindow.value.hi : undefined,
       wroteSomething: usSenateWroteSomething,
     },
     {
@@ -982,13 +1024,18 @@ export async function runChosenSource(client, chosen, { runChildCliFn = runChild
   // checked against. defaultWroteSomething is the fail-open fallback for the (should-never-happen)
   // case where a registry entry has no predicate wired at all.
   const wroteRows = !selfRecordedFailure && (chosen.wroteSomething ?? defaultWroteSomething)(detail, status);
+  // The run's own achieved edge, so a gap under a number this tick actually fetched is judged a
+  // regression rather than an expected tail. See highestPresentInWindow.
+  const presentMax = highestPresentInWindow(chosen.key, {
+    absent, failures, lo: chosen.windowLo, hi: chosen.windowHi,
+  });
   const tailProbeOnly = !selfRecordedFailure && status === 'partial'
-    && isExpectedTailProbeOutcome(chosen.key, failures, chosen.windowMaxKnown);
+    && isExpectedTailProbeOutcome(chosen.key, failures, chosen.windowMaxKnown, presentMax);
   // Kept alongside the newer absent-list path on purpose: isExpectedTailProbeOutcome still governs
   // run rows written BEFORE this fix, and any manual `--rolls` invocation whose misses land in
   // failures for a reason other than a 404.
   const regressedAbsences = selfRecordedFailure
-    ? [] : findRegressedAbsences(chosen.key, absent, chosen.windowMaxKnown);
+    ? [] : findRegressedAbsences(chosen.key, absent, chosen.windowMaxKnown, presentMax);
   const healthy = !selfRecordedFailure && !killedByScheduler && regressedAbsences.length === 0
     && (status === 'succeeded' || tailProbeOnly);
 

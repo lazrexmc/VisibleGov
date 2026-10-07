@@ -21,6 +21,7 @@ import {
   MAX_RUN_DURATION_MS, MAX_LOCK_DURATION_MS, CHILD_TIMEOUT_MS, CHILD_MAX_BUFFER,
   LEGISCAN_CHILD_TIMEOUT_MS, LOCK_GRACE_MS, ORPHAN_CLOSE_SKEW_GRACE_MS,
   US_CONGRESS_CONGRESS, US_CONGRESS_ROLL_WINDOW, US_SENATE_SESSION, US_SENATE_VOTE_WINDOW,
+  highestPresentInWindow,
 } from '../scripts/scheduled-ingest.js';
 import { MO_SENATE_MIN_INTERVAL_MS } from '../src/adapters/mo-senate-web.js';
 import { MO_HOUSE_MIN_INTERVAL_MS, DEFAULT_MO_HOUSE_SESSION } from '../src/adapters/mo-house-xml.js';
@@ -1721,4 +1722,45 @@ test('runChildCli: DEFAULT detector passes --env-file when .env really is presen
     runChildCli('fake-cli.js', ['--a'], { cwd: dir, spawnFn });
     assert.deepEqual(calls[0], ['--env-file=.env', 'fake-cli.js', '--a'], 'local runs must keep loading credentials from .env');
   });
+});
+
+// ---- the run's own achieved edge (RapidForge review, 2026-10-06) ----
+// Both judgements compared a roll number against windowMaxKnown, the max BEFORE the run. A run
+// probing 313-317 where 315 comes back absent and 316 comes back present left 315 unflagged (315 >
+// 314) and called it an expected tail. The next window starts past 316, so 315 is never probed
+// again - a real roll call skipped forever, silently. Not hypothetical: clerk.house.gov serves an
+// HTTP 200 "Error sanitizing file ... Please try again" stub, so the same number can be absent on
+// one tick and present on the next.
+test('highestPresentInWindow: the first number in the window that is neither absent nor failed', () => {
+  assert.equal(highestPresentInWindow('us-congress', { absent: [{ step: 'roll 315' }], failures: [], lo: 313, hi: 317 }), 317);
+  assert.equal(highestPresentInWindow('us-congress', {
+    absent: [{ step: 'roll 316' }, { step: 'roll 317' }], failures: [], lo: 313, hi: 317,
+  }), 315);
+  // Nothing present at all: there is no achieved edge, so callers fall back to the inherited one.
+  assert.equal(highestPresentInWindow('us-congress', {
+    absent: [{ step: 'roll 316' }, { step: 'roll 317' }], failures: [], lo: 316, hi: 317,
+  }), null);
+  assert.equal(highestPresentInWindow('legiscan', { absent: [], failures: [], lo: 1, hi: 9 }), null, 'unwindowed sources opt out');
+});
+
+test('findRegressedAbsences: an absence BELOW something this run fetched is a hole, not a tail', () => {
+  const absent = [{ step: 'roll 315' }];
+  // The bug: judged only against the inherited edge, 315 looks like overshoot.
+  assert.equal(findRegressedAbsences('us-congress', absent, 314).length, 0);
+  // Fixed: 316/317 came back, so 315 is a gap under the run's own edge.
+  assert.equal(findRegressedAbsences('us-congress', absent, 314, 317).length, 1);
+});
+
+test('findRegressedAbsences: a genuine tail is still expected, not flagged', () => {
+  // The window is DESIGNED to overshoot. Closing the hole must not make every normal tick noisy.
+  const tail = [{ step: 'roll 316' }, { step: 'roll 317' }];
+  assert.equal(findRegressedAbsences('us-congress', tail, 315, 315).length, 0);
+});
+
+test('isExpectedTailProbeOutcome: a failure below the run own edge is NOT an expected tail', () => {
+  const failures = [{ step: 'roll 315' }];
+  assert.equal(isExpectedTailProbeOutcome('us-congress', failures, 314), true, 'the old, too-generous judgement');
+  assert.equal(isExpectedTailProbeOutcome('us-congress', failures, 314, 317), false, 'fixed');
+  // And the real tail case still passes, or every overshooting tick would read as broken.
+  assert.equal(isExpectedTailProbeOutcome('us-congress', [{ step: 'roll 316' }], 315, 315), true);
 });

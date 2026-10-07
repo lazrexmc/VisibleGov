@@ -49,8 +49,14 @@ export class RollCallNotYetPublishedError extends SourceFetchError {
 
 export function isAbsentRecordError(err) {
   if (!(err instanceof SourceFetchError)) return false;
-  // The name check is kept alongside instanceof deliberately: an error constructed before this
-  // class moved here, or deserialized from a stored run detail, still carries only the name.
+  // The name check is kept alongside instanceof, but NOT for the reason first written here. That
+  // comment claimed it covered errors deserialized from a stored run detail; RapidForge pointed out
+  // this function returns on its FIRST line for anything not instanceof SourceFetchError, so a
+  // plain object never reaches the name test at all. The claim was false and a false justification
+  // in a comment is worse than none, because the next reader inherits it.
+  // Its only real case is a second module instance of this file (two copies loaded under different
+  // specifiers), where instanceof fails across the boundary while the name still matches. Cheap
+  // insurance, honestly labelled.
   return err.status === 404
     || err instanceof RollCallNotYetPublishedError
     || err.name === 'RollCallNotYetPublishedError';
