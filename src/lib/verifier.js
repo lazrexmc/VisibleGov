@@ -11,7 +11,10 @@ import {
 // the summary's author trying to refute it is the whole point of this pass — "upgrading" the
 // verifier to match the author's weight class would defeat that.
 export const VERIFIER_MODEL = 'claude-sonnet-5';
-export const VERIFY_PROMPT_VERSION = 'v1';
+// v2 (2026-10-06): added the line-number instruction below. Bumped because prompt_version is
+// stamped on every summary_verifications row, and leaving it at v1 would make two different
+// prompts indistinguishable in the audit trail.
+export const VERIFY_PROMPT_VERSION = 'v2';
 
 // Deliberately NOT summarizer.js's MAX_OUTPUT_TOKENS (16000): the verifier emits a full JSON
 // verdict per bullet (section, supported, reason, evidence_quote) on top of claude-sonnet-5's
@@ -52,6 +55,13 @@ export const VERIFY_SYSTEM_PROMPT = [
   '- supported = true only if the cited section, read on its own, fully supports the bullet with no additional inference required.',
   '- supported = false for anything you cannot fully verify against the cited section — do not give the benefit of the doubt.',
   '- For every verdict, provide an evidence_quote: an exact, verbatim quote pulled from the bill text (from the cited section when possible) that supports or contradicts the bullet.',
+  // Added 2026-10-06. The stored bill text carries PRINTED LINE NUMBERS from the source document,
+  // interleaved mid-sentence - the real bytes read 'recognizes that "All 2 political power is
+  // vested"'. A blind census of 525 October receipts found 4 that copied those digits into the
+  // quote, sometimes the wrong one and in the wrong place: '37 August 28, 2028' where the text reads
+  // 'August 37 28, 2028', and '5 purposes' where it reads '6 purposes'. Those quotes are rendered to
+  // readers by migration 0021, so a stray numeral makes a true receipt look careless or wrong.
+  '- The bill text contains PRINTED LINE NUMBERS from the source document, often appearing in the middle of a sentence. Do NOT copy them into evidence_quote. Quote the words of the bill as a reader would read them aloud, omitting the line numbers, and never begin a quote with a bare line number.',
   '- reason must explain, in one or two plain-language sentences, why the bullet is or is not fully supported.',
   '- overall is "clean" only if every single verdict is supported; if even one bullet fails, overall is "flagged".',
 ].join('\n');

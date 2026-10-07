@@ -18,8 +18,21 @@ test('VERIFIER_MODEL is claude-sonnet-5, deliberately a different weight class t
   assert.notEqual(VERIFIER_MODEL, MODEL);
 });
 
+// This pin is the point: it fails whenever the prompt changes, forcing the version to be bumped
+// deliberately rather than drifting. It did its job on 2026-10-06 - adding the line-number
+// instruction tripped it, and prompt_version is stamped on every summary_verifications row, so
+// leaving it at v1 would have made two different prompts indistinguishable in the audit trail.
 test('VERIFY_PROMPT_VERSION pinned', () => {
-  assert.equal(VERIFY_PROMPT_VERSION, 'v1');
+  assert.equal(VERIFY_PROMPT_VERSION, 'v2');
+});
+
+test('the verify prompt tells the verifier not to copy printed line numbers into a quote', () => {
+  // A blind census of 525 October receipts found 4 that copied source line numbers into the quote,
+  // sometimes the wrong digit in the wrong place: '37 August 28, 2028' where the text reads
+  // 'August 37 28, 2028'. Those quotes are published to readers by migration 0021.
+  const prompt = String(VERIFY_SYSTEM_PROMPT);
+  assert.match(prompt, /PRINTED LINE NUMBERS/);
+  assert.match(prompt, /never begin a quote with a bare line number/);
 });
 
 // Many-bullet summaries (HR 6955, HR 8595) threw SummaryTruncatedError against summarizer.js's
