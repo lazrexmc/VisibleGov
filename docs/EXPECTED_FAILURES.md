@@ -26,7 +26,33 @@ entry is closed** - the first time this repo has had a clean migration board.
 
 ---
 
-## 1. `VisibleGov Scheduled Summaries` fails daily from 2026-09-01 06:00
+## 1. ~~`VisibleGov Scheduled Summaries` fails daily from 2026-09-01 06:00~~ CLOSED 2026-10-20
+
+**CLOSED. The expiry condition was met, not waived.** Anthropic granted Lance $200 in API credits
+on 2026-10-20, which is the funding event this entry was waiting on. Every model in `PRICES` was
+then re-checked against Anthropic's published per-Mtok pricing - the part that actually clears the
+guard - and **all three were unchanged**: haiku-4-5 $1/$5, sonnet-5 $2/$10, opus-5 $5/$25. The
+sonnet line's "intro pricing" caveat is deleted because the intro rate did not lapse into a
+different number. `PRICES_VERIFIED_THROUGH` moved 2026-08-31 -> 2026-12-31. Suite 2,834 pass /
+0 fail.
+
+**The date was NOT moved alone**, which this entry named as the one edit that would make things
+worse. It moved together with the re-check, and the commit records which prices were compared
+against what. **Struck through rather than deleted so the next reader can see the guard existed,
+held for seven weeks, and was retired by its own stated condition** rather than by someone finding
+it inconvenient.
+
+**Consequence worth stating plainly: the daily 06:00 tick can now spend real money again**, under
+its $1.00/tick + $5.00/ISO-week ledger carve-out, which `CLAUDE.md` makes the standing per-run
+approval for that runner alone. Whether the Windows task is currently enabled is Lance's to check -
+an agent never runs `schtasks`. `npm run status` reported the runner silent since 2026-08-31.
+
+**Re-check `PRICES` again before 2026-12-31.** The guard will re-arm on 2027-01-01 and that is the
+design, not a defect.
+
+---
+
+## 1a. The original entry, kept for the record
 
 **Symptom.** The Windows Scheduled Task runs at 06:00 and the run reports
 `skipped-prices-unverified`. It fails before opening a run row and before any network call, so it

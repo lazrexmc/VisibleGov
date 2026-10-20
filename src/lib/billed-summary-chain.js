@@ -21,7 +21,7 @@ export { VERIFIER_MODEL };
 // pricing — priceOf throws rather than spend unpriced).
 export const PRICES = {
   'claude-haiku-4-5': { in: 1.0, out: 5.0 },
-  'claude-sonnet-5': { in: 2.0, out: 10.0 }, // intro pricing — see PRICES_VERIFIED_THROUGH
+  'claude-sonnet-5': { in: 2.0, out: 10.0 },
   'claude-opus-5': { in: 5.0, out: 25.0 },
 };
 
@@ -35,7 +35,12 @@ export const PRICES = {
 // To clear an expiry: re-check every model above against Anthropic's published prices, correct any
 // that moved, and move this date forward. Do NOT move the date alone — that is the one edit that
 // makes this worse than the comment it replaced.
-export const PRICES_VERIFIED_THROUGH = '2026-08-31';
+// RE-CHECKED 2026-10-20 against Anthropic's published per-Mtok pricing, every model in the
+// table, which is what clears the expiry rather than merely re-arming it. ALL THREE WERE
+// UNCHANGED: haiku-4-5 $1/$5, sonnet-5 $2/$10, opus-5 $5/$25. The "intro pricing" caveat that
+// sat on the sonnet line is gone because the intro rate did not lapse into a different number -
+// there is nothing left to caveat, and a caveat kept past its subject is how this file got here.
+export const PRICES_VERIFIED_THROUGH = '2026-12-31';
 
 export function priceOf(model) {
   const p = PRICES[model];
