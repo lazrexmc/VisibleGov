@@ -21,6 +21,23 @@
 // Usage:
 //   node --env-file=.env scripts/gloss-batch-mo.mjs --budget-usd 15 [--max-terms N] [--resume]
 //   node --env-file=.env scripts/gloss-batch-mo.mjs --fetch-only --budget-usd 15
+//
+// THE DRAIN IS TWO STEPS AND THIS SCRIPT IS ONLY THE FIRST. It authors, verifies and persists
+// drafts; it PUBLISHES NOTHING. Clean terms are promoted draft -> approved -> published by:
+//
+//   node --env-file=.env src/cli/auto-publish-glossary.js --dry-run   # the split, free
+//   node --env-file=.env src/cli/auto-publish-glossary.js             # publish, free, no model calls
+//
+// Forgetting it is easy and quiet (done on 2026-10-20): the run reported "glossed_clean: 737" and
+// `npm run status` still showed `glossary published 1,850` with no error anywhere. The run's
+// `glossed_clean` means "the verifier cleared it", NOT "it is live on the site". Until the second
+// step runs, every authored term - clean and flagged alike - sits in the authored-drafts bucket,
+// which is why that status line no longer claims they are all awaiting Lance.
+//
+// Recommended sequence for a full drain, cheapest and least destructive first:
+//   1. --fetch-only            free; banks statute text and rules out uncodified sections
+//   2. --resume --budget-usd N billed; projects from the bank before submitting (lesson 44)
+//   3. auto-publish-glossary   free; publishes the clean ones
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import Anthropic from '@anthropic-ai/sdk';
 import { getClient, selectAll, openRun, closeRun } from '../src/lib/db.js';

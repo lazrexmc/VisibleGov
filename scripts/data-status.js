@@ -364,7 +364,25 @@ async function main() {
   // decision about ranges and chapters. See src/adapters/mo-statutes.js:263 - "needs_mapping until
   // a design grounds them honestly".
   console.log(`    ...needs_mapping ...... ${n(glossNeedsMapping)}  <- no resolvable citation: ~71% are acts/agencies/programs with no statute section at all`);
-  console.log(`    ...flagged, awaiting Lance ${n(glossFlagged)}  <- authored + verified, verifier raised an objection`);
+  // LABEL CORRECTED 2026-10-20. This line used to read "flagged, awaiting Lance ... verifier
+  // raised an objection", which was FALSE for most of this number right after a gloss batch:
+  // the glossary drain is TWO steps, and between them every authored term - clean and flagged
+  // alike - sits in exactly this bucket. On 2026-10-20 it read 1,356 when Lance's actual queue
+  // was 619; the other 737 were verified CLEAN and merely waiting for auto-publish-glossary,
+  // which is free and makes no model calls.
+  //
+  // This is the SAME defect the glossDraftMappable comment above records having already fixed
+  // once ("Reporting the sum told Lance his review queue was 870 when it was 427"), recurring one
+  // level deeper: that fix split authored from unauthored, and this one splits CLEAN-authored from
+  // FLAGGED-authored.
+  //
+  // The exact split is deliberately NOT derived here. Eligibility comes from
+  // glossVerificationBadge in src/review/server.js, and a second copy of that derivation living
+  // in the status script would eventually disagree with the one the publisher actually uses -
+  // then neither number would mean anything. The authoritative split is one free command, named
+  // on the next line so nobody has to guess it.
+  console.log(`    ...authored drafts .... ${n(glossFlagged)}  <- NOT all awaiting Lance: the CLEAN ones just need the free auto-publish step`);
+  console.log('      exact split ......... node --env-file=.env src/cli/auto-publish-glossary.js --dry-run   (eligible = clean, flaggedOrUnverifiedSkipped = Lance's real queue)');
   console.log(`    ...not yet authored ... ${n(glossUnauthored)}  <- citation resolved, no gloss written yet (needs a gloss run)`);
 
   console.log('\nPEOPLE  (rows vs unified people — these are different things)');
@@ -412,7 +430,7 @@ async function main() {
   console.log(`  reconciliation flags open ..... ${reconOpen}`);
   console.log(`  summaries awaiting review ..... ${sumDraft + sumStale}${sumStale > 0 ? ` (draft: ${sumDraft}, stale: ${sumStale})` : ''}`);
   console.log(`  summaries retired ............ ${sumRejected}`);
-  console.log(`  glossary awaiting review ...... ${n(glossFlagged)}  (flagged only; ${n(glossUnauthored)} more need a gloss run, not a human)`);
+  console.log(`  glossary authored drafts ...... ${n(glossFlagged)}  (clean + flagged TOGETHER — run auto-publish-glossary --dry-run for the split; ${n(glossUnauthored)} more need a gloss run, not a human)`);
   console.log(`  glossary needs_mapping ........ ${n(glossNeedsMapping)}  (NOT one extractor bug - ~71% have no statute section; the rest are mostly ranges and chapter refs)`);
 
   // REPAIR LEDGER (added 2026-08-26). `votes` alone stopped telling the whole truth the day rows
