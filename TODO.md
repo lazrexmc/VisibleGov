@@ -57,6 +57,45 @@ ledger as any manual tick - so there is no double-spend to coordinate.
 **Still true and unchanged:** every billed call other than that scheduler needs Lance's explicit
 per-run approval with a cost stated. The ledger carve-out covers `scheduled-summaries.js` alone.
 
+### LANCE - one script drafted and awaiting you: `scripts/unpark-stochastic-parks.mjs`
+
+Dry run verified 2026-10-20. Run it, read it, then `--apply` if you agree. It returns **4** bills
+to the billed queue that were parked PERMANENTLY for a failure that was never theirs.
+
+**The defect it cleans up (fixed in code at the same time).** A park removes a bill from every
+future tick's budget forever. The billed scheduler parked on ANY `MalformedSummaryError`, including
+the completeness CHECKER mis-shaping its own output. One tick discarded HB 594 (9 key_provisions
+against a required 3-7), HB 1909 (6 coverage entries against 5 provisions) and SB 748
+(`coverage[5]` pointing at bullet_index 27 of 25). **None of those is a property of the bill.**
+
+And the bound two of them broke is one the model is never structurally held to:
+`apiProvisionsSchema()` DELETES `minItems`/`maxItems` because the API rejects `minItems > 1`, so
+3-7 lives in the prompt and in the record gate and **nowhere in the schema the model generates
+against.** Asking for 3-7 in prose and then permanently parking a bill for returning 9 punishes the
+bill for the checker's roll of the dice. `isStochasticRecordFailure` now stops that class parking at
+all; 7 tests pin it in both directions, including that an ABSENT `retryable` flag still parks.
+
+**Why 4 and not the 10 completeness-related parks - the restraint is the point.** Bulk-unparking
+would repeat the same error mirrored: treating measured, exhausted failures as noise.
+
+| Bills | Evidence | Verdict |
+|---|---|---|
+| HRES 1423, HB 369, SB 794, SJR 46 | **three exhausted billed attempts each** | leave parked; three recurrences IS 0039's deterministic standard |
+| SRES 412 | "corroboration found 4 provisions but the primary found 1" | unpark - two blind runs disagreeing is the retry case |
+| HB 594, HB 1909, SB 748 | pure output-shape, one attempt | unpark |
+| HJR 114, SJR 41 | section not verbatim: "Section 7, Article IX, Constitution of Missouri"; "1the state of Missouri" | **leave parked, see below** |
+
+**HJR 114 and SJR 41 are a DIFFERENT defect and should not ride along with this fix.** Their
+failures are section strings absent from the bill text - one citing constitutional articles, one
+carrying `1the`, a glued-digit artifact. That is bill-text quality, not checker shape, so the
+reasoning behind the unpark does not cover them, and one attempt each is not enough to classify
+either. Worth its own look; the glued-digit class in particular may affect more than one bill.
+
+**A number I gave Lance and then corrected: "6 of 34" was wrong - it is 10 of 34**, from a narrower
+regex that missed four whose reason string had been overwritten by the drain-lane seeding note.
+Only 3-4 of the 10 are the stochastic class, so the *fix's* recovery rate is the measured 3 per
+tick, not 10.
+
 ---
 
 ## Pre-funding snapshot - verified live 2026-09-05 22:29 CDT, now HISTORY

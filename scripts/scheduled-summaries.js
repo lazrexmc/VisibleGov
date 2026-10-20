@@ -552,9 +552,25 @@ async function runTickLocked(deps) {
     gateRefusals += Number(parsed.counts?.gated) || 0;
     recordFailures += Number(parsed.counts?.failures) || 0;
     for (const failure of parsed.failures ?? []) {
-      if (failure?.error === 'MalformedSummaryError' && failure.bill_id) {
-        parkedAdditions[failure.bill_id] = { reason: failure.message ?? 'malformed summary', parked_at: now.toISOString() };
+      if (failure?.error !== 'MalformedSummaryError' || !failure.bill_id) continue;
+      // A park is PERMANENT: it removes the bill from every future tick's budget. So it is only
+      // ever correct for a failure that will recur - never for one the checker rolled badly.
+      // `retryable` is set by isStochasticRecordFailure in summary-queue.js; see the comment there
+      // for the three bills this condition was written after, and for the HB 903 precedent where
+      // parking a stochastic failure as structural cost a publishable bill until it was withdrawn.
+      //
+      // The bill stays eligible, so a later tick re-attempts it. THIS TICK'S paid work is still
+      // lost either way - that is a separate, cheaper problem (retry the provisions stage in-tick)
+      // and is deliberately not solved here. Losing a tick's spend is recoverable; losing the bill
+      // is not.
+      if (failure.retryable === true) {
+        skipped.push({
+          identifier: failure.bill_id,
+          reason: `checker malformed its own output, NOT parked (stays eligible for a later tick): ${failure.message ?? 'malformed completeness check'}`,
+        });
+        continue;
       }
+      parkedAdditions[failure.bill_id] = { reason: failure.message ?? 'malformed summary', parked_at: now.toISOString() };
     }
   }
 

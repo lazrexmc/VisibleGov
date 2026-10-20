@@ -1736,3 +1736,41 @@ test('checkEvidenceQuoteGrounding: a trivially short elided fragment is not evid
   const q = 'The Department ... the ... annually';
   assert.match(checkEvidenceQuoteGrounding([{ bullet_index: 0, evidence_quote: q }], text), /too short to be evidence/);
 });
+
+// ---------------------------------------------------------------------------
+// isStochasticRecordFailure — the predicate that decides whether a record failure may PARK a bill
+// permanently. See its comment in summary-queue.js for the three bills (HB 594, HB 1909, SB 748)
+// that were parked on 2026-10-20 for the checker's own bad roll, and the HB 903 precedent.
+//
+// It is exported, and ONE copy, precisely so the gate and the billed scheduler cannot drift into
+// disagreeing about which class a failure belongs to.
+// ---------------------------------------------------------------------------
+import { isStochasticRecordFailure } from '../src/cli/summary-queue.js';
+
+test('isStochasticRecordFailure: true only for a checker that mis-shaped its own output', () => {
+  assert.equal(isStochasticRecordFailure(new MalformedSummaryError('x', { checkerMalformed: true })), true);
+});
+
+test('isStochasticRecordFailure: false for author-side and structural failures, and for junk', () => {
+  // The default must be FALSE: an unrecognised failure keeps the old, safe parking behaviour.
+  // If this ever defaulted true, a genuinely unpublishable bill would be re-attempted forever,
+  // spending real budget each tick to re-discover the same refusal.
+  assert.equal(isStochasticRecordFailure(new MalformedSummaryError('summary has zero what_it_does bullets')), false);
+  assert.equal(isStochasticRecordFailure(new Error('something else')), false);
+  assert.equal(isStochasticRecordFailure(null), false);
+  assert.equal(isStochasticRecordFailure(undefined), false);
+  assert.equal(isStochasticRecordFailure({}), false);
+  // Truthy-but-not-true must not pass: this guards the `=== true` rather than a loose check.
+  assert.equal(isStochasticRecordFailure({ checkerMalformed: 'yes' }), false);
+  assert.equal(isStochasticRecordFailure({ checkerMalformed: 1 }), false);
+});
+
+test('MalformedSummaryError carries its meta onto the instance, which is how the flag travels', () => {
+  const err = new MalformedSummaryError('completeness check for bill HB 594 is malformed', {
+    billId: 'b1', reasons: ['key_provisions has 9 entries, outside the required 3-7'], checkerMalformed: true,
+  });
+  assert.equal(err.name, 'MalformedSummaryError');
+  assert.equal(err.billId, 'b1');
+  assert.equal(err.checkerMalformed, true);
+  assert.equal(isStochasticRecordFailure(err), true);
+});

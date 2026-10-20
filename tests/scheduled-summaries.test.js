@@ -122,7 +122,7 @@ test('estimateBillCostUsd: I3 — matches the review\'s own worked example, padd
 
 function fakeDeps(overrides = {}) {
   const calls = {
-    childCli: [], closed: [], logs: [], records: [],
+    childCli: [], closed: [], logs: [], records: [], parkedWrites: [],
   };
   return {
     calls,
@@ -151,12 +151,80 @@ function fakeDeps(overrides = {}) {
       writeRecordsFile: (p, payload) => { calls.records.push({ p, payload }); },
       appendLog: (line) => { calls.logs.push(line); },
       readParked: () => overrides.parked ?? {},
-      writeParked: () => {},
+      writeParked: (payload) => { calls.parkedWrites.push(payload); },
       dryRun: overrides.dryRun ?? false,
       ...overrides.deps,
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// A park is PERMANENT - it removes a bill from every future tick's budget - so it must only ever
+// follow a failure that will RECUR. 2026-10-20: one tick parked HB 594, HB 1909 and SB 748 because
+// the completeness CHECKER mis-shaped its own output, discarding three publishable bills forever.
+// These two tests pin the distinction in both directions; without the negative one, a future change
+// that drops the `retryable` flag would silently restore the old behaviour and nothing would fail.
+// ---------------------------------------------------------------------------
+
+test('runTick: a RETRYABLE checker malformation is NOT parked - the bill stays eligible', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'b-stoch', identifier: 'HB 594', title: 'T', bill_text_hash: 'h', text_length: 500, priority: 'other' }],
+    texts: { 'b-stoch': { content: 'text', content_hash: 'h' } },
+    recordResult: {
+      counts: { published: 0, gated: 0, failures: 1 },
+      gated: [],
+      failures: [{
+        bill_id: 'b-stoch',
+        error: 'MalformedSummaryError',
+        message: "completeness check for bill HB 594 is malformed — key_provisions has 9 entries, outside the required 3-7",
+        retryable: true,
+      }],
+    },
+  });
+  await runTick(deps);
+  assert.equal(calls.parkedWrites.length, 0, 'a stochastic checker failure must never write a park');
+  assert.equal(calls.closed[0].detail.parked, 0);
+  // It must still be VISIBLE - an unparked failure that reports nothing is just a silent loss.
+  assert.ok(
+    calls.closed[0].detail.skipped.some((x) => /NOT parked \(stays eligible/.test(x.reason)),
+    'the tick must say out loud that it declined to park, and why',
+  );
+});
+
+test('runTick: a NON-retryable malformation is still parked - the fix must not disable parking', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'b-struct', identifier: 'HB 700', title: 'T', bill_text_hash: 'h', text_length: 500, priority: 'other' }],
+    texts: { 'b-struct': { content: 'text', content_hash: 'h' } },
+    recordResult: {
+      counts: { published: 0, gated: 0, failures: 1 },
+      gated: [],
+      failures: [{
+        bill_id: 'b-struct',
+        error: 'MalformedSummaryError',
+        message: 'summary has zero what_it_does bullets',
+        retryable: false,
+      }],
+    },
+  });
+  await runTick(deps);
+  assert.equal(calls.closed[0].detail.parked, 1);
+  assert.equal(calls.parkedWrites.length, 1);
+  assert.ok(calls.parkedWrites[0]['b-struct'], 'the structural failure is the one that still parks');
+});
+
+test('runTick: a failure with NO retryable field parks - absent is not retryable, so an old record CLI stays safe', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'b-old', identifier: 'HB 800', title: 'T', bill_text_hash: 'h', text_length: 500, priority: 'other' }],
+    texts: { 'b-old': { content: 'text', content_hash: 'h' } },
+    recordResult: {
+      counts: { published: 0, gated: 0, failures: 1 },
+      gated: [],
+      failures: [{ bill_id: 'b-old', error: 'MalformedSummaryError', message: 'malformed' }],
+    },
+  });
+  await runTick(deps);
+  assert.equal(calls.closed[0].detail.parked, 1, 'undefined must not be read as retryable');
+});
 
 test('runTick: budget-exhausted week opens NO run row and spends nothing', async () => {
   const { deps, calls } = fakeDeps({

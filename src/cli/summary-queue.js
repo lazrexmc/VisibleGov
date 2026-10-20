@@ -65,6 +65,32 @@ export class MissingBillTextError extends Error {
 }
 
 const RECORD_FAILURE_TYPES = [MalformedSummaryError, TextHashMismatchError, MissingBillTextError];
+
+// isStochasticRecordFailure — did this failure come from the CHECKER mis-shaping its own output,
+// rather than from anything about the bill?
+//
+// WHY THIS PREDICATE EXISTS (2026-10-20, measured). The billed scheduler parked a bill PERMANENTLY
+// on any MalformedSummaryError, which quietly discarded publishable bills: one tick parked HB 594
+// (9 key_provisions, outside the required 3-7), HB 1909 (6 coverage entries against 5 provisions)
+// and SB 748 (coverage[5] pointing at bullet_index 27 of 25). None of those is a property of the
+// bill. All three are ordinary sampling variance in the checker's output shape.
+//
+// And the bound they violated is one the model was never structurally held to: apiProvisionsSchema()
+// DELETES minItems/maxItems because the API rejects minItems > 1, so the 3-7 range lives in the
+// prompt and in this gate, and nowhere in the schema the model actually generates against. Asking
+// for 3-7 in prose and then permanently parking a bill for returning 9 punishes the bill for the
+// checker's roll of the dice.
+//
+// This repo already bought this lesson once: HB 903 was parked as structural after four identical
+// failures, the park was withdrawn, and it published on the fifth attempt. The rule written down
+// from it is park what fails DETERMINISTICALLY; retry what fails because two samplers disagreed.
+//
+// ONE predicate, exported, so the gate and the scheduler can never disagree about which class a
+// failure is - the same discipline as src/lib/anon-lock.js existing as one predicate instead of
+// two copies that drift.
+export function isStochasticRecordFailure(err) {
+  return err?.checkerMalformed === true;
+}
 function isTypedFailure(err) {
   return RECORD_FAILURE_TYPES.some((T) => err instanceof T);
 }
@@ -791,7 +817,7 @@ export async function classifyRecordItem(client, item, options = {}) {
   if (completenessResult.overall === 'malformed') {
     throw new MalformedSummaryError(
       `completeness check for bill ${identifier} is malformed — the checker's own output cannot be trusted: ${completenessResult.reasons.join('; ')}`,
-      { billId, reasons: completenessResult.reasons },
+      { billId, reasons: completenessResult.reasons, checkerMalformed: true },
     );
   }
   if (completenessResult.overall === 'incomplete') {
@@ -1076,7 +1102,17 @@ async function main() {
         outcomes[result.outcome] += 1;
         if (result.gateReason) gated.push({ bill_id: result.billId, summary_id: result.summaryId, reason: result.gateReason });
       } catch (err) {
-        if (isTypedFailure(err)) failures.push({ bill_id: item?.bill_id ?? null, error: err.name, message: err.message });
+        // `retryable` crosses the process boundary deliberately: the scheduler decides whether to
+        // PARK from this flag, and only name+message used to survive serialization, so the
+        // distinction had no way to reach the caller that acts on it.
+        if (isTypedFailure(err)) {
+          failures.push({
+            bill_id: item?.bill_id ?? null,
+            error: err.name,
+            message: err.message,
+            retryable: isStochasticRecordFailure(err),
+          });
+        }
         else throw err;
       }
     }
