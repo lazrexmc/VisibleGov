@@ -127,3 +127,61 @@ the 2026-08-03 audits. Thirty-five findings are recorded here as *Fixed (reporte
 weaker claim than *Fixed (verified)*, and the file says so at each one rather than presenting a
 uniform column of green. Three findings were re-verified today (D5, D6, and the migration state
 behind it); three remain **Open** (D3, D4, D8).
+
+---
+
+## 2026-10-20 - session findings, 5 defects found and fixed outside any audit report
+
+Source: live work during the $200-credit session. **Not an audit** - these surfaced while running
+the billed lanes, which is worth recording because none of the three dated audits would have found
+them: all five are behaviours visible only when money and schedulers are actually moving.
+
+### S1 - A permanent exclusion fired on a stochastic failure
+**Verdict: Fixed - RE-VERIFIED by test, 2026-10-20 (commit `2a8ee76`).**
+`scheduled-summaries.js` parked bills forever on any `MalformedSummaryError`, including the
+completeness checker mis-shaping its own output. One tick permanently discarded HB 594, HB 1909 and
+SB 748. The bound two of them broke (`3-7 key_provisions`) is deleted from the schema the model
+generates against, because the API rejects `minItems > 1`. `isStochasticRecordFailure` now gates it;
+7 tests, including that an ABSENT `retryable` flag still parks. **4 bills await Lance's
+`scripts/unpark-stochastic-parks.mjs --apply`** - deliberately not the 10 completeness-related parks
+(four carry three exhausted attempts each; two are a different defect, S5). PLAYBOOK 69.
+
+### S2 - `npm run status` could not run at all
+**Verdict: Fixed - RE-VERIFIED 2026-10-20 (commit `6c4026b`).**
+A syntax error shipped into `scripts/data-status.js`; the full suite reported 2,847 pass / 0 fail
+because **no test imported it.** `tests/scripts-parse.test.js` now `node --check`s every script under
+`scripts/`, `src/` and `tests/`. The finding generalises past the typo: a green suite is evidence only
+about the code it loads, and the repo's most-reached-for instrument was its least-tested file
+precisely because it only prints. PLAYBOOK 70.
+
+### S3 - A 10-minute cooldown was the binding constraint on the glossary lane
+**Verdict: Fixed - MEASURED before and after, 2026-10-20 (commit `71d826d`).**
+Before: ~110 minutes to rule out 10 sections, 0 fetched. After: a full 958-candidate sweep with
+**31 parks, all no-cooldown, 0 fallbacks**, ~5.2 hours of sleeping avoided, $0.00. PLAYBOOK 68.
+
+### S4 - A status line overstated a human's queue by 2.2x
+**Verdict: Fixed - RE-VERIFIED live, 2026-10-20 (commit `80c487a`).**
+`flagged, awaiting Lance` read 1,356 against a real 619; the other 737 were clean terms awaiting a
+free publish step. **The same function's own comment records fixing this once already** (870 vs 427).
+Relabelled, and the authoritative split is now named rather than reimplemented. PLAYBOOK 73.
+
+### S5 - Two bills fail on non-verbatim section strings - STILL OPEN
+**Verdict: Open - triaged, not fixed, deliberately not bundled with S1.**
+HJR 114 cites `"Section 7, Article IX, Constitution of Missouri"` and SJR 41 carries
+`"1the state of Missouri"` - a glued-digit text-extraction artifact. This is bill-text quality, not
+checker shape, so S1's reasoning does not cover them and one attempt each is not enough to classify
+either. They remain parked. **The glued-digit class may affect more than one bill and nobody has
+measured how many.**
+
+### S6 - Parked-bill set is backed up but NOT restorable - STILL OPEN
+**Verdict: Open - found by grep, 2026-10-20.**
+`scripts/migrate-parked-to-ledger.mjs` copies parked.json -> `parked_bills`. **Nothing copies the
+table back**, and the scheduler reads only the JSON. A rebuild recovers the set into a table nothing
+consults while the scheduler re-attempts every parked bill at real cost - the failure migration 0039
+was written to prevent, one step short of prevented. Recorded in `docs/DISASTER_RECOVERY.md`.
+
+### Re-verification of an earlier finding
+**D5 (summary coverage, the product gap) - still Mitigated, re-measured 2026-10-20.** 23% at the
+2026-08-26 audit, 33.7% on 2026-09-05, **34.5% now** (1,427 of 3,108). 1,993 bills remain READY.
+**The lane that closes it is the $0 subscription lane, not credits** - measured today, the billed
+path costs $0.55/published against $0, so the $200 cannot buy this gap closed (~$1,100 would).

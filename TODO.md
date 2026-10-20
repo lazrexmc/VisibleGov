@@ -4,7 +4,156 @@
 
 ---
 
-## RESUME HERE - verified live 2026-10-20 08:0x CDT, read this block first
+## RESUME HERE - verified live 2026-10-20, end of session. Read this block first.
+
+**Every number here was produced by running the thing in this session, not by reading a previous
+claim.** Tree `<see git log>`, clean, pushed. Suite **2,850 pass / 0 fail** (`node --test`, in a
+clean shell - NEVER `source .env` first, it turns 2 correct tests red).
+
+### State of the world, measured today
+
+| | |
+|---|---|
+| API credits | **$200 granted 2026-10-20**; **$10.98 spent**, ~$189 left (the Anthropic console is the truth) |
+| Summaries published | 1,427 of 3,108 accountability bills with text = **34.5%** |
+| READY to summarize | 1,993 |
+| Summaries awaiting Lance | 46 |
+| Glossary published | **2,587 of 5,096 glossable = 50.8%** (was 36.3% this morning) |
+| Glossary authored drafts | 619 - **all genuinely flagged**, Lance's real queue |
+| Glossary not yet authored | 42 |
+| Ungroundable by policy | 4,517 agency/program/act + **109 uncodified** - NEVER a backlog |
+| Migrations | run `npm run verify:migrations`; count deliberately not stated here |
+| Site | https://visiblegov.us (apex 200, `www` 301) |
+
+### Nothing is running. Nothing is in flight. No lane needs a babysitter.
+
+### THE THREE THINGS WAITING ON LANCE'S OWN HANDS
+
+**1. Apply the unpark (drafted, dry-run verified, 4 bills):**
+```
+node --env-file=.env scripts/unpark-stochastic-parks.mjs           # dry run, read it
+node --env-file=.env scripts/unpark-stochastic-parks.mjs --apply   # his step
+```
+Touches `.superpowers/artifacts/scheduled-summaries/parked.json` (operative; backed up first) and
+the `parked_bills` table (durable ledger - a row left there would be copied back by
+`scripts/migrate-parked-to-ledger.mjs`). Written in `2a8ee76`. **Why only 4 of the 10
+completeness-related parks: see that commit and the script's own header. Do not widen it without
+reading them** - four of the ten carry three exhausted billed attempts each, which IS the
+deterministic standard, and two more are a different defect (below).
+
+**2. Decide the daily 06:00 billed tick.** The Windows task `VisibleGov Scheduled Summaries` **is
+enabled and fires every morning** (proof: a dated file per day in
+`.superpowers/artifacts/summary-scheduler-logs/`). It skipped all autumn on the price guard; the
+guard is now cleared, so **the next 06:00 tick spends real money** - about $3-4 - under its
+$25/ISO-week + $4/tick ledger carve-out, which IS the standing approval for that runner alone.
+**The open question is whether he wants that**, because the billed lane converts at **$0.55 per
+published** (measured today) against **$0** for the subscription wave lane. Disabling it is a
+`schtasks` call: **an agent never runs `schtasks`** - his step, always.
+
+**3. Review the queues when he feels like it.** His words, 2026-10-20: *"I'll review them
+eventually."* 619 glosses + 46 summaries. Not blocking anything.
+
+### THE NEXT CONCRETE ACTIONS, in order, for whoever picks this up
+
+**a. Finish the glossary - it is the cheap lane and it is nearly done.** 42 MO terms unauthored.
+Two steps, and **the second one is free and easy to forget** (it was forgotten today):
+```
+node --env-file=.env scripts/gloss-batch-mo.mjs --source mo --fetch-only --budget-usd 25   # free
+node --env-file=.env scripts/gloss-batch-mo.mjs --source mo --resume --budget-usd 15       # billed
+node --env-file=.env src/cli/auto-publish-glossary.js --dry-run                            # free
+node --env-file=.env src/cli/auto-publish-glossary.js                                      # free, publishes
+```
+**A billed run needs Lance's explicit per-run approval with a cost stated.** Rate measured today:
+**$0.0104 per published gloss**, so 42 terms is well under a dollar. Run it in the harness's own
+background mode and redirect to a file - never pipe a run you intend to watch through `tail`
+(PLAYBOOK 74).
+
+**b. Then the USC glossary backlog**, same runner with `--source usc`. Historical rate $0.0158/gloss
+(USC excerpts run ~2.5x MO's length). Separate checkpoint dir and run label by design, so `--resume`
+can never mix the two sources. **The control probe does NOT apply to usc** - those citations resolve
+against a different host, so a usc run keeps the original cooldown behaviour deliberately.
+
+**c. Investigate the 10 `MoPageIdentityError` fetch failures - they CLUSTER, which is the clue.**
+`96.192`/`96.196` and `173.234`/`173.240`/`173.260` are adjacent sections. That pattern suggests a
+per-chapter template variation on revisor.mo.gov rather than ten independent flukes. They are
+recorded in `.superpowers/artifacts/gloss-batch-mo/state.json` under `fetchFailures`. They are NOT
+parked - an identity error means "we got a page but not the one we asked for", which is ambiguous,
+so the runner correctly leaves them eligible. The sweep aborts at 20 such errors
+(`IDENTITY_ABORT_THRESHOLD`); we saw 10.
+
+**d. Investigate HJR 114 and SJR 41 - a SEPARATE defect from today's park fix.** Both failed because
+a `key_provisions[].section` string is not verbatim in the bill text: HJR 114 cites `"Section 7,
+Article IX, Constitution of Missouri"`, and SJR 41 carries `"1the state of Missouri"` - **a glued
+digit, which is a text-extraction artifact and may affect more than one bill.** They stay parked for
+now. This is bill-text quality, not checker shape, so today's `isStochasticRecordFailure` reasoning
+deliberately does not cover them.
+
+**e. HB 2 hit `verify: hit max_tokens`** on a 36k-76k-char appropriations bill - the verifier blew
+`VERIFY_MAX_OUTPUT_TOKENS` emitting a verdict per bullet. It was SKIPPED, not parked, so it stays
+eligible. Either raise that constant or leave it to the monster lane. Note **identifiers repeat
+across sessions** - there are several distinct "HB 2" and "HB 594" rows, so chase these by
+`bill_id`, never by identifier.
+
+**f. The summary backlog is the largest product gap and credits are the WRONG tool for it.** 1,993
+READY. Billed: $0.55/published measured today, so ~$1,100 to finish - the $200 cannot. The $0
+subagent wave lane runs on Lance's Claude subscription, has never used credits, and peaked at 204
+published/day. It needs a SESSION, not money. `docs/RUNBOOK_SUMMARY_WAVES.md` is the procedure;
+`npm run wave:cost` measures what a wave actually cost from transcripts already on disk, and its
+header records three proposed optimizations that were all refuted by measurement - **read it before
+proposing a fourth.**
+
+### Facts a cold session would otherwise rediscover
+
+- **The two lanes are not interchangeable and confusing them stops free work.** API credits buy the
+  billed scheduler (`scripts/scheduled-summaries.js`) and the gloss runner. They do **not** buy the
+  $0 subagent wave lane, which runs on the Claude subscription. "No credits" never blocked summaries;
+  "funded" does not unblock them either. `CHATLOG.md` 2026-09-05 records this correction first.
+- **Price guard:** `PRICES_VERIFIED_THROUGH = '2026-12-31'` in `src/lib/billed-summary-chain.js`.
+  **It re-arms 2027-01-01 and that is the design.** Clearing it requires re-checking every model in
+  `PRICES` against published pricing; **moving the date alone is the one edit that makes it worse**,
+  because a stale price fails in the expensive direction - `priceOf` returns happily, the tracker
+  under-counts, and the weekly cap silently stops being the cap. Verified 2026-10-20: haiku-4-5
+  $1/$5, sonnet-5 $2/$10, opus-5 $5/$25, all unchanged.
+- **Caps:** `WEEKLY_CAP_USD = 25.00`, `PER_TICK_CAP_USD = 4.00`. `envCapUsd` is **downward-only**
+  (`Math.min`), so `SUMMARY_WEEKLY_CAP_USD`/`SUMMARY_TICK_CAP_USD` can only lower them and a typo in
+  the environment cannot grow spend. Raising requires editing the constants, by design. The task
+  fires daily, so **the real ceiling is min(weekly, per-tick x 7)** - PLAYBOOK 67.
+- **Judge the scheduled summary task's liveness from `.superpowers/artifacts/summary-scheduler-logs/`,
+  NEVER from `npm run status` or `ingestion_runs`.** The price-guard skip happens before `openRun`,
+  so a healthy skipped tick writes no run row and `status` correctly says "never ran". PLAYBOOK 71.
+- **A stranded `running` run row is charged the full per-tick cap by the next tick's ledger**, which
+  is deliberate and conservative. Tick 2 was killed today and its row was LEFT running for exactly
+  that reason - closing it at $0 would have handed the week back budget it had already spent.
+  `scripts/close-stranded-runs.mjs` exists if the noise matters more than the accuracy.
+- **Measured rates, all from completed runs:** gloss MO **$0.0104/published** (2026-10-20, 737 for
+  $7.682; historical 2026-08-21 was $0.0102 over 1,217 for $12.45); gloss USC $0.0158 (525 for
+  $8.31); billed summaries **$0.55/published** at a $4 tick cap (2026-10-20, 6 for $3.2997) versus
+  $0.107 at a $1 cap (2026-08-21, 20 over 6 ticks) - **that difference is causal, not noise**
+  (PLAYBOOK 66).
+- **`state.json`'s `parked` array is NOT authoritative** - it is a per-pass list that resets when
+  `--resume` is omitted. The DATABASE is the truth (`glossary_notes` rows whose note starts
+  `parked by gloss-batch`, 109 distinct terms). Parked terms are excluded from candidates by their
+  `glossary_terms.status` anyway, so the array is belt-and-braces.
+- **The glossary control section is `RSMo 1.010`** (the common-law reception statute, chosen for
+  permanence), TTL 60s, in `scripts/gloss-batch-mo.mjs`. If it is ever repealed the probe reports
+  "not serving" forever and the lane silently reverts to 10-minute cooldowns.
+- **Run tests in a clean shell.** `source .env` + `node --test` makes 2 CORRECT tests fail
+  (`review-logic.test.js` asserts behaviour when no DB client is configured). Every CLI takes
+  `--env-file=.env` for this reason.
+- **Gate commits on the extracted `fail N` line, never a pipeline's exit status.** Hit again today
+  while verifying `node --check`: it reported exit 0 for a file it had just rejected, because the
+  exit code belonged to `head`.
+- **Milestone commits, 2026-10-20:** `3ed953f` price guard cleared; `8567888` caps raised + 5 tests
+  de-coupled from the cap values; `ac22300` docs match the code; `6e3b961` JOINT_CHANGE_PROTOCOL
+  retraction; `051c896` funded RESUME block; `71d826d` control probe + uncodified policy class;
+  `3169a20` task-liveness correction; `2a8ee76` stop parking stochastic failures + unpark draft;
+  `80c487a` two-step drain documented; `6c4026b` `npm run status` fixed + parse guard added.
+
+---
+
+## Superseded same-day RESUME text (2026-10-20 morning), kept so the day's own corrections stay visible
+
+### (superseded) RESUME HERE as written 2026-10-20 morning - DO NOT RESUME FROM THIS, the block at the top of the file is current
 
 ### FUNDED 2026-10-20: Anthropic granted $200 in API credits. Two lanes unblocked, one was never blocked.
 

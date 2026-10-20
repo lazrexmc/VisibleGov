@@ -1,4 +1,12 @@
-> # STOP - READ THIS FIRST (banner refreshed 2026-08-23)
+> # STOP - READ THIS FIRST (banner refreshed 2026-10-20)
+> **Everything below the next five lines is dated 2026-08-23 or earlier and several of its
+> live-verified claims have since expired - notably the migration state. As of 2026-10-20
+> `npm run verify:migrations` reports 40 probed, 30 applied, 0 MISSING (0032 through 0039 are all
+> applied), so any statement below that a migration is "DRAFTED, awaiting Lance's apply" is HISTORY.
+> The glossary is at 2,587 of 5,096 glossable; summaries at 1,427 (34.5%). Anthropic granted $200 in
+> API credits on 2026-10-20. Do not resume from anything below - resume from `TODO.md`'s RESUME HERE
+> block, which was rewritten the same day.**
+>
 > **This document is a dated palimpsest and is NOT the place to learn current state.** Go to the
 > `RESUME HERE` block at the top of `TODO.md` - it is the only doc in this repo that claims to
 > be current - and to `npm run status` for every count (any number typed here goes stale within

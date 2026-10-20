@@ -451,8 +451,14 @@ node --env-file=.env scripts/gloss-batch-mo.mjs --source usc --budget-usd <N> [-
 ```
 
 `--budget-usd` is mandatory and is the hard cap. The runner fetches each cited section from
-revisor.mo.gov (`src/adapters/mo-statutes.js`: strictly sequential, 5 s spacing; a bot page = a
-10-minute cooldown and one retry) or uscode.house.gov (`src/adapters/uscode.js`, 2 s spacing),
+revisor.mo.gov (`src/adapters/mo-statutes.js`: strictly sequential, 5 s spacing; a bot page is
+resolved by a CONTROL PROBE since 2026-10-20 - it re-fetches the known-good section `RSMo 1.010`,
+and a clean control fetch proves the site is serving us, so the target simply is not published and
+is parked in ~5 s instead of after a 10-minute cooldown. Any ambiguous control result - bot page,
+network error, empty 200 - falls back to the old 10-minute-cooldown-and-one-retry path, because
+parking writes `status='rejected'` onto a statute section and must never happen without positive
+proof. **USC keeps the old cooldown behaviour** - those citations resolve against a different host,
+so an RSMo control would be meaningless. PLAYBOOK 68) or uscode.house.gov (`src/adapters/uscode.js`, 2 s spacing),
 banks the excerpts under `.superpowers/artifacts/gloss-batch-<source>/` (so `--resume` never mixes
 the two drains), and **projects every batch's cost from that bank on disk before submitting it** -
 refusing the submission if spent + projected would pass the cap (PLAYBOOK lesson 44: the first USC
@@ -889,7 +895,7 @@ API-spend-approval policy referenced in Section 2).
 
 ## Operational state that is NOT in the database (read before trusting a rebuild)
 
-**The parked-bill set.** `.superpowers/artifacts/scheduled-summaries/parked.json` holds 31 bills the
+**The parked-bill set.** `.superpowers/artifacts/scheduled-summaries/parked.json` holds 34 bills (2026-10-20) the
 summary chain has stopped retrying for structural reasons. It is **gitignored**, so a rebuild from a
 bare clone does not have it - and this document did not mention it at all until 2026-08-29, which is
 exactly how that kind of gap survives.
@@ -898,9 +904,34 @@ Why it matters in money rather than tidiness: each entry represents **three exha
 attempts**. Rebuilding without it means the daily scheduler re-attempts all 31 and pays again for
 work already proven to fail, and nothing errors while it happens.
 
-**Migration `0039_parked_bills.sql` moves this into the database** so it is backed up with
-everything else. Until it is applied and `scripts/migrate-parked-to-ledger.mjs --apply` has run,
-**copy `parked.json` off the machine as part of any backup**, or accept re-spending on rebuild.
+**UPDATED 2026-10-20. `0039_parked_bills.sql` IS APPLIED** (`npm run verify:migrations` probes it by
+the `parked_bills` table and reports it live) and `scripts/migrate-parked-to-ledger.mjs` has run:
+the table holds 31 rows. **So the data is backed up. It is NOT restorable, and that distinction is
+the whole point of this section.**
+
+**THE REMAINING GAP, verified by grep 2026-10-20:** `migrate-parked-to-ledger.mjs` copies
+**JSON -> table** and **nothing copies table -> JSON**. The billed scheduler reads only
+`parked.json` (`readParked`/`writeParked`, `PARKED_PATH` in `scripts/scheduled-summaries.js`). A
+rebuild therefore recovers the parked set into a table that nothing consults, while the scheduler
+starts from an empty file and re-attempts every parked bill at real cost - **exactly the failure
+0039 was written to prevent, one step short of prevented.**
+
+Writing the restore direction is a small script nobody has needed yet. Until it exists, a rebuild
+must reconstruct the file from the table by hand; the shape is
+`{ "<bill_id>": { "reason": "<text>", "parked_at": "<iso>" } }`, which is what `planParkedRows` in
+the migrate script consumes in the other direction.
+
+**Also note the two stores can legitimately disagree.** On 2026-10-20 the JSON held 34 entries and
+the table 31 - the three newest parks had not been synced. Neither is wrong; the JSON leads and the
+sync is manual. **Re-run `migrate-parked-to-ledger.mjs` after any tick that parks**, or the backup
+quietly lags the thing it is backing up.
+
+**And `state.json`'s `parked` array in the gloss runner is a different thing entirely** - a per-pass
+list that resets when `--resume` is omitted. Do not back it up or restore from it; for glossary
+parks the DATABASE is authoritative (`glossary_notes` rows whose note begins `parked by gloss-batch`).
+
+**Copy `parked.json` off the machine as part of any backup** regardless, since it is gitignored and
+is the only copy the scheduler can actually read.
 
 If you are rebuilding and the file is gone: the set is recoverable in principle by re-deriving which
 bills have three failed attempts in `summaries`, but the *reasons* - the evidence for why a fourth

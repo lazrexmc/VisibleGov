@@ -19,6 +19,16 @@ accountable with real information instead of spin.
 > snapshots kept further down — is history that goes stale; do not resume from it. Live numbers:
 > `npm run status` (what each number means: `docs/DATA_INVENTORY.md`).
 >
+> **FUNDED 2026-10-20: Anthropic granted Lance $200 in API credits**, ending a month-long spend hold.
+> Dollar figures are deliberately NOT restated here - the console is the truth and `TODO.md`'s RESUME
+> HERE carries what was spent. **The one fact worth keeping in this file, because it was got
+> backwards for weeks in BOTH directions:** API credits buy the BILLED scheduler and the GLOSS
+> runner, and nothing else. The fast $0 subagent summary lane runs on Lance's Claude subscription and
+> has never used credits - so "no credits" never blocked summaries, and "funded" does not unblock
+> them. Measured 2026-10-20: the billed path costs **$0.55 per published summary** against **$0** for
+> the subscription lane, so a session reading funding as licence to spend on the summary backlog has
+> it wrong.
+>
 > **Two Windows Scheduled Tasks mutate the database while you work (both Ready, 2026-08-23):**
 > `VisibleGov Scheduled Ingestion` (every 15 minutes since 2026-07-31; `scripts/scheduled-ingest.js`;
 > `docs/SCHEDULED_INGESTION.md`) and `VisibleGov Scheduled Summaries` (daily 06:00;
@@ -266,6 +276,16 @@ per-legislator vote coverage," for the full evidence trail.
 See `PLAYBOOK_DELTA.md` §2. This only works if it's mechanically neutral - same treatment
 regardless of party, everything traceable to the actual bill text and the actual recorded vote, no
 editorializing in a summary. Check every design decision against this before it ships.
+
+**EXTENDED 2026-10-20 to a SECOND ungroundable class, on the same reasoning and with Lance's
+agreement: UNCODIFIED SECTIONS.** A bill that PROPOSES to create section 135.1325 gives the glossary
+a citation that resolves to nothing - the Revisor of Statutes publishes no text until a section is
+codified, so there is nothing to quote and this rule excludes it exactly as it excludes an agency
+name. 109 such terms as of 2026-10-20. `npm run status` reports them on their own line and keeps them
+OUT of the glossable denominator, because a number implying future work invites a future session to
+do it. 78 were already parked when the class was finally named, 68 of those back in August, so
+**this class existed unnamed for two months while its members sat in a denominator as achievable
+work.**
 
 **Applied 2026-09-05 to the glossary, and it settled 4,461 rows.** Lance:
 *"I don't think we can gloss something that doesn't have a traceable source, otherwise it's me

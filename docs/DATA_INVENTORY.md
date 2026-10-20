@@ -526,3 +526,75 @@ Two rules that keep this from breaking again:
 2. **If the aggregate matviews and the tables disagree, run `npm run refresh:aggregates`.** The matviews back the profile charts, so when they lag, a legislator's chart under-reports activity that the vote list beside it displays correctly - a visible self-contradiction on the public site.
 
 Anything that restates a count in prose will be wrong again within 30 minutes. Only two things should ever be trusted for live numbers: the status script, and `site/js/trust-page.js`, which counts from the database at page load and is the one number source in the repo that cannot go stale.
+---
+
+## 2026-10-20 - two glossary numbers changed meaning, and one assertion in this document expired
+
+### The second ungroundable class: UNCODIFIED sections
+
+`npm run status` now prints a line that did not exist before:
+
+```
+  glossary published ...... 2,587 of 5,096 glossable  (50.8%)
+    ...ungroundable ....... 4,517  <- acts/agencies/programs with no citable source
+    ...uncodified ......... 109    <- sections a bill PROPOSES; the Revisor publishes no text
+    ...raw row total ...... 9,722  <- includes BOTH ungroundable classes
+```
+
+**What `uncodified` means.** A bill proposing to create section 135.1325 ("Employer Provided Child
+Care Assistance Tax Credit Act") gives the glossary a citation that resolves to nothing:
+revisor.mo.gov does not publish a section until it is codified. There is no text to quote, so
+Lance's 2026-09-05 source rule excludes it exactly as it excludes an agency name. Agreed with him
+2026-10-20.
+
+**How they are identified, and why not by status.** By the park note `gloss-batch` writes
+(`glossary_notes.note LIKE 'parked by gloss-batch%'`), counted as DISTINCT `term_id`. **Never by
+`status='rejected'` alone** - that status is crowded and also holds genuinely bad glosses, so
+conflating them would make the line meaningless. The note is the evidence, which is why `parkTerm`
+writes one.
+
+**They were previously counted as GLOSSABLE.** The denominator moved 5,193 -> 5,096 when they were
+excluded. 78 existed when the class was named and 68 of those were parked in August, so **this class
+sat inside the "achievable work" denominator for two months.** That is the precise defect Lance's
+2026-09-05 ruling was issued to stop, reappearing in a class nobody had met yet.
+
+### `flagged, awaiting Lance` is now `authored drafts`, because the old label was false
+
+The line used to read `flagged, awaiting Lance <N>  <- verifier raised an objection`. On 2026-10-20
+it read **1,356** when Lance's real review queue was **619**: the other 737 were verified CLEAN and
+merely waiting for a free `auto-publish-glossary` run.
+
+**This is §4 of this document ("draft != flagged") recurring one level deeper.** §4 separates the
+`status` axis from the `verdict` axis. This is a third distinction inside the draft+verdict
+intersection: a clean-verdict draft and a flagged-verdict draft have **different owners** - the first
+is owed a free CLI run, the second is owed a human. Merging them overstated a person's workload by
+2.2x, which is the same magnitude and the same shape as the 870-vs-427 error this schema already
+produced once.
+
+**The authoritative split is one free command, and it is not recomputed in the status script:**
+
+```
+node --env-file=.env src/cli/auto-publish-glossary.js --dry-run
+# counts.eligible                  = clean, needs the free publish step
+# counts.flaggedOrUnverifiedSkipped = Lance's real queue
+```
+
+Eligibility is derived by `glossVerificationBadge` in `src/review/server.js`. A second copy of that
+derivation living in a reporting tool would eventually disagree with the one the publisher actually
+uses, and then neither number would mean anything - so `data-status.js` names this command instead
+of guessing.
+
+### EXPIRED ASSERTION, corrected here rather than left standing
+
+This document states, of the draft summaries, *"nothing clean is sitting unpublished"* (and §4 says
+the same of the 98 drafts in its 2026-08-02 pass). **That was true when written and is NOT a standing
+property of the system.** It holds only while the auto-publish step has been run more recently than
+the last authoring batch.
+
+On 2026-10-20 the glossary batch left **737 clean terms unpublished for hours** with no error
+anywhere, because the drain is TWO steps and only the first was run. The run's own field name is most
+of the trap: `glossed_clean: 737` means "the verifier cleared it", **not** "it is live".
+
+**Read it as: nothing clean should REMAIN unpublished after `auto-publish-glossary` runs. Between an
+authoring batch and that run, clean items are expected to be sitting unpublished** - and the right
+response is to run the free step, not to investigate a defect.

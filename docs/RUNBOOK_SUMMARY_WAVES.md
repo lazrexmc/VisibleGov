@@ -1,13 +1,30 @@
 # Runbook - summary waves ($0 subagent path)
 
-> **LANE STATE: PAUSED (2026-09-03 08:06 CDT) - read this before running anything below.**
-> Lance paused the drain so other projects on this machine get the token budget:
-> *"pause visiblegov's draining runs for now, let's have the other projects get token usage
-> instead."* **Nothing below should be run until he says otherwise.** The declaration of record,
-> with decider and date, is `docs/EXPECTED_FAILURES.md` section 2; `TODO.md`'s RESUME block carries
-> the numbered resume procedure, whose step 1 is "confirm Lance wants it resumed" - **a pause that
-> is a DECISION and a pause that is a FAULT look identical to whoever finds them, and only one
-> should be undone on initiative.**
+> **LANE STATE (2026-10-20): IDLE, NOT PAUSED. This lane may be run.**
+> Lance lifted the 2026-09-03 pause on 2026-10-06: *"Start draining using subscription, I have no
+> credits for API."* Nothing has replaced it, so there is no standing instruction against running
+> what follows. Last summary published **2026-10-06**; 1,993 bills READY.
+>
+> **IDLE is not a third kind of pause - it is the absence of a session.** This lane IS a Claude
+> session, so it runs while one runs it and stops when that session ends. `npm run status` prints
+> `LANE IDLE` once the last publish is over two days old and **is the only instrument that can tell
+> idle from running** - trust it over this banner, which cannot know.
+>
+> **This banner said PAUSED for fourteen days after the pause was lifted**, which is the more useful
+> warning: a lane with no process boundary cannot contradict a document about itself. Re-read
+> `docs/EXPECTED_FAILURES.md` section 2 and `TODO.md`'s RESUME block before trusting any lane-state
+> prose, here or there.
+>
+> *~~LANE STATE: PAUSED (2026-09-03 08:06 CDT).~~ Lance: "pause visiblegov's draining runs for now,
+> let's have the other projects get token usage instead." **Superseded 2026-10-06.** Struck rather
+> than deleted, because a pause that is a DECISION and a pause that is a FAULT look identical to
+> whoever finds them, and only one should be undone on initiative - the record has to show which
+> this was.*
+>
+> **Credits do not apply to this lane and never have.** It runs on Lance's Claude subscription via
+> session subagents. The $200 granted 2026-10-20 buys the BILLED scheduler and the gloss runner, not
+> this. Measured 2026-10-20, this is also the CHEAPER lane for summaries by a wide margin: $0 here
+> against **$0.55 per published** through the billed path.
 >
 > *~~LANE STATE (2026-08-24): THE FRESH-AUTHORING LANE IS OPEN AGAIN ... run continuously until he
 > signals a pause.~~ Superseded 2026-09-03 - he signalled it. Struck rather than deleted so the

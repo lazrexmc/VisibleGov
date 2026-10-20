@@ -6860,3 +6860,136 @@ lesson 14).
   string that CLAUDE.md's deviation 4 pins. A trailer is an authorship claim; RapidForge corrected the
   same pin in its own repo on 2026-08-30. Whether to re-pin deviation 4 to the role is Lance's call.
 
+
+- **2026-10-06 - the drain resumed on the subscription, and the evidence-quote gate was built, corrected twice, then demoted.**
+  **RECONSTRUCTED 2026-10-20 FROM COMMITS, not written on the day.** No CHATLOG entry existed for
+  any of October before this one, which is itself the finding: five commits landed with no decision
+  trail. What follows is anchored to commit messages and code, and anything not derivable from those
+  is deliberately absent rather than guessed.
+  **Lance, 2026-10-06, verbatim:** *"Start draining using subscription, I have no credits for API."*
+  Then *"proceed chaining until i pause"*, and later *"Ask RapidForge to review the recent changes
+  and provide feedback"* followed by *"Proceed but don't over engineer, only spend tokens on
+  productive items that move the project forward."*
+  The commits: `4e4726d` gated `evidence_quote` against the bill text - the per-bullet citations
+  migration 0021 renders publicly had never been checked against the source at all. `577f177`
+  corrected that gate twice and shipped the audit that found both errors. `4ae8057` then **demoted
+  the gate to a diagnostic because the defect it blocks measures zero** across the published corpus
+  - the honest outcome of actually running the audit rather than trusting the gate's premise.
+  `11e8bc1` stopped the verifier copying printed PDF line numbers into published receipts.
+  `285cdfd` made missing roll calls judged against the run's own edge rather than an inherited one.
+  **The shape worth keeping: a gate was built, its own audit showed it was guarding nothing, and it
+  was demoted instead of defended.** `scripts/audit-evidence-quotes.mjs` imports the gate rather
+  than reimplementing the comparison, so the audit and the gate cannot drift.
+
+- **2026-10-20 - FUNDED: $200 in API credits, and the day's work was mostly correcting my own claims.**
+  **Lance, verbatim, opening:** *"Anthropic just gave me $200 in api credits, lets' get to work!"*
+  Then, mid-turn and before any money moved, the instruction that changed the whole plan:
+  *"review the folder and find the intent and purpose of API credits as well before spending them."*
+  **That instruction was right and it inverted the allocation.** Grepping the repo's own decision log
+  found `CHATLOG.md:6719` (2026-09-05), which already recorded the correction: **API credits never
+  bought the fast summary lane.** That lane runs on Lance's Claude subscription via session subagents
+  and peaked at 204 published/day; credits buy only the billed scheduler and the gloss runner. The
+  2026-09-05 entry says in as many words that he *"may have been waiting for the wrong thing."* So
+  the $200 went where the subscription cannot reach - the glossary - rather than at the summary
+  backlog that never needed money.
+
+  **Price guard cleared by its own condition (`3ed953f`).** `docs/EXPECTED_FAILURES.md` entry 1 said
+  moving `PRICES_VERIFIED_THROUGH` alone is "the one edit that makes this worse". All three models in
+  `PRICES` were re-checked against Anthropic's published per-Mtok rates and **all three were
+  unchanged** - haiku-4-5 $1/$5, sonnet-5 $2/$10, opus-5 $5/$25. Date moved 2026-08-31 -> 2026-12-31,
+  with the re-check, never alone. Re-arms 2027-01-01 by design. The sonnet "intro pricing" caveat was
+  deleted rather than reworded: the intro rate did not lapse into a different number.
+
+  **Scheduler caps raised on his explicit approval (`8567888`): weekly $5 -> $25, per-tick $1 -> $4.**
+  He chose "$25/week". **The per-tick raise was not cosmetic and the weekly number was meaningless
+  without it:** the task fires once a day, so seven ticks at $1 ceiling the week at $7 regardless of
+  the weekly cap. PLAYBOOK 67. Five tests went red and only one was about the caps; the other four had
+  hardcoded prior-spend arithmetic and now derive from the constants. The I3 test needed more than
+  arithmetic - its premise is an allowance SMALLER than a bill's estimate, and at $4 a $1.365 monster
+  is simply affordable, so its allowance is now pinned explicitly.
+
+  **THE MEASUREMENT THAT MATTERS MOST, and it contradicted me by 5x.** I quoted the measured
+  $0.107/published forward across the cap raise. Tick 1 actual: **24 attempted, 6 published, $3.2997
+  spent = $0.55/published.** $25 buys ~45 summaries, not the ~230 I told him. Finishing the 1,993
+  READY queue via the billed lane would cost ~$1,100, which the $200 cannot do. **Lance, on being
+  told:** *"1.Stop the tick, we can conserve api credits"*. Tick 2 was killed mid-flight; its run row
+  was deliberately LEFT `running` so the ledger charges it the full $4, because its real spend died
+  with the process's cost tracker and closing it at $0 would hand the week back budget it had used.
+  PLAYBOOK 66.
+
+  **The glossary lane, which is the one credits are actually for.** Lance approved the gloss run at a
+  **$25 hard cap** and *"Proceed, I agree"* to two things: building a control-probe fix, and treating
+  uncodified sections as ungroundable by policy.
+  *The fix (`71d826d`):* `revisor.mo.gov` serves the same bot page for a section it does not publish
+  and for a client it is throttling. The runner distinguished them by sleeping a 10-minute cooldown
+  per section - **measured at ~110 minutes to rule out TEN sections, zero fetched.** A control section
+  (RSMo 1.010) settles it in one 5s request. First real sweep: **31 parks, all no-cooldown, zero
+  fallbacks, ~5.2 hours of sleeping avoided.** Parking requires POSITIVE proof of service; every
+  ambiguous outcome falls back to the slow path, because a false park writes `status='rejected'` onto
+  a real statute section. PLAYBOOK 68.
+  *The policy:* **Lance's 2026-09-05 ruling extended to a second class he had not met.** A bill that
+  PROPOSES to create section 135.1325 yields a citation resolving to nothing - the Revisor publishes
+  no text until codification, so there is nothing to quote and the one non-negotiable excludes it
+  exactly as it excludes an agency name. 109 such terms, now on their own `npm run status` line and
+  out of the glossable denominator, where 78 had been counted as achievable work. **68 of those 78
+  were parked in August, so this class existed unnamed for two months.**
+  *The result:* fetch sweep free and clean (919 + 31 + 8 = 958, exact). Billed phase **$7.682 of a $15
+  cap** (I set $15 under his authorized $25 since the run is checkpointed), 930 authored, 737 verified
+  clean, 0 author failures. **$0.0104 per clean gloss, against the historical $0.0102** - three
+  independently-built estimates ($9.10 mine, $9.37 historical, $9.51 the runner's) landed within 5%.
+  Then `auto-publish-glossary` published **737 of 737, 0 failed. Glossary 1,850 -> 2,587 of 5,096
+  glossable, 36.3% -> 50.8%.**
+
+  **A defect found by investigating on his instruction (*"2.Investigate"*), fixed in `2a8ee76`.** The
+  tick's three `record_failures` were all the completeness CHECKER malforming its own output - 9
+  `key_provisions` against a required 3-7, 6 coverage entries against 5 provisions, a coverage entry
+  citing bullet_index 27 of 25. The scheduler then **parked** those bills, permanently excluding them
+  from every future budget. **The bound two of them broke is deleted from the schema the model
+  generates against:** `apiProvisionsSchema()` strips `minItems`/`maxItems` because the API rejects
+  `minItems > 1`. This repo had already bought the lesson on HB 903 and written the rule down - *park
+  what fails deterministically, retry what fails because two samplers disagreed* - as guidance that
+  nothing enforced. `isStochasticRecordFailure` is now one exported predicate; `retryable` crosses the
+  CLI boundary because only name+message used to survive serialization. PLAYBOOK 69.
+  **`scripts/unpark-stochastic-parks.mjs` is DRAFTED, dry-run verified, and awaits Lance's `--apply`.**
+  It unparks **4, not the 10** completeness-related parks: four carry three exhausted billed attempts
+  each, which IS migration 0039's deterministic standard, and HJR 114 / SJR 41 failed on section
+  strings absent from the bill text (constitutional articles; a glued-digit `"1the"`), which is
+  bill-text quality and a different defect.
+
+  **Three claims of mine that were wrong, corrected the same day.**
+  **One: "confirm the Windows task is enabled" (`3169a20`).** It had fired at 06:00 every day,
+  skipping on the price guard. `npm run status` says "never ran" because the guard skip precedes
+  `openRun` and writes no run row - so I consulted the one instrument that structurally cannot see
+  that path, which is the exact four-states-one-silence trap entry 1 was rewritten in September to
+  prevent. The proof was a dated log file the whole time. PLAYBOOK 71.
+  **Two: "10 real sections wrongly rejected".** Called damage before testing. Ten known-good sections
+  fetched fine while those ten returned the bot page; the parks were correct and no repair was needed.
+  I was misled by the log wording - `cooling down 10 min` is the language of rate limiting for what
+  the error class calls `nonexistent citation`.
+  **Three: "6 of 34 parked bills are this class".** It is 10 of 34; a narrower regex missed four whose
+  reason string had been overwritten by the drain-lane seeding note. Only 3-4 are the stochastic
+  class, so the fix's recovery rate is the measured 3 per tick.
+
+  **And one I committed rather than merely said (`6c4026b`).** An unescaped apostrophe broke
+  `npm run status` entirely, and I reported **2,847 pass / 0 fail** from a suite that does not import
+  `data-status.js`. "Suite green" was used as a claim about the repo when it is only a claim about the
+  loaded set. `tests/scripts-parse.test.js` now `node --check`s every script under `scripts/`, `src/`
+  and `tests/`. While building that guard, verifying `node --check` reported **exit 0 for a file it
+  had just rejected** - the exit code belonged to `head` at the end of a pipe, which is CLAUDE.md's
+  own standing rule, hit while writing a guard against a different mistake. PLAYBOOK 70, 74.
+
+  **A peer correction that falsified one of this repo's own documents (`6e3b961`).**
+  `docs/JOINT_CHANGE_PROTOCOL.md` cited RapidForge's keepalive reading `docs/EXPECTED_FAILURES.md` as
+  its worked example of a shared contract. I sent a heads-up on that basis; RapidForge checked its own
+  tree and reported the keepalive was a session-only cron that **died with its session in early
+  September.** The instruction had been false for six weeks. Retracted immediately per the protocol's
+  own rule that a known-false claim goes out before any agreement. PLAYBOOK 72.
+
+  **Lance on the review queues:** *"3. I'll review them eventually."* No action taken, and the status
+  label was corrected because it had been overstating that queue by 2.2x - 1,356 reported against a
+  real 619, the other 737 being clean terms awaiting a free publish step. **The same defect the same
+  function records having already fixed once** ("told Lance his review queue was 870 when it was
+  427"). PLAYBOOK 73, 75.
+
+  **Day's spend: $10.98 of $200** - $3.30 for 6 summaries, $7.68 for 737 glosses. Suite 2,850 pass /
+  0 fail.

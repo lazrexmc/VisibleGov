@@ -13,13 +13,23 @@ information.
 | Deployed since | 2026-08-05, custom domain live 2026-08-24 |
 | Verified at the origin | 2026-08-30 00:11 CDT - apex returns 200 and `Cloudflare Pages=success` is a check-run on HEAD. Confirm both before believing a deploy: `gh api repos/lazrexmc/VisibleGov/commits/$(git rev-parse HEAD)/check-runs`. "Auto-deploys on push" is not evidence - a sibling project's Pages integration died silently for six weeks. |
 | Host URL semantics | Cloudflare Pages 308-canonicalises `.html` to extensionless, so `_redirects` targets must be extensionless. Assets WERE served `public, max-age=14400, must-revalidate` - four hours - which is Pages default, not a repo setting; `site/_headers` now sets `max-age=0, must-revalidate` on `/js/*` and `/css/*` (2026-09-05) because filenames are not content-hashed, so a deploy could not invalidate what a browser held. HTML was already `max-age=0`. **Visitors who cached assets before that deploy keep them for up to four more hours.** **Any byte-check of a JS module must cache-bust** or it will report a working fix as broken, which has happened here. |
-| Published summaries | **1,401** as of 2026-09-05 (live count: `npm run status` - this row rots) |
-| Published glossary | 1,850 of 9,521 as of 2026-09-05 |
+| Published summaries | **1,427** as of 2026-10-20 (live count: `npm run status` - this row rots) |
+| Published glossary | **2,587 of 5,096 glossable (50.8%)** as of 2026-10-20. **Do NOT quote the raw row total (9,722) as the denominator** - it includes 4,626 terms that are ungroundable BY POLICY (4,517 acts/agencies/programs with no citable source, 109 uncodified sections a bill only proposes). Those are permanently excluded, not a backlog. |
 
-**Status (2026-09-05): DEPLOYED and live. The summary drain is PAUSED by Lance's decision
-(2026-09-03) so other projects get the token budget - see `docs/EXPECTED_FAILURES.md` section 2;
-nothing is broken.** Plain-language summaries published: **1,401**, of which 1,046 cover the 3,108
-accountability bills that have text (33.7%). The open drafts are parked bills with written reasons (reasons in
+**Status (2026-10-20): DEPLOYED and live. The summary drain is IDLE - not paused, just unattended.**
+That lane IS a Claude session, so it runs only while a session runs it; the 2026-09-03 pause was
+lifted on 2026-10-06 and nothing has replaced it since. `npm run status` prints `LANE IDLE` past two
+days and is the only instrument that can tell idle from running - trust it over any prose here. See
+`docs/EXPECTED_FAILURES.md` section 2. Plain-language summaries published: **1,427**, covering
+**34.5%** of the 3,108 accountability bills that have text, with 1,993 still READY.
+
+**Funding, because it is the question most often got backwards:** Anthropic granted $200 in API
+credits on 2026-10-20. Credits buy the BILLED scheduler and the GLOSS runner **only**. The fast $0
+subagent summary lane runs on the maintainer's Claude subscription and has never used credits, so
+"no credits" never blocked summaries and funding does not unblock them. Measured 2026-10-20: the
+billed path costs **$0.55 per published summary** (at a $4 tick cap) against **$0** for the
+subscription lane, and glosses cost **$0.0104** each - which is why the credits went to the
+glossary, taking it from 36.3% to 50.8% in a day for $7.68. The open drafts are parked bills with written reasons (reasons in
 `.superpowers/artifacts/scheduled-summaries/parked.json`; `npm run status` prints the live count
 as "parked (structural failures)" - a few dozen) plus whatever the latest scheduler tick refused
 (2026-08-23: 32 open drafts = 28 parked + 4 fresh refusals); every future summary flows through the

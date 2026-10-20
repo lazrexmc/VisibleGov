@@ -88,6 +88,16 @@ with offset/limit or jump by grep.
 | 63 | 09-03 | A string that looks like a fact is not a measurement; a claim about the future can only be probed |
 | 64 | 09-03 | A step's own report of its outcome is weakest evidence exactly when it is positive; check the artifact, and check it is THIS run's |
 | 65 | 09-26 | A recogniser for a known non-answer runs on the raw bytes, before any parser that can throw; a window that advances only on success turns a tail crash into a permanent stall |
+| 66 | 10-20 | A cost-per-unit measured under one budget cap is a property of that cap, not a constant |
+| 67 | 10-20 | A periodic cap times its period is the real ceiling; raising the other number alone is decorative |
+| 68 | 10-20 | Two indistinguishable upstream responses need a CONTROL probe, not a timeout |
+| 69 | 10-20 | A permanent exclusion must only ever follow a DETERMINISTIC failure, enforced in code, defaulting to not-excluding |
+| 70 | 10-20 | A green suite is evidence only about the code the suite LOADS; reporting-only scripts need a parse floor |
+| 71 | 10-20 | Judge liveness by the artifact the EXPECTED path writes; a success-shaped query cannot see a healthy no-op |
+| 72 | 10-20 | A documented cross-session contract is a claim about another system and rots like a typed count |
+| 73 | 10-20 | A number merging two queues recurs; label it by what it IS and point at the one authoritative derivation |
+| 74 | 10-20 | Two ways to lose a background run: the shell that launched it, and the pipe you watched it through |
+| 75 | 10-20 | A multi-step pipeline whose middle step reports success is where work dies silently |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1748,3 +1758,205 @@ was a measurement of one page, recorded as a property of the parser.**
 **Rule: recognise a known non-answer from the raw bytes before any parser sees them, scoped to bodies
 that are not a real record. A parser's tolerance of today's error page is not part of the upstream's
 interface.**
+
+## Lesson 66 - A cost-per-unit measured under one budget cap is a property of that cap, not a constant (2026-10-20)
+
+The billed summary scheduler had a measured rate: **$0.107 per published summary**, from 6 ticks and
+20 summaries on 2026-08-21. A real measurement, honestly recorded. On 2026-10-20 the per-tick cap
+rose from $1.00 to $4.00 and that figure was quoted forward to Lance as "~230 summaries for $25".
+
+The first tick after the raise: **24 attempted, 6 published, $3.2997 spent. $0.55 per published,
+5.1x the quoted rate.** $25 buys ~45 summaries, not 230.
+
+**The mechanism is causal, not noise, and it was predictable.** A tick buys bills until its allowance
+is gone. A bigger allowance lets it reach for bigger and harder bills, and conversion collapsed to
+25%. The $0.107 was measured when the cap could only fund the cheapest bills in a recency-ordered
+queue whose easy head had not yet been drained.
+
+**Rule: a per-unit cost measured under a constraint is valid only under that constraint.** When the
+constraint moves, the measurement expires - it does not scale. Re-measure after the first run at the
+new setting, before quoting any projection built on the old one. Same family as "a grammar verified
+on two fixtures is a hypothesis about the corpus" (lesson 48), with the budget as the hidden fixture.
+
+## Lesson 67 - A periodic cap times its period is the real ceiling; raising the other number alone is decorative (2026-10-20)
+
+Lance approved raising the billed scheduler's weekly cap from $5 to $25. Setting
+`WEEKLY_CAP_USD = 25` alone would have delivered **$7**: the task fires once a day, so seven ticks at
+a $1.00 per-tick cap ceiling the week at $7.00 regardless of what the weekly number says. The doc and
+the constant would both have read 25 over a lane that could never spend past 7.
+
+Caught before shipping, by multiplying the per-tick cap by the tick frequency instead of reading the
+weekly constant and believing it.
+
+**Rule: with two caps and a fixed period, the binding one is
+min(weekly, per-tick x ticks-per-period). Compute it. A number nothing can reach is decorative**, and
+a decorative number in a budget doc is worse than an absent one, because it gets quoted both as a
+limit and as a capacity.
+
+## Lesson 68 - Two indistinguishable upstream responses need a CONTROL probe, not a timeout (2026-10-20)
+
+`revisor.mo.gov` serves the identical bot-detection page for a section it does not publish and for a
+client it is throttling. The MO glossary runner told them apart by sleeping out a **10-minute
+cooldown** per section and retrying, on the sound logic that rate limiting would have cleared.
+Measured cost: **~110 minutes to rule out TEN sections, zero fetched.** Across 958 candidates with an
+uncodified share, that is tens of hours of deliberate sleeping. The cooldown - not the API, not the
+money - was the binding constraint on the whole lane.
+
+**The measurement that produced the fix took one minute:** RSMo 621.075 and ten other known sections
+returned real text while ten suspect sections returned the bot page, in the same minute. The site was
+answering us. A single known-good CONTROL section establishes that in one 5s request.
+
+First real sweep after the fix: **31 parks, all via the no-cooldown path, zero fallbacks, ~5.2 hours
+of sleeping avoided.**
+
+**The asymmetry is the whole safety argument and is the part to copy:** taking the destructive branch
+(writing `status='rejected'` onto a real statute section) requires POSITIVE proof the upstream is
+serving us. A clean control fetch is that proof. A bot page on the control, a network error, a
+timeout, a 200 carrying no text - all report "unknown" and fall back to the slow path. Cache the
+control with a short TTL, or request volume doubles against the very service whose throttling you are
+reasoning about, causing the condition you are detecting.
+
+**Rule: when one response means two things, do not disambiguate with time. Disambiguate with a second
+request whose answer you already know.**
+
+## Lesson 69 - A permanent exclusion must only ever follow a DETERMINISTIC failure (2026-10-20)
+
+The billed scheduler parked bills - removing them from every future tick's budget, forever - on any
+`MalformedSummaryError`. That included the completeness CHECKER mis-shaping its own output. One tick
+permanently discarded three publishable bills: HB 594 (9 `key_provisions` against a required 3-7),
+HB 1909 (6 coverage entries against 5 provisions), SB 748 (`coverage[5]` citing bullet_index 27 of
+25). **None of those is a property of the bill.**
+
+**And the bound two of them broke is one the model is never structurally held to.**
+`apiProvisionsSchema()` DELETES `minItems`/`maxItems` because the API rejects `minItems > 1`, so 3-7
+lives in the prompt and in the record gate and **nowhere in the schema the model generates against.**
+The code comment said the bound is "enforced mechanically at the record gate anyway" - true, and
+nobody traced that a gate refusal PARKS THE BILL FOREVER. Asking for a range in prose and then
+permanently excluding a bill for missing it punishes the bill for the checker's sampling variance.
+
+This repo had already bought the lesson (HB 903: parked as structural after four identical failures,
+withdrawn, published on the fifth) and had written the rule down - *park what fails
+deterministically, retry what fails because two samplers disagreed*. It was written as guidance, and
+nothing enforced it, so the code kept doing the other thing.
+
+**Rule: every permanent-exclusion path states which failures are deterministic, in code, as one
+exported predicate.** Default to NOT excluding - an absent or unrecognised marker takes the safe
+branch. And when relaxing such a gate, the test that carries the weight is the NEGATIVE one, that
+genuinely structural failures still exclude, or the relaxation quietly becomes "never exclude
+anything".
+
+## Lesson 70 - A green suite is evidence only about the code the suite LOADS (2026-10-20)
+
+An unescaped apostrophe in `'... Lance's real queue'` went into `scripts/data-status.js` and broke
+`npm run status` completely - a SyntaxError at import, so the command did not run at all. The full
+suite was run immediately before the commit and reported **2,847 pass / 0 fail**. That was true, and
+it was evidence about nothing: **no test imported `data-status.js`.**
+
+"Suite green" was used as a claim about the repo when it is only a claim about the loaded set.
+
+**That the broken file was the least-tested in the repo is not a coincidence.** `CLAUDE.md` tells
+every fresh session that live numbers come from `npm run status`. It is the first instrument anyone
+reaches for, and it had no test **because it only prints** - nothing to assert, so nobody asserted
+anything, so a syntax error could ship.
+
+`tests/scripts-parse.test.js` now compiles every `.js`/`.mjs` under `scripts/`, `src/` and `tests/`
+with `node --check`. Parsing is a deliberately low bar, chosen because it is the only check that
+covers every script **without executing** any of them - these files open database connections, read
+`.env` and submit billed batches, so importing them to test them would be worse than not testing
+them.
+
+**Rule: before citing a suite as evidence about a file, confirm the suite loads that file.** For
+reporting-only scripts a parse check is the cheap floor and is not optional. Two of that guard's
+three assertions exist to stop it rotting: the walk must find many files (a broken walk cannot pass
+vacuously) and `node --check` is tested against a known-bad input (a detector that stops detecting
+fails loudly) - absence reported as health, yet again.
+
+## Lesson 71 - Judge liveness by the artifact the EXPECTED path writes, not by the instrument you usually reach for (2026-10-20)
+
+`npm run status` reported the `scheduled-summaries` source silent since 2026-08-31 and the summary
+scheduler as "never ran". The conclusion drawn and reported to Lance: the Windows task must be
+disabled, please check it.
+
+**The task had fired at 06:00 every single day.** `.superpowers/artifacts/summary-scheduler-logs/`
+held a dated file for 10-17, 10-18, 10-19 and 10-20, each reading `prices unverified`. `status` reads
+`ingestion_runs`, and the price-guard skip happens **before `openRun` by design**, so the expected
+path writes no run row at all.
+
+**The sting: `docs/EXPECTED_FAILURES.md` entry 1 documented exactly this**, and had been rewritten on
+2026-09-04 precisely because the skip used to leave no evidence - four states collapsed into one
+silence. That rewrite is the only reason the answer was recoverable at all. The trap was still walked
+into, by consulting the one instrument that structurally cannot see that path.
+
+**Rule: for a process whose expected outcome is a SKIP, the skip's own artifact is the liveness
+signal.** A monitoring query shaped around successful runs cannot see a healthy no-op. Before
+concluding a scheduled job is dead, ask what its expected path writes, and go read that.
+
+## Lesson 72 - A documented cross-session contract is a claim about another system, and it rots like a typed count (2026-10-20)
+
+`docs/JOINT_CHANGE_PROTOCOL.md` gave one worked example of a shared contract: RapidForge's keepalive
+reads `docs/EXPECTED_FAILURES.md` to decide whether VisibleGov's silence is expected, so **changing
+its shape changes their behaviour**. A heads-up was duly sent before changing that file.
+
+RapidForge checked its own tree and replied: that keepalive was a session-only cron armed in early
+September and **it died with its session.** No tool, script or scheduled job there reads the file. The
+instruction had been false for roughly six weeks and it generated real coordination work.
+
+**Rule: a contract written into a doc names a CONSUMER, and consumers die.** Verify the consumer still
+exists before coordinating around it. This is the migration-count lesson restated in prose about a
+peer, and the same fix applies: prefer a probe to a sentence, and where only a sentence is possible,
+re-ask the owning session rather than re-reading your own doc.
+
+## Lesson 73 - A number that merges two queues is a recurring shape; label it by what it IS (2026-10-20)
+
+`npm run status` printed `flagged, awaiting Lance <N> <- verifier raised an objection`. After a
+glossary batch it read **1,356** when Lance's actual review queue was **619**. The other 737 were
+verified CLEAN and merely waiting for a free `auto-publish-glossary` run.
+
+**The same defect had already been fixed once in the same function.** Its own comment records it:
+*"Reporting the sum told Lance his review queue was 870 when it was 427."* That fix split authored
+from unauthored. This one splits CLEAN-authored from FLAGGED-authored. One schema, one label, two
+separate 2x overstatements of a human's workload.
+
+The split was deliberately NOT recomputed in the reporting script: eligibility is derived by
+`glossVerificationBadge` in `src/review/server.js`, and a second copy of that derivation in a status
+tool would eventually disagree with the one the publisher uses - at which point neither number means
+anything. The label now refuses to claim which queue it is and names the free command that answers
+authoritatively.
+
+**Rule: when a count spans two populations with different owners, the label must not name one of
+them.** Call it what it is ("authored drafts"), and point at the single authoritative derivation
+instead of reimplementing it.
+
+## Lesson 74 - Two ways to lose a background run: the shell that launched it, and the pipe you watched it through (2026-10-20)
+
+Both hit within an hour, on the same task.
+
+**First:** a sweep launched with `nohup ... &` from a Bash tool call was **dead within 25 seconds** -
+the background job does not survive the shell that spawned it. Caught only because liveness was
+checked by PID (lesson 43), which is the lesson that paid for itself here.
+
+**Second:** relaunched correctly as a harness-tracked background task, but piped through `tail -40`.
+`tail` buffers its entire input until the producer exits, so **the log file stayed empty for the whole
+run.** That run was writing park records into a live database with no way to observe it - precisely
+the window in which a mass-park bug had to be caught.
+
+**Rule: launch long work through the harness's own background mechanism, verify it by PID, and
+redirect its output straight to a file.** Never pipe a run you intend to WATCH through `tail`, `head`,
+`sort` or anything else that buffers: a monitoring pipe that reveals nothing until the end is not
+monitoring.
+
+## Lesson 75 - A multi-step pipeline whose middle step reports success is where work dies silently (2026-10-20)
+
+The MO glossary batch finished clean: 930 authored, **`glossed_clean: 737`**, $7.68 of a $15 cap, zero
+author failures. `npm run status` then reported `glossary published 1,850` - **unchanged.** Nothing had
+been published. No error anywhere, because nothing was wrong: the drain is TWO steps, and
+`src/cli/auto-publish-glossary.js` (free, no model calls) promotes clean terms to published.
+
+**The field name is most of the trap.** `glossed_clean` reads like a result and is actually a
+precondition: it means "the verifier cleared it", not "it is live". $7.68 of correct work would have
+sat invisible indefinitely had the published count not been cross-checked against the run's own
+output.
+
+**Rule: a run's terminal report describes what THAT STEP did. Verify the pipeline's effect at the
+DESTINATION, not at the last step you ran** - and when a step's output names a state that is not the
+final state, say so in that step's own documentation, because the omission is silent by construction.

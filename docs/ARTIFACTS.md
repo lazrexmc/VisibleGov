@@ -197,15 +197,40 @@ nowhere but `parked.json`).
 
 ### `gloss-batch-mo/`, `gloss-batch-usc/` - the glossary Batch-API drains (`scripts/gloss-batch-mo.mjs`)
 
-Both runs are FINISHED (2026-08-21: MO 1,217 glosses for $12.45; USC 525 glosses for $8.31 - see
-`CHATLOG.md` and PLAYBOOK lessons 41-44). The published glosses are in the DB; each run has its
-`ingestion_runs` row with `spent_usd` in the detail. What is on disk:
+**A THIRD MO RUN COMPLETED 2026-10-20** (2026-08-21: MO 1,217 glosses for $12.45; USC 525 for
+$8.31 - PLAYBOOK 41-44). The 2026-10-20 MO run: **958 candidates, 919 fetched free, 930 authored,
+737 verified clean, $7.682 of a $15 cap, 0 author failures, 1 verify failure.** Then
+`src/cli/auto-publish-glossary.js` published **737 of 737, 0 failed**, taking the glossary from
+1,850 to 2,587 of 5,096 glossable (36.3% -> 50.8%). Rate **$0.0104 per published gloss**, against
+the 2026-08-21 run's $0.0102 - the economics are stable across two months.
+
+**THE DRAIN IS TWO STEPS AND ONLY THE FIRST IS THIS RUNNER.** It authors, verifies and persists
+DRAFTS; it publishes nothing. Forgetting `auto-publish-glossary` is silent - on 2026-10-20 the run
+reported `glossed_clean: 737` while `npm run status` still showed `glossary published 1,850`, with
+no error anywhere. `glossed_clean` means "the verifier cleared it", not "it is live". PLAYBOOK 75.
+
+**The 10-minute bot-page cooldown is GONE from the MO path, replaced by a control probe
+(2026-10-20).** revisor.mo.gov serves the same bot page for an unpublished section and for a
+throttled client; the old code slept 10 minutes per section to tell them apart, measured at ~110
+minutes to rule out TEN sections. A known-good control section (`RSMo 1.010`, TTL 60s) settles it in
+one 5s request. First sweep: **31 parks, all no-cooldown, zero fallbacks, ~5.2 hours of sleeping
+avoided.** Parking requires a CLEAN control fetch as positive proof of service; every ambiguous
+outcome falls back to the old cooldown path. **USC runs deliberately keep the old behaviour** - those
+citations resolve against a different host, so an RSMo control would be meaningless. PLAYBOOK 68.
+
+The published glosses are in the DB; each run has its `ingestion_runs` row with `spent_usd` in the
+detail. What is on disk:
 
 - **`excerpts.json`** - the bank of fetched statute excerpts (revisor.mo.gov at 5-second pacing
   with a bot-page cooldown; uscode.house.gov for USC). Free to re-fetch, slow to re-bank (the MO
   sweep was ~1,500 pages over ~2 hours), and it is the input lesson 44's cost projection reads
   before any batch is submitted - a reopened drain should project from this file, never from a
   per-term rate.
+- **`state.json`'s `parked` array is NOT the authoritative park record** (learned 2026-10-20). It
+  is a PER-PASS list and it resets whenever `--resume` is omitted: one pass reported 15 parks where
+  the database held 109. **The database is the truth** - `glossary_notes` rows whose note begins
+  `parked by gloss-batch`, counted as distinct `term_id`. Parked terms are excluded from candidates
+  by their `glossary_terms.status` regardless, so the array is belt-and-braces, not a ledger.
 - **`state.json` - cost-bearing only while a run is in flight.** The run ledger: Batch API batch
   ids per phase, parked terms, fetch failures, `spentUsd`. `--resume` reads the batch ids from
   it; the runner's `loadJson` falls back to an EMPTY ledger if the file is missing, so a resumed

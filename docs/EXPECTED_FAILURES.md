@@ -13,7 +13,23 @@ empty, say so plainly, because "no known failures" is itself information.
 
 ---
 
-## Currently green - re-verified 2026-09-05 08:1x CDT
+## Currently green - re-verified 2026-10-20
+
+| Instrument | Exit | Note |
+|---|---|---|
+| `npm run verify:migrations` | **0** | 40 probed, **30 applied, 0 MISSING**, 10 `unverifiable` because Tier 2 (`SUPABASE_DB_URL`) is off - a reported non-result, not a failure, and it does not affect the exit code |
+| `node --test` | **0** | **2,850 pass / 0 fail**, in a clean shell |
+
+**Entry 1 (the price guard) is CLOSED as of 2026-10-20** - funding arrived, prices were re-checked
+and all three were unchanged, so the guard was cleared by its own stated condition. **It re-arms
+2027-01-01**, which is the design and will not be a defect when it happens.
+
+**Nothing in this file is currently red.** Per the rule above: anything red and not listed here is a
+real failure.
+
+---
+
+## Previously green - re-verified 2026-09-05 08:1x CDT
 
 | Instrument | Exit | Note |
 |---|---|---|
@@ -102,10 +118,19 @@ this entry.**
 
 ---
 
-## 2. ~~CURRENTLY PAUSED BY DECISION~~ RESUMED 2026-10-06 09:5x CDT: the $0 summary wave lane
+## 2. ~~CURRENTLY PAUSED BY DECISION~~ ~~RESUMED 2026-10-06~~ IDLE since 2026-10-06: the $0 summary wave lane
 
-**Status: RUNNING.** Lance resumed it 2026-10-06: *"Start draining using subscription, I have no
-credits for API."* The pause he set on 2026-09-03 is lifted. **Struck through rather than deleted so
+**Status as of 2026-10-20: NOT PAUSED, NOT RUNNING - IDLE for want of a session.** These are three
+different states and this entry has now worn all three, so the distinction is the point. Lance
+resumed it 2026-10-06: *"Start draining using subscription, I have no credits for API."* The pause he
+set on 2026-09-03 is lifted and stays lifted. **But "resumed" is not a durable state for this lane:**
+it IS a Claude session, so it ran while that session ran and stopped when the session ended. Last
+summary published **2026-10-06**; 14 days idle at this writing, with 1,993 bills READY.
+
+**This line said "Status: RUNNING" for fourteen days while nothing ran.** Not because anyone was
+careless, but because a lane with no process boundary has no way to contradict a document that
+claims it is running. `npm run status` prints `LANE IDLE` past two days, which is the only
+instrument that can - **trust that over this heading.** **Struck through rather than deleted so
 the record shows the pause existed, who set it, and that it was ended deliberately rather than
 forgotten** - a pause that quietly disappears is indistinguishable from one nobody ever honoured.
 
