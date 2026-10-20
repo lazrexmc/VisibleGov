@@ -1,7 +1,8 @@
 # Scheduled summaries - `scripts/scheduled-summaries.js`
 
 The autonomous bill-summary runner designed to run **unattended, on Lance's machine, every day**,
-under a strict, code-enforced budget cap ($5.00 per ISO week, $1.00 per tick). This doc is what lets
+under a strict, code-enforced budget cap (**$25.00 per ISO week, $4.00 per tick** - raised 2026-10-20
+from $5.00/$1.00 on Lance's approval; see "Cap raise" below). This doc is what lets
 him register it (his own step - an agent never runs `schtasks`) and is what he uses to keep an eye
 on it now that it's running.
 
@@ -36,9 +37,9 @@ Each invocation (one tick, typically once a day, early morning):
    `TICK_MAX_DURATION_MS`) is reclaimed as stale by whichever LATER tick finds it that way - see
    "Recovery properties" below for exactly what that constant does and does not enforce.
 2. Computes this ISO week's spend from `ingestion_runs` rows (`source='scheduled-summaries'`,
-   last 10 days) and checks it against the weekly cap (`SUMMARY_WEEKLY_CAP_USD`, $5.00 default) and
-   per-tick cap (`SUMMARY_TICK_CAP_USD`, $1.00 default). **The week is the UTC ISO-8601 week**
-   (`currentWeekKey`: Thursday-anchored, keys like `2026-W34`), so the $5.00 window resets at
+   last 10 days) and checks it against the weekly cap (`SUMMARY_WEEKLY_CAP_USD`, $25.00 default) and
+   per-tick cap (`SUMMARY_TICK_CAP_USD`, $4.00 default). **The week is the UTC ISO-8601 week**
+   (`currentWeekKey`: Thursday-anchored, keys like `2026-W34`), so the $25.00 window resets at
    **Monday 00:00 UTC** - Sunday evening Central - never on a local-calendar boundary. A Monday
    6 AM Central tick is already the new week's first tick and opens at $0.00 spent (2026-W34 was
    2026-08-17..23; the 2026-08-24 tick opens 2026-W35). If the remaining allowance for this tick
@@ -161,7 +162,7 @@ Each invocation (one tick, typically once a day, early morning):
 
 ## Budget is real - these caps are published Terms of Service with yourself
 
-`SUMMARY_WEEKLY_CAP_USD` (default $5.00) and `SUMMARY_TICK_CAP_USD` (default $1.00) are
+`SUMMARY_WEEKLY_CAP_USD` (default $25.00) and `SUMMARY_TICK_CAP_USD` (default $4.00) are
 **hard, code-enforced limits**, not suggestions. They are defined in `scripts/scheduled-summaries.js`
 (`WEEKLY_CAP_USD`/`PER_TICK_CAP_USD`) and are env-overridable via `envCapUsd()`, downward only - a
 typo'd env var can shrink spend, never grow it (`Math.min(override, default)`: the default is a
@@ -171,14 +172,14 @@ A crashed/stranded tick (`status='running'` left behind by a hard kill) is alway
 code-default per-tick cap against the weekly ledger - conservatively assuming the worst, and never
 using a possibly-lowered cap from whichever tick happens to be doing the charging (fixed in this
 review's pass: a throttled manual tick run under a lowered `SUMMARY_TICK_CAP_USD` used to be able
-to under-charge a PRIOR crashed tick that actually ran under the real $1.00 cap).
+to under-charge a PRIOR crashed tick that actually ran under the real, unlowered per-tick cap).
 
 ## The registry
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `SUMMARY_WEEKLY_CAP_USD` | $5.00 | Hard weekly budget; env override can only lower it, never raise it |
-| `SUMMARY_TICK_CAP_USD` | $1.00 | Hard per-invocation budget; env override can only lower it, never raise it |
+| `SUMMARY_WEEKLY_CAP_USD` | $25.00 | Hard weekly budget; env override can only lower it, never raise it |
+| `SUMMARY_TICK_CAP_USD` | $4.00 | Hard per-invocation budget; env override can only lower it, never raise it |
 | `TICK_MAX_DURATION_MS` | 30 minutes | The lock's own declared stale-reclaim duration - how long a LATER tick waits before treating an existing lock as abandoned. NOT a self-terminating deadline for the CURRENT tick - see the Task Scheduler section below for what actually bounds a stuck tick |
 | `MAX_CONVERSIONS_EXAMINED` | 50 (not env-overridable) | How many draft-only bills the conversion lane examines per tick, oldest-flagged first, before assembling the rest of the tick |
 | `WORST_BILL_FLOOR_USD` | $0.05 | The floor a tick's remaining allowance must clear just to open a run row at all |
@@ -223,7 +224,7 @@ on the order of $0.04, not $0.67. After it finishes:
    and `per_call_count`.
 3. Only once both of those look right, proceed to registration below (and remember to unset
    `SUMMARY_TICK_CAP_USD` afterward, or the daily runs will stay throttled to $0.70/tick - a real
-   per-tick budget of $1.00 needs the env var absent, not present-and-small).
+   full default per-tick budget needs the env var absent, not present-and-small).
 
 ## Registering it (Lance's step - never run `schtasks` from an agent)
 
@@ -335,7 +336,7 @@ shortly after the next boot/logon instead of being dropped.
 This is safe by design: a catch-up tick is just a normal tick - the lock file prevents overlap,
 the weekly ledger is computed from `ingestion_runs` (not from run *count*), and the per-tick cap
 binds regardless of what time the tick actually fires. Worst case, two ticks land on the same
-calendar day (a late catch-up plus the next 6 AM) - both stay under the same weekly $5.00 cap,
+calendar day (a late catch-up plus the next 6 AM) - both stay under the same weekly cap,
 so the spend guarantee is unchanged. Note it fires IMMEDIATELY on registration too: the moment
 this setting was turned on (2026-08-17, ~9:03 AM, after the 6:00 start had already passed),
 Task Scheduler treated that day's start as missed and launched a catch-up tick on the spot.
@@ -372,7 +373,7 @@ the tick mid-run** - exit code 0xC000013A. This happened live on 2026-08-17: the
 registration-moment catch-up tick popped its window, the window was closed, and the tick died.
 It died BEFORE opening its run row, so that particular kill cost $0.00 and charged nothing -
 but a kill later in a tick strands the lock (self-heals in 30 min, or delete it by hand) and a
-`running` run row (conservatively charged the full $1.00 by next tick's ledger math, by
+`running` run row (conservatively charged the full per-tick cap by next tick's ledger math, by
 design). So: **when a black node window appears at tick time, leave it alone - it closes
 itself when the tick finishes.** The permanent fix is switching the task to "Run whether user
 is logged on or not" (no window at all, and ticks run while logged out): per the section
@@ -610,7 +611,7 @@ Task Scheduler section above for what actually bounds a stuck tick.)
 **Conservative crashed-tick ledger charge:** If the scheduler is killed mid-run (Windows timeout,
 power loss, etc.) and its `ingestion_runs` row is left at `status='running'`, the NEXT tick's own
 weekly-spend calculation (`summarizeWeekSpend`) counts that stranded row as having spent the FULL
-per-tick cap default ($1.00) against the weekly ledger - never less, even if that later tick happens
+per-tick cap default ($4.00) against the weekly ledger - never less, even if that later tick happens
 to be running under a manually-lowered `SUMMARY_TICK_CAP_USD` itself (fixed in this review's pass:
 the charge now always uses `Math.max(this tick's own cap, the code default)`, so a throttled manual
 tick can never retroactively under-charge an earlier crash that ran under the real cap). This is
@@ -693,3 +694,40 @@ Changes since activation that this doc now reflects: the conditional provisions-
 stage (2026-08-18), the recency-first sort's session-date dependency and WARNING line
 (2026-08-21/22), the `partial`-is-steady-state reading, the self-park class and two-edit
 unpark, the silent Task XML flags, and the `schtasks /run` manual trigger.
+
+---
+
+## Cap raise, 2026-10-20: $5.00/$1.00 -> $25.00/$4.00
+
+**Approved explicitly by Lance** on 2026-10-20, the day Anthropic granted him $200 in API credits.
+Before that grant the lane had been dormant since 2026-08-31 behind the price guard
+(`docs/EXPECTED_FAILURES.md` entry 1, now closed), so this raise and the guard's clearance landed
+together and the commits are adjacent: `3ed953f` then `8567888`.
+
+**Why the per-tick cap had to rise with the weekly one, which is the part worth keeping.** The
+Windows task fires once a day. Seven ticks at a $1.00 per-tick cap ceiling the week at $7.00 **no
+matter what the weekly cap says**, so raising only the weekly figure to $25.00 would have produced a
+doc and a constant both reading 25 over a lane that could never spend past 7. That is a decorative
+number - a figure nothing enforces - and it is the exact failure class this repo has had to correct
+repeatedly. At $4.00 per tick, six ticks reach $24.00 and the **weekly** cap is what actually binds,
+which is the one Lance chose.
+
+**What it buys, at the measured rate.** $0.107 per published summary (measured 2026-08-21 over 6
+ticks / 20 summaries, `CHATLOG.md:6144`) puts a $4.00 tick at roughly 37 published and the week at
+roughly 234, against a READY queue of 2,013. **A tick may now run materially longer than it used
+to:** it buys bills until the allowance is gone, bounded by cost and never by a count.
+
+**What did NOT change.** `envCapUsd` is still downward-only (`Math.min(raw, defaultUsd)`), so
+`SUMMARY_WEEKLY_CAP_USD` and `SUMMARY_TICK_CAP_USD` can still only lower these numbers and a typo in
+the environment cannot grow spend. Raising them genuinely requires editing the constants, which is
+the behaviour that made this a code change rather than an env tweak.
+
+**The ledger carve-out still covers only this runner.** `CLAUDE.md` makes the cap plus the ledger
+the standing per-run approval for `scripts/scheduled-summaries.js` alone. Every other billed call
+still needs Lance's explicit per-run approval with a cost stated.
+
+**A test asserts these two numbers literally** (`tests/scheduled-summaries.test.js`, "caps:
+constants match the spec") so they cannot move without someone editing a test that says them out
+loud. Every other test in that file now derives its allowances from the constants, because those
+tests are about behaviour at an allowance and not about the cap's value - four of them broke on this
+raise purely because they had hardcoded prior-spend arithmetic against $5.00/$1.00.

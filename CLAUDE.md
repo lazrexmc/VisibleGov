@@ -319,8 +319,11 @@ Global conventions (chatlog discipline, TODO structure, draft-then-apply, etc.) 
   `CHATLOG.md` (2026-08-03 through 08-23) and is not restated here; if Lance suspends the rule
   again, that is a NEW dated note replacing this parenthetical, not another layer on top of it.*
 - **Scheduled summaries — `scripts/scheduled-summaries.js` exception:** `scripts/scheduled-summaries.js`
-  runs billed calls unattended under a code-enforced $5.00/ISO-week cap plus a $1.00/tick cap (Lance,
-  2026-08-10; built 2026-08-15; registered as the Windows task `VisibleGov Scheduled Summaries`,
+  runs billed calls unattended under a code-enforced **$25.00/ISO-week cap plus a $4.00/tick cap
+  (RAISED 2026-10-20 from $5.00/$1.00 on Lance's explicit approval, after Anthropic granted him $200
+  in API credits; the per-tick figure rose with it because the task fires once a day, so seven ticks
+  at $1.00 ceilinged the week at $7.00 and a $25.00 weekly cap alone would have been decorative)**
+  (originally Lance, 2026-08-10; built 2026-08-15; registered as the Windows task `VisibleGov Scheduled Summaries`,
   daily 06:00, trigger dated 2026-08-17 — `docs/SCHEDULED_SUMMARIES.md`); this ledger+cap IS the
   per-run approval for this runner only. Every other billed
   call still requires explicit per-run approval.
