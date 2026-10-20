@@ -106,9 +106,25 @@ async function main() {
   const glossUngroundable = await count(
     'glossary_terms?needs_mapping=is.true&kind=in.(agency,program,act,public_law)&select=id',
   );
-  // What is actually glossable: everything except those. This is the honest denominator for
-  // "how much of the glossary can ever exist", and it is materially different from the raw total.
-  const glossGlossable = glossTotal - glossUngroundable;
+  // UNCODIFIED SECTIONS — the SECOND ungroundable class, found 2026-10-20 and agreed by Lance the
+  // same day. A bill that PROPOSES to create section 135.1325 gives the glossary a citation that
+  // resolves to nothing: the Revisor does not publish a section until it is codified, so there is
+  // no text to quote and the one non-negotiable excludes it exactly as it excludes an agency name.
+  //
+  // These are identified by the park note `gloss-batch` writes, never by status alone: `rejected`
+  // is a crowded status that also holds genuinely bad glosses, and conflating the two would make
+  // this line meaningless. The note is the evidence, which is why parkTerm writes one.
+  //
+  // They were previously counted as GLOSSABLE, so the denominator implied work that can never be
+  // done - the precise defect the 2026-09-05 ruling was issued to stop, reappearing in a second
+  // class nobody had met yet.
+  const parkNoteRows = await rows('glossary_notes?note=like.parked by gloss-batch*&select=term_id');
+  const glossUncodified = new Set(parkNoteRows.map((r) => r.term_id)).size;
+
+  // What is actually glossable: everything except the two ungroundable classes. This is the honest
+  // denominator for "how much of the glossary can ever exist", and it is materially different from
+  // the raw total.
+  const glossGlossable = glossTotal - glossUngroundable - glossUncodified;
 
   // COUNT this, never derive it. It used to be `glossTotal - glossPublished - glossNeedsMapping`,
   // which silently swept in every status that is neither draft nor published — 47 REJECTED terms
@@ -284,6 +300,7 @@ async function main() {
       passageVoteAndPublishedSummary: passagePublished,
       readyToSummarize,
       glossUngroundable,
+      glossUncodified,
       glossGlossable,
       summariesPublished: sumPublished,
       daysSinceLastPublish: daysSincePublish,
@@ -334,7 +351,8 @@ async function main() {
   const glossPct = glossGlossable > 0 ? ((glossPublished / glossGlossable) * 100).toFixed(1) : '-';
   console.log(`  glossary published ...... ${n(glossPublished)} of ${n(glossGlossable)} glossable  (${glossPct}%)`);
   console.log(`    ...ungroundable ....... ${n(glossUngroundable)}  <- acts/agencies/programs with no citable source. EXCLUDED BY POLICY (Lance, 2026-09-05), never a backlog`);
-  console.log(`    ...raw row total ...... ${n(glossTotal)}  <- includes the ungroundable; do not quote this as the denominator`);
+  console.log(`    ...uncodified ......... ${n(glossUncodified)}  <- sections a bill PROPOSES; the Revisor publishes no text to quote. EXCLUDED BY POLICY (Lance, 2026-10-20), never a backlog`);
+  console.log(`    ...raw row total ...... ${n(glossTotal)}  <- includes BOTH ungroundable classes; do not quote this as the denominator`);
   // MEASURED 2026-09-05, replacing "extractor couldn't resolve a citation (curation backlog)".
   // That label was wrong about 71% of these rows and made the whole set read as one fixable parser
   // bug. Of 6,261: 4,461 are kind agency/program/act/public_law - concepts with NO statute section

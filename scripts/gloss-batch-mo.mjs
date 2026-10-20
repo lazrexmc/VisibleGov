@@ -39,6 +39,53 @@ export const AUTHOR_MODEL = 'claude-haiku-4-5';
 export const ESCALATION_MODEL = 'claude-sonnet-5';
 export const BATCH_DISCOUNT = 0.5; // Message Batches API: 50% of standard prices
 export const BOT_PAGE_COOLDOWN_MS = 10 * 60 * 1000;
+
+// CONTROL PROBE (2026-10-20) — how we tell "this section does not exist" from "we are being rate
+// limited" WITHOUT waiting 10 minutes to find out.
+//
+// WHY THIS EXISTS, measured rather than reasoned. The 2026-10-20 MO sweep spent ~110 minutes to
+// rule out TEN sections and fetched none, because revisor.mo.gov serves the SAME bot-detection
+// page for a section it does not have as it does when it is throttling us. The old code could
+// only distinguish the two by waiting out a 10-minute cooldown per section, on the sound logic
+// that rate limiting would have cleared. At 969 candidates with a meaningful uncodified share,
+// that is tens of hours of deliberate sleeping, and the cooldown - not the API, not the money -
+// was the binding constraint on the whole lane.
+//
+// The measurement that produced the fix: in a single minute, RSMo 621.075 and ten other known
+// sections returned real text while the ten suspect sections returned the bot page. So the site
+// WAS answering us; those sections simply are not there. A control section establishes that in
+// one 5s request instead of 600 seconds of waiting.
+//
+// THE ASYMMETRY IS DELIBERATE AND IS THE WHOLE SAFETY ARGUMENT: parking a term requires POSITIVE
+// proof the site is serving us. A clean control fetch is that proof. Anything else - a bot page on
+// the control, a network error, a timeout, a parse failure - means we do not know, and we fall
+// back to the original cooldown-and-retry path. A false park writes status='rejected' onto a real
+// statute section, so the failure must land on the side of waiting, never of rejecting.
+//
+// 1.010 is the control because it is the most permanent section in RSMo (the common-law reception
+// statute, chapter 1 section 010) and is not plausibly repealed or renumbered.
+export const CONTROL_CITATION = 'RSMo 1.010';
+export const CONTROL_TTL_MS = 60 * 1000;
+
+// A short TTL so a long run of nonexistent sections re-probes occasionally rather than on every
+// single one. Without it this fix would double request volume against the very site whose
+// throttling it is trying to reason about - causing the condition it exists to detect.
+export function createControlProbe(fetchFn, { ttlMs = CONTROL_TTL_MS, now = () => Date.now() } = {}) {
+  let last = null;
+  return async function controlIsServing() {
+    if (last && now() - last.at < ttlMs) return last.serving;
+    let serving = false;
+    try {
+      const res = await fetchFn(CONTROL_CITATION);
+      // Truthy excerpt text only. A 200 that carries no text is not proof of service.
+      serving = Boolean(res && res.excerptText);
+    } catch {
+      serving = false; // includes MoBotPageError: unknown, so fall back to the slow path
+    }
+    last = { at: now(), serving };
+    return serving;
+  };
+}
 export const IDENTITY_ABORT_THRESHOLD = 20; // sweep-wide template-drift tripwire
 export const RUN_SOURCE = 'gloss-batch-mo'; // the MO default; see runSourceFor
 
@@ -261,6 +308,12 @@ async function main() {
   console.error(`candidates: ${candidates.length} ${args.source}-cited gloss-ready terms`);
 
   // ---- phase FETCH (sequential, 5s limiter inside fetchGlossSource; free) ----
+  // The control probe is created once per run so its TTL cache spans the whole sweep. Only the MO
+  // source has a control section: USC citations resolve against a different host entirely, so a
+  // usc run keeps the original cooldown behaviour rather than consulting an irrelevant control.
+  const controlIsServing = args.source === 'mo'
+    ? createControlProbe(fetchGlossSource)
+    : async () => false;
   let identityErrors = 0;
   for (const term of candidates) {
     if (excerpts[term.id] || state.parked.includes(term.id)) continue;
@@ -271,7 +324,19 @@ async function main() {
       saveJson('excerpts.json', excerpts);
     } catch (err) {
       if (err instanceof MoBotPageError) {
-        console.error(`bot page on ${term.citation} — cooling down ${BOT_PAGE_COOLDOWN_MS / 60000} min, then ONE retry`);
+        // Ask the control section whether the site is answering US before assuming anything about
+        // THIS one. A clean control fetch is positive proof of service, so the target's bot page
+        // means the section is not there and we can park in ~5s instead of ~600s. Anything else
+        // and we do not know, so we take the original cooldown path unchanged.
+        if (await controlIsServing()) {
+          const note = `parked by gloss-batch-mo ${new Date().toISOString()}: revisor.mo.gov served its bot page for ${term.citation} WHILE simultaneously serving real text for the control section ${CONTROL_CITATION}, so the site was answering us and this section is not published - not rate limiting. Likely a bill-created section the Revisor does not serve yet. Unpark by setting status back to 'draft' if the section appears.`;
+          await parkTerm(client, term, note);
+          state.parked.push(term.id);
+          saveJson('state.json', state);
+          console.error(`PARKED ${term.citation} (control ${CONTROL_CITATION} served — no cooldown needed)`);
+          continue;
+        }
+        console.error(`bot page on ${term.citation} AND on control ${CONTROL_CITATION} — treating as rate limiting, cooling down ${BOT_PAGE_COOLDOWN_MS / 60000} min, then ONE retry`);
         await sleep(BOT_PAGE_COOLDOWN_MS);
         try {
           const { url, excerptText, hash } = await fetchGlossSource(term.citation);

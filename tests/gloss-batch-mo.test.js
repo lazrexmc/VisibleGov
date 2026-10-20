@@ -7,12 +7,14 @@ import {
   projectBatchSpendUsd, assertWithinBudget, recordFetchFailure, clearFetchFailure,
   PROJECTION_OVERHEAD_TOKENS, PROJECTION_OUTPUT_TOKENS, PROJECTION_AUTHOR_OUTPUT_TOKENS, PROJECTION_VERIFY_OUTPUT_TOKENS,
   PROJECTION_RETRY_ALLOWANCE,
+  createControlProbe, CONTROL_CITATION, CONTROL_TTL_MS,
 } from '../scripts/gloss-batch-mo.mjs';
 import { priceOf } from '../src/lib/billed-summary-chain.js';
 import {
   GLOSS_SYSTEM_PROMPT, GLOSS_SCHEMA, GLOSS_VERIFIER_MODEL, GLOSS_VERIFY_SCHEMA, MODEL,
 } from '../src/lib/glosser.js';
 import { persistGloss } from '../src/cli/gloss.js';
+import { MoBotPageError } from '../src/adapters/mo-statutes.js';
 
 const TERM = { id: 'term-1', term: 'section 536.010', citation: 'RSMo 536.010' };
 const EXCERPT = '536.010. Definitions. — For the purpose of this chapter: (1) "Agency" means any administrative officer or body.';
@@ -179,4 +181,88 @@ test('projection CALIBRATION: never projects below the 2026-08-21 USC run actual
   // is refused; the whole run is refused up front under an $8 cap once the retry allowance applies.
   assert.throws(() => assertWithinBudget({ label: 'verify', spentUsd: 3.07, projectedUsd: verify, budgetUsd: 8 }), /verify/);
   assert.throws(() => assertWithinBudget({ label: 'projected run', spentUsd: 0, projectedUsd: (author1 + verify) * PROJECTION_RETRY_ALLOWANCE, budgetUsd: 8 }), /projected run/);
+});
+
+// ---------------------------------------------------------------------------
+// createControlProbe — the 2026-10-20 fix that stopped a 10-minute cooldown
+// being the binding constraint on the whole MO gloss lane.
+//
+// The property under test is an ASYMMETRY, not a behaviour: a term may be parked only on POSITIVE
+// proof that revisor.mo.gov is serving us, because a false park writes status='rejected' onto a
+// real statute section. Every ambiguous outcome must report "not serving" so the caller falls back
+// to the slow cooldown path. Three of these five tests exist only to pin that direction.
+// ---------------------------------------------------------------------------
+
+test('createControlProbe: a control fetch carrying real text is positive proof of service', async () => {
+  const probe = createControlProbe(async () => ({ excerptText: '1.010. Common law in force — ...' }));
+  assert.equal(await probe(), true);
+});
+
+test('createControlProbe: a bot page ON THE CONTROL means rate limiting, NOT nonexistence', async () => {
+  // The case the whole fix must not get wrong: the site is throttling us, so we know nothing about
+  // the target section and must not park it.
+  const probe = createControlProbe(async () => { throw new MoBotPageError('bot page'); });
+  assert.equal(await probe(), false);
+});
+
+test('createControlProbe: ANY other failure also reports not-serving — unknown is never proof', async () => {
+  for (const thrown of [
+    new Error('socket hang up'),
+    new TypeError('fetch failed'),
+    Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }),
+  ]) {
+    const probe = createControlProbe(async () => { throw thrown; });
+    assert.equal(await probe(), false, `${thrown.message} must not be read as proof of service`);
+  }
+});
+
+test('createControlProbe: a 200 with no excerpt text is not proof of service either', async () => {
+  // A page that parses but carries nothing is exactly the shape a changed template would produce,
+  // and treating it as healthy would park real sections wholesale.
+  for (const res of [null, undefined, {}, { excerptText: '' }]) {
+    const probe = createControlProbe(async () => res);
+    assert.equal(await probe(), false);
+  }
+});
+
+test('createControlProbe: the result is cached for its TTL, then re-probed', async () => {
+  // Without the TTL this fix doubles request volume against the site whose throttling it is
+  // reasoning about, i.e. it would cause the condition it exists to detect.
+  let calls = 0;
+  let clock = 1_000_000;
+  const probe = createControlProbe(
+    async () => { calls += 1; return { excerptText: 'x' }; },
+    { ttlMs: 60_000, now: () => clock },
+  );
+  assert.equal(await probe(), true);
+  assert.equal(calls, 1);
+  clock += 59_000;
+  assert.equal(await probe(), true);
+  assert.equal(calls, 1, 'inside the TTL the cached verdict is reused');
+  clock += 2_000;
+  assert.equal(await probe(), true);
+  assert.equal(calls, 2, 'past the TTL the control is probed again');
+});
+
+test('createControlProbe: a cached NEGATIVE verdict is also honoured, so one throttled probe does not stampede', () => {
+  let calls = 0;
+  let clock = 0;
+  const probe = createControlProbe(
+    async () => { calls += 1; throw new MoBotPageError('bot page'); },
+    { ttlMs: 60_000, now: () => clock },
+  );
+  return probe().then(async (first) => {
+    assert.equal(first, false);
+    clock += 10_000;
+    assert.equal(await probe(), false);
+    assert.equal(calls, 1);
+  });
+});
+
+test('CONTROL_CITATION is a section chosen for permanence, not convenience', () => {
+  // 1.010 is the common-law reception statute. If this ever changes, the replacement must be
+  // equally unrepealable, or the probe starts reporting "not serving" forever and the lane
+  // silently reverts to 10-minute cooldowns.
+  assert.equal(CONTROL_CITATION, 'RSMo 1.010');
+  assert.ok(CONTROL_TTL_MS > 0 && CONTROL_TTL_MS <= 5 * 60 * 1000);
 });
