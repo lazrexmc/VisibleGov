@@ -8,8 +8,13 @@ import {
 import { PRICES_VERIFIED_THROUGH } from '../src/lib/billed-summary-chain.js';
 
 test('caps: constants match the spec', () => {
-  assert.equal(WEEKLY_CAP_USD, 5.00);
-  assert.equal(PER_TICK_CAP_USD, 1.00);
+  // Raised 2026-10-20 (5.00/1.00 -> 25.00/4.00) on Lance's approval once $200 of API credit
+  // existed. This test is deliberately a LITERAL assertion and not derived from the source: its
+  // whole job is that a cap cannot move without someone editing a test that says the number out
+  // loud. Every OTHER test below now derives its allowances from these constants, because those
+  // tests are about BEHAVIOUR at an allowance, not about the cap's value.
+  assert.equal(WEEKLY_CAP_USD, 25.00);
+  assert.equal(PER_TICK_CAP_USD, 4.00);
   assert.equal(MONSTER_THRESHOLD_CHARS, 100000);
 });
 
@@ -37,8 +42,8 @@ test('summarizeWeekSpend: sums this week, ignores other weeks, counts crashed ti
     { status: 'succeeded', detail: { week_key: '2026-W32', spent_usd: 0.90 } }, // other week
     { status: 'running', detail: {} }, // crashed/unclosed: conservative full-tick assumption
   ];
-  const out = summarizeWeekSpend(rows, '2026-W33', 1.00);
-  assert.equal(out.spentUsd, 0.40 + 0.25 + 1.00);
+  const out = summarizeWeekSpend(rows, '2026-W33', PER_TICK_CAP_USD);
+  assert.equal(out.spentUsd, 0.40 + 0.25 + PER_TICK_CAP_USD);
   assert.equal(out.crashedTicks, 1);
 });
 
@@ -155,7 +160,7 @@ function fakeDeps(overrides = {}) {
 
 test('runTick: budget-exhausted week opens NO run row and spends nothing', async () => {
   const { deps, calls } = fakeDeps({
-    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: 5.0 } }],
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: WEEKLY_CAP_USD } }],
   });
   const report = await runTick(deps);
   assert.equal(report.outcome, 'budget-exhausted');
@@ -209,14 +214,14 @@ test('runTick: monster-lane 1.5x-allowance headroom gate — attempted with ampl
   // text_length just over MONSTER_THRESHOLD_CHARS (100001, not the old 200000): I3's own
   // pre-bill estimateBillCostUsd guard (a SEPARATE, additive check — see the dedicated I3 test
   // below) must not itself exclude the "ample" sub-case here. estimateBillCostUsd(100001) ≈
-  // $0.84, comfortably under the $1.00 default allowance; estimateBillCostUsd(200000) ≈ $1.015
+  // $0.84, comfortably under the default tick allowance; estimateBillCostUsd(200000) ≈ $1.015
   // would not have been, which is exactly the I3 test's own point made with a bigger bill.
   const monsterQueue = [{
     bill_id: 'm1', identifier: 'HB 9', title: 'T', bill_text_hash: 'hm', text_length: 100001, priority: 'other',
   }];
   const monsterTexts = { m1: { content: 't', content_hash: 'hm' } };
 
-  // Sub-case A: default allowance ($1.00, no prior spend this week) is comfortably above the gate
+  // Sub-case A: the default allowance (PER_TICK_CAP_USD, no prior spend this week) is comfortably above the gate
   // (1.5 * the 0.05 worst-bill floor = $0.075) — the monster is attempted and its chain call fires.
   let ampleChainCalls = 0;
   const ample = fakeDeps({
@@ -239,13 +244,13 @@ test('runTick: monster-lane 1.5x-allowance headroom gate — attempted with ampl
   assert.equal(ample.calls.closed[0].detail.lanes.monster, 1);
   assert.equal(ample.calls.closed[0].detail.skipped.length, 0);
 
-  // Sub-case B: prior spend this week ($4.94) leaves only a $0.06 tick allowance — at-or-below the
+  // Sub-case B: prior spend leaves only a $0.06 tick allowance — at-or-below the
   // same 1.5x gate ($0.075) — the monster is excluded BEFORE any chain call and lands as a skip.
   let tightChainCalls = 0;
   const tight = fakeDeps({
     queue: monsterQueue,
     texts: monsterTexts,
-    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: 4.94 } }],
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: WEEKLY_CAP_USD - 0.06 } }],
     deps: {
       runBillChainFn: async () => { tightChainCalls += 1; throw new Error('must not be called — gate should exclude this bill first'); },
     },
@@ -257,15 +262,23 @@ test('runTick: monster-lane 1.5x-allowance headroom gate — attempted with ampl
 });
 
 test('runTick: I3 — pre-bill cost-estimate guard skips an under-funded bill BEFORE any chain call, even when the OLD 1.5x-worst-bill gate alone would have let it through; ample allowance and a tight-but-sufficient allowance both still run', async () => {
-  // Sub-case A: a 400k-char monster (the review's own worked example, ~$1.365 estimate) under the
-  // DEFAULT $1.00 tick allowance. The OLD monster-specific 1.5x-worst-bill gate would have passed
-  // this (1.00 - 0 = 1.00 > 1.5 * 0.05 = 0.075) — the NEW I3 guard is what actually excludes it.
+  // Sub-case A: a 400k-char monster (the review's own worked example, ~$1.365 estimate) under a
+  // $1.00 tick allowance, pinned here via prior weekly spend. The OLD monster-specific
+  // 1.5x-worst-bill gate would have passed this (1.00 > 1.5 * 0.05 = 0.075) — the NEW I3 guard is
+  // what actually excludes it.
+  //
+  // The $1.00 allowance is now PINNED rather than inherited from PER_TICK_CAP_USD, which is the
+  // substantive repair in this file. When the per-tick cap rose to $4.00 this test went green-to-red
+  // for the right reason and the wrong cause: a $1.365 bill is simply AFFORDABLE at $4.00, so the
+  // guard correctly let it through and the assertion that it was excluded failed. Pinning the
+  // allowance keeps the test about the guard instead of about the cap.
   let bigChainCalls = 0;
   const big = fakeDeps({
     queue: [{
       bill_id: 'm2', identifier: 'HB 99', title: 'T', bill_text_hash: 'hm2', text_length: 400000, priority: 'other',
     }],
     texts: { m2: { content: 't', content_hash: 'hm2' } },
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: WEEKLY_CAP_USD - 1.00 } }],
     deps: {
       runBillChainFn: async () => { bigChainCalls += 1; throw new Error('must not be called — I3 guard should exclude this bill first'); },
     },
@@ -278,13 +291,13 @@ test('runTick: I3 — pre-bill cost-estimate guard skips an under-funded bill BE
   assert.equal(big.calls.closed[0].status, 'partial'); // a non-routine (I3-estimate) skip still marks partial
 
   // Sub-case B: a small FRESH-lane bill under a genuinely tight remaining allowance ($0.70, via
-  // prior spend this week of $4.30) still runs — its estimate (~$0.666, near the fixed output
+  // prior weekly spend of WEEKLY_CAP_USD - 0.70) still runs — its estimate (~$0.666, near the fixed output
   // floor) fits comfortably, unlike the 400k monster above at the very same allowance.
   let smallChainCalls = 0;
   const small = fakeDeps({
     queue: [{ bill_id: 'f9', identifier: 'HB 9', title: 'T', bill_text_hash: 'hf9', text_length: 500, priority: 'other' }],
     texts: { f9: { content: 't', content_hash: 'hf9' } },
-    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: 4.30 } }], // allowance = $0.70
+    recentRuns: [{ status: 'succeeded', detail: { week_key: '2026-W33', spent_usd: WEEKLY_CAP_USD - 0.70 } }], // allowance = $0.70
     deps: {
       runBillChainFn: async (a, tracker, { bill }) => {
         smallChainCalls += 1;

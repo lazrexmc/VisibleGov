@@ -9,8 +9,9 @@
 //     business logic (budget math, queue ordering, lane assembly, draft tracking) is
 //     deterministic and testable without a database or network.
 //   - BILLED-CALLS CAP DISCIPLINE: The scheduler operates under two hard caps:
-//     * WEEKLY_CAP_USD = 5.00 — maximum spend per ISO week (UTC, Thursday-anchored)
-//     * PER_TICK_CAP_USD = 1.00 — maximum spend per tick (individual orchestration loop run)
+//     * WEEKLY_CAP_USD = 25.00 — maximum spend per ISO week (UTC, Thursday-anchored)
+//     * PER_TICK_CAP_USD = 4.00 — maximum spend per tick (individual orchestration loop run)
+//       (both raised 2026-10-20 from 5.00/1.00 on Lance's approval — see the constants)
 //   - The caps are env-overridable via envCapUsd(), but DOWNWARD ONLY — a typo'd environment
 //     variable can shrink spend, never grow it. This mirrors envIntervalMs's floor-only
 //     discipline in scheduled-ingest.js, inverted: the env can only constrain, never relax.
@@ -49,8 +50,20 @@ import { MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
 import { sessionRecencyKey } from '../src/lib/session-dates.js';
 import { pickCurrentTextRow } from '../src/cli/summary-queue.js';
 
-export const WEEKLY_CAP_USD = 5.00;
-export const PER_TICK_CAP_USD = 1.00;
+// RAISED 2026-10-20 on Lance's explicit approval, after Anthropic granted $200 in API credits:
+// weekly $5.00 -> $25.00, per-tick $1.00 -> $4.00.
+//
+// THE PER-TICK RAISE IS NOT INCIDENTAL - without it the weekly number is decorative. This task
+// fires once a day, so seven ticks at $1.00 ceiling the week at $7.00 no matter what the weekly
+// cap says. Lance approved "$25/week"; delivering $7/week while the constant read 25 would be
+// exactly the decorative-number failure this repo keeps correcting. $4.00 x 6 ticks = $24.00, so
+// the WEEKLY cap is what actually binds, which is the one that was chosen deliberately.
+//
+// At the measured $0.107/published this is ~37 summaries per tick and ~234 per week, against a
+// 2,013-bill READY queue. A tick may now run materially longer than it did at $1.00: it buys
+// bills until the allowance is gone, bounded by cost and never by count.
+export const WEEKLY_CAP_USD = 25.00;
+export const PER_TICK_CAP_USD = 4.00;
 export const MONSTER_THRESHOLD_CHARS = 100000;
 
 // Downward-only env override (spec: "env-overridable DOWNWARD only ... a typo can shrink spend,
