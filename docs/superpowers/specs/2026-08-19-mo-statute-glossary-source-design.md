@@ -230,3 +230,47 @@ drift:
 
 **Counts in §1 and §6 are pre-amendment.** Amendments 1 and 2 both REDUCE what maps, on purpose —
 re-derive every count from a fresh dry-run, never from this document.
+
+---
+
+## AMENDED 2026-10-20 - the bot page is ambiguous, and this spec only resolved half of it
+
+**Status: still APPROVED and SHIPPED; this amends the bot-page handling, nothing else.**
+Agreed with Lance 2026-10-20 ("Proceed, I agree") and implemented in commit `71d826d`.
+
+**What this spec got right:** it identified that *"a nonexistent section returns HTTP 200 with
+bot-page content"* and made `MoBotPageError` an explicit typed error rather than letting bot text be
+stored as statute text. That is the fabrication class the pipeline exists to prevent, and it held.
+
+**What it did not resolve:** the SAME bot page is also what the site serves when it is throttling us.
+One response, two meanings, and the spec did not say how to tell them apart. The implementation chose
+time - a 10-minute cooldown and one retry, on the sound logic that rate limiting would have cleared -
+and a second bot page was then read as the nonexistent-section signal.
+
+**Measured cost of resolving it with time (2026-10-20): ~110 minutes to rule out TEN sections, zero
+fetched.** Across 958 candidates with a meaningful uncodified share that is tens of hours of
+deliberate sleeping. The cooldown, not the API and not the budget, was the binding constraint on the
+whole lane.
+
+**The amendment: resolve it with a CONTROL PROBE, not a timeout.** On a bot page for the target,
+immediately fetch a known-good control section (`RSMo 1.010`, the common-law reception statute, chosen
+for permanence; TTL-cached 60s so a long run of absent sections does not double request volume against
+the service whose throttling it is reasoning about). A clean control fetch carrying real text is
+POSITIVE PROOF the site is serving us, so the target's bot page means the section is not published,
+and it is parked in ~5s rather than after 600s.
+
+**The asymmetry is a hard requirement of this amendment, in the same spirit as the response-identity
+rule above:** parking writes `status='rejected'` onto a statute section, so it requires positive proof.
+A bot page on the control, a network error, a timeout, or a 200 carrying no text all mean UNKNOWN, and
+the runner falls back to this spec's original cooldown-and-one-retry path unchanged.
+
+**Measured after: 31 parks in a 958-candidate sweep, all via the no-cooldown path, zero fallbacks,
+~5.2 hours of sleeping avoided, $0.00 spent in the fetch phase.**
+
+**Scope note: MO only.** USC citations resolve against uscode.house.gov, where an RSMo control section
+is meaningless, so `--source usc` keeps the original behaviour deliberately.
+
+**Related policy change the same day, outside this spec's scope but caused by its findings:** the
+sections ruled out this way are overwhelmingly ones a bill PROPOSES to create, which the Revisor does
+not publish until codification. Lance ruled them a second ungroundable class - see `CLAUDE.md`'s
+glossary source rule and `docs/DATA_INVENTORY.md` (2026-10-20).
