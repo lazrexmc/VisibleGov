@@ -4,7 +4,49 @@
 
 ---
 
-## RESUME HERE - verified live 2026-09-05 22:29 CDT, read this block first
+## RESUME HERE - verified live 2026-10-20 08:0x CDT, read this block first
+
+### FUNDED 2026-10-20: Anthropic granted $200 in API credits. Two lanes unblocked, one was never blocked.
+
+**Read this before acting on any funding statement elsewhere in this file or in `CLAUDE.md`.** Every
+dated note below 2026-10-20 that says "no credits", "dormant until funding returns", or "at a
+standstill" is HISTORY and is no longer the state.
+
+**What the $200 actually buys, because this was got wrong for weeks:**
+
+| Lane | Measured cost | Status 2026-10-20 |
+|---|---|---|
+| Gloss runner | $0.0102/gloss (MO), $0.0158 (USC) | **RUNNING.** 1,010 unauthored; approved $25 cap; ~$10-16 expected |
+| Billed scheduler | **$0.107/published** | **UNBLOCKED.** Caps raised to $25/wk + $4/tick on Lance's approval |
+| Billed API wave chain | $0.2035-0.368/published | available, 2-3.4x worse than the scheduler - prefer the scheduler |
+| **$0 subscription wave lane** | **$0, never used credits** | idle; needs a session, not money |
+
+**The premise correction, recorded because Lance may have been waiting on the wrong thing for weeks:**
+API credits never bought the fast summary lane. That lane runs on his Claude subscription via session
+subagents and peaked at 204 published/day. Credits buy the billed scheduler and the gloss runner
+only. `CHATLOG.md:6719` has the original form of this correction, dated 2026-09-05.
+
+**The price guard is CLEARED** (`3ed953f`). All three models in `PRICES` were re-checked against
+Anthropic's published per-Mtok rates and **all three were unchanged** - haiku-4-5 $1/$5, sonnet-5
+$2/$10, opus-5 $5/$25; `PRICES_VERIFIED_THROUGH` 2026-08-31 -> 2026-12-31. The guard's own rule was
+that moving the date alone is the edit that makes things worse, so it moved only with the re-check.
+**It re-arms 2027-01-01 by design.** `docs/EXPECTED_FAILURES.md` entry 1 is closed.
+
+**Scheduler caps raised** (`8567888`): weekly $5 -> $25, per-tick $1 -> $4. **The per-tick raise is
+not cosmetic** - the task fires once a day, so seven ticks at $1 ceilinged the week at $7 regardless
+of the weekly cap. A $25 weekly cap alone would have been a decorative number.
+
+**AWAITING LANCE - one thing, and the cap raise does nothing without it:** `npm run status` reports
+the `scheduled-summaries` source silent since **2026-08-31**, and the summary scheduler as never
+having run. **Confirm the Windows task `VisibleGov Scheduled Summaries` is enabled.** An agent never
+runs `schtasks`, so this is his step. At $4/tick it should publish roughly 37/day once ticking.
+
+**Still true and unchanged:** every billed call other than that scheduler needs Lance's explicit
+per-run approval with a cost stated. The ledger carve-out covers `scheduled-summaries.js` alone.
+
+---
+
+## Pre-funding snapshot - verified live 2026-09-05 22:29 CDT, now HISTORY
 
 **Every number here was produced by running the thing, not by reading a previous claim.**
 
