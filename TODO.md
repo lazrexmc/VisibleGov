@@ -36,10 +36,23 @@ that moving the date alone is the edit that makes things worse, so it moved only
 not cosmetic** - the task fires once a day, so seven ticks at $1 ceilinged the week at $7 regardless
 of the weekly cap. A $25 weekly cap alone would have been a decorative number.
 
-**AWAITING LANCE - one thing, and the cap raise does nothing without it:** `npm run status` reports
-the `scheduled-summaries` source silent since **2026-08-31**, and the summary scheduler as never
-having run. **Confirm the Windows task `VisibleGov Scheduled Summaries` is enabled.** An agent never
-runs `schtasks`, so this is his step. At $4/tick it should publish roughly 37/day once ticking.
+**NOTHING AWAITS LANCE HERE - the task is enabled and has been ticking all along.** This block
+briefly said otherwise and that was wrong. `npm run status` reports the `scheduled-summaries` source
+silent since 2026-08-31 and the scheduler as "never ran", which is **correct and not a fault**: the
+price-guard skip happens before `openRun`, so a skipped tick writes NO run row, and `status` reads
+run rows. The artifact that proves the task fires is the log directory:
+`.superpowers/artifacts/summary-scheduler-logs/` holds a dated file for **2026-10-17, 18, 19 and 20,
+each written at 06:00**, each saying `prices unverified`.
+
+**This is the exact trap `docs/EXPECTED_FAILURES.md` entry 1 was rewritten on 2026-09-04 to prevent,
+and the rewrite worked.** Before that date the skip logged nothing, so a tick that ran and skipped
+was indistinguishable from a disabled task - four states, one silence. The logging it added is the
+only reason today's answer is evidence instead of a guess. **Check the log directory, never the run
+rows, to decide whether this task is alive.**
+
+Today's 06:00 tick skipped because the guard was cleared at ~08:1x, after it fired. **Tomorrow's
+06:00 tick is the first that will spend**, under the new $25/$4 caps, drawing on the same weekly
+ledger as any manual tick - so there is no double-spend to coordinate.
 
 **Still true and unchanged:** every billed call other than that scheduler needs Lance's explicit
 per-run approval with a cost stated. The ledger carve-out covers `scheduled-summaries.js` alone.
