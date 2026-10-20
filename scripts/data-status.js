@@ -382,7 +382,7 @@ async function main() {
   // then neither number would mean anything. The authoritative split is one free command, named
   // on the next line so nobody has to guess it.
   console.log(`    ...authored drafts .... ${n(glossFlagged)}  <- NOT all awaiting Lance: the CLEAN ones just need the free auto-publish step`);
-  console.log('      exact split ......... node --env-file=.env src/cli/auto-publish-glossary.js --dry-run   (eligible = clean, flaggedOrUnverifiedSkipped = Lance's real queue)');
+  console.log("      exact split ......... node --env-file=.env src/cli/auto-publish-glossary.js --dry-run   (eligible = clean, flaggedOrUnverifiedSkipped = Lance's real queue)");
   console.log(`    ...not yet authored ... ${n(glossUnauthored)}  <- citation resolved, no gloss written yet (needs a gloss run)`);
 
   console.log('\nPEOPLE  (rows vs unified people — these are different things)');
