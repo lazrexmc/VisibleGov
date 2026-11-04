@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { closureFor, closeStranded } from '../scripts/close-stranded-runs.mjs';
+import {
+  closureFor, closeStranded, STRANDED_TICK_CHARGE_USD, isoWeekKeyOf,
+} from '../scripts/close-stranded-runs.mjs';
+import { PER_TICK_CAP_USD } from '../scripts/scheduled-summaries.js';
 
 const NOW = new Date('2026-08-29T18:00:00Z');
 const run = (startedAt, detail) => ({ id: 'r1', source: 'correct-data', started_at: startedAt, detail });
@@ -117,4 +120,62 @@ test('closeStranded: a failed PATCH throws rather than reporting a false success
     () => closeStranded({ url: 'https://x', key: 'k', apply: true, fetchFn: fn, log: () => {} }),
     /failed to close r1: HTTP 409/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Spend must survive closure (2026-11-04).
+//
+// summarizeWeekSpend charges a status='running' row the conservative per-tick cap, but reads a
+// CLOSED row's detail.spent_usd. closureFor never wrote one, so closing a crashed billed tick
+// dropped its charge to $0 and made the weekly cap stop being the cap. Closure was the UNSAFE
+// direction. Six real rows were closed on 2026-11-04 in exactly that state.
+// ---------------------------------------------------------------------------
+
+const billed = (startedAt, detail) => ({
+  id: 'r9', source: 'scheduled-summaries', started_at: startedAt, detail,
+});
+
+test('closureFor: a crashed BILLED tick keeps a conservative spend charge and its week', () => {
+  const c = closureFor(billed('2026-11-03T12:00:35Z'), { now: NOW });
+  assert.equal(c.detail.spent_usd, STRANDED_TICK_CHARGE_USD);
+  assert.equal(c.detail.week_key, isoWeekKeyOf('2026-11-03T12:00:35Z'));
+  // The charge is an ESTIMATE and says so. A dollar figure that cannot be told apart from a
+  // measured one is how an estimate gets quoted as fact later.
+  assert.equal(c.detail.spend_is_estimated, true);
+  assert.match(c.detail.spend_estimate_basis, /per-tick cap/);
+});
+
+test('closureFor: the recorded charge equals what the ledger charged while the row was OPEN', () => {
+  // This is the property that makes closure lossless rather than merely non-zero: the row's
+  // contribution to its week must not change at the moment somebody tidies it up.
+  assert.equal(STRANDED_TICK_CHARGE_USD, PER_TICK_CAP_USD);
+});
+
+test('closureFor: a NON-billed source gets no invented dollar figure', () => {
+  // Other sources have no spend ledger. Writing a cost for an unbilled ingest run would fabricate
+  // a number that never existed, which is worse than leaving it absent.
+  const c = closureFor(run('2026-08-03T22:35:11Z'), { now: NOW });
+  assert.equal(c.detail.spent_usd, undefined);
+  assert.equal(c.detail.week_key, undefined);
+  assert.equal(c.detail.spend_is_estimated, undefined);
+});
+
+test('closureFor: a REAL spend already in the detail is never overwritten by the estimate', () => {
+  // A tick that got far enough to record its own spend knows better than this function does.
+  const c = closureFor(billed('2026-11-03T12:00:35Z', { spent_usd: 0.42, week_key: '2026-W45' }), { now: NOW });
+  assert.equal(c.detail.spent_usd, 0.42);
+  assert.equal(c.detail.week_key, '2026-W45');
+  assert.equal(c.detail.spend_is_estimated, undefined, 'a measured figure must not be relabelled an estimate');
+});
+
+test('closureFor: an existing week_key is preserved even when the spend has to be estimated', () => {
+  const c = closureFor(billed('2026-11-03T12:00:35Z', { week_key: '2026-W01' }), { now: NOW });
+  assert.equal(c.detail.spent_usd, STRANDED_TICK_CHARGE_USD);
+  assert.equal(c.detail.week_key, '2026-W01', 'the tick knew its own week; do not re-derive it');
+});
+
+test('isoWeekKeyOf: matches the scheduler, and refuses to guess on junk', () => {
+  assert.equal(isoWeekKeyOf('2026-08-15T12:00:00Z'), '2026-W33');
+  assert.equal(isoWeekKeyOf('not a date'), null);
+  assert.equal(isoWeekKeyOf(undefined), null);
 });

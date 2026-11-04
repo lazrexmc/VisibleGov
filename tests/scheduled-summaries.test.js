@@ -606,3 +606,63 @@ test('runTick: an in-window injected clock does not trip the price guard', async
   const report = await runTick(deps);
   assert.notEqual(report.outcome, 'skipped-prices-unverified');
 });
+
+// ---------------------------------------------------------------------------
+// A stranded row burdens ONLY its own week (2026-11-04).
+//
+// The running-row branch used to charge the conservative cap with no week_key check, while every
+// other row is filtered to the week being summed. One stranded row therefore consumed budget in
+// every week, permanently, until closed. Measured: six rows stranded 2026-10-20..11-04, $4.00 each
+// against a $25.00 cap, and ISO week 2026-W45 spent only $3.41 of its cap as a result.
+//
+// The three cases below are the whole contract: charge it in its own week, do not charge it
+// elsewhere, and when the week cannot be known, charge it anyway.
+// ---------------------------------------------------------------------------
+
+test('summarizeWeekSpend: a stranded row IS charged in the week it started', () => {
+  const rows = [{ status: 'running', started_at: '2026-08-15T12:00:00Z', detail: {} }];
+  const out = summarizeWeekSpend(rows, '2026-W33', PER_TICK_CAP_USD);
+  assert.equal(out.spentUsd, PER_TICK_CAP_USD);
+  assert.equal(out.crashedTicks, 1);
+});
+
+test('summarizeWeekSpend: a stranded row is NOT charged against an unrelated week', () => {
+  // The defect this fixes. Before the fix this returned PER_TICK_CAP_USD for every weekKey asked,
+  // so a single crash in W33 silently ate budget in W34, W35 and onward for as long as it sat open.
+  const rows = [{ status: 'running', started_at: '2026-08-15T12:00:00Z', detail: {} }];
+  const out = summarizeWeekSpend(rows, '2026-W44', PER_TICK_CAP_USD);
+  assert.equal(out.spentUsd, 0, 'a crash in another week must not consume this week');
+  assert.equal(out.crashedTicks, 0);
+});
+
+test('summarizeWeekSpend: a stranded row with NO usable started_at is still charged - unknown is treated as spent', () => {
+  // The safe fallback, and it is deliberate: this function's doctrine is that unknown spend counts
+  // as spent. Skipping an undatable crash would be the one failure direction that costs money.
+  for (const started of [undefined, null, '', 'not a date']) {
+    const out = summarizeWeekSpend([{ status: 'running', started_at: started, detail: {} }], '2026-W44', PER_TICK_CAP_USD);
+    assert.equal(out.spentUsd, PER_TICK_CAP_USD, `started_at=${JSON.stringify(started)} must still be charged`);
+    assert.equal(out.crashedTicks, 1);
+  }
+});
+
+test('summarizeWeekSpend: scoping did not weaken the I9 floor - a lowered caller cap cannot under-charge a crash', () => {
+  // Guards the interaction between the two rules: the row is in-week, so it is charged, and the
+  // charge is still the code default rather than today's throttled cap.
+  const rows = [{ status: 'running', started_at: '2026-08-15T12:00:00Z', detail: {} }];
+  const out = summarizeWeekSpend(rows, '2026-W33', 0.10);
+  assert.equal(out.spentUsd, PER_TICK_CAP_USD);
+});
+
+test('summarizeWeekSpend: a CLOSED crash carrying the estimated charge counts the same as it did open', () => {
+  // End-to-end property across the two files: close-stranded-runs writes spent_usd + week_key, so
+  // tidying a row up must not change the week's total. Before the fix this summed to 0.
+  const open = summarizeWeekSpend(
+    [{ status: 'running', started_at: '2026-08-15T12:00:00Z', detail: {} }],
+    '2026-W33', PER_TICK_CAP_USD,
+  );
+  const closed = summarizeWeekSpend(
+    [{ status: 'failed', started_at: '2026-08-15T12:00:00Z', detail: { week_key: '2026-W33', spent_usd: PER_TICK_CAP_USD } }],
+    '2026-W33', PER_TICK_CAP_USD,
+  );
+  assert.equal(closed.spentUsd, open.spentUsd, 'closing a row must not change what the week was charged');
+});

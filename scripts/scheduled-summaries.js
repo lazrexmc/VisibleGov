@@ -91,6 +91,26 @@ export function summarizeWeekSpend(rows, weekKey, perTickCapUsd) {
   let crashedTicks = 0;
   for (const row of rows ?? []) {
     if (row.status === 'running') {
+      // SCOPED TO ITS OWN WEEK (2026-11-04). This branch used to charge the conservative tick cap
+      // with NO week_key check, while every other row below is filtered to `weekKey`. A single
+      // stranded row therefore burdened EVERY week's budget, permanently, until somebody closed it.
+      //
+      // Measured, not theorised: six scheduled-summaries rows sat at status='running' from
+      // 2026-10-20 to 2026-11-04. At $4.00 each that is $24.00 charged against a $25.00 weekly cap
+      // in weeks the crashes had nothing to do with - ISO week 2026-W45 spent only $3.41 of its cap,
+      // and this is why. The conservative CHARGE was right; applying it to unrelated weeks was not.
+      //
+      // A running row carries no detail (openRun writes none), so its week comes from started_at.
+      // An absent or unparseable started_at deliberately falls through and is charged anyway:
+      // unknown spend is treated as spent, which is this function's doctrine and the safe direction.
+      // The NaN check is load-bearing, and a test caught its absence. `new Date('not a date')` is an
+      // Invalid Date, and currentWeekKey happily returns the string 'NaN-WNaN' for it - which is
+      // TRUTHY and never equal to a real week key, so an unparseable timestamp would take the skip
+      // path and go UNCHARGED. That is the single failure direction that costs money, reached by the
+      // guard meant to prevent it.
+      const startedMs = row.started_at ? new Date(row.started_at).getTime() : NaN;
+      const startedWeek = Number.isNaN(startedMs) ? null : currentWeekKey(new Date(startedMs));
+      if (startedWeek && startedWeek !== weekKey) continue;
       // I9 (final whole-branch review): a crashed/stranded row must be charged AT LEAST the
       // code's own hard default (PER_TICK_CAP_USD), never the CALLER's possibly-lowered
       // perTickCapUsd. Without this, a today's throttled manual run (e.g. the I7 first-live-tick
@@ -192,7 +212,25 @@ export const PARKED_PATH = path.join(RECORDS_DIR, 'parked.json');
 // scheduled-ingest.js, there is no "chosen source" whose real timeout is only known after
 // selection, so acquireLock's initial declaration here is already final (no
 // updateLockMaxDuration call site exists in this file for that reason).
-export const TICK_MAX_DURATION_MS = 30 * 60 * 1000;
+// RAISED 2026-11-04, 30 -> 90 minutes, and the raise is a consequence of the 2026-10-20 cap raise
+// rather than an independent judgement.
+//
+// This is the lock's declared stale-reclaim window: how long a LATER tick waits before treating an
+// existing lock as abandoned. It is NOT a self-terminating deadline for the current tick.
+//
+// MEASURED: since the per-tick cap went $1.00 -> $4.00, every tick with work to do runs 33-37
+// minutes (11 completed ticks, 2026-10-20..11-04, stopping when the allowance is spent). At $1.00 a
+// tick finished well inside 30 minutes, so the old window was comfortable. At $4.00 EVERY TICK NOW
+// OUTLIVES ITS OWN LOCK'S ABANDONMENT THRESHOLD - meaning a second tick starting while the first is
+// still working (a Task Scheduler catch-up, a manual run, a nudge from the operator) would judge the
+// live lock abandoned, reclaim it, and bill CONCURRENTLY with a tick that is still spending. Neither
+// would see the other's spend, and the weekly cap would be enforced twice against one budget.
+//
+// 90 minutes is ~2.5x the observed maximum, chosen the same way the LegiScan child's 75-minute
+// timeout was: observed runs plus headroom. It must stay comfortably above real tick durations, so
+// RE-MEASURE IT WHENEVER THE PER-TICK CAP CHANGES - a bigger allowance buys more bills and takes
+// longer, and this constant does not follow automatically.
+export const TICK_MAX_DURATION_MS = 90 * 60 * 1000;
 
 // The conservative "smallest plausible bill" cost floor. An allowance below this cannot safely
 // fund even the cheapest queued bill, so the tick ends before it opens a run row (spec: "allowance
