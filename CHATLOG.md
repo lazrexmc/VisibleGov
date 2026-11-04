@@ -6993,3 +6993,17 @@ lesson 14).
 
   **Day's spend: $10.98 of $200** - $3.30 for 6 summaries, $7.68 for 737 glosses. Suite 2,850 pass /
   0 fail.
+
+## 2026-11-04 01:15 CST - Stranded scheduled-summaries rows: runTick now closes a crashed run (RapidForge, at Lance's word)
+Lance (in RapidForge's session): "visiblegov errors every day, I get an email notification from github but I never
+do anything abou tit" then "fix it from here". RapidForge diagnosed read-only: the ingest + ingest-legiscan workflows
+have failed every run since 2026-10-20 at the health check, on two causes. (1) Seven rows stuck at status running
+(scheduled-summaries 10-20/21/22/24/26 and 11-03, legiscan 10-28), each detail={}; on every stranded morning the tick
+opened its row then died before recordLane (no records file) and before closeRun (no log file). Prices are fresh to
+2026-12-31 and no restart/sleep/shutdown hit 06:00 on those days, so the trigger is unrecorded. Root mechanism: nothing
+guaranteed closeRun after openRun. Fix (TDD): new test "closes the run as failed" went red (closed 0, want 1); runTick
+now wraps openRun..return in try/catch, closes as failed with detail.error, logs "CRASHED before close:", rethrows;
+runClosed guards a post-close throw. Suite 2,851 pass / 0 fail. Docs: SCHEDULED_SUMMARIES.md note added, incl. the
+limit (an outside kill still strands; use npm run close-stranded). (2) us-senate: HTTP 403 from senate.gov on every
+run since 2026-10-23 (216 failed: 202 local, 14 GitHub). Not worked around; how to source Senate votes is Lance's
+call (pending). Model: Claude Opus 5.5 via RapidForge.

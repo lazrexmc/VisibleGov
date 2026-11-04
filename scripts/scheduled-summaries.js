@@ -381,250 +381,275 @@ async function runTickLocked(deps) {
   }
 
   const runId = await deps.openRunFn();
-  // Same injected clock as the guard above, for the same reason: createCostTracker asserts price
-  // freshness too, and left to `new Date()` it makes every test that spends depend on the calendar.
-  const tracker = createCostTracker({ now });
+  // A throw anywhere from here to closeRun below used to escape runTick with this row still
+  // 'running' - stranded for good, failing the ingest health check on every run after it, and with
+  // no log line, because the InteractiveToken console window takes stderr with it when it closes.
+  // Seven rows stranded that way between 2026-10-20 and 2026-11-03. The catch below closes the row
+  // honestly as 'failed' with the error in detail, logs it, and rethrows so main() still exits
+  // non-zero. runClosed keeps a throw AFTER a successful close (e.g. appendLog) from overwriting it.
+  let runClosed = false;
+  try {
+    // Same injected clock as the guard above, for the same reason: createCostTracker asserts price
+    // freshness too, and left to `new Date()` it makes every test that spends depend on the calendar.
+    const tracker = createCostTracker({ now });
 
-  const freshResults = [];
-  const conversionResults = [];
-  const skipped = [];
-  let freshCount = 0;
-  let monsterCount = 0;
-  let attempted = 0;
-  let balanceDepleted = false;
-  let worstBillUsd = WORST_BILL_FLOOR_USD;
+    const freshResults = [];
+    const conversionResults = [];
+    const skipped = [];
+    let freshCount = 0;
+    let monsterCount = 0;
+    let attempted = 0;
+    let balanceDepleted = false;
+    let worstBillUsd = WORST_BILL_FLOOR_USD;
 
-  for (const { lane, item } of assembled) {
-    // Budget guard: stop before starting a bill we can no longer safely afford.
-    if (tracker.spentUsd() >= allowance - worstBillUsd) {
-      console.error(`budget guard: stopping tick — spent $${tracker.spentUsd().toFixed(4)} of $${allowance.toFixed(4)} allowance`);
-      break;
-    }
-    // The lone monster (assembleTick guarantees at most one) needs extra headroom — it is
-    // consistently the most expensive call in a tick.
-    if (lane === 'monster' && !(allowance - tracker.spentUsd() > 1.5 * worstBillUsd)) {
-      skipped.push({
-        identifier: item.identifier ?? item.bill_id,
-        reason: 'insufficient headroom for a monster bill this tick (needs > 1.5x the worst-bill estimate)',
-      });
-      continue;
-    }
-
-    attempted += 1;
-    const startSpend = tracker.spentUsd();
-    try {
-      if (lane === 'conversion') {
-        const { draftRow } = item;
-        const textRow = await deps.loadTextRow(item.bill_id);
-        if (!textRow || textRow.content_hash !== draftRow.bill_text_hash) {
-          skipped.push({ identifier: item.bill_id, reason: 'bill_texts hash mismatch vs. draft hash — skipped' });
-          continue;
-        }
-        if (typeof textRow.content === 'string' && textRow.content.length > MAX_TEXT_CHARS) {
-          skipped.push({ identifier: item.bill_id, reason: `bill text ${textRow.content.length} chars exceeds MAX_TEXT_CHARS (${MAX_TEXT_CHARS})` });
-          continue;
-        }
-        // I3: conservative pre-bill estimate from the text length now in hand — before the
-        // (cheap, unbilled) objections lookup below, let alone the first paid call.
-        const estUsd = estimateBillCostUsd(textRow.content.length);
-        if (!(allowance - tracker.spentUsd() > estUsd)) {
-          skipped.push({ identifier: item.bill_id, reason: `pre-bill cost estimate $${estUsd.toFixed(4)} exceeds remaining allowance $${(allowance - tracker.spentUsd()).toFixed(4)} — skipped before any paid call` });
-          continue;
-        }
-        const draftInfo = await deps.loadDraftObjectionsFn(deps.client, {
-          draftId: draftRow.id, text: textRow.content, billId: item.bill_id,
-        });
-        if (draftInfo.hasVerifications === false || !draftInfo.objections || draftInfo.objections.length === 0) {
-          // I8: routine, expected — hundreds of draft-only bills legitimately have no
-          // verifications on file yet (that's a re-verify lane's job, not this one). Tagged
-          // `routine: true` so it never forces the tick's status to 'partial' below.
-          skipped.push({
-            identifier: item.bill_id,
-            reason: 'no objections/verifications on file for this draft — belongs to a re-verify lane, not conversion',
-            routine: true,
-          });
-          continue;
-        }
-        const hash8 = String(draftRow.bill_text_hash).slice(0, 8);
-        const bill = {
-          bill_id: item.bill_id,
-          identifier: draftInfo.identifier ?? item.bill_id,
-          title: draftInfo.title ?? null,
-          bill_text_hash: draftRow.bill_text_hash,
-        };
-        const { envelope } = await deps.runBillChainFn(deps.anthropic, tracker, {
-          bill,
-          text: textRow.content,
-          stageDir: STAGE_DIR,
-          checkpointKey: `${item.bill_id}-${hash8}`,
-          authorModel: AUTHOR_MODEL,
-          checkerModel: CHECKER_MODEL,
-          reAuthor: { priorSummary: draftInfo.priorSummary, objections: draftInfo.objections },
-        });
-        conversionResults.push(envelope);
-      } else {
-        // fresh or monster — the queue item IS already shaped like a `bill` (bill_id, identifier,
-        // title, bill_text_hash), courtesy of summary-queue.js's planQueue.
-        // I3: pre-bill estimate from item.text_length — already in hand, no DB read needed to get
-        // it, so this runs BEFORE loadTextRow (unlike the conversion lane, which only learns its
-        // text length from that same read). A missing text_length is treated as the worst case
-        // (MAX_TEXT_CHARS) rather than as free — never UNDER-estimate an unknown size.
-        const estUsd = estimateBillCostUsd(item.text_length ?? MAX_TEXT_CHARS);
-        if (!(allowance - tracker.spentUsd() > estUsd)) {
-          skipped.push({ identifier: item.identifier ?? item.bill_id, reason: `pre-bill cost estimate $${estUsd.toFixed(4)} exceeds remaining allowance $${(allowance - tracker.spentUsd()).toFixed(4)} — skipped before any paid call` });
-          continue;
-        }
-        const textRow = await deps.loadTextRow(item.bill_id);
-        if (!textRow || textRow.content_hash !== item.bill_text_hash) {
-          skipped.push({ identifier: item.identifier ?? item.bill_id, reason: 'bill_texts hash mismatch vs. queue hash — skipped' });
-          continue;
-        }
-        if (typeof textRow.content === 'string' && textRow.content.length > MAX_TEXT_CHARS) {
-          skipped.push({ identifier: item.identifier ?? item.bill_id, reason: `bill text ${textRow.content.length} chars exceeds MAX_TEXT_CHARS (${MAX_TEXT_CHARS})` });
-          continue;
-        }
-        const hash8 = String(item.bill_text_hash).slice(0, 8);
-        const { envelope } = await deps.runBillChainFn(deps.anthropic, tracker, {
-          bill: item,
-          text: textRow.content,
-          stageDir: STAGE_DIR,
-          checkpointKey: `${item.bill_id}-${hash8}`,
-          authorModel: AUTHOR_MODEL,
-          checkerModel: CHECKER_MODEL,
-        });
-        freshResults.push(envelope);
-        if (lane === 'fresh') freshCount += 1; else monsterCount += 1;
-      }
-    } catch (err) {
-      if (classifyBillingError(err)) {
-        balanceDepleted = true;
-        deps.appendLog('BALANCE DEPLETED — reload required');
+    for (const { lane, item } of assembled) {
+      // Budget guard: stop before starting a bill we can no longer safely afford.
+      if (tracker.spentUsd() >= allowance - worstBillUsd) {
+        console.error(`budget guard: stopping tick — spent $${tracker.spentUsd().toFixed(4)} of $${allowance.toFixed(4)} allowance`);
         break;
       }
-      // Non-billing error: checkpoints already preserved whatever paid stages completed; skip
-      // this bill honestly and keep going — one bad bill must never starve the rest of the tick.
-      skipped.push({ identifier: item.identifier ?? item.bill_id, reason: err.message });
-    } finally {
-      // Probe convention: re-estimate the worst-case per-bill cost from what THIS bill actually
-      // spent, so the budget guard above tightens as real prices come in rather than trusting the
-      // floor for the whole tick.
-      worstBillUsd = Math.max(worstBillUsd, (tracker.spentUsd() - startSpend) * 1.5);
-    }
-  }
-
-  // ---- record: hand each non-empty lane's envelopes to summary-queue.js record ----
-  let published = 0;
-  // FIX-IN-PASSING (:387-389 in the pre-fix file): renamed from `flagged`/`rejected` — these are
-  // the record CLI's own `gated` (mechanical-gate refusals: flagDraft) and `failures` (typed
-  // pre-write rejects: malformed shape, hash mismatch, missing text) counts, not a moderation
-  // "flag" or an editorial "rejection".
-  let gateRefusals = 0;
-  let recordFailures = 0;
-  const parkedAdditions = {};
-
-  async function recordLane(results, suffix, replaceDrafts) {
-    if (results.length === 0) return; // nothing to record — no file, no spawn (test-verified)
-    const filePath = path.join(RECORDS_DIR, `records-${runId}-${suffix}.json`);
-    deps.writeRecordsFile(filePath, { results });
-    const args = ['record', '--file', filePath];
-    if (replaceDrafts) args.push('--replace-drafts');
-    let cliResult;
-    try {
-      cliResult = deps.runChildCliFn('src/cli/summary-queue.js', args);
-    } catch (err) {
-      // I4 (final whole-branch review): a throwing runChildCliFn (ETIMEDOUT/ENOBUFS/launch
-      // failure) used to propagate straight out of runTick — closeRun never ran, so the run row
-      // stranded at 'running' with NO log line at all, indistinguishable from a genuine hard
-      // crash but with none of that scenario's diagnostic trail. The records file is already on
-      // disk (written above, before this call) either way — nothing is lost; the tick continues
-      // to its own honest closeRun below instead of dying here.
-      console.error(`record CLI (${suffix}) failed to launch/complete: ${err.message} — records file kept on disk at ${filePath}`);
-      skipped.push({ identifier: `record-${suffix}`, reason: `record CLI (${suffix}) threw: ${err.message}` });
-      return;
-    }
-    const parsed = cliResult?.parsed;
-    if (!parsed) {
-      // Recovery property: the records file stays on disk either way — nothing is lost.
-      console.error(`record CLI (${suffix}) produced no parseable output (exit ${cliResult?.exitStatus ?? 'unknown'}) — records file kept on disk at ${filePath}`);
-      return;
-    }
-    published += Number(parsed.counts?.published) || 0;
-    gateRefusals += Number(parsed.counts?.gated) || 0;
-    recordFailures += Number(parsed.counts?.failures) || 0;
-    for (const failure of parsed.failures ?? []) {
-      if (failure?.error !== 'MalformedSummaryError' || !failure.bill_id) continue;
-      // A park is PERMANENT: it removes the bill from every future tick's budget. So it is only
-      // ever correct for a failure that will recur - never for one the checker rolled badly.
-      // `retryable` is set by isStochasticRecordFailure in summary-queue.js; see the comment there
-      // for the three bills this condition was written after, and for the HB 903 precedent where
-      // parking a stochastic failure as structural cost a publishable bill until it was withdrawn.
-      //
-      // The bill stays eligible, so a later tick re-attempts it. THIS TICK'S paid work is still
-      // lost either way - that is a separate, cheaper problem (retry the provisions stage in-tick)
-      // and is deliberately not solved here. Losing a tick's spend is recoverable; losing the bill
-      // is not.
-      if (failure.retryable === true) {
+      // The lone monster (assembleTick guarantees at most one) needs extra headroom — it is
+      // consistently the most expensive call in a tick.
+      if (lane === 'monster' && !(allowance - tracker.spentUsd() > 1.5 * worstBillUsd)) {
         skipped.push({
-          identifier: failure.bill_id,
-          reason: `checker malformed its own output, NOT parked (stays eligible for a later tick): ${failure.message ?? 'malformed completeness check'}`,
+          identifier: item.identifier ?? item.bill_id,
+          reason: 'insufficient headroom for a monster bill this tick (needs > 1.5x the worst-bill estimate)',
         });
         continue;
       }
-      parkedAdditions[failure.bill_id] = { reason: failure.message ?? 'malformed summary', parked_at: now.toISOString() };
+
+      attempted += 1;
+      const startSpend = tracker.spentUsd();
+      try {
+        if (lane === 'conversion') {
+          const { draftRow } = item;
+          const textRow = await deps.loadTextRow(item.bill_id);
+          if (!textRow || textRow.content_hash !== draftRow.bill_text_hash) {
+            skipped.push({ identifier: item.bill_id, reason: 'bill_texts hash mismatch vs. draft hash — skipped' });
+            continue;
+          }
+          if (typeof textRow.content === 'string' && textRow.content.length > MAX_TEXT_CHARS) {
+            skipped.push({ identifier: item.bill_id, reason: `bill text ${textRow.content.length} chars exceeds MAX_TEXT_CHARS (${MAX_TEXT_CHARS})` });
+            continue;
+          }
+          // I3: conservative pre-bill estimate from the text length now in hand — before the
+          // (cheap, unbilled) objections lookup below, let alone the first paid call.
+          const estUsd = estimateBillCostUsd(textRow.content.length);
+          if (!(allowance - tracker.spentUsd() > estUsd)) {
+            skipped.push({ identifier: item.bill_id, reason: `pre-bill cost estimate $${estUsd.toFixed(4)} exceeds remaining allowance $${(allowance - tracker.spentUsd()).toFixed(4)} — skipped before any paid call` });
+            continue;
+          }
+          const draftInfo = await deps.loadDraftObjectionsFn(deps.client, {
+            draftId: draftRow.id, text: textRow.content, billId: item.bill_id,
+          });
+          if (draftInfo.hasVerifications === false || !draftInfo.objections || draftInfo.objections.length === 0) {
+            // I8: routine, expected — hundreds of draft-only bills legitimately have no
+            // verifications on file yet (that's a re-verify lane's job, not this one). Tagged
+            // `routine: true` so it never forces the tick's status to 'partial' below.
+            skipped.push({
+              identifier: item.bill_id,
+              reason: 'no objections/verifications on file for this draft — belongs to a re-verify lane, not conversion',
+              routine: true,
+            });
+            continue;
+          }
+          const hash8 = String(draftRow.bill_text_hash).slice(0, 8);
+          const bill = {
+            bill_id: item.bill_id,
+            identifier: draftInfo.identifier ?? item.bill_id,
+            title: draftInfo.title ?? null,
+            bill_text_hash: draftRow.bill_text_hash,
+          };
+          const { envelope } = await deps.runBillChainFn(deps.anthropic, tracker, {
+            bill,
+            text: textRow.content,
+            stageDir: STAGE_DIR,
+            checkpointKey: `${item.bill_id}-${hash8}`,
+            authorModel: AUTHOR_MODEL,
+            checkerModel: CHECKER_MODEL,
+            reAuthor: { priorSummary: draftInfo.priorSummary, objections: draftInfo.objections },
+          });
+          conversionResults.push(envelope);
+        } else {
+          // fresh or monster — the queue item IS already shaped like a `bill` (bill_id, identifier,
+          // title, bill_text_hash), courtesy of summary-queue.js's planQueue.
+          // I3: pre-bill estimate from item.text_length — already in hand, no DB read needed to get
+          // it, so this runs BEFORE loadTextRow (unlike the conversion lane, which only learns its
+          // text length from that same read). A missing text_length is treated as the worst case
+          // (MAX_TEXT_CHARS) rather than as free — never UNDER-estimate an unknown size.
+          const estUsd = estimateBillCostUsd(item.text_length ?? MAX_TEXT_CHARS);
+          if (!(allowance - tracker.spentUsd() > estUsd)) {
+            skipped.push({ identifier: item.identifier ?? item.bill_id, reason: `pre-bill cost estimate $${estUsd.toFixed(4)} exceeds remaining allowance $${(allowance - tracker.spentUsd()).toFixed(4)} — skipped before any paid call` });
+            continue;
+          }
+          const textRow = await deps.loadTextRow(item.bill_id);
+          if (!textRow || textRow.content_hash !== item.bill_text_hash) {
+            skipped.push({ identifier: item.identifier ?? item.bill_id, reason: 'bill_texts hash mismatch vs. queue hash — skipped' });
+            continue;
+          }
+          if (typeof textRow.content === 'string' && textRow.content.length > MAX_TEXT_CHARS) {
+            skipped.push({ identifier: item.identifier ?? item.bill_id, reason: `bill text ${textRow.content.length} chars exceeds MAX_TEXT_CHARS (${MAX_TEXT_CHARS})` });
+            continue;
+          }
+          const hash8 = String(item.bill_text_hash).slice(0, 8);
+          const { envelope } = await deps.runBillChainFn(deps.anthropic, tracker, {
+            bill: item,
+            text: textRow.content,
+            stageDir: STAGE_DIR,
+            checkpointKey: `${item.bill_id}-${hash8}`,
+            authorModel: AUTHOR_MODEL,
+            checkerModel: CHECKER_MODEL,
+          });
+          freshResults.push(envelope);
+          if (lane === 'fresh') freshCount += 1; else monsterCount += 1;
+        }
+      } catch (err) {
+        if (classifyBillingError(err)) {
+          balanceDepleted = true;
+          deps.appendLog('BALANCE DEPLETED — reload required');
+          break;
+        }
+        // Non-billing error: checkpoints already preserved whatever paid stages completed; skip
+        // this bill honestly and keep going — one bad bill must never starve the rest of the tick.
+        skipped.push({ identifier: item.identifier ?? item.bill_id, reason: err.message });
+      } finally {
+        // Probe convention: re-estimate the worst-case per-bill cost from what THIS bill actually
+        // spent, so the budget guard above tightens as real prices come in rather than trusting the
+        // floor for the whole tick.
+        worstBillUsd = Math.max(worstBillUsd, (tracker.spentUsd() - startSpend) * 1.5);
+      }
     }
-  }
 
-  await recordLane(freshResults, 'fresh', false);
-  await recordLane(conversionResults, 'drafts', true);
+    // ---- record: hand each non-empty lane's envelopes to summary-queue.js record ----
+    let published = 0;
+    // FIX-IN-PASSING (:387-389 in the pre-fix file): renamed from `flagged`/`rejected` — these are
+    // the record CLI's own `gated` (mechanical-gate refusals: flagDraft) and `failures` (typed
+    // pre-write rejects: malformed shape, hash mismatch, missing text) counts, not a moderation
+    // "flag" or an editorial "rejection".
+    let gateRefusals = 0;
+    let recordFailures = 0;
+    const parkedAdditions = {};
 
-  // The budget must never re-pay for a bill a mechanical gate has already proven unpublishable.
-  if (Object.keys(parkedAdditions).length > 0) {
-    if (parkedReadFailed) {
-      // Fix-in-passing (:503-510 in the pre-fix file): parked.json existed but could not be read
-      // this tick — merge-writing now would silently DELETE every previously-parked bill's row
-      // (a real money leak: each would quietly become re-eligible and re-attempted, spending real
-      // budget re-discovering what was already mechanically proven unpublishable). Refuse the
-      // write; the new park-worthy bill(s) simply get parked again on a future healthy tick.
-      deps.appendLog(`parked.json was unreadable this tick — ${Object.keys(parkedAdditions).length} new park entry/entries NOT written to avoid clobbering the existing file`);
-    } else {
-      deps.writeParked({ ...parked, ...parkedAdditions });
+    async function recordLane(results, suffix, replaceDrafts) {
+      if (results.length === 0) return; // nothing to record — no file, no spawn (test-verified)
+      const filePath = path.join(RECORDS_DIR, `records-${runId}-${suffix}.json`);
+      deps.writeRecordsFile(filePath, { results });
+      const args = ['record', '--file', filePath];
+      if (replaceDrafts) args.push('--replace-drafts');
+      let cliResult;
+      try {
+        cliResult = deps.runChildCliFn('src/cli/summary-queue.js', args);
+      } catch (err) {
+        // I4 (final whole-branch review): a throwing runChildCliFn (ETIMEDOUT/ENOBUFS/launch
+        // failure) used to propagate straight out of runTick — closeRun never ran, so the run row
+        // stranded at 'running' with NO log line at all, indistinguishable from a genuine hard
+        // crash but with none of that scenario's diagnostic trail. The records file is already on
+        // disk (written above, before this call) either way — nothing is lost; the tick continues
+        // to its own honest closeRun below instead of dying here.
+        console.error(`record CLI (${suffix}) failed to launch/complete: ${err.message} — records file kept on disk at ${filePath}`);
+        skipped.push({ identifier: `record-${suffix}`, reason: `record CLI (${suffix}) threw: ${err.message}` });
+        return;
+      }
+      const parsed = cliResult?.parsed;
+      if (!parsed) {
+        // Recovery property: the records file stays on disk either way — nothing is lost.
+        console.error(`record CLI (${suffix}) produced no parseable output (exit ${cliResult?.exitStatus ?? 'unknown'}) — records file kept on disk at ${filePath}`);
+        return;
+      }
+      published += Number(parsed.counts?.published) || 0;
+      gateRefusals += Number(parsed.counts?.gated) || 0;
+      recordFailures += Number(parsed.counts?.failures) || 0;
+      for (const failure of parsed.failures ?? []) {
+        if (failure?.error !== 'MalformedSummaryError' || !failure.bill_id) continue;
+        // A park is PERMANENT: it removes the bill from every future tick's budget. So it is only
+        // ever correct for a failure that will recur - never for one the checker rolled badly.
+        // `retryable` is set by isStochasticRecordFailure in summary-queue.js; see the comment there
+        // for the three bills this condition was written after, and for the HB 903 precedent where
+        // parking a stochastic failure as structural cost a publishable bill until it was withdrawn.
+        //
+        // The bill stays eligible, so a later tick re-attempts it. THIS TICK'S paid work is still
+        // lost either way - that is a separate, cheaper problem (retry the provisions stage in-tick)
+        // and is deliberately not solved here. Losing a tick's spend is recoverable; losing the bill
+        // is not.
+        if (failure.retryable === true) {
+          skipped.push({
+            identifier: failure.bill_id,
+            reason: `checker malformed its own output, NOT parked (stays eligible for a later tick): ${failure.message ?? 'malformed completeness check'}`,
+          });
+          continue;
+        }
+        parkedAdditions[failure.bill_id] = { reason: failure.message ?? 'malformed summary', parked_at: now.toISOString() };
+      }
     }
+
+    await recordLane(freshResults, 'fresh', false);
+    await recordLane(conversionResults, 'drafts', true);
+
+    // The budget must never re-pay for a bill a mechanical gate has already proven unpublishable.
+    if (Object.keys(parkedAdditions).length > 0) {
+      if (parkedReadFailed) {
+        // Fix-in-passing (:503-510 in the pre-fix file): parked.json existed but could not be read
+        // this tick — merge-writing now would silently DELETE every previously-parked bill's row
+        // (a real money leak: each would quietly become re-eligible and re-attempted, spending real
+        // budget re-discovering what was already mechanically proven unpublishable). Refuse the
+        // write; the new park-worthy bill(s) simply get parked again on a future healthy tick.
+        deps.appendLog(`parked.json was unreadable this tick — ${Object.keys(parkedAdditions).length} new park entry/entries NOT written to avoid clobbering the existing file`);
+      } else {
+        deps.writeParked({ ...parked, ...parkedAdditions });
+      }
+    }
+
+    const spentUsd = tracker.spentUsd();
+    // I8: routine, expected conversion-lane skips (a draft-only bill with no verifications on file
+    // yet — see the `routine: true` tag above) must never force 'partial' on an otherwise healthy
+    // tick that published everything it attempted; only a genuine anomaly (hash mismatch, oversize
+    // text, an insufficient pre-bill estimate, a non-billing chain error, a crashed record CLI) does.
+    const nonRoutineSkipped = skipped.filter((s) => !s.routine);
+    const status = balanceDepleted || nonRoutineSkipped.length > 0 ? 'partial' : 'succeeded';
+    const detail = {
+      week_key: weekKey,
+      spent_usd: Number(spentUsd.toFixed(4)),
+      per_call_count: tracker.callLog.length,
+      published,
+      gate_refusals: gateRefusals,
+      record_failures: recordFailures,
+      parked: Object.keys(parkedAdditions).length,
+      balance_depleted: balanceDepleted,
+      lanes: { fresh: freshCount, conversion: conversionResults.length, monster: monsterCount },
+      skipped,
+    };
+    await deps.closeRunFn(deps.client, runId, status, detail);
+    runClosed = true;
+
+    // Fix-in-passing (:422-425 in the pre-fix file): `now` is the TICK-START timestamp (used above
+    // for weekKey/parked_at, correctly) — the log line's own leading timestamp should reflect when
+    // the tick actually finished, not when it started, since the two can differ by minutes.
+    const finishedAt = deps.now();
+    const newWeeklyTotal = weeklySpentUsd + spentUsd;
+    const logLine = `${finishedAt.toISOString()} tick=${runId} attempted=${attempted} published=${published} `
+      + `gate_refusals=${gateRefusals} spent=$${spentUsd.toFixed(4)} week=${weekKey} total=$${newWeeklyTotal.toFixed(4)}/${weeklyCapUsd.toFixed(2)}`
+      + `${balanceDepleted ? ' [BALANCE DEPLETED]' : ''}`;
+    deps.appendLog(logLine);
+
+    return {
+      outcome: 'ok', balanceDepleted, runId, weekKey, allowance, detail,
+    };
+  } catch (err) {
+    if (!runClosed) {
+      const message = err?.message ?? String(err);
+      try {
+        await deps.closeRunFn(deps.client, runId, 'failed', { error: message, crashed_at: deps.now().toISOString() });
+      } catch (closeErr) {
+        // The close itself failed (e.g. the database is unreachable). Nothing more can be done
+        // in-process: the row stays 'running' and the stranded-run detector reports it, which is honest.
+        console.error(`could not close crashed run ${runId}: ${closeErr?.message ?? closeErr}`);
+      }
+      try {
+        deps.appendLog(`${deps.now().toISOString()} tick=${runId} CRASHED before close: ${message}`);
+      } catch { /* best-effort: the row and the rethrow already carry the error */ }
+    }
+    throw err;
   }
-
-  const spentUsd = tracker.spentUsd();
-  // I8: routine, expected conversion-lane skips (a draft-only bill with no verifications on file
-  // yet — see the `routine: true` tag above) must never force 'partial' on an otherwise healthy
-  // tick that published everything it attempted; only a genuine anomaly (hash mismatch, oversize
-  // text, an insufficient pre-bill estimate, a non-billing chain error, a crashed record CLI) does.
-  const nonRoutineSkipped = skipped.filter((s) => !s.routine);
-  const status = balanceDepleted || nonRoutineSkipped.length > 0 ? 'partial' : 'succeeded';
-  const detail = {
-    week_key: weekKey,
-    spent_usd: Number(spentUsd.toFixed(4)),
-    per_call_count: tracker.callLog.length,
-    published,
-    gate_refusals: gateRefusals,
-    record_failures: recordFailures,
-    parked: Object.keys(parkedAdditions).length,
-    balance_depleted: balanceDepleted,
-    lanes: { fresh: freshCount, conversion: conversionResults.length, monster: monsterCount },
-    skipped,
-  };
-  await deps.closeRunFn(deps.client, runId, status, detail);
-
-  // Fix-in-passing (:422-425 in the pre-fix file): `now` is the TICK-START timestamp (used above
-  // for weekKey/parked_at, correctly) — the log line's own leading timestamp should reflect when
-  // the tick actually finished, not when it started, since the two can differ by minutes.
-  const finishedAt = deps.now();
-  const newWeeklyTotal = weeklySpentUsd + spentUsd;
-  const logLine = `${finishedAt.toISOString()} tick=${runId} attempted=${attempted} published=${published} `
-    + `gate_refusals=${gateRefusals} spent=$${spentUsd.toFixed(4)} week=${weekKey} total=$${newWeeklyTotal.toFixed(4)}/${weeklyCapUsd.toFixed(2)}`
-    + `${balanceDepleted ? ' [BALANCE DEPLETED]' : ''}`;
-  deps.appendLog(logLine);
-
-  return {
-    outcome: 'ok', balanceDepleted, runId, weekKey, allowance, detail,
-  };
 }
 
 // ============================================================

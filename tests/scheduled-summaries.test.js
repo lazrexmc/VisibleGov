@@ -405,6 +405,27 @@ test('runTick: I4 — a throwing record CLI call (recordLane) is caught; the run
   assert.equal(calls.records.length, 1); // the records file was written before the throw — never lost
 });
 
+// 2026-11-04: seven `running` rows stranded between 2026-10-20 and 2026-11-03 (six of this source,
+// one legiscan) and failed the ingest health check on EVERY run since, which is what the daily
+// GitHub failure email was. On each stranded morning the tick opened its row and then died before
+// recordLane (no records file) and before closeRun (no log line - stderr vanishes with the console
+// window), so nothing said why. A throw anywhere between openRun and closeRun outside the per-bill
+// try used to escape runTick uncaught. It must instead close the row honestly as `failed`, put the
+// error in detail, log it, and still rethrow so main() keeps its non-zero exit.
+test('runTick: a throw between openRun and closeRun (an unguarded records-file write) closes the run as failed, logs it, and rethrows - no stranded running row', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [{ bill_id: 'f1', identifier: 'HB 1', title: 'T', bill_text_hash: 'h1', text_length: 500, priority: 'other' }],
+    texts: { f1: { content: 't', content_hash: 'h1' } },
+    deps: { writeRecordsFile: () => { throw new Error('EACCES: records dir not writable'); } },
+  });
+  await assert.rejects(() => runTick(deps), /EACCES/);
+  assert.equal(calls.closed.length, 1);
+  assert.equal(calls.closed[0].runId, 'run-1');
+  assert.equal(calls.closed[0].status, 'failed');
+  assert.match(calls.closed[0].detail.error, /EACCES/);
+  assert.ok(calls.logs.some((l) => /CRASHED/.test(l) && /EACCES/.test(l)));
+});
+
 test('runTick: I5 — a throwing plan CLI is caught, logged, and returns plan-failed without opening a run row', async () => {
   const { deps, calls } = fakeDeps({
     deps: {

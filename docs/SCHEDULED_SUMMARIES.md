@@ -159,6 +159,18 @@ Each invocation (one tick, typically once a day, early morning):
   call, so nothing is spent and no run row is stranded; the only trace is Task Scheduler's "Last Result"
   being non-zero (History tab). A day with no log entry is therefore ambiguous between "the task
   never fired" and "a pre-tick DB call failed" - check Last Result before concluding either.
+- **After `openRun`, a throw closes the row instead of stranding it (2026-11-04).** Between
+  2026-10-20 and 2026-11-03 seven `running` rows stranded (six `scheduled-summaries`, one
+  `legiscan`) and failed `check-ingest-health` on every ingest run after the first, which is what
+  the daily GitHub failure email was. Each stranded morning opened its row, then died before
+  `recordLane` (no records file) and before `closeRun` (no log line), so the error was lost. Any
+  throw between `openRun` and `closeRun` outside the per-bill `try` used to escape `runTick` with
+  the row still `running`. It now closes the row as `failed` with `detail.error`, appends a
+  `CRASHED before close:` log line, and rethrows so `main()` still exits non-zero (test:
+  "closes the run as failed" in `tests/scheduled-summaries.test.js`). **Limit:** a hard kill from
+  outside the process (the console window closed, the machine stopping) cannot run that code, so it
+  still strands the row; close those with `npm run close-stranded`. The triggering error of the
+  seven was never recorded, so the next crash's `detail.error` is the first real evidence of it.
 
 ## Budget is real - these caps are published Terms of Service with yourself
 
