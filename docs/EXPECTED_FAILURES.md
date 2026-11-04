@@ -72,15 +72,29 @@ operator's residential IP and Anthropic's WebFetch infrastructure - with identic
 - **Not the operator's Cloudflare reputation ban** (he raised this, reasonably). senate.gov's blocked
   paths are fronted by **Akamai**, a different vendor and a different list.
 
-**Why this reads as a senate.gov FAULT rather than an anti-scraping measure:** `/legislative/votes.htm`
-is the page a member of the public visits to read Senate votes, and it 403s too, as does `/`. A
-legislature does not deliberately forbid its own public votes page. `AkamaiNetStorage` returning 403
-commonly means the object is not present at that path, so the likeliest reading is a restructuring or
-an Akamai misconfiguration upstream. **It may well fix itself.**
+**CORRECTED 2026-11-04, same day, by Lance's own browser.** This entry first argued the 403 read as a
+senate.gov FAULT - reasoning that `/legislative/votes.htm` and `/` 403 too, that a legislature does
+not forbid its own public votes page, and that an `AkamaiNetStorage` 403 usually means the object is
+absent. **Lance then opened the exact URL in his browser and pasted the full, current XML.** The file
+is present and is served.
 
-**NO WORKAROUND IS TO BE BUILT, and this is a standing instruction.** An attempt to probe the blocked
-path with a spoofed browser header set was correctly refused by the harness as bot-check
-circumvention. That refusal is endorsed here, not merely recorded: **this project's entire value is
+**So this IS client discrimination, and the earlier reading was wrong.** The same URL, from the same
+IP, returns 200 to a browser and 403 to `curl`. Akamai is distinguishing clients - almost certainly on
+TLS fingerprint and header shape, which no header setting fixes - and `/legislative/*` now refuses
+non-browser clients. It will NOT fix itself, and it is a deliberate anti-automation measure rather
+than a misconfiguration.
+
+**The lesson, which is the reusable part: "a human cannot load it either" was an INFERENCE from curl's
+403, not an observation of a human loading it.** One person with a browser falsified a paragraph of
+confident reasoning in a single message. A claim about what a human sees needs a human, or at least a
+browser engine - PLAYBOOK 71's shape again, the instrument that cannot see the path being asked about
+the path.
+
+**NO WORKAROUND IS TO BE BUILT, and this is a standing instruction - which matters MORE now that a
+browser is known to work, not less.** The correction above establishes that a sufficiently
+browser-shaped client would get the data. That is precisely the reason not to build one. An attempt to
+probe the blocked path with a spoofed browser header set was correctly refused by the harness as
+bot-check circumvention. That refusal is endorsed here, not merely recorded: **this project's entire value is
 being above reproach about its sources.** Defeating a public institution's access controls to obtain
 civic data would be self-defeating even if it worked, and would sit badly beside the one
 non-negotiable. If the files are genuinely restricted now, the answer is to ask the Senate, not to
@@ -92,6 +106,24 @@ which this project already holds a key, was probed directly on 2026-11-04:
 -> **404**. The API covers House votes only, which is precisely why this project reads senate.gov at
 all. Its README defers coverage questions to congress.gov/help/coverage-dates and refers data gaps to
 "data partners in the House and Senate".
+
+**A LEGITIMATE ROUTE EXISTS, and it is Lance's call because it needs his hands.** Not a workaround -
+a human using a browser as a human, which is what the site now permits:
+
+1. He opens the menu URL in his browser and saves the XML to a file.
+2. The adapter ingests from that file rather than fetching it, the way
+   `ingest-legiscan --dataset-file` already works for the cached LegiScan datasets.
+
+**That capability does not exist yet for us-senate** - `--dataset-file` is a LegiScan-only flag today.
+Building it is a small, honest change and it is NOT circumvention: no automated client pretends to be
+a browser, and the only fetch is one a person performed themselves. **Worth building only when the
+Senate actually votes again**, since the gap is currently zero; doing it now would be building for a
+problem that has not arrived. Flagged so the next session does not re-derive the option under time
+pressure.
+
+**The other honest route: ask.** The Senate webmaster can be asked whether automated access to the LIS
+XML is permitted and how. That is outbound contact in Lance's name, so it is his to send, never an
+agent's.
 
 **Expiry condition - what clears this entry.** Re-probe the URL. One command, free, no key:
 ```
@@ -110,11 +142,20 @@ had an entirely different cause (senate.gov served a redirect to a full HTML pag
 `fast-xml-parser` threw on; PLAYBOOK 65). **The health check reports the same word for both. Read the
 run row's `stderrTail` before assuming it is this.**
 
-**The CI job stays RED, deliberately.** This is a real data gap, not a cosmetic one: Senate votes
-stopped arriving on 2026-10-23 and the site's Senate coverage is frozen at that date. Suppressing the
-signal would hide a genuine hole in the product's own accountability claim. If the redness becomes
-alarm fatigue before the source returns, that is a conversation to have explicitly rather than a
-`continue-on-error` added quietly.
+**THE DATA GAP IS ZERO, and the earlier "coverage frozen at 2026-10-23" claim here was also wrong.**
+Measured 2026-11-04: our newest stored `us-senate` vote is **2026-09-30**, and the newest vote in the
+live menu file is **00256, dated 30-Sep**. They match. **The Senate has not held a roll-call vote
+since 2026-09-30 and we hold every one up to it** (915 votes stored). The block began after the last
+vote, so it has cost nothing at all.
+
+**What that changes: this is a LIVENESS alarm, not a data-loss alarm - for now.** Nothing is missing
+today, and nothing will be until the Senate votes again, at which point we lose every vote from that
+day onward. Urgency is therefore tied to the Senate's calendar, not to the clock.
+
+**The CI job stays RED, deliberately, for that reason.** It is the only warning that will be in place
+when the next vote happens. Suppressing it would mean discovering the hole after it exists rather
+than before. If the redness becomes alarm fatigue, that is a conversation to have explicitly rather
+than a `continue-on-error` added quietly.
 
 ## 1. ~~`VisibleGov Scheduled Summaries` fails daily from 2026-09-01 06:00~~ CLOSED 2026-10-20
 
