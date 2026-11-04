@@ -19,13 +19,15 @@ empty, say so plainly, because "no known failures" is itself information.
 |---|---|---|
 | `npm run verify:migrations` | **0** | 40 probed, **30 applied, 0 MISSING**, 10 `unverifiable` because Tier 2 (`SUPABASE_DB_URL`) is off - a reported non-result, not a failure, and it does not affect the exit code |
 | `node --test` | **0** | **2,850 pass / 0 fail**, in a clean shell |
+| `npm run check:ingest` | **1** | **RED from 2026-11-04 - see entry 3.** `us-senate` BROKEN on an upstream 403; the other four sources are ok. This is the one currently-red instrument and it is declared below. |
 
 **Entry 1 (the price guard) is CLOSED as of 2026-10-20** - funding arrived, prices were re-checked
 and all three were unchanged, so the guard was cleared by its own stated condition. **It re-arms
 2027-01-01**, which is the design and will not be a defect when it happens.
 
-**Nothing in this file is currently red.** Per the rule above: anything red and not listed here is a
-real failure.
+**One instrument is currently red: `npm run check:ingest`, declared as entry 3** (us-senate, upstream
+403 from senate.gov, first seen 2026-11-04). Everything else is green. Per the rule above: anything
+red and NOT listed here is a real failure.
 
 ---
 
@@ -41,6 +43,78 @@ real failure.
 entry is closed** - the first time this repo has had a clean migration board.
 
 ---
+
+## 3. `us-senate` ingest BROKEN from 2026-11-04: senate.gov returns 403 for its own roll-call XML
+
+**Symptom.** `npm run check:ingest` reports `BROKEN us-senate - 5 consecutive failed runs`, and the
+`ingest.yml` GitHub Actions job exits 1 on every run because of it. Individual runs fail with
+`SourceFetchError: HTTP 403 from us-senate:
+https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.xml`.
+
+**Last successful run: 2026-10-23T09:30:13.** 228 failed runs after it as of 2026-11-04.
+
+**Cause: UPSTREAM, and it is not us.** Measured 2026-11-04 from two unrelated networks - the
+operator's residential IP and Anthropic's WebFetch infrastructure - with identical results:
+
+| URL | Result from BOTH networks |
+|---|---|
+| `/legislative/LIS/roll_call_lists/vote_menu_119_2.xml` | **403**, `Server: AkamaiNetStorage` |
+| `/legislative/LIS/roll_call_lists/vote_menu_119_1.xml` | **403** |
+| `/legislative/votes.htm` (the HUMAN-facing votes page) | **403** |
+| `/` | **403** |
+| `/general/contact_information/senators_cfm.xml` | **200**, `Server: Apache`, 52,531 chars of real XML |
+
+**The 403 follows the URL, not the requester.** Three hypotheses were tested and killed:
+- **Not a missing `User-Agent`.** 403 with none, with a generic one, and with a browser one.
+- **Not datacenter-IP blocking.** An unrelated non-datacenter IP gets the same 403, and the one
+  Actions run inspected had reported `nothing-due` for us-senate, so it never fetched at all - its
+  BROKEN verdict came from historical rows, not from a runner being refused.
+- **Not the operator's Cloudflare reputation ban** (he raised this, reasonably). senate.gov's blocked
+  paths are fronted by **Akamai**, a different vendor and a different list.
+
+**Why this reads as a senate.gov FAULT rather than an anti-scraping measure:** `/legislative/votes.htm`
+is the page a member of the public visits to read Senate votes, and it 403s too, as does `/`. A
+legislature does not deliberately forbid its own public votes page. `AkamaiNetStorage` returning 403
+commonly means the object is not present at that path, so the likeliest reading is a restructuring or
+an Akamai misconfiguration upstream. **It may well fix itself.**
+
+**NO WORKAROUND IS TO BE BUILT, and this is a standing instruction.** An attempt to probe the blocked
+path with a spoofed browser header set was correctly refused by the harness as bot-check
+circumvention. That refusal is endorsed here, not merely recorded: **this project's entire value is
+being above reproach about its sources.** Defeating a public institution's access controls to obtain
+civic data would be self-defeating even if it worked, and would sit badly beside the one
+non-negotiable. If the files are genuinely restricted now, the answer is to ask the Senate, not to
+evade them.
+
+**There is NO official API alternative, verified rather than assumed.** The Congress.gov API, for
+which this project already holds a key, was probed directly on 2026-11-04:
+`GET /v3/house-vote/119/2` -> **200**; `GET /v3/senate-vote/119/2` -> **404**; `GET /v3/vote/119/2`
+-> **404**. The API covers House votes only, which is precisely why this project reads senate.gov at
+all. Its README defers coverage questions to congress.gov/help/coverage-dates and refers data gaps to
+"data partners in the House and Senate".
+
+**Expiry condition - what clears this entry.** Re-probe the URL. One command, free, no key:
+```
+curl -s -o /dev/null -w "%{http_code}
+" https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_119_2.xml
+```
+`200` means the source is back: delete this entry, and expect the adapter to heal the gap on its own,
+since it walks the vote menu rather than tailing from a cursor. A persistent `403` past a few weeks
+makes this a question for the Senate webmaster - **Lance's call, not an agent's**, since it is
+outbound contact in his name.
+
+**How to tell this from a NEW failure.** This entry covers `HTTP 403` on `/legislative/*` ONLY. A
+different status (404, 500, a timeout), a different path, or a parse error is NOT this entry - note
+in particular that the 2026-09-18..26 us-senate outage looked similar at the health-check level and
+had an entirely different cause (senate.gov served a redirect to a full HTML page that
+`fast-xml-parser` threw on; PLAYBOOK 65). **The health check reports the same word for both. Read the
+run row's `stderrTail` before assuming it is this.**
+
+**The CI job stays RED, deliberately.** This is a real data gap, not a cosmetic one: Senate votes
+stopped arriving on 2026-10-23 and the site's Senate coverage is frozen at that date. Suppressing the
+signal would hide a genuine hole in the product's own accountability claim. If the redness becomes
+alarm fatigue before the source returns, that is a conversation to have explicitly rather than a
+`continue-on-error` added quietly.
 
 ## 1. ~~`VisibleGov Scheduled Summaries` fails daily from 2026-09-01 06:00~~ CLOSED 2026-10-20
 
