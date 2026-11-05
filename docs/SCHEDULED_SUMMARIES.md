@@ -33,7 +33,7 @@ Each invocation (one tick, typically once a day, early morning):
    duration - the exact same `acquireLock`/`releaseLock` mechanism `scheduled-ingest.js` uses,
    reused, not reimplemented). If another invocation already holds it, this one logs
    `already running (<reason>) - skipping this tick` and exits 0 - that is a **normal**, expected
-   outcome, never a failure. A lock older than its own declared max duration (30 minutes,
+   outcome, never a failure. A lock older than its own declared max duration (90 minutes,
    `TICK_MAX_DURATION_MS`) is reclaimed as stale by whichever LATER tick finds it that way - see
    "Recovery properties" below for exactly what that constant does and does not enforce.
 2. Computes this ISO week's spend from `ingestion_runs` rows (`source='scheduled-summaries'`,
@@ -135,7 +135,7 @@ Each invocation (one tick, typically once a day, early morning):
   is out of money would be worse than stopping.
 - **Never creates overlapping processes.** The single-instance lock (see step 1) prevents two
   concurrent runs; its release is ownership-checked (nonce-based), so a lock can never be deleted by
-  a process that doesn't own it. `TICK_MAX_DURATION_MS` (30 minutes) is **not** a self-enforced
+  a process that doesn't own it. `TICK_MAX_DURATION_MS` (90 minutes) is **not** a self-enforced
   deadline that terminates a stuck tick - it is only the duration a LATER tick uses to decide an
   existing lock is stale enough to reclaim. The actual thing that can kill a runaway tick is
   Windows' own Task Scheduler "Stop the task if it runs longer than" setting - see that section
@@ -192,7 +192,7 @@ to under-charge a PRIOR crashed tick that actually ran under the real, unlowered
 |---|---|---|
 | `SUMMARY_WEEKLY_CAP_USD` | $25.00 | Hard weekly budget; env override can only lower it, never raise it |
 | `SUMMARY_TICK_CAP_USD` | $4.00 | Hard per-invocation budget; env override can only lower it, never raise it |
-| `TICK_MAX_DURATION_MS` | 30 minutes | The lock's own declared stale-reclaim duration - how long a LATER tick waits before treating an existing lock as abandoned. NOT a self-terminating deadline for the CURRENT tick - see the Task Scheduler section below for what actually bounds a stuck tick |
+| `TICK_MAX_DURATION_MS` | 90 minutes (was 30 until 2026-11-04) | The lock's own declared stale-reclaim duration - how long a LATER tick waits before treating an existing lock as abandoned. NOT a self-terminating deadline for the CURRENT tick - see the Task Scheduler section below for what actually bounds a stuck tick |
 | `MAX_CONVERSIONS_EXAMINED` | 50 (not env-overridable) | How many draft-only bills the conversion lane examines per tick, oldest-flagged first, before assembling the rest of the tick |
 | `WORST_BILL_FLOOR_USD` | $0.05 | The floor a tick's remaining allowance must clear just to open a run row at all |
 
@@ -294,7 +294,7 @@ been created.`
   next section).
 - **Triggering a tick by hand through the real Task Scheduler environment:**
   `schtasks /run /tn "VisibleGov Scheduled Summaries"`. This is a REAL, full-budget paid tick (up
-  to $1.00), not a dry run, so it is Lance's call, never an agent's. Done once with his explicit
+  to **$4.00** - raised from $1.00 on 2026-10-20), not a dry run, so it is Lance's call, never an agent's. Done once with his explicit
   go on 2026-08-17 (tick d744297c, 24 paid calls, $0.4836) to validate the registered pathway
   end-to-end; it is also the way to make up a missed day by hand. Expect the black node console
   window (section below) and leave it alone.
@@ -306,7 +306,7 @@ time); Actions -> New -> Program: `C:\Program Files\nodejs\node.exe`, Arguments:
 `F:\VisibleGov` (optional - see the superseded "Start in" note above; and note the GUI could not
 save this task on this machine once it existed, see "Modifying this task" below).
 
-### Check the task's own "Stop the task if it runs longer than" setting - it must EXCEED 30 minutes
+### Check the task's own "Stop the task if it runs longer than" setting - it must EXCEED 90 minutes
 
 This is a **separate setting from everything above** - it's Windows' own execution-time limit on
 the *whole scheduled task*, not anything this script controls. The `schtasks /create` command
@@ -315,9 +315,9 @@ Scheduler -> find "VisibleGov Scheduled Summaries" -> Properties -> **Settings t
 if it runs longer than."
 
 **This Windows setting is the ACTUAL, real deadline that can kill a stuck tick.**
-`TICK_MAX_DURATION_MS` (30 minutes, inside the script) is NOT a self-enforced deadline for the
+`TICK_MAX_DURATION_MS` (90 minutes, inside the script) is NOT a self-enforced deadline for the
 CURRENT tick at all - it only controls how long a LATER tick waits before deciding an existing lock
-file is abandoned and safe to reclaim. If Windows' own setting is *shorter* than 30 minutes, it can
+file is abandoned and safe to reclaim. If Windows' own setting is *shorter* than 90 minutes, it can
 kill a legitimate in-progress tick before this script's own lock even reaches its stale-reclaim
 window - and because that kill comes from OUTSIDE the script (not the script's own `finally`
 block), the lock is never released by its normal path (it still self-heals eventually, once a later
@@ -326,13 +326,26 @@ be left `running` and get conservatively charged the full per-tick cap by the ne
 math).
 
 **Recommendation: uncheck "Stop the task if it runs longer than" entirely, or set it to at least
-1 hour (comfortably above the 30-minute `TICK_MAX_DURATION_MS`).** Windows' own setting is the real
+2 hours (comfortably above the 90-minute `TICK_MAX_DURATION_MS`).** Windows' own setting is the real
 enforcement here; the in-script constant only needs to stay well under it so the stale-reclaim
 window and the OS-level kill can never race each other in a confusing way.
 
+**Why this number moved, 2026-11-04, and the invariant it nearly broke.** `TICK_MAX_DURATION_MS`
+was 30 minutes while the per-tick cap was $1.00, and ticks finished inside it. Raising the cap to
+$4.00 made every tick with work run **33-37 minutes** (measured across 11 completed ticks), so each
+tick began outliving its own lock's abandonment threshold - a later tick would judge a LIVE tick's
+lock stale, reclaim it, and bill concurrently against one weekly budget. Hence 90 minutes.
+**That raise was made without re-reading the recommendation in this section, which then still said
+"at least 1 hour" - and 90 minutes exceeds an hour.** It is harmless on this machine only because
+the live task carries no `ExecutionTimeLimit` at all (next paragraph), so Windows' 72-hour default
+applies and nothing was ever close. Had anyone edited the task in the GUI, where the dialog
+re-imposes its own default, the invariant this whole section exists to protect would have been
+violated by a constant changed in a different file, silently. **Whoever changes
+`TICK_MAX_DURATION_MS` again re-reads this section in the same commit.**
+
 (Registration-day verification note, 2026-08-17: the task XML the `schtasks /create` command
 actually produces contains NO `ExecutionTimeLimit` element at all, and Task Scheduler's default
-for that absence is 72 hours - already comfortably above 30 minutes. So on a fresh registration
+for that absence is 72 hours - already comfortably above 90 minutes. So on a fresh registration
 this setting is fine as-is; the check above matters if anyone ever edits the task in the GUI,
 where the dialog re-imposes its own defaults.)
 
@@ -612,11 +625,11 @@ the VERY NEXT tick will see it as eligible again, re-queue it, and re-attempt it
 past them, paying only for the stages that are still missing. This is the actual recovery
 guarantee: **a crashed bill is retried, cheaply, not abandoned and not re-paid for from scratch.**
 
-**Lock reclaim:** A lock older than its own declared max duration (30 minutes,
+**Lock reclaim:** A lock older than its own declared max duration (90 minutes,
 `TICK_MAX_DURATION_MS`) is automatically reclaimed on the next tick that finds it stale, with a
 warning logged. This handles power loss or forced kills. You can also delete
 `.superpowers/artifacts/summary-scheduler.lock.json` by hand at any time if you want a clean next
-tick immediately rather than waiting for it to age out. (Again: this 30-minute figure is the
+tick immediately rather than waiting for it to age out. (Again: this 90-minute figure is the
 RECLAIM window a later tick uses, not a self-terminating deadline for the current one - see the
 Task Scheduler section above for what actually bounds a stuck tick.)
 
@@ -667,7 +680,7 @@ schtasks /run    /tn "VisibleGov Scheduled Summaries"            # fire a REAL p
 ```
 
 If the machine ever loses power mid-run, the lock file self-heals: a lock older than its own
-declared max duration (30 minutes, `TICK_MAX_DURATION_MS`) is automatically reclaimed on
+declared max duration (90 minutes, `TICK_MAX_DURATION_MS`) is automatically reclaimed on
 the next tick, with a warning logged. You can also delete
 `.superpowers/artifacts/summary-scheduler.lock.json` by hand at any time if you want
 a clean next tick immediately rather than waiting out the stale-reclaim window.
