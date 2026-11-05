@@ -4,11 +4,20 @@
 
 ---
 
-## RESUME HERE - verified live 2026-10-20, end of session. Read this block first.
+## RESUME HERE - verified live 2026-11-05, 07:0x CST. Read this block first.
 
 **Every number here was produced by running the thing in this session, not by reading a previous
-claim.** Tree `<see git log>`, clean, pushed. Suite **2,850 pass / 0 fail** (`node --test`, in a
+claim.** Tree `<see git log>`, clean, pushed. Suite **2,883 pass / 0 fail** (`node --test`, in a
 clean shell - NEVER `source .env` first, it turns 2 correct tests red).
+
+**WHAT CHANGED 2026-11-05.** The six crashed billed ticks that sat at `status='running'` from 10-20
+to 11-04 are closed AND their spend charges are backfilled (`scripts/backfill-stranded-spend.mjs`,
+applied; re-running it is a no-op by design). The weekly ledger is now internally consistent -
+verified live: W43 $24.35, W44 $15.08, W45 $14.26, **no week over its $25 cap**, with the estimated
+portion labelled `spend_is_estimated` in each row so it can never be quoted as measured. The defect
+that made this necessary is PLAYBOOK lesson 76. **A new OPEN finding came out of the same look and
+it costs money every morning: `docs/EXPECTED_FAILURES.md` entry 4** - appropriations bills blow
+`max_tokens` and are retried every tick (HB 2: ten times since 10-20).
 
 ### State of the world, measured today
 
@@ -46,12 +55,25 @@ enabled and fires every morning** (proof: a dated file per day in
 `.superpowers/artifacts/summary-scheduler-logs/`). It skipped all autumn on the price guard; the
 guard is now cleared, so **the next 06:00 tick spends real money** - about $3-4 - under its
 $25/ISO-week + $4/tick ledger carve-out, which IS the standing approval for that runner alone.
-**The open question is whether he wants that**, because the billed lane converts at **$0.55 per
-published** (measured today) against **$0** for the subscription wave lane. Disabling it is a
-`schtasks` call: **an agent never runs `schtasks`** - his step, always.
+**The open question is whether he wants that**, and the case against it got much stronger on
+11-05. **Do not quote a single cost-per-summary figure for this lane; it is degrading fast.**
+Measured live from the run rows, measured spend only:
+
+| ISO week | measured spend | published | per published |
+|---|---|---|---|
+| 2026-W43 | $8.35 | 26 | **$0.32** |
+| 2026-W44 | $11.08 | 14 | **$0.79** |
+| 2026-W45 | $10.26 | 4 | **$2.56** |
+
+Eightfold degradation in three weeks with no code change: recency-first drained the cheap bills
+first, and the queue is now on appropriations bills whose pre-flight estimates run $0.67-$0.84 each.
+The 11-05 tick spent **$3.34 and published one summary**. Against **$0** for the subscription wave
+lane. The older "$0.55 per published" figure in this block was true on 10-20 and is now stale -
+PLAYBOOK lessons 66 and 77. Disabling the task is a `schtasks` call: **an agent never runs
+`schtasks`** - his step, always.
 
 **3. Review the queues when he feels like it.** His words, 2026-10-20: *"I'll review them
-eventually."* 619 glosses + 46 summaries. Not blocking anything.
+eventually."* 619 glosses + 143 summaries (143 as of 2026-11-04). Not blocking anything.
 
 ### THE NEXT CONCRETE ACTIONS, in order, for whoever picks this up
 
@@ -80,6 +102,14 @@ recorded in `.superpowers/artifacts/gloss-batch-mo/state.json` under `fetchFailu
 parked - an identity error means "we got a page but not the one we asked for", which is ambiguous,
 so the runner correctly leaves them eligible. The sweep aborts at 20 such errors
 (`IDENTITY_ABORT_THRESHOLD`); we saw 10.
+
+**c2. Decide what to do about appropriations bills - `docs/EXPECTED_FAILURES.md` entry 4.** This
+is the only open item on this list that is actively spending money. `max_tokens` is a DETERMINISTIC
+failure (HB 2 has hit it on all ten ticks that reached it) and is currently in the same lenient
+`skipped` bucket as genuinely retryable failures, so the scheduler pays to re-author it every
+morning. Smallest fix: make `max_tokens` a parking reason. Real fix: a chunked authoring path, which
+is the only route that ever produces a summary for the state budget - arguably the most
+consequential bill class on the whole site. Read the entry before touching either.
 
 **d. Investigate HJR 114 and SJR 41 - a SEPARATE defect from today's park fix.** Both failed because
 a `key_provisions[].section` string is not verbatim in the bill text: HJR 114 cites `"Section 7,

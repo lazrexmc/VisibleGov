@@ -7007,3 +7007,43 @@ runClosed guards a post-close throw. Suite 2,851 pass / 0 fail. Docs: SCHEDULED_
 limit (an outside kill still strands; use npm run close-stranded). (2) us-senate: HTTP 403 from senate.gov on every
 run since 2026-10-23 (216 failed: 202 local, 14 GitHub). Not worked around; how to source Senate votes is Lance's
 call (pending). Model: Claude Opus 5.5 via RapidForge.
+
+## 2026-11-05 07:0x CST - Backfilled the six stranded ticks' spend charges; found a per-morning money leak in the billed lane
+Lance: "go ahead and draft and apply it. it is now 11/5, how did the overnight run go?" ("it" = the optional backfill
+offered at the end of the prior turn, which had been deliberately left undrafted because it touches production data.)
+
+**The backfill, drafted and applied.** `scripts/backfill-stranded-spend.mjs` (new, dry-run default, 21 new tests).
+Context: 1dc218d taught `closureFor` to record a crashed billed tick's conservative spend charge, but it fixed only
+FUTURE closures - the six rows that motivated it had been closed hours earlier and still read $0. Not merely untidy
+history: the scheduler sums the last TEN DAYS, so one of those rows was inside the live window and was handing this
+morning's tick $4 of allowance the ledger's own doctrine said was spent. Dry run named exactly 6 rows, week keys
+W43 x4 / W44 x1 / W45 x1, +$4.00 each. Applied; re-running `--apply` prints "nothing to backfill" because the
+`spent_usd=is.null` guard lives in the QUERY, not in a post-read check - that is what makes it idempotent. Verified
+live via the Supabase MCP (reauthorized mid-turn by Lance): W43 $24.3476, W44 $15.0789, W45 $14.2597, `over_cap` false
+for all three, estimated portion separated from measured in the same query. 0 rows left at status='running'.
+`strandedSpendPatch` was EXTRACTED from `closureFor` so the closer and the backfill share one definition of
+"conservative" rather than two that drift. PLAYBOOK lesson 76. The symptom had been sitting in the runner's own log
+the whole time in a shape no single line shows: total=$11.41 on 11-02, total=$6.92 on 11-04, with real money spent in
+between - a cumulative that goes DOWN. Suggested detector, not built: assert a week's cumulative never decreases.
+
+**The overnight run, which is the bigger finding.** 11-05 06:00 tick: attempted=126, published=1, gate_refusals=7,
+spent $3.3433. The 118 unattempted were free pre-flight skips (per-bill estimate $0.67-$0.84 exceeded the remaining
+$0.67 allowance), so the paid work was ~11 bills for one published summary. Three bills "hit max_tokens". Per tick
+that reads like bad luck; it is not. One `group by` over the skip reasons across all ticks since 10-20:
+**HB 2 has hit max_tokens on TEN separate ticks (10-20..11-05) - every tick that ever reached it**, HB 2287 nine,
+HB 2017 seven, plus HB 12/19/519/1019/2004/2007, SB 40, SB 912. These are Missouri's APPROPRIATIONS bills; the text
+does not fit, has never fit, will not fit tomorrow, and each retry pays for a full authored output that is discarded.
+Cause: `skipped` is one bucket holding "might not recur" and "cannot succeed". The 2026-11-04 fix deliberately stopped
+parking the first kind (`isStochasticRecordFailure`) and max_tokens inherited the lenient half without anyone deciding
+it. A size overflow is not two samplers disagreeing. Declared as `docs/EXPECTED_FAILURES.md` entry 4, OPEN and
+unbuilt, with the explicit note that NO instrument reports it - a paid retry of an impossible bill is not a failure of
+anything that gets checked. PLAYBOOK lesson 77.
+
+**Economics, re-derived rather than quoted, and they correct this repo's own stated figure.** Measured spend only,
+from the run rows: W43 $8.35/26 published = $0.32 each; W44 $11.08/14 = $0.79; W45 $10.26/4 = **$2.56**. Eightfold
+degradation in three weeks with no code change - recency-first drained the cheap bills first. The "$0.55 per
+published" in TODO's RESUME HERE was true on 10-20 and is now stale; corrected there with the table. This is lesson 66
+recurring in a second form: a measured rate is a measurement of a moment. Against $0 for the subscription wave lane.
+**Not acted on:** disabling the 06:00 task is a `schtasks` call and an agent never runs `schtasks`; parking max_tokens
+is a code change nobody asked for yet. Both are written down as decisions for Lance, with the numbers attached.
+Suite 2,883 pass / 0 fail, clean shell. `npm run verify:migrations` exit 0. Model: Claude Opus 5.

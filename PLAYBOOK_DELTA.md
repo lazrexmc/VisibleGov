@@ -98,6 +98,8 @@ with offset/limit or jump by grep.
 | 73 | 10-20 | A number merging two queues recurs; label it by what it IS and point at the one authoritative derivation |
 | 74 | 10-20 | Two ways to lose a background run: the shell that launched it, and the pipe you watched it through |
 | 75 | 10-20 | A multi-step pipeline whose middle step reports success is where work dies silently |
+| 76 | 11-05 | A forward-only fix leaves a wrong past, and the wrong past is still being read |
+| 77 | 11-05 | A deterministic failure that is retried is invisible per-run and compounds across runs |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -1960,3 +1962,66 @@ output.
 **Rule: a run's terminal report describes what THAT STEP did. Verify the pipeline's effect at the
 DESTINATION, not at the last step you ran** - and when a step's output names a state that is not the
 final state, say so in that step's own documentation, because the omission is silent by construction.
+
+## Lesson 76 - A forward-only fix leaves a wrong past, and the wrong past is still being read (2026-11-05)
+
+`closureFor` was taught to record a crashed billed tick's conservative spend charge on 2026-11-04.
+Correct, tested, shipped. It fixed every FUTURE closure and nothing else, and the six rows that
+motivated the fix had been closed hours earlier - so they still read `$0`. The defect was closed in
+the code and left open in the data.
+
+What made that more than untidiness: the scheduler sums the last ten days, so one of those six rows
+was still inside the window the live cap is computed from. A past record that reads `$0` was not
+merely inaccurate history; it was handing a live tick $4 of allowance that the ledger's own doctrine
+said had been spent. The repair was not retrospective bookkeeping, it was a cap that was wrong this
+morning.
+
+The symptom was sitting in the runner's own log the whole time, in a shape no single line could
+show: `total=$11.41` on 11-02, `total=$6.92` on 11-04, with real money spent in between. A weekly
+cumulative that goes DOWN is arithmetically impossible unless something was un-counted. Nobody reads
+two log lines against each other.
+
+**Rule: when a fix changes how a record is WRITTEN, ask in the same breath which already-written
+records are wrong, and whether anything still reads them.** If something does, the backfill is part
+of the fix and not a follow-up - and it belongs in a script with a dry run, for the same reason the
+original repair did. Write the backfill to share the fixed code's own definition (here
+`strandedSpendPatch`, extracted and used by both) rather than restating the figure: two copies of
+"conservative" eventually disagree, and then the ledger stops being comparable with itself. Make the
+guard that skips already-correct rows part of the QUERY, not a check after the read, so a second
+`--apply` is a no-op instead of a second charge.
+
+**The cheap detector this suggests, not yet built:** assert that a cumulative weekly total never
+decreases between consecutive ticks of the same week. That one invariant would have caught this on
+11-04 without anybody reasoning about JSON fields.
+
+## Lesson 77 - A deterministic failure that is retried is invisible per-run and compounds across runs (2026-11-05)
+
+The 2026-11-05 billed tick spent $3.34 and published one summary. Its log line gave `attempted=126
+published=1 gate_refusals=7`, and its skipped list showed three bills that `hit max_tokens` - which
+reads like three unlucky bills out of 126 and invites moving on.
+
+Aggregated across every tick since 2026-10-20, the same three bills are not unlucky. **HB 2 hit
+`max_tokens` on ten separate ticks** - every tick that ever reached it, 10-20 through 11-05. HB 2287
+did it nine times, HB 2017 seven. These are Missouri appropriations bills: their text does not fit,
+has never fit, and will not fit tomorrow. Each retry paid for a full authored output that was
+discarded.
+
+Two things hid it. A per-tick report is the wrong unit for a per-bill defect, and `skipped` is a
+single bucket holding two completely different things: "this failed for a reason that might not
+recur" and "this cannot succeed." The distinction was drawn carefully one layer up - the 2026-11-04
+fix deliberately stopped parking failures where two samplers disagreed, because retrying those is
+right - and `max_tokens` quietly inherited the lenient half. A size overflow is not a disagreement
+between samplers. It is a property of the bill.
+
+**Rule: before paying for a retry, ask whether the failure can be different next time.** A failure
+whose cause is a fixed property of the input - length, structure, a missing source - is a CLASS to
+park with written reasons (lesson 38), not an instance to retry. And when retries are allowed at
+all, measure repeats across runs, because the run that pays for the tenth attempt cannot see the
+first nine. One `group by identifier` over the skip reasons is the whole instrument.
+
+**The second half, which is lesson 66 recurring and worth naming as such:** a cost-per-output rate
+has a shelf life measured in days, because a recency-first queue drains its cheap work first. The
+billed lane measured $0.32 per published summary in ISO week 2026-W43, $0.79 in W44 and $2.56 in
+W45 - an eightfold degradation in three weeks, with no code change. Lesson 66 was the same shape
+under a cap raise. **A measured rate is a measurement of a moment; re-derive it before quoting it to
+justify a decision.**

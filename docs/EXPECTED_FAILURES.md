@@ -13,12 +13,12 @@ empty, say so plainly, because "no known failures" is itself information.
 
 ---
 
-## Currently green - re-verified 2026-10-20
+## Currently green - re-verified 2026-11-05
 
 | Instrument | Exit | Note |
 |---|---|---|
 | `npm run verify:migrations` | **0** | 40 probed, **30 applied, 0 MISSING**, 10 `unverifiable` because Tier 2 (`SUPABASE_DB_URL`) is off - a reported non-result, not a failure, and it does not affect the exit code |
-| `node --test` | **0** | **2,850 pass / 0 fail**, in a clean shell |
+| `node --test` | **0** | **2,883 pass / 0 fail**, in a clean shell (2026-11-05) |
 | `npm run check:ingest` | **1** | **RED from 2026-11-04 - see entry 3.** `us-senate` BROKEN on an upstream 403; the other four sources are ok. This is the one currently-red instrument and it is declared below. |
 
 **Entry 1 (the price guard) is CLOSED as of 2026-10-20** - funding arrived, prices were re-checked
@@ -28,6 +28,11 @@ and all three were unchanged, so the guard was cleared by its own stated conditi
 **One instrument is currently red: `npm run check:ingest`, declared as entry 3** (us-senate, upstream
 403 from senate.gov, first seen 2026-11-04). Everything else is green. Per the rule above: anything
 red and NOT listed here is a real failure.
+
+**Entry 4 is open and NO instrument reports it** - that is the point of listing it. Appropriations
+bills blow `max_tokens` and are retried by the billed scheduler every tick, which costs money and
+leaves every instrument green, because a paid retry of an impossible bill is not a failure of
+anything that gets checked.
 
 ---
 
@@ -156,6 +161,46 @@ day onward. Urgency is therefore tied to the Senate's calendar, not to the clock
 when the next vote happens. Suppressing it would mean discovering the hole after it exists rather
 than before. If the redness becomes alarm fatigue, that is a conversation to have explicitly rather
 than a `continue-on-error` added quietly.
+
+## 4. Missouri APPROPRIATIONS bills exceed `max_tokens` and are retried every tick (open, found 2026-11-05)
+
+**Symptom.** A billed `scheduled-summaries` tick records skip reasons of the form
+`coverage:HB 2: hit max_tokens` or `verify:HB 19: hit max_tokens`. Per tick this looks like two or
+three unlucky bills out of a hundred-odd attempted.
+
+**It is not per-tick.** Aggregated across every tick since 2026-10-20:
+
+| Bill | Ticks that hit `max_tokens` | First | Last |
+|---|---|---|---|
+| HB 2 | **10** | 2026-10-20 | 2026-11-05 |
+| HB 2287 | 9 | 2026-10-23 | 2026-11-05 |
+| HB 2017 | 7 | 2026-10-23 | 2026-11-02 |
+| HB 19 | 2 | 2026-11-04 | 2026-11-05 |
+| HB 12, HB 519, HB 1019, HB 2004, HB 2007, SB 40, SB 912 | 1 each | 2026-10-23 | 2026-11-04 |
+
+HB 2, 5, 7, 8, 12, 15, 19 and the HB 20xx range are Missouri's **appropriations bills** - the state
+budget. Their text does not fit, has never fit, and will not fit tomorrow. Every retry pays for a
+full authored output that is then discarded.
+
+**Why it is not already parked.** `skipped` is one bucket holding two different things: a failure
+that might not recur, and a failure that cannot succeed. The 2026-11-04 fix deliberately stopped
+parking the first kind (a completeness checker that malformed its own output is worth retrying -
+`isStochasticRecordFailure`), and `max_tokens` inherited the lenient half without anyone deciding
+that. A size overflow is not two samplers disagreeing; it is a property of the bill.
+
+**The condition that clears it.** Either (a) `max_tokens` becomes a parking reason - deterministic
+by cause, so it belongs in `parked_bills` with a written reason like the other structural classes -
+or (b) appropriations bills get a different authoring path that does not try to summarise the whole
+text at once. (a) is the small change and stops the bleeding; (b) is the only one that ever produces
+a summary for the state budget, which is arguably the single most consequential bill class on the
+site. **Neither is built. This entry is open.**
+
+**Reading note for whoever picks this up:** do not re-derive the counts above from one tick. The
+instrument is one `group by` over the skip reasons across ticks - the query is in `CHATLOG.md` under
+2026-11-05 - because the tick that pays for the tenth attempt cannot see the first nine.
+PLAYBOOK_DELTA lesson 77.
+
+---
 
 ## 1. ~~`VisibleGov Scheduled Summaries` fails daily from 2026-09-01 06:00~~ CLOSED 2026-10-20
 

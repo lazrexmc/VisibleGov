@@ -25,6 +25,7 @@
     "schedule:ingest": "node --env-file=.env scripts/scheduled-ingest.js",
     "verify:migrations": "node --env-file=.env scripts/verify-migrations.mjs",
     "close-stranded": "node --env-file=.env scripts/close-stranded-runs.mjs",
+    "backfill-stranded-spend": "node --env-file=.env scripts/backfill-stranded-spend.mjs",
     "check:ingest": "node --env-file=.env scripts/check-ingest-health.mjs",
     "wave:cost": "node scripts/wave-cost.mjs"
   },

@@ -57,6 +57,39 @@ function parseArgs(argv) {
   return out;
 }
 
+// PRESERVE THE SPEND CHARGE ACROSS CLOSURE (2026-11-04). Closing a row used to make its spend
+// VANISH from the billed scheduler's weekly ledger. summarizeWeekSpend charges a status='running'
+// row the conservative per-tick cap, but reads a CLOSED row's detail.spent_usd - which closureFor
+// never wrote - so a closed crash counted as $0.
+//
+// That made closing a row the UNSAFE direction: a tick that died after spending real money became
+// free in the books, and the weekly cap quietly stopped being the cap. Six scheduled-summaries rows
+// were closed on 2026-11-04, each having spent up to the cap, and all six read as $0 afterwards.
+//
+// The true figure is unknowable - the cost tracker died with the process - so the conservative cap
+// is recorded, which is exactly what the ledger was already charging while the row sat open.
+// week_key travels with it because the ledger skips any row whose week_key does not match the week
+// being summed; without it the value would be written and never read.
+//
+// Scoped to the billed runner ONLY. Other sources have no spend ledger, and inventing a dollar
+// figure for an unbilled ingest run would fabricate a cost that never existed.
+//
+// EXTRACTED 2026-11-05 so that closureFor (closing a row now) and backfill-stranded-spend.mjs
+// (repairing the six rows closed BEFORE this existed) cannot drift into recording different
+// figures, different week derivations, or different estimate labelling for the same situation. Two
+// copies of a conservative charge will eventually disagree about what "conservative" was, and then
+// the ledger's own history stops being comparable with itself.
+export function strandedSpendPatch(run) {
+  if (run?.source !== 'scheduled-summaries') return {};
+  if (run?.detail?.spent_usd != null) return {};
+  return {
+    spent_usd: STRANDED_TICK_CHARGE_USD,
+    week_key: run.detail?.week_key ?? isoWeekKeyOf(run.started_at),
+    spend_is_estimated: true,
+    spend_estimate_basis: 'the per-tick cap in force at closure; the real figure died with the process',
+  };
+}
+
 export function closureFor(run, { now = new Date() } = {}) {
   const startedMs = new Date(run.started_at).getTime();
   const stuckHours = Math.floor((now.getTime() - startedMs) / 3600000);
@@ -67,31 +100,7 @@ export function closureFor(run, { now = new Date() } = {}) {
       ...(run.detail && typeof run.detail === 'object' ? run.detail : {}),
       closed_by: 'scripts/close-stranded-runs.mjs',
       closed_at: now.toISOString(),
-      // PRESERVE THE SPEND CHARGE ACROSS CLOSURE (2026-11-04). Closing a row used to make its
-      // spend VANISH from the billed scheduler's weekly ledger. summarizeWeekSpend charges a
-      // status='running' row the conservative per-tick cap, but reads a CLOSED row's
-      // detail.spent_usd - which this function never wrote - so a closed crash counted as $0.
-      //
-      // That made closing a row the UNSAFE direction: a tick that died after spending real money
-      // became free in the books, and the weekly cap quietly stopped being the cap. Six
-      // scheduled-summaries rows were closed on 2026-11-04, each having spent up to the cap, and
-      // all six read as $0 afterwards.
-      //
-      // The true figure is unknowable - the cost tracker died with the process - so the conservative
-      // cap is recorded, which is exactly what the ledger was already charging while the row sat
-      // open. week_key travels with it because the ledger skips any row whose week_key does not
-      // match the week being summed; without it the value would be written and never read.
-      //
-      // Scoped to the billed runner ONLY. Other sources have no spend ledger, and inventing a
-      // dollar figure for an unbilled ingest run would fabricate a cost that never existed.
-      ...(run.source === 'scheduled-summaries' && run.detail?.spent_usd == null
-        ? {
-          spent_usd: STRANDED_TICK_CHARGE_USD,
-          week_key: run.detail?.week_key ?? isoWeekKeyOf(run.started_at),
-          spend_is_estimated: true,
-          spend_estimate_basis: 'the per-tick cap in force at closure; the real figure died with the process',
-        }
-        : {}),
+      ...strandedSpendPatch(run),
       reason: `process died without closing the run; row sat at status='running' for ${stuckHours}h. `
         + 'finished_at set to started_at because the true end time is unknowable — inventing one '
         + 'would corrupt duration analysis. Recorded failed, not succeeded: it did not finish.',
