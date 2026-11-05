@@ -36,6 +36,18 @@ it costs money every morning: `docs/EXPECTED_FAILURES.md` entry 4** - appropriat
 
 ### Nothing is running. Nothing is in flight. No lane needs a babysitter.
 
+**BUT ONE THING FIRES ON ITS OWN while nobody is here: the 06:00 billed tick.** Lance went AFK on
+2026-11-05 after being given the command to disable it (`schtasks /change /tn "VisibleGov Scheduled
+Summaries" /disable`). **Whether he ran it is NOT recorded here, because this session cannot see it
+and an agent never runs `schtasks` - not even `/query`.** So do not assume either way.
+
+**Check it by artifact, the way everything else in this repo is checked:** a new dated file in
+`.superpowers/artifacts/summary-scheduler-logs/` means it fired; no new file means it did not. If it
+fired, expect roughly **-$3.40 for about one published summary** per morning (see the degradation
+table under item 2 below), plus another paid retry of HB 2 and friends
+(`docs/EXPECTED_FAILURES.md` entry 4). Several quiet mornings of that is the single largest
+avoidable spend in the project right now.
+
 ### THE THREE THINGS WAITING ON LANCE'S OWN HANDS
 
 **1. Apply the unpark (drafted, dry-run verified, 4 bills):**
