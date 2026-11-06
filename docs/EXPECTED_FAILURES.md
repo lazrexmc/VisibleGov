@@ -162,7 +162,7 @@ when the next vote happens. Suppressing it would mean discovering the hole after
 than before. If the redness becomes alarm fatigue, that is a conversation to have explicitly rather
 than a `continue-on-error` added quietly.
 
-## 4. Missouri APPROPRIATIONS bills exceed `max_tokens` and are retried every tick (open, found 2026-11-05)
+## 4. ~~Missouri APPROPRIATIONS bills exceed `max_tokens` and are retried every tick~~ FIXED IN CODE 2026-11-06, one residual below
 
 **Symptom.** A billed `scheduled-summaries` tick records skip reasons of the form
 `coverage:HB 2: hit max_tokens` or `verify:HB 19: hit max_tokens`. Per tick this looks like two or
@@ -188,12 +188,48 @@ parking the first kind (a completeness checker that malformed its own output is 
 `isStochasticRecordFailure`), and `max_tokens` inherited the lenient half without anyone deciding
 that. A size overflow is not two samplers disagreeing; it is a property of the bill.
 
-**The condition that clears it.** Either (a) `max_tokens` becomes a parking reason - deterministic
-by cause, so it belongs in `parked_bills` with a written reason like the other structural classes -
-or (b) appropriations bills get a different authoring path that does not try to summarise the whole
-text at once. (a) is the small change and stops the bleeding; (b) is the only one that ever produces
-a summary for the state budget, which is arguably the single most consequential bill class on the
-site. **Neither is built. This entry is open.**
+**FIXED IN CODE 2026-11-06 (commit in `CHATLOG.md` under that date).** `src/lib/overflow-parks.js`
+plus wiring in `scripts/scheduled-summaries.js`. A `max_tokens` stop is now permanent on unchanged
+input, keyed by `bill_id` + the bill's text hash, and the bill is skipped **before any paid call** -
+not re-authored and discarded. The record stores the STAGE and the token limit it hit, so the
+suppression expires by itself if the bill text changes or that stage's allowance is raised. Agreed
+in shape with RapidForge under `docs/JOINT_CHANGE_PROTOCOL.md`; 28 tests.
+
+**Why a separate store and not `parked_bills` / `parked.json`** (which is what the earlier option
+(a) in this entry proposed, and it was the wrong call): that store means a human-reviewed judgement,
+keyed by `bill_id` ALONE and unparked by a person. This one is keyed by bill+TEXT and expires on its
+own. A `bill_id`-only key cannot express the hash scoping that makes an amended bill retry, and
+writing self-expiring rows into the human store would have collided with the 4-bill unpark already
+awaiting Lance.
+
+**Not every stage is equal, which is why the stage is recorded.** `coverage` caps output at 3,000
+tokens; `verify` gets 32,000. HB 2 failed at `coverage` - the tightest stage - so it is NOT proven
+impossible at a larger allowance. Raising that limit releases the park automatically.
+
+**THE RESIDUAL, and it costs about $3 once.** The twelve known offenders are deliberately **NOT**
+pre-seeded into the store, so the first tick after the runner is re-enabled pays once for each and
+then never again. They could not be seeded: the historical tick records log `identifier ?? bill_id`
+and for this lane `identifier` is always set, so the offenders are recorded as labels like `HB 2` -
+**and `HB 2` matches 24 distinct bill rows**, because Missouri renumbers appropriations bills every
+session. Seeding would have meant guessing one of 24 and writing a suppression against the wrong
+bill, which removes a summarisable bill from the site. Paying $3 beats guessing. PLAYBOOK_DELTA
+lesson 78.
+
+**STILL OPEN, and it is a product question rather than a defect:** nothing yet produces a summary
+for the state budget - arguably the most consequential bill class on the site. That needs a chunked
+authoring path or a larger allowance, and RapidForge's note is explicit that it is Lance's call, not
+part of this fix. The suppression stops the bleeding; it does not make these bills readable.
+
+**Also open, deliberately not decided while Lance is away:** overflow-parked bills are still counted
+inside `npm run status`'s "READY to summarize". By his own rule about numbers that imply future work
+they arguably should not be, but that moves a headline denominator, so it is left visible and
+flagged rather than changed quietly.
+
+**Where it is counted now, which was the third thing this fix owed.** `npm run status` prints an
+`overflow-parked (unpaid, auto-expiring)` line (printed even at zero - an absent line cannot be told
+from one nobody wrote), the tick log line carries `permanent_skips=N overflow_parked=N`, and the run
+row's `detail.permanent_skips` is a bucket SEPARATE from `detail.skipped`. The split is the point:
+ten paid retries of HB 2 previously read as ten ordinary skips.
 
 **Reading note for whoever picks this up:** do not re-derive the counts above from one tick. The
 instrument is one `group by` over the skip reasons across ticks - the query is in `CHATLOG.md` under

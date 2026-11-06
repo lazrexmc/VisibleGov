@@ -662,6 +662,13 @@ cases, `main()` still exits 0 - an expected, logged stop, not a Task-Scheduler-v
 - `scheduled-summaries/stages/<bill_id>-<hash8>.json` - the per-stage checkpoints above (about
   60 files on 2026-08-23; they accumulate one per bill-text attempted and are harmless to keep).
 - `scheduled-summaries/parked.json` - the park list ("Unparking a bill").
+- `scheduled-summaries/overflow-parks.json` - bills whose output overflowed `max_tokens`, keyed by
+  `bill_id@texthash16`. A SEPARATE store from `parked.json` on purpose: these are machine-managed
+  and self-expiring (released when the bill text changes or the stage's output allowance is raised),
+  need no human unparking, and are skipped before any paid call. Added 2026-11-06 after
+  appropriations bills were re-authored and discarded on every tick for two weeks - HB 2 ten times.
+  `src/lib/overflow-parks.js` carries the full reasoning; `docs/EXPECTED_FAILURES.md` entry 4 the
+  history and the residuals.
 - `summary-scheduler-logs/YYYY-MM-DD.log` - the one-line-per-tick log ("Reading the logs").
 - `summary-scheduler.lock.json` - present only while a tick runs (or after a hard kill, until
   reclaimed).

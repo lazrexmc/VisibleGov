@@ -49,6 +49,9 @@ import { loadDraftObjections } from '../src/lib/draft-objections.js';
 import { MAX_TEXT_CHARS } from '../src/lib/summarizer.js';
 import { sessionRecencyKey } from '../src/lib/session-dates.js';
 import { pickCurrentTextRow } from '../src/cli/summary-queue.js';
+import {
+  overflowSuppression, parseMaxTokensFailure, overflowRecordFor, overflowKey,
+} from '../src/lib/overflow-parks.js';
 
 // RAISED 2026-10-20 on Lance's explicit approval, after Anthropic granted $200 in API credits:
 // weekly $5.00 -> $25.00, per-tick $1.00 -> $4.00.
@@ -206,6 +209,12 @@ export const LOG_DIR = path.join(ARTIFACTS_DIR, 'summary-scheduler-logs');
 export const RECORDS_DIR = path.join(ARTIFACTS_DIR, 'scheduled-summaries');
 export const STAGE_DIR = path.join(RECORDS_DIR, 'stages');
 export const PARKED_PATH = path.join(RECORDS_DIR, 'parked.json');
+// SEPARATE STORE FROM parked.json, DELIBERATELY (2026-11-06). parked.json means a human-reviewed
+// judgement keyed by bill_id ALONE and unparked by a person. An overflow suppression is keyed by
+// bill+TEXT and expires by itself, so it cannot live in a store whose key cannot express the hash
+// scoping that is the whole point - and mixing them would collide with the 4-bill unpark already
+// drafted and awaiting Lance. See src/lib/overflow-parks.js's header.
+export const OVERFLOW_PARKS_PATH = path.join(RECORDS_DIR, 'overflow-parks.json');
 
 // 30 minutes: generous headroom for a full tick's worth of streamed calls (spec: "~25 streamed
 // calls"). The lock's OWN declared duration, fixed and uniform per tick — unlike
@@ -368,6 +377,15 @@ async function runTickLocked(deps) {
   const parked = parkedRaw ?? {};
   const parkedIds = new Set(Object.keys(parked));
 
+  // Same null-means-unreadable convention as readParked: an unreadable store must never be
+  // merge-written, or every already-suppressed bill silently becomes re-eligible and starts
+  // costing money again on the next tick.
+  const overflowRaw = deps.readOverflowParks ? deps.readOverflowParks() : {};
+  const overflowReadFailed = overflowRaw === null;
+  const overflowParks = overflowRaw ?? {};
+  const overflowAdditions = {};
+  const permanentSkips = [];
+
   const assembled = assembleTick({
     freshQueue, conversions, monsters: monsterQueue, parkedIds,
   });
@@ -452,6 +470,24 @@ async function runTickLocked(deps) {
         skipped.push({
           identifier: item.identifier ?? item.bill_id,
           reason: 'insufficient headroom for a monster bill this tick (needs > 1.5x the worst-bill estimate)',
+        });
+        continue;
+      }
+
+      // PERMANENT, UNPAID SKIP — the whole point of the overflow store (2026-11-06).
+      // Checked BEFORE `attempted += 1` and before every paid call, because a bill counted as
+      // attempted or costed is a bill this fix failed to protect. Appropriations bills blew
+      // max_tokens on every tick since 2026-10-20 (HB 2 ten times) and each retry paid for an
+      // output that was discarded. This is the line that stops that.
+      const billTextHash = lane === 'conversion' ? item.draftRow?.bill_text_hash : item.bill_text_hash;
+      const suppression = overflowSuppression(overflowParks, { billId: item.bill_id, textHash: billTextHash });
+      if (suppression.suppressed) {
+        permanentSkips.push({
+          identifier: item.identifier ?? suppression.record?.identifier ?? item.bill_id,
+          bill_id: item.bill_id,
+          stage: suppression.record?.stage,
+          max_tokens: suppression.record?.max_tokens,
+          reason: suppression.reason,
         });
         continue;
       }
@@ -547,6 +583,27 @@ async function runTickLocked(deps) {
           deps.appendLog('BALANCE DEPLETED — reload required');
           break;
         }
+        // A max_tokens stop is PERMANENT on unchanged input: the output does not fit and will not
+        // fit again tomorrow. Record it so no future tick pays for this bill at this text, keyed by
+        // the stage and the limit it hit so the park expires by itself if either changes.
+        //
+        // Only a max_tokens stop takes this path. parseMaxTokensFailure returns null for a refusal,
+        // a billing error, a completeness failure or an unrecognised stage - all of which stay
+        // transient, because permanently suppressing a bill that was merely unlucky removes it from
+        // a transparency site with no symptom anywhere, which is worse than paying once more.
+        const overflow = parseMaxTokensFailure(err.message);
+        if (overflow) {
+          const hashForKey = lane === 'conversion' ? item.draftRow?.bill_text_hash : item.bill_text_hash;
+          const record = overflowRecordFor({
+            billId: item.bill_id,
+            identifier: item.identifier ?? overflow.identifier,
+            stage: overflow.stage,
+            textHash: hashForKey,
+            now,
+          });
+          const key = overflowKey(item.bill_id, hashForKey);
+          if (record && key) overflowAdditions[key] = record;
+        }
         // Non-billing error: checkpoints already preserved whatever paid stages completed; skip
         // this bill honestly and keep going — one bad bill must never starve the rest of the tick.
         skipped.push({ identifier: item.identifier ?? item.bill_id, reason: err.message });
@@ -637,6 +694,18 @@ async function runTickLocked(deps) {
       }
     }
 
+    // Same hazard, same refusal as parked.json above: merge-writing onto a store this tick could
+    // not read would silently DELETE every bill already suppressed, re-enabling a paid retry of
+    // all of them. The new entries are simply recorded again on a future healthy tick - at the cost
+    // of one more paid attempt each, which is the cheaper of the two mistakes.
+    if (Object.keys(overflowAdditions).length > 0) {
+      if (overflowReadFailed) {
+        deps.appendLog(`overflow-parks.json was unreadable this tick — ${Object.keys(overflowAdditions).length} new overflow entry/entries NOT written to avoid clobbering the existing file`);
+      } else if (deps.writeOverflowParks) {
+        deps.writeOverflowParks({ ...overflowParks, ...overflowAdditions });
+      }
+    }
+
     const spentUsd = tracker.spentUsd();
     // I8: routine, expected conversion-lane skips (a draft-only bill with no verifications on file
     // yet — see the `routine: true` tag above) must never force 'partial' on an otherwise healthy
@@ -655,6 +724,13 @@ async function runTickLocked(deps) {
       balance_depleted: balanceDepleted,
       lanes: { fresh: freshCount, conversion: conversionResults.length, monster: monsterCount },
       skipped,
+      // SPLIT FROM `skipped` ON PURPOSE (2026-11-06). `skipped` is transient - things that may
+      // succeed on another tick. These are permanent exclusions that cost nothing, and burying them
+      // in the same bucket is precisely the blind spot being fixed: ten paid retries of HB 2 read as
+      // ten ordinary skips. They also deliberately do NOT force status='partial', because a
+      // declared, free, expected exclusion is not an anomaly.
+      permanent_skips: permanentSkips,
+      overflow_parked: Object.keys(overflowAdditions).length,
     };
     await deps.closeRunFn(deps.client, runId, status, detail);
     runClosed = true;
@@ -666,6 +742,7 @@ async function runTickLocked(deps) {
     const newWeeklyTotal = weeklySpentUsd + spentUsd;
     const logLine = `${finishedAt.toISOString()} tick=${runId} attempted=${attempted} published=${published} `
       + `gate_refusals=${gateRefusals} spent=$${spentUsd.toFixed(4)} week=${weekKey} total=$${newWeeklyTotal.toFixed(4)}/${weeklyCapUsd.toFixed(2)}`
+      + ` permanent_skips=${permanentSkips.length} overflow_parked=${Object.keys(overflowAdditions).length}`
       + `${balanceDepleted ? ' [BALANCE DEPLETED]' : ''}`;
     deps.appendLog(logLine);
 
@@ -797,6 +874,24 @@ function writeParkedReal(obj) {
   writeFileSync(PARKED_PATH, JSON.stringify(obj, null, 2), 'utf8');
 }
 
+// Mirrors readParkedReal's three-way contract exactly: {} when the file has never existed (a first
+// run is not a fault), null when it exists but cannot be read or parsed (unknown - never overwrite),
+// and the parsed object otherwise. The distinction is load-bearing: see the writeOverflowParks call.
+function readOverflowParksReal() {
+  try {
+    return JSON.parse(readFileSync(OVERFLOW_PARKS_PATH, 'utf8'));
+  } catch (err) {
+    if (err?.code === 'ENOENT') return {};
+    console.error(`overflow-parks.json unreadable (${err.message}) — treating the overflow list as unknown this tick, will not overwrite it`);
+    return null;
+  }
+}
+
+function writeOverflowParksReal(obj) {
+  mkdirSync(path.dirname(OVERFLOW_PARKS_PATH), { recursive: true });
+  writeFileSync(OVERFLOW_PARKS_PATH, JSON.stringify(obj, null, 2), 'utf8');
+}
+
 async function main() {
   const dryRun = process.argv.slice(2).includes('--dry-run');
 
@@ -838,6 +933,8 @@ async function main() {
     appendLog: appendLogReal,
     readParked: readParkedReal,
     writeParked: writeParkedReal,
+    readOverflowParks: readOverflowParksReal,
+    writeOverflowParks: writeOverflowParksReal,
     dryRun,
   });
 

@@ -122,7 +122,7 @@ test('estimateBillCostUsd: I3 — matches the review\'s own worked example, padd
 
 function fakeDeps(overrides = {}) {
   const calls = {
-    childCli: [], closed: [], logs: [], records: [], parkedWrites: [],
+    childCli: [], closed: [], logs: [], records: [], parkedWrites: [], overflowWrites: [],
   };
   return {
     calls,
@@ -152,6 +152,8 @@ function fakeDeps(overrides = {}) {
       appendLog: (line) => { calls.logs.push(line); },
       readParked: () => overrides.parked ?? {},
       writeParked: (payload) => { calls.parkedWrites.push(payload); },
+      readOverflowParks: () => (overrides.overflowParks === undefined ? {} : overrides.overflowParks),
+      writeOverflowParks: (payload) => { calls.overflowWrites.push(payload); },
       dryRun: overrides.dryRun ?? false,
       ...overrides.deps,
     },
@@ -665,4 +667,159 @@ test('summarizeWeekSpend: a CLOSED crash carrying the estimated charge counts th
     '2026-W33', PER_TICK_CAP_USD,
   );
   assert.equal(closed.spentUsd, open.spentUsd, 'closing a row must not change what the week was charged');
+});
+
+// ---------------------------------------------------------------------------
+// max_tokens overflow: permanent, hash-keyed, UNPAID (2026-11-06).
+//
+// Appropriations bills exceed the output allowance and were retried on every tick - HB 2 ten times
+// between 2026-10-20 and 2026-11-05, each retry paying for a discarded output
+// (docs/EXPECTED_FAILURES.md entry 4). Agreed shape, from RapidForge under JOINT_CHANGE_PROTOCOL:
+// permanent on unchanged input, keyed by text hash, split out of `skipped`, and counted where a
+// person sees it.
+//
+// The expensive half of this is "UNPAID". A suppression that still ran the chain would be a
+// relabelling, not a fix, so the first test asserts zero chain calls and zero spend - the only
+// assertion here that money depends on.
+// ---------------------------------------------------------------------------
+
+const OVERFLOW_BILL = {
+  bill_id: 'ovf1', identifier: 'HB 2', title: 'Appropriations', bill_text_hash: 'hash-aaa', text_length: 100,
+};
+
+function overflowStore(overrides = {}) {
+  return {
+    'ovf1@hash-aaa': {
+      bill_id: 'ovf1', identifier: 'HB 2', stage: 'coverage', max_tokens: 3000,
+      text_hash: 'hash-aaa', recorded_at: '2026-11-05T12:00:00Z', reason: 'hit max_tokens',
+      ...overrides,
+    },
+  };
+}
+
+test('runTick: an overflow-parked bill costs NOTHING - no chain call, no spend, not even attempted', async () => {
+  let chainCalls = 0;
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    overflowParks: overflowStore(),
+    deps: { runBillChainFn: async () => { chainCalls += 1; throw new Error('must never be called'); } },
+  });
+  await runTick(deps);
+  assert.equal(chainCalls, 0, 'suppression that still pays the chain is a relabelling, not a fix');
+  const closed = calls.closed.at(-1);
+  assert.equal(Number(closed.detail.spent_usd ?? 0), 0, 'the whole point: zero dollars on a bill known to overflow');
+  assert.equal(closed.detail.attempted ?? 0, 0, 'nothing was attempted, so it must not be counted as attempted');
+});
+
+test('runTick: an overflow-parked bill lands in permanent_skips, NOT in skipped', async () => {
+  // The split RapidForge asked for. Leaving it in `skipped` would hide a permanent exclusion among
+  // transient ones, which is the blind spot being fixed, not a fix.
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    overflowParks: overflowStore(),
+  });
+  await runTick(deps);
+  const d = calls.closed.at(-1).detail;
+  assert.equal((d.permanent_skips ?? []).length, 1);
+  assert.equal(d.permanent_skips[0].identifier, 'HB 2');
+  assert.match(d.permanent_skips[0].reason, /max_tokens/);
+  assert.match(d.permanent_skips[0].reason, /UNPAID/, 'a person reading this must see no money was spent');
+  assert.equal(
+    (d.skipped ?? []).filter((x) => String(x.identifier) === 'HB 2').length, 0,
+    'a permanent exclusion must not also appear in the transient bucket',
+  );
+});
+
+test('runTick: an overflow-parked bill is counted where a person sees it - the tick log line', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    overflowParks: overflowStore(),
+  });
+  await runTick(deps);
+  assert.ok(
+    calls.logs.some((l) => /permanent_skips=1/.test(l)),
+    `the one-line-per-tick log must carry the count; got: ${JSON.stringify(calls.logs)}`,
+  );
+});
+
+test('runTick: a max_tokens failure WRITES an overflow record keyed by bill and text hash', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    deps: { runBillChainFn: async () => { throw new Error('coverage:HB 2: hit max_tokens'); } },
+  });
+  await runTick(deps);
+  const written = calls.overflowWrites.at(-1);
+  assert.ok(written, 'a max_tokens stop must be recorded, or the next tick pays again');
+  assert.ok(written['ovf1@hash-aaa'], 'keyed by bill + text hash, so an amended bill retries');
+  assert.equal(written['ovf1@hash-aaa'].stage, 'coverage');
+  assert.equal(written['ovf1@hash-aaa'].max_tokens, 3000, 'the limit it hit, so the park can expire');
+});
+
+test('runTick: a max_tokens failure does NOT touch parked.json - that store means human judgement', async () => {
+  // parked.json is keyed by bill_id alone and is unparked by a person. Writing a self-expiring,
+  // hash-scoped record into it would corrupt both meanings and collide with the unpark awaiting Lance.
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    deps: { runBillChainFn: async () => { throw new Error('coverage:HB 2: hit max_tokens'); } },
+  });
+  await runTick(deps);
+  assert.equal(calls.parkedWrites.length, 0, 'the human park store must be left alone');
+});
+
+test('runTick: a NON-max_tokens chain failure writes no overflow record and stays transient', async () => {
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    deps: { runBillChainFn: async () => { throw new Error('coverage:HB 2: refused to answer'); } },
+  });
+  await runTick(deps);
+  assert.equal(calls.overflowWrites.length, 0, 'only a max_tokens stop is permanent');
+  const d = calls.closed.at(-1).detail;
+  assert.ok((d.skipped ?? []).some((x) => /refused/.test(x.reason)), 'it belongs in the transient bucket');
+});
+
+test('runTick: an overflow park EXPIRES by itself once the bill text changes', async () => {
+  // The store holds hash-aaa; the queue now offers hash-bbb, a different input.
+  let chainCalls = 0;
+  const { deps } = fakeDeps({
+    queue: [{ ...OVERFLOW_BILL, bill_text_hash: 'hash-bbb' }],
+    texts: { ovf1: { content: 'amended text', content_hash: 'hash-bbb' } },
+    overflowParks: overflowStore(),
+    deps: {
+      runBillChainFn: async (a, tracker, { bill }) => {
+        chainCalls += 1;
+        return {
+          envelope: {
+            bill_id: bill.bill_id, identifier: bill.identifier, bill_text_hash: bill.bill_text_hash,
+            summary: {}, verdicts: [], completeness: {}, provenance: 'api',
+            author_model: 'claude-haiku-4-5', verifier_model: 'claude-sonnet-5',
+          },
+        };
+      },
+    },
+  });
+  await runTick(deps);
+  assert.equal(chainCalls, 1, 'an amended appropriations bill deserves one fresh attempt');
+});
+
+test('runTick: an UNREADABLE overflow store is never clobbered by this tick additions', async () => {
+  // Same hazard as parked.json: merge-writing onto a store we could not read would silently delete
+  // every bill already suppressed, quietly re-enabling paid retries of all of them.
+  const { deps, calls } = fakeDeps({
+    queue: [OVERFLOW_BILL],
+    texts: { ovf1: { content: 'text', content_hash: 'hash-aaa' } },
+    overflowParks: null,
+    deps: { runBillChainFn: async () => { throw new Error('coverage:HB 2: hit max_tokens'); } },
+  });
+  await runTick(deps);
+  assert.equal(calls.overflowWrites.length, 0, 'never merge-write onto a store that could not be read');
+  assert.ok(
+    calls.logs.some((l) => /overflow/i.test(l) && /unreadable|NOT written/i.test(l)),
+    `the refusal must be logged, not silent; got: ${JSON.stringify(calls.logs)}`,
+  );
 });

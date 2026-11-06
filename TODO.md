@@ -4,10 +4,10 @@
 
 ---
 
-## RESUME HERE - verified live 2026-11-05, 07:0x CST. Read this block first.
+## RESUME HERE - verified live 2026-11-06. Read this block first.
 
 **Every number here was produced by running the thing in this session, not by reading a previous
-claim.** Tree `<see git log>`, clean, pushed. Suite **2,883 pass / 0 fail** (`node --test`, in a
+claim.** Tree `<see git log>`, clean, pushed. Suite **2,911 pass / 0 fail** (`node --test`, in a
 clean shell - NEVER `source .env` first, it turns 2 correct tests red).
 
 **WHAT CHANGED 2026-11-05.** The six crashed billed ticks that sat at `status='running'` from 10-20
@@ -115,13 +115,21 @@ parked - an identity error means "we got a page but not the one we asked for", w
 so the runner correctly leaves them eligible. The sweep aborts at 20 such errors
 (`IDENTITY_ABORT_THRESHOLD`); we saw 10.
 
-**c2. Decide what to do about appropriations bills - `docs/EXPECTED_FAILURES.md` entry 4.** This
-is the only open item on this list that is actively spending money. `max_tokens` is a DETERMINISTIC
-failure (HB 2 has hit it on all ten ticks that reached it) and is currently in the same lenient
-`skipped` bucket as genuinely retryable failures, so the scheduler pays to re-author it every
-morning. Smallest fix: make `max_tokens` a parking reason. Real fix: a chunked authoring path, which
-is the only route that ever produces a summary for the state budget - arguably the most
-consequential bill class on the whole site. Read the entry before touching either.
+**c2. ~~Decide what to do about appropriations bills~~ FIXED IN CODE 2026-11-06 - what is LEFT is a
+product question, not a leak.** The money leak is closed: a `max_tokens` stop is now permanent on
+unchanged input, keyed by `bill_id` + text hash, and the bill is skipped **before any paid call**
+(`src/lib/overflow-parks.js`; `docs/EXPECTED_FAILURES.md` entry 4). It expires by itself if the text
+changes or the stage's allowance rises, so nothing needs unparking. Two residuals, both deliberate:
+
+- **About $3, once.** The twelve known offenders are NOT pre-seeded, so the first tick after the
+  runner is re-enabled pays once per bill then never again. They *cannot* be seeded - the historical
+  records log the label `HB 2`, and **`HB 2` matches 24 distinct bill rows** because Missouri
+  renumbers appropriations bills every session. Paying $3 beats guessing one of 24 and suppressing
+  the wrong bill. PLAYBOOK 78.
+- **Nothing yet summarises the state budget**, which is arguably the site's most consequential bill
+  class. That needs a chunked authoring path or a bigger allowance and is **Lance's product call** -
+  RapidForge's hand-off says so explicitly. The fix stops the bleeding; it does not make these
+  bills readable.
 
 **d. Investigate HJR 114 and SJR 41 - a SEPARATE defect from today's park fix.** Both failed because
 a `key_provisions[].section` string is not verbatim in the bill text: HJR 114 cites `"Section 7,

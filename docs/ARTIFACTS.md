@@ -157,6 +157,12 @@ is in Supabase in every case.
 
 ### `scheduled-summaries/` - the daily 6 AM scheduler's own state (`scripts/scheduled-summaries.js`)
 
+- **`overflow-parks.json` - cost-bearing, added 2026-11-06.** `bill_id@texthash16` -> the stage, the
+  token limit it hit, and when. Losing it costs one paid re-attempt per entry, because each bill is
+  re-authored and discarded once before being re-recorded. Never merge-write it after a failed read:
+  the scheduler refuses and logs instead, because clobbering it silently re-enables paid retries of
+  every bill in it. Distinct from `parked.json` in meaning - self-expiring and machine-managed, not
+  a human judgement; `src/lib/overflow-parks.js` has the reasoning.
 - **`parked.json` - cost-bearing.** The park list (`bill_id` -> reason, kept as an editable file on
   purpose; `docs/SCHEDULED_SUMMARIES.md` "Unparking a bill"). A parked bill is never attempted
   again. If the file is lost, the parked bills re-enter the lanes on the next tick - a

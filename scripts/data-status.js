@@ -32,6 +32,7 @@ const asJson = process.argv.includes('--json');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..');
 const PARKED_PATH = path.join(REPO_ROOT, '.superpowers', 'artifacts', 'scheduled-summaries', 'parked.json');
+const OVERFLOW_PARKS_PATH = path.join(REPO_ROOT, '.superpowers', 'artifacts', 'scheduled-summaries', 'overflow-parks.json');
 
 // Exact count via content-range. PostgREST caps returned ROWS at 1000, but a count=exact HEAD-style
 // request returns the true total in the header regardless — this is the only counting method in
@@ -216,6 +217,17 @@ async function main() {
   // exactly the moment a human most needed to know 31 bills were parked and nothing was working
   // them. Never gate a detector's display on the liveness of the thing it monitors: the parked set
   // is a fact on disk and does not stop being true because the scheduler stopped.
+  let overflowParkedCount = 0;
+  let overflowParkedUnreadable = false;
+  try {
+    overflowParkedCount = Object.keys(JSON.parse(readFileSync(OVERFLOW_PARKS_PATH, 'utf8'))).length;
+  } catch (err) {
+    // ENOENT is the normal state before the first overflow is ever recorded, and it means ZERO, not
+    // unknown. Any other error means the file exists and could not be read, which must not read as
+    // zero - a silent zero here is exactly the blind spot this count was added to close.
+    if (err?.code !== 'ENOENT') { overflowParkedUnreadable = true; overflowParkedCount = null; }
+  }
+
   let parkedCount = 0;
   if (existsSync(PARKED_PATH)) {
     try {
@@ -332,6 +344,7 @@ async function main() {
     // array (empty means checked-and-clean, which is a different fact from absent).
     stranded,
     parked: { count: parkedCount, path: PARKED_PATH },
+    overflow_parked: { count: overflowParkedCount, path: OVERFLOW_PARKS_PATH, unreadable: overflowParkedUnreadable },
   };
 
   if (asJson) {
@@ -500,6 +513,19 @@ async function main() {
   // when zero: "0 parked" is information, while a missing line is indistinguishable from a line
   // nobody wrote.
   console.log(`  parked (structural failures) .... ${parkedCount === null ? '(parked.json unreadable)' : n(parkedCount)}`);
+  // COUNTED WHERE A PERSON SEES IT (2026-11-06), which is the third of the three things the
+  // max_tokens fix owed. Appropriations bills that overflow the model's output allowance are
+  // permanently skipped UNPAID, and a permanent exclusion nobody can see is just a quieter version
+  // of the leak it replaced - ten paid retries of HB 2 looked exactly like ten ordinary skips.
+  //
+  // Printed even when zero, on the same reasoning as the parked line above: "0" is information,
+  // while an absent line cannot be told apart from one nobody wrote.
+  //
+  // NOTE, deliberately stated rather than silently handled: these bills are still inside the
+  // "READY to summarize" count above. Excluding them would follow Lance's own rule about numbers
+  // that imply future work, but it moves a headline denominator, so it is his call - see
+  // docs/EXPECTED_FAILURES.md entry 4.
+  console.log(`  overflow-parked (unpaid, auto-expiring) ${overflowParkedCount === null ? '(overflow-parks.json unreadable)' : n(overflowParkedCount)}`);
 
   console.log('\nStructure and meaning of these numbers: docs/DATA_INVENTORY.md');
 }

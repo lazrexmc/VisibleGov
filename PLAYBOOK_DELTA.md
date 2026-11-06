@@ -100,6 +100,7 @@ with offset/limit or jump by grep.
 | 75 | 10-20 | A multi-step pipeline whose middle step reports success is where work dies silently |
 | 76 | 11-05 | A forward-only fix leaves a wrong past, and the wrong past is still being read |
 | 77 | 11-05 | A deterministic failure that is retried is invisible per-run and compounds across runs |
+| 78 | 11-06 | Logging the display name instead of the key makes your own history unreplayable |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -2025,3 +2026,34 @@ billed lane measured $0.32 per published summary in ISO week 2026-W43, $0.79 in 
 W45 - an eightfold degradation in three weeks, with no code change. Lesson 66 was the same shape
 under a cap raise. **A measured rate is a measurement of a moment; re-derive it before quoting it to
 justify a decision.**
+
+## Lesson 78 - Logging the display name instead of the key makes your own history unreplayable (2026-11-06)
+
+The fix for lesson 77 - permanently suppressing bills that overflow `max_tokens` - would have been
+strictly better if it shipped with the already-known offenders pre-loaded. Twelve bills had been
+identified by name from two weeks of tick records, so seeding looked like a five-minute job that
+would save a paid retry of each.
+
+It could not be done, and the reason is worth more than the saving. The tick records log
+`identifier ?? bill_id`, and for the lane these failures came from `identifier` is always set - so
+every one of the twelve is recorded as a human label like `HB 2`. **`HB 2` matches 24 distinct bill
+rows in this database.** Missouri renumbers its appropriations bills every session, so the label
+identifies a slot, not a bill. Seeding would have meant picking one of 24 and hoping, and a wrong
+guess writes a suppression against the wrong bill - which removes a summarisable bill from the site
+and expires only if that unrelated bill's text changes.
+
+So the offenders are NOT seeded; the first tick after the runner is re-enabled pays once for each
+and then never again. Roughly $3 once, which is the correct price for not guessing.
+
+This is lesson 54's shape (an upstream id is not an identity) turned inward: **our own log was the
+untrustworthy source.** The data to resolve it existed at write time - `item.bill_id` was right
+there, one property away from what got written - and was discarded in favour of the prettier field.
+
+**Rule: a record written for a human to read is not a record you can replay. Log the key alongside
+the label, always, even when the label is what you will print.** The cost is a few bytes per row;
+the cost of omitting it is discovering, at the moment the data would have paid for itself, that the
+history is only decorative. The new suppression store carries `bill_id` AND `identifier` for exactly
+this reason, and the permanent-skip entries do too.
+
+**The tell, for next time:** if you cannot write a `WHERE` clause that selects the thing your log
+describes, your log is prose, not data.

@@ -35,7 +35,13 @@
 >    law a new summary cites): code-enforced
 >    $1.00/tick + $5.00/ISO-week caps, with the spend ledger kept as `ingestion_runs` rows
 >    (source `scheduled-summaries`; the queue planner it calls records its own rows as
->    `summary-queue-record`). The "parked (structural failures)" line `npm run status` prints
+>    `summary-queue-record`). The "overflow-parked (unpaid, auto-expiring)" line counts
+>    `.superpowers/artifacts/scheduled-summaries/overflow-parks.json` - a DIFFERENT and much
+>    narrower thing: bills whose output overflowed `max_tokens`, keyed by bill + text hash, skipped
+>    before any paid call, and released automatically if the text or the stage allowance changes.
+>    They are NOT human judgements and need no unparking. They ARE still inside "READY to
+>    summarize" above (`docs/EXPECTED_FAILURES.md` entry 4 says why that is left as Lance's call).
+>    The "parked (structural failures)" line `npm run status` prints
 >    counts `.superpowers/artifacts/scheduled-summaries/parked.json` - bills whose authoring
 >    failed structurally (a `MalformedSummaryError` from the record step - the authored envelope failed the mechanical
 >    shape checks and was never written - or a park seeded with a written reason from the drain

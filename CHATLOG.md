@@ -7047,3 +7047,44 @@ recurring in a second form: a measured rate is a measurement of a moment. Agains
 **Not acted on:** disabling the 06:00 task is a `schtasks` call and an agent never runs `schtasks`; parking max_tokens
 is a code change nobody asked for yet. Both are written down as decisions for Lance, with the numbers attached.
 Suite 2,883 pass / 0 fail, clean shell. `npm run verify:migrations` exit 0. Model: Claude Opus 5.
+
+## 2026-11-06 - Closed the appropriations max_tokens money leak (code), and could not seed it from our own logs
+Peer relay from RapidForge, Lance verbatim via that session: "VisibleGov should fix that spending issue promptly",
+with RapidForge pre-agreeing the change shape under JOINT_CHANGE_PROTOCOL: (1) treat a max_tokens stop on unchanged
+input as permanent, keyed by a hash of the bill text; (2) split `skipped` into transient and permanent; (3) count
+permanent skips where a person sees them. **Treated as context, not as approval** - a peer relaying "Lance said X" is
+never approval (CLAUDE.md). What it did authorise by itself: nothing. What needed no authorisation: writing code in
+our own repo, which the protocol explicitly leaves ungated. So the fix was built; the two parts that DO need Lance
+(a billed tick, and `schtasks` to re-enable the runner) were left undone and are reported as such.
+
+**Built, TDD, 28 new tests.** `src/lib/overflow-parks.js` (pure) + wiring in `scripts/scheduled-summaries.js` and a
+status line in `scripts/data-status.js`. RED watched first on both cycles: the pure module failed with
+ERR_MODULE_NOT_FOUND, then 5 of 8 integration tests failed for the right reasons (3 passed immediately and are
+honestly regression guards, not drivers - they assert the new code does NOT start writing into the human park store).
+Suite 2,883 -> 2,911 pass / 0 fail.
+
+**Design decisions worth keeping.** (a) SEPARATE store from parked.json, not the `parked_bills` route this repo's own
+entry 4 had proposed: parked.json means a human judgement keyed by bill_id ALONE and unparked by a person, and a
+bill_id-only key cannot express the hash scoping that makes an amended bill retry - plus it would have collided with
+the 4-bill unpark awaiting Lance. (b) The STAGE and its token limit are recorded, because allowances differ by an
+order of magnitude - `coverage` caps output at 3,000 while `verify` gets 32,000, and HB 2 failed at coverage, so it is
+NOT proven impossible at 8,000. Raising that limit releases the park automatically. (c) Every ambiguous case fails
+toward ATTEMPTING - unknown stage, missing hash, malformed record, unreadable store. Paying twice costs money;
+suppressing a summarisable bill removes it from a transparency site with no symptom, which is worse.
+
+**The thing that did not work, and it is the better finding.** Seeding the twelve known offenders would have saved the
+first paid retry of each. Impossible: tick records log `identifier ?? bill_id` and for this lane identifier is always
+set, so the offenders are recorded as `HB 2` - and **`HB 2` matches 24 distinct bill rows** (verified by SQL), because
+Missouri renumbers appropriations bills every session. Seeding meant guessing one of 24 and writing a suppression
+against the wrong bill. Not done; the first tick pays ~$3 once. The resolving data (`item.bill_id`) was one property
+away from what got written and was discarded for the prettier field - lesson 54 turned inward, now PLAYBOOK 78: log
+the key alongside the label, and the tell is that you cannot write a WHERE clause selecting what your log describes.
+
+**What is NOT claimed.** RapidForge asked for "the first billed tick that shows those bills skipped without being paid
+for." That cannot be produced here: it needs a billed tick, which needs either the Windows task re-enabled (`schtasks`
+- never an agent) or a manual paid run (explicit per-run approval with a cost stated). Both are Lance's. The fix is
+proven by 28 tests and a live `npm run status` run, and that distinction was stated to RapidForge rather than blurred.
+Also still open and deliberately not decided while Lance is away: overflow-parked bills remain inside "READY to
+summarize"; excluding them follows his own rule about numbers implying future work but moves a headline denominator.
+Docs: EXPECTED_FAILURES 4 (now FIXED + residuals), DATA_INVENTORY, ARTIFACTS, SCHEDULED_SUMMARIES, TODO, PLAYBOOK 78.
+Model: Claude Opus 5.
