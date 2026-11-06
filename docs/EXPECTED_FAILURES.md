@@ -200,6 +200,23 @@ instrument is one `group by` over the skip reasons across ticks - the query is i
 2026-11-05 - because the tick that pays for the tenth attempt cannot see the first nine.
 PLAYBOOK_DELTA lesson 77.
 
+**THIS SECTION HAS AN EXTERNAL CONSUMER as of 2026-11-06 - do not renumber or delete it silently.**
+RapidForge's `modules/spend-cap.md` trap 6.7 cites `VisibleGov/docs/EXPECTED_FAILURES.md section 4`
+by name. **Verified by reading their file on 2026-11-06, not taken on their word** - which is the
+whole point, because the retraction repaired in `docs/JOINT_CHANGE_PROTOCOL.md` the same day was a
+cross-repo claim about this very file that nobody re-checked for six weeks. If this entry closes,
+say so to RapidForge; if it is renumbered, their pointer breaks.
+
+**A better fix than the one sketched above, from that trap - worth taking.** RapidForge's rule:
+*"treat a `max_tokens` stop on unchanged input as permanent, key it by the input's hash, spend
+nothing more on it until the input or the allowance changes, and count permanent skips where a
+person sees them."* Keying by **hash of the bill text** beats parking by `bill_id`, which is what
+option (a) above would have done: a substitute or amended version of HB 2 is a genuinely different
+input and should get one fresh attempt, where a `bill_id` park would suppress it forever. The
+allowance clause matters too - a bill that overflowed at a $4 tick cap is not proven impossible at a
+larger one. Their own note says it is **"Not yet in the reference implementation"**, so this is a
+design to adopt, not code to copy.
+
 ---
 
 ## 1. ~~`VisibleGov Scheduled Summaries` fails daily from 2026-09-01 06:00~~ CLOSED 2026-10-20
