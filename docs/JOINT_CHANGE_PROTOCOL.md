@@ -17,14 +17,15 @@ finding.*
   reads, an exit-code meaning, a schema. The class is real; **the example this doc used to give is
   not, any more.**
 
-  ~~`docs/EXPECTED_FAILURES.md` section 2 is live example - RapidForge's keepalive derives whether
-  VisibleGov's silence is expected by reading that file and `TODO.md`. Changing its shape changes
-  their behaviour.~~
+  **RETRACTED 2026-10-20:** that keepalive was a session-only cron armed against the September
+  drain and **it died with its session.**
 
-  **RETRACTED 2026-10-20.** That keepalive was a session-only cron armed against the September
-  drain and **it died with its session.** Asked directly, RapidForge checked its own tree and
-  reported that no tool, script or scheduled job there reads `docs/EXPECTED_FAILURES.md`; its only
-  scheduled job reads BlockArchive's state. Shape changes to that file need no heads-up.
+  > "`docs/EXPECTED_FAILURES.md` section 2 is live example - RapidForge's keepalive derives whether VisibleGov's silence is expected by reading that file and `TODO.md`. **Changing its shape changes their behaviour.**"
+
+  Now true: asked directly, RapidForge checked its own tree and reported that no tool, script or
+  scheduled job there reads `docs/EXPECTED_FAILURES.md`; its only scheduled job reads
+  BlockArchive's state. Shape changes to that file need no heads-up. **Re-checked by RapidForge and
+  reported here 2026-11-06: still no file in its `tools/` mentions `EXPECTED_FAILURES`.**
 
   **Kept rather than deleted, because the failure is more instructive than the rule.** This doc
   named a cross-session dependency and nothing re-checked whether the dependency still existed, so
