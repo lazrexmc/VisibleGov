@@ -34,6 +34,11 @@
 // NOT proven impossible at 8,000, so raising that limit must release the park automatically rather
 // than needing someone to remember.
 
+// EVERY EXPORT IN THIS FILE IS CITED BY NAME IN ANOTHER REPO (RapidForge's MODULE_DIRECTORY.md
+// section 5, recorded 2026-11-06). Renaming one breaks that documentation and nothing in either
+// tree fails - see the inbound-pointer register in docs/JOINT_CHANGE_PROTOCOL.md before a rename,
+// and tell RapidForge when one lands.
+
 // Mirrors the allowances the chain actually passes: MAX_OUTPUT_TOKENS (src/lib/summarizer.js),
 // VERIFY_MAX_OUTPUT_TOKENS (src/lib/verifier.js), and the inline literals in
 // src/lib/billed-summary-chain.js. Kept as data rather than imported because this module must stay

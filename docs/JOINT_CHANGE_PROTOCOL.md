@@ -49,6 +49,43 @@ finding.*
   agreement. **Sitting on a known-false claim while awaiting a reply is worse than an unreviewed
   edit** - the whole cost of the errors below was the interval during which they were believed.
 
+## Inbound pointers: what RapidForge cites IN THIS REPO
+
+**Why this register exists.** The bullet retracted above named a cross-repo dependency and nothing
+ever re-checked it, so for roughly six weeks this doc instructed both sessions to coordinate around
+an instrument that was not running. The lesson drawn there was: *name the contract when you create
+it, and verify the consumer still exists before coordinating around it.* Within two days of writing
+that, four real inbound pointers appeared and three of them were created in a single afternoon. This
+is where they are named.
+
+**What this changes in practice:** renaming any identifier in the right-hand column, or renumbering
+any lesson or entry listed, breaks documentation in another repo silently - nothing in either tree
+fails. Check this table before such a rename, and tell RapidForge when one lands.
+
+| What they cite | Where it is cited | Breaks if |
+|---|---|---|
+| `docs/EXPECTED_FAILURES.md` **entry 4** | `modules/spend-cap.md` trap 6.7 | renumbered or deleted |
+| `PLAYBOOK_DELTA.md` **Lesson 78** | `modules/spend-cap.md` trap 6.8 | renumbered |
+| `src/lib/overflow-parks.js` - exports `STAGE_OUTPUT_ALLOWANCES`, `parseMaxTokensFailure`, `overflowKey`, `overflowRecordFor`, `overflowSuppression` | `MODULE_DIRECTORY.md` section 5 | any export renamed |
+| `scripts/gloss-batch-mo.mjs` - exports `projectBatchSpendUsd`, `assertWithinBudget`, `recordFetchFailure`, `citationFilterFor`; and `PLAYBOOK_DELTA.md` **Lesson 44** | `MODULE_DIRECTORY.md` section 5 | any export renamed, or 44 renumbered |
+
+**Verified 2026-11-06 by reading RapidForge's own files and this repo's own source**, not by taking
+the peer's word and not by recollection: each trap and row was read in place, and all nine cited
+export names were confirmed to exist with `grep -E '^export (const|function|async function)'`. That
+matters because the failure this register prevents is *recording a dependency that is not real* -
+which is exactly what the retraction above was.
+
+**The last row was NOT reported by anyone.** It was found while checking the other three, and it had
+been an undeclared cross-repo dependency for some time. So the count here is "four that are known",
+never "four that exist".
+
+**This table is itself a claim about another repo and will rot the same way.** Re-derive it rather
+than trusting it:
+
+```
+grep -rn "VisibleGov" F:/RapidForge --include=*.md
+```
+
 ## How disagreements resolve
 
 1. **Ties break on ownership.** Lance owns both, but each project has an owning session, and the
