@@ -51,6 +51,16 @@ entry is closed** - the first time this repo has had a clean migration board.
 
 ## 3. `us-senate` ingest BROKEN from 2026-11-04: senate.gov returns 403 for its own roll-call XML
 
+**READING THE RUN ROW: fixed 2026-11-07, and it had been actively misleading.** Until then every
+failed row here led with `parseError: "Unexpected end of JSON input"`, which is our own
+`JSON.parse('')` of a child that exited non-zero and printed nothing on stdout - true, and not the
+cause. The 403 sat further down in `stderrTail`. On 2026-11-07 a peer session read the first field
+and reported "an empty or cut-off body from the source" with "httpStatus null"; both readings were
+careful and both were the wrong system. Rows written from now on lead with `primaryError`
+(`SourceFetchError: HTTP 403 from us-senate: ...`) and a parsed `httpStatus` (403), with
+`parseErrorIsSecondary: true`. **Rows written BEFORE that date still have the old shape - read their
+`stderrTail`, not their `parseError`.** PLAYBOOK_DELTA lesson 79.
+
 **Symptom.** `npm run check:ingest` reports `BROKEN us-senate - 5 consecutive failed runs`, and the
 `ingest.yml` GitHub Actions job exits 1 on every run because of it. Individual runs fail with
 `SourceFetchError: HTTP 403 from us-senate:

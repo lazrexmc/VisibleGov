@@ -101,6 +101,7 @@ with offset/limit or jump by grep.
 | 76 | 11-05 | A forward-only fix leaves a wrong past, and the wrong past is still being read |
 | 77 | 11-05 | A deterministic failure that is retried is invisible per-run and compounds across runs |
 | 78 | 11-06 | Logging the display name instead of the key makes your own history unreplayable |
+| 79 | 11-07 | Whichever error field you put first IS the diagnosis everyone will make |
 
 Dates are 2026; "§7" rows are undated list items (seeded 2026-07-27, accumulated through
 2026-07-29 - lesson 13, commit e4f884d; lesson 14 on 2026-07-31 began the H2 form). When a new
@@ -2057,3 +2058,42 @@ this reason, and the permanent-skip entries do too.
 
 **The tell, for next time:** if you cannot write a `WHERE` clause that selects the thing your log
 describes, your log is prose, not data.
+
+## Lesson 79 - Whichever error field you put first IS the diagnosis everyone will make (2026-11-07)
+
+Every failed `us-senate` run row in this project carried, as its most prominent error field:
+
+```
+parseError: "Unexpected end of JSON input"
+```
+
+The actual cause was a clean HTTP 403 from senate.gov - declared in `docs/EXPECTED_FAILURES.md`
+entry 3 for days - sitting at the top of a 2,000-character `stderrTail` blob further down the same
+JSON object. The parse error was true: a child CLI that exits non-zero prints nothing on stdout, so
+`JSON.parse('')` throws. It was true and it was not the cause.
+
+A peer session (RapidForge) read that field and reported "an empty or cut-off body from the source,
+or a parse of one", with "httpStatus null". That reading was careful and correct given what the row
+put first. It was also the wrong system: nothing was cut off, the source was answering consistently,
+and `httpStatus` was null only because nothing had ever parsed it out of the stderr we did capture.
+A field chosen for convenience sent a competent reader to the wrong place and cost real diagnostic
+effort - and it would have done that to every future reader too, including us.
+
+**The trap is that the misleading field was not wrong.** Nothing was inaccurate anywhere in that
+row; a complete, truthful record was assembled in an order that implied a false cause. No test can
+fail on this, no checker can see it, and the author cannot feel it, because the author knows which
+field matters.
+
+**Rule: a diagnostic record is read top-down and acted on from the first plausible line, so decide
+which field is the CAUSE and put it there.** Concretely, when a child process fails: the cause comes
+from its stderr, and your own handling of its empty stdout is demoted and labelled as secondary.
+Extract the structured facts a reader will want - here an `httpStatus` - into their own fields
+instead of leaving them to be grepped out of a blob. And keep the honest negative available: "exited
+7 with no stderr" is a real finding, while a cause invented to fill the slot is the failure this
+rule prevents.
+
+**The test that this is fixed is not a passing suite, it is the old symptom:** feed the stored
+production row back through the new code and check the headline changes. Here it went from
+`"Unexpected end of JSON input"` to `"SourceFetchError: HTTP 403 from us-senate: ..."` with
+`httpStatus: 403`. Verifying an observability fix against a fixture proves the fixture parses;
+verifying it against the record that actually misled someone proves the fix.

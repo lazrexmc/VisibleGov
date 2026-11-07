@@ -7088,3 +7088,48 @@ Also still open and deliberately not decided while Lance is away: overflow-parke
 summarize"; excluding them follows his own rule about numbers implying future work but moves a headline denominator.
 Docs: EXPECTED_FAILURES 4 (now FIXED + residuals), DATA_INVENTORY, ARTIFACTS, SCHEDULED_SUMMARIES, TODO, PLAYBOOK 78.
 Model: Claude Opus 5.
+
+## 2026-11-07 - The spend fix is proven in production; and our own error field had been sending readers to the wrong system
+RapidForge relayed, at Lance's word ("tell visiblegov"), that GitHub had failed every ingest run since 2026-11-06
+16:50Z, with three points. Checked all three in source. Two were already stale and one was wrong - in a way caused by
+a defect of ours, not a misstep of theirs.
+
+**POINT 3, and it is the good news: the overflow fix works with real money.** First billed tick under 510a955,
+2026-11-07 06:00 CST: `attempted=18 published=1 gate_refusals=4 spent=$3.4709 week=2026-W45 total=$21.7306/25.00
+permanent_skips=0 overflow_parked=2`. HB 2 and HB 2287 recorded with real UUIDs (c5a6428e..., 0c3f12bf...), real text
+hashes, stage `coverage`, max_tokens 3000 - precisely the identity that could NOT be seeded from our own logs
+(PLAYBOOK 78). permanent_skips=0 is the predicted first-tick shape since the store starts empty; the flip to
+permanent_skips=2 at $0 lands on the 11-08 tick and is the actual proof. Tick line sent to RapidForge.
+
+**POINT 1 was already resolved before I looked.** Both rows they named (legiscan 11-06T00:45:02Z,
+scheduled-summaries 11-06T23:53:16Z) are closed by scripts/close-stranded-runs.mjs - not by me - and the whole table
+has ZERO rows at status='running'; `npm run check:ingest` confirms no stranded runs. The dry-run-then-ask sequence
+they were staging was moot. **And the closed summaries row carries spent_usd=4, which is 1dc218d proving itself with
+real money:** closing a crashed billed tick used to drop its charge to $0 and silently hand the next tick $4 of
+allowance. The arithmetic reconciles exactly - W45 measured 3.41 + 3.5064 + 3.3433 + 3.4709 = 13.7306, plus $4
+backfilled for 11-03 and $4 on this closure = 21.7306, which is the number the tick itself printed. Independent
+closure, independent ledger, same figure. (A first query of mine used `started_at in ('...T00:45:02Z',...)` and
+returned []; that was MY error - timestamps carry sub-second precision, so exact equality missed both rows. The
+`status='running'` half of the same query was sound and is what the zero-stranded claim rests on.)
+
+**POINT 2 was a misread, and we caused it.** They reported "Unexpected end of JSON input, httpStatus null - an empty
+or cut-off body from the source". The same row's stderrTail says `SourceFetchError: HTTP 403 from us-senate: ...
+status: 403` - the same clean, consistent 403 that EXPECTED_FAILURES entry 3 has declared for days. The parse error is
+ours: a child that exits non-zero prints nothing, so JSON.parse('') throws, and httpStatus was null only because
+nothing ever parsed it out. **The row put our parse of the child's silence in the headline field and buried the cause
+in a 2,000-char blob.** Nothing in it was inaccurate; a truthful record assembled in an order that implied a false
+cause. No test can fail on that and no checker can see it.
+
+**Fixed, TDD, 12 tests:** `summarizeChildFailure` in scripts/scheduled-ingest.js. When a child fails, the cause comes
+from stderr (picking the ERROR line, not line one - node prints ExperimentalWarning first); httpStatus is parsed into
+its own field but ONLY from `HTTP nnn`/`status: nnn` anchors, so a stack frame like `file.js:404:11` or the year 2026
+can never become a status; parseError is kept and labelled `parseErrorIsSecondary`; a silent failure reports "exited N
+with no stderr" rather than inventing a cause. **Verified against the stored production row, not a fixture** - the
+headline flips from "Unexpected end of JSON input" to "SourceFetchError: HTTP 403 from us-senate: ..." with
+httpStatus 403. Verifying an observability fix on a fixture proves the fixture parses; verifying it on the record that
+actually misled someone proves the fix. PLAYBOOK 79. Old rows keep the old shape and entry 3 says to read their
+stderrTail.
+
+No workaround for the 403 built or proposed - standing instruction, and Senate coverage still has a ZERO data gap
+(no Senate vote since 2026-09-30, our newest stored vote is that date). Suite 2,923 pass / 0 fail. Nothing in
+RapidForge's message needed Lance. Model: Claude Opus 5.

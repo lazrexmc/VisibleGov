@@ -870,6 +870,76 @@ export function parseChildOutput(stdout) {
   }
 }
 
+// REPORT THE CAUSE, NOT OUR PARSE OF THE CHILD'S SILENCE (2026-11-07).
+//
+// recordSchedulerAttemptFailure used to write `parseError` into the run row with no field naming
+// the actual failure. A child CLI that exits non-zero prints nothing on stdout, so JSON.parse('')
+// throws, and EVERY such row read `parseError: "Unexpected end of JSON input"` while the real cause
+// sat at the top of a 2,000-character stderrTail.
+//
+// That is not a theoretical ugliness. On 2026-11-07 a peer session read that field - correctly, it
+// is the one we put first - and reported "an empty or cut-off body from the source" with
+// "httpStatus null". senate.gov was in fact returning a clean, consistent HTTP 403 that this repo
+// has had DECLARED in docs/EXPECTED_FAILURES.md entry 3 for days. The field we surfaced sent a
+// careful reader to the wrong system, and cost real diagnostic effort.
+//
+// The rule: when the child FAILED, the cause comes from stderr, and `parseError` is demoted to what
+// it really is - a note about our own handling of an empty stdout. The single exception is a child
+// that exited ZERO and still emitted unparseable output: then the parse is the only thing that went
+// wrong, and demoting it would hide a genuine defect in that CLI.
+const PRIMARY_ERROR_MAX = 500;
+
+// Matches an error line the way a reader would pick it out: a Node/custom error class, or an
+// explicit Error:/FAILED prefix. Deliberately NOT "the first line" - node and npm print
+// ExperimentalWarning and config warnings first, and surfacing a deprecation notice as the cause is
+// the same class of mistake this function exists to fix.
+const ERROR_LINE = /^\s*([A-Z][A-Za-z0-9_]*Error|Error|FAILED|FATAL)\b.*$/m;
+
+// Only a 3-digit code introduced by `HTTP` or `status:` counts. Without those anchors a stack frame
+// like `at thing (file.js:404:11)` or a year reads as a status, and a status invented from a line
+// number is worse than the null it replaces.
+const HTTP_STATUS = /(?:HTTP\s+|status:\s*)([1-5]\d{2})\b/;
+
+export function summarizeChildFailure({
+  exitStatus, stderr, parseError, launchError,
+} = {}) {
+  const err = String(stderr ?? '');
+  const statusMatch = err.match(HTTP_STATUS);
+  const httpStatus = statusMatch ? Number(statusMatch[1]) : null;
+  const clip = (t) => {
+    const one = String(t).replace(/\s+/g, ' ').trim();
+    return one.length > PRIMARY_ERROR_MAX ? `${one.slice(0, PRIMARY_ERROR_MAX - 3)}...` : one;
+  };
+
+  // 1. The process never started: neither stderr nor a parse can say anything useful.
+  if (launchError) return { primaryError: clip(launchError), httpStatus, parseErrorIsSecondary: true };
+
+  const failed = exitStatus !== 0;
+
+  // 2. The child failed and said why. This is the branch that fixes the misdiagnosis.
+  if (failed && err.trim()) {
+    const line = err.match(ERROR_LINE)?.[0]
+      ?? err.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0);
+    return { primaryError: clip(line), httpStatus, parseErrorIsSecondary: true };
+  }
+
+  // 3. The child failed silently. Say the exit code and say that there was nothing else - an
+  //    absence of diagnostic output is itself a finding about that CLI, and inventing a cause for
+  //    it would be the very substitution this function removes.
+  if (failed) {
+    return {
+      primaryError: `child exited ${exitStatus} with no stderr (no diagnostic output to attribute a cause to)`,
+      httpStatus,
+      parseErrorIsSecondary: true,
+    };
+  }
+
+  // 4. Exit 0 but unparseable stdout: the parse IS the cause.
+  if (parseError) return { primaryError: clip(parseError), httpStatus, parseErrorIsSecondary: false };
+
+  return { primaryError: 'child failed with no exit code, stderr or parse error recorded', httpStatus, parseErrorIsSecondary: false };
+}
+
 // recordSchedulerAttemptFailure (C1, fix round 1): writes an HONEST failed ingestion_runs row on
 // the scheduler's own behalf, using the SAME openRun/closeRun helpers every CLI uses (reused, not
 // reinvented) — never a fake success, always status='failed' with real diagnostic detail. This is
@@ -882,11 +952,23 @@ export function parseChildOutput(stdout) {
 export async function recordSchedulerAttemptFailure(client, source, childResult, launchError = null) {
   const runId = await openRun(client, source);
   const stderrTail = String(childResult.stderr ?? '').slice(-2000); // bounded — never an unbounded write
+  // primaryError/httpStatus lead the detail now; see summarizeChildFailure for the misdiagnosis
+  // that made this necessary. parseError is kept - it is still true - but renamed in meaning by
+  // parseErrorIsSecondary, so nobody reads our empty-stdout handling as the upstream cause again.
+  const summary = summarizeChildFailure({
+    exitStatus: childResult.exitStatus,
+    stderr: childResult.stderr,
+    parseError: childResult.parseError,
+    launchError: launchError ? launchError.message : null,
+  });
   await closeRun(client, runId, 'failed', {
     scheduler_attempt: true,
+    primaryError: summary.primaryError,
+    httpStatus: summary.httpStatus,
     exitCode: childResult.exitStatus,
     stderrTail,
     parseError: childResult.parseError,
+    parseErrorIsSecondary: summary.parseErrorIsSecondary,
     launchError: launchError ? launchError.message : null,
   });
   return runId;

@@ -4,10 +4,10 @@
 
 ---
 
-## RESUME HERE - verified live 2026-11-06. Read this block first.
+## RESUME HERE - verified live 2026-11-07. Read this block first.
 
 **Every number here was produced by running the thing in this session, not by reading a previous
-claim.** Tree `<see git log>`, clean, pushed. Suite **2,911 pass / 0 fail** (`node --test`, in a
+claim.** Tree `<see git log>`, clean, pushed. Suite **2,923 pass / 0 fail** (`node --test`, in a
 clean shell - NEVER `source .env` first, it turns 2 correct tests red).
 
 **WHAT CHANGED 2026-11-05.** The six crashed billed ticks that sat at `status='running'` from 10-20
@@ -36,17 +36,29 @@ it costs money every morning: `docs/EXPECTED_FAILURES.md` entry 4** - appropriat
 
 ### Nothing is running. Nothing is in flight. No lane needs a babysitter.
 
-**BUT ONE THING FIRES ON ITS OWN while nobody is here: the 06:00 billed tick.** Lance went AFK on
-2026-11-05 after being given the command to disable it (`schtasks /change /tn "VisibleGov Scheduled
-Summaries" /disable`). **Whether he ran it is NOT recorded here, because this session cannot see it
-and an agent never runs `schtasks` - not even `/query`.** So do not assume either way.
+**THE BILLED TICK IS BACK ON.** Lance disabled it 2026-11-05 and re-enabled it 2026-11-06
+(`schtasks /change ... /enable`). It fires daily at 06:00 local. An agent never runs `schtasks`, not
+even `/query`, so **judge it by the log directory** - a new dated file in
+`.superpowers/artifacts/summary-scheduler-logs/` means it fired. A missing file is NOT proof it
+failed: that is also the crash signature, so pair it with a check for a `running` row before
+concluding anything.
 
-**Check it by artifact, the way everything else in this repo is checked:** a new dated file in
-`.superpowers/artifacts/summary-scheduler-logs/` means it fired; no new file means it did not. If it
-fired, expect roughly **-$3.40 for about one published summary** per morning (see the degradation
-table under item 2 below), plus another paid retry of HB 2 and friends
-(`docs/EXPECTED_FAILURES.md` entry 4). Several quiet mornings of that is the single largest
-avoidable spend in the project right now.
+**THE SPEND FIX IS PROVEN IN PRODUCTION.** First tick under it, 2026-11-07 06:00:
+```
+2026-11-07T12:31:12.507Z tick=d9cf3794-... attempted=18 published=1 gate_refusals=4
+spent=$3.4709 week=2026-W45 total=$21.7306/25.00 permanent_skips=0 overflow_parked=2
+```
+`overflow_parked=2` with `permanent_skips=0` is exactly the predicted FIRST-tick shape, because the
+store starts empty. HB 2 and HB 2287 are now in
+`.superpowers/artifacts/scheduled-summaries/overflow-parks.json` with real UUIDs, real text hashes,
+stage `coverage`, limit 3000 - the identity that could not be seeded from our own logs (PLAYBOOK 78).
+**The flip worth checking next: the 2026-11-08 tick should show `permanent_skips=2` and skip both
+for $0.** That is the actual proof, and RapidForge is waiting on that line.
+
+**BUDGET NOTE, because it is tight:** ISO week 2026-W45 stands at **$21.7306 of $25.00**, so the
+11-08 tick is throttled to about $3.27. W45 ends Sunday 11-08; W46 resets Monday 11-09. Two $4.00
+charges in that total are ESTIMATES for crashed ticks (11-03 backfilled, 11-06 recorded on closure),
+both labelled `spend_is_estimated` in their rows - neither is a measurement.
 
 ### THE THREE THINGS WAITING ON LANCE'S OWN HANDS
 
